@@ -15,6 +15,7 @@ async def create_ticket(ticket: TicketCreate):
 
 @router.get("/", response_model=List[Dict[str, Any]])
 async def list_tickets(status: Optional[str] = None, category: Optional[str] = None):
+    """Lấy danh sách tickets từ Supabase"""
     try:
         supabase = get_supabase_client()
         query = supabase.table("inbox_tickets").select("*").order("created_at", desc=True)
@@ -22,7 +23,7 @@ async def list_tickets(status: Optional[str] = None, category: Optional[str] = N
         if status and status != "all":
             query = query.eq("status", status)
         elif not status:
-            query = query.neq("status", "dismissed") # Mặc định không hiện ticket đã bỏ qua
+            query = query.neq("status", "dismissed") # Mặc định ẩn ticket đã bỏ qua
             
         if category and category != "all":
             query = query.eq("category", category)
@@ -34,24 +35,23 @@ async def list_tickets(status: Optional[str] = None, category: Optional[str] = N
 
 @router.put("/{ticket_id}/dismiss")
 async def dismiss_ticket(ticket_id: str):
-    """FIX LỖI 404: Đánh dấu BỎ QUA ticket + Đồng bộ Đã Đọc trên Gmail"""
+    """FIX LỖI 404 BỎ QUA TICKET"""
     try:
         supabase = get_supabase_client()
-        # Tìm theo UUID hoặc source_id
         res = supabase.table("inbox_tickets").select("*").eq("id", ticket_id).execute()
         if not res.data:
             res = supabase.table("inbox_tickets").select("*").eq("source_id", ticket_id).execute()
             
         if not res.data:
-            raise HTTPException(status_code=404, detail="Không tìm thấy ticket")
+            raise HTTPException(status_code=404, detail=f"Không tìm thấy ticket #{ticket_id}")
             
         ticket = res.data[0]
         real_id = ticket["id"]
         
-        # 1. Cập nhật Supabase status -> 'dismissed'
+        # Đổi status -> 'dismissed'
         supabase.table("inbox_tickets").update({"status": "dismissed"}).eq("id", real_id).execute()
         
-        # 2. Đồng bộ đánh dấu ĐÃ ĐỌC trên Gmail
+        # Đánh dấu đã đọc trên Gmail
         if ticket.get("source") == "gmail" and ticket.get("source_id"):
             try:
                 from app.services.gmail_service import mark_email_as_read
@@ -67,7 +67,7 @@ async def dismiss_ticket(ticket_id: str):
 
 @router.put("/{ticket_id}/restore")
 async def restore_ticket(ticket_id: str):
-    """KHÔI PHỤC ticket đã bỏ qua"""
+    """KHÔI PHỤC TICKET"""
     try:
         supabase = get_supabase_client()
         supabase.table("inbox_tickets").update({"status": "pending"}).eq("id", ticket_id).execute()
@@ -77,9 +77,26 @@ async def restore_ticket(ticket_id: str):
 
 @router.post("/{ticket_id}/triage")
 async def force_ai_triage(ticket_id: str):
-    """ÉP GEMINI AI TÓM TẮT LẠI CHO TICKET CỤ THỂ"""
+    """FIX LỖI 404 ÉP AI TÓM TẮT TICKET CỤ THỂ"""
     try:
         await process_ticket_with_ai(ticket_id)
-        return {"status": "success", "message": "Đã ép AI tóm tắt xong!"}
+        return {"status": "success", "message": f"Đã tóm tắt AI xong cho ticket {ticket_id}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/batch-triage")
+async def batch_ai_triage():
+    """TÓM TẮT AI HÀNG LOẠT CHO TẤT CẢ TICKET CŨ TRONG SUPABASE"""
+    try:
+        supabase = get_supabase_client()
+        res = supabase.table("inbox_tickets").select("id").is_("ai_summary", "null").execute()
+        tickets = res.data or []
+        
+        count = 0
+        for t in tickets:
+            await process_ticket_with_ai(t["id"])
+            count += 1
+            
+        return {"status": "success", "message": f"Đã chạy tóm tắt Gemini AI cho {count} ticket cũ!"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
