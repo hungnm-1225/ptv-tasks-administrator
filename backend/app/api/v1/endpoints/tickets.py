@@ -4,59 +4,82 @@ from fastapi import APIRouter, HTTPException
 from app.core.supabase import get_supabase_client
 from app.models.ticket import TicketCreate
 from app.workers.ticket_processor import process_incoming_ticket
+from app.core.gemini import process_ticket_with_ai
 
 router = APIRouter()
 
 @router.post("/", response_model=Dict[str, Any])
 async def create_ticket(ticket: TicketCreate):
-    """Tiếp nhận ticket mới từ webhook"""
     res = await process_incoming_ticket(ticket.dict())
     return {"status": "success", "data": res}
 
 @router.get("/", response_model=List[Dict[str, Any]])
 async def list_tickets(status: Optional[str] = None, category: Optional[str] = None):
-    """Lấy danh sách inbox_tickets THẬT từ Supabase (Lọc theo status & category)"""
     try:
         supabase = get_supabase_client()
-        # Lấy tất cả tickets, sắp xếp mới nhất lên đầu
         query = supabase.table("inbox_tickets").select("*").order("created_at", desc=True)
         
         if status and status != "all":
             query = query.eq("status", status)
+        elif not status:
+            query = query.neq("status", "dismissed") # Mặc định không hiện ticket đã bỏ qua
             
         if category and category != "all":
             query = query.eq("category", category)
             
         res = query.execute()
         return res.data or []
-        
     except Exception as e:
-        print(f"❌ Lỗi khi đọc inbox_tickets từ Supabase: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.put("/{ticket_id}/dismiss")
 async def dismiss_ticket(ticket_id: str):
-    """Đánh dấu BỎ QUA ticket + Đồng bộ Đã Đọc trên Gmail"""
-    supabase = get_supabase_client()
-    res = supabase.table("inbox_tickets").select("*").eq("id", ticket_id).execute()
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Không tìm thấy ticket")
+    """FIX LỖI 404: Đánh dấu BỎ QUA ticket + Đồng bộ Đã Đọc trên Gmail"""
+    try:
+        supabase = get_supabase_client()
+        # Tìm theo UUID hoặc source_id
+        res = supabase.table("inbox_tickets").select("*").eq("id", ticket_id).execute()
+        if not res.data:
+            res = supabase.table("inbox_tickets").select("*").eq("source_id", ticket_id).execute()
+            
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Không tìm thấy ticket")
+            
+        ticket = res.data[0]
+        real_id = ticket["id"]
         
-    ticket = res.data[0]
-    
-    # 1. Đổi trạng thái trong Supabase -> 'dismissed'
-    supabase.table("inbox_tickets").update({"status": "dismissed"}).eq("id", ticket_id).execute()
-    
-    # 2. Nếu nguồn là Gmail -> Đánh dấu ĐÃ ĐỌC trên Gmail cá nhân của Anh
-    if ticket.get("source") == "gmail" and ticket.get("source_id"):
-        from app.services.gmail_service import mark_email_as_read
-        mark_email_as_read(ticket["source_id"])
+        # 1. Cập nhật Supabase status -> 'dismissed'
+        supabase.table("inbox_tickets").update({"status": "dismissed"}).eq("id", real_id).execute()
         
-    return {"status": "success", "message": "Đã bỏ qua ticket và đồng bộ Gmail"}
+        # 2. Đồng bộ đánh dấu ĐÃ ĐỌC trên Gmail
+        if ticket.get("source") == "gmail" and ticket.get("source_id"):
+            try:
+                from app.services.gmail_service import mark_email_as_read
+                mark_email_as_read(ticket["source_id"])
+            except Exception as e:
+                print(f"⚠️ Warning mark_as_read: {e}")
+                
+        return {"status": "success", "message": f"Đã bỏ qua ticket {ticket_id}"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.put("/{ticket_id}/restore")
 async def restore_ticket(ticket_id: str):
-    """KHÔI PHỤC ticket đã bỏ qua quay lại Hòm Thư"""
-    supabase = get_supabase_client()
-    supabase.table("inbox_tickets").update({"status": "pending"}).eq("id", ticket_id).execute()
-    return {"status": "success", "message": "Đã khôi phục ticket"}
+    """KHÔI PHỤC ticket đã bỏ qua"""
+    try:
+        supabase = get_supabase_client()
+        supabase.table("inbox_tickets").update({"status": "pending"}).eq("id", ticket_id).execute()
+        return {"status": "success", "message": f"Đã khôi phục ticket {ticket_id}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{ticket_id}/triage")
+async def force_ai_triage(ticket_id: str):
+    """ÉP GEMINI AI TÓM TẮT LẠI CHO TICKET CỤ THỂ"""
+    try:
+        await process_ticket_with_ai(ticket_id)
+        return {"status": "success", "message": "Đã ép AI tóm tắt xong!"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

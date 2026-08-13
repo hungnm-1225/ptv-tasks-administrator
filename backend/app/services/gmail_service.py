@@ -138,3 +138,32 @@ def mark_email_as_read(message_id: str):
             logger.info(f"📧 Đã đồng bộ đánh dấu ĐÃ ĐỌC trên Gmail cho mail #{message_id}")
     except Exception as e:
         logger.error(f"⚠️ Lỗi đánh dấu đã đọc trên Gmail: {e}")
+
+# Cập nhật hàm poll_unread_gmails trong backend/app/services/gmail_service.py
+
+def extract_attachments_and_clean_body(payload):
+    """Trích xuất file đính kèm (PDF, XLSX) và làm sạch văn bản"""
+    attachments = []
+    body = ""
+
+    if 'parts' in payload:
+        for part in payload['parts']:
+            filename = part.get('filename')
+            mime_type = part.get('mimeType', '')
+            
+            if filename:
+                attachments.append({"filename": filename, "mimeType": mime_type})
+                
+            if part.get('mimeType') == 'text/plain' and 'data' in part.get('body', {}):
+                body += base64.urlsafe_b64decode(part['body']['data']).decode('utf-8', errors='ignore')
+            elif 'parts' in part:
+                sub_body, sub_atts = extract_attachments_and_clean_body(part)
+                body += sub_body
+                attachments.extend(sub_atts)
+    elif 'body' in payload and 'data' in payload['body']:
+        body = base64.urlsafe_b64decode(payload['body']['data']).decode('utf-8', errors='ignore')
+
+    # Bỏ các thẻ HTML rác nếu có
+    import re
+    clean_text = re.sub(r'<[^>]+>', ' ', body).strip()
+    return clean_text, attachments
