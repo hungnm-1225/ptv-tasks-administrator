@@ -114,11 +114,42 @@ class GoogleSheetManager:
         logger.info(f"✅ Đã cập nhật dòng {row_index} [{target_sheet_name}]: Category={category}, Assigned=TRUE, Status={status}")
 
 
+# backend/app/services/google_sheet_service.py
+
 async def poll_form_feedbacks():
-    """Cron job wrapper: quét Google Sheet tìm feedback chưa xử lý."""
+    """Hàm Cronjob: Quét Google Sheet & Lưu thẳng vào Supabase"""
+    logger.info("🔎 Đang quét Google Sheet Form Feedback...")
     try:
-        manager = GoogleSheetManager()
-        rows = manager.get_unprocessed_rows()
-        logger.info(f"📊 Google Sheet: tìm thấy {len(rows)} feedback chưa xử lý.")
+        # 1. Đọc danh sách các dòng chưa xử lý từ Sheet
+        unprocessed_rows = get_unprocessed_rows_from_sheet() 
+        
+        for row in unprocessed_rows:
+            fb_id = row['fb_id']
+            
+            # 2. Kiểm tra xem Ticket ID này đã có trong Supabase chưa
+            existing = supabase_client.table("inbox_tickets") \
+                .select("id").eq("source", "google_form").eq("source_id", fb_id).execute()
+
+            if not existing.data:
+                # 3. LƯU THẲNG VÀO SUPABASE DATABASE
+                new_ticket = {
+                    "source": "google_form",
+                    "source_id": fb_id,
+                    "sender_email": row['submitter'] or "user@dtt.vn",
+                    "submitter_name": row['submitter'],
+                    "subject": row['subject'],
+                    "raw_content": f"Country: {row['country']}\nRemarks: {row['remarks']}\nDoc: {row['doc_url']}",
+                    "status": "pending",
+                    "metadata": {"row_index": row['row_index'], "doc_url": row['doc_url']}
+                }
+                res = supabase_client.table("inbox_tickets").insert(new_ticket).execute()
+                
+                if res.data:
+                    ticket_id = res.data[0]["id"]
+                    logger.info(f"✅ ĐÃ LƯU THÀNH CÔNG VÀO SUPABASE: {fb_id}")
+                    
+                    # 4. GỌI AI GEMINI PHÂN TÍCH & BẮN TELEGRAM + ĐẨY TẠO TASK TRÊN WEB ADMIN
+                    await process_ticket_with_ai(ticket_id)
+
     except Exception as e:
-        logger.error(f"❌ Lỗi khi quét Google Sheet: {e}")
+        logger.error(f"❌ Lỗi khi quét và lưu Google Sheet: {e}")

@@ -1,8 +1,12 @@
+# backend/app/services/osticket_service.py
 import os
 import asyncio
+import logging
 from playwright.async_api import async_playwright
 from app.core.supabase import get_supabase_client
 from app.core.gemini import process_ticket_with_ai
+
+logger = logging.getLogger(__name__)
 
 OSTICKET_URL = os.getenv("OSTICKET_URL", "https://support.pythaverse.space/scp/login.php")
 ADMIN_USER = os.getenv("OSTICKET_ADMIN_USER")
@@ -10,8 +14,12 @@ ADMIN_PASS = os.getenv("OSTICKET_ADMIN_PASS")
 
 async def poll_open_ostickets():
     """Hàm quét Ticket chưa xử lý trên OS Ticket bằng Playwright"""
-    print("🔎 Đang quét OS Ticket (support.pythaverse.space)...")
+    logger.info("🔎 Đang quét OS Ticket (support.pythaverse.space)...")
     
+    if not ADMIN_USER or not ADMIN_PASS:
+        logger.warning("⚠️ Thiếu OSTICKET_ADMIN_USER hoặc OSTICKET_ADMIN_PASS trên Render Environment!")
+        return
+
     async with async_playwright() as p:
         # Bật trình duyệt Chromium ẩn
         browser = await p.chromium.launch(headless=True)
@@ -26,23 +34,30 @@ async def poll_open_ostickets():
             if await page.is_visible('input[name="userid"]'):
                 await page.fill('input[name="userid"]', ADMIN_USER)
                 await page.fill('input[name="passwd"]', ADMIN_PASS)
-                await page.click('input[type="submit"]')
+                
+                # 🎯 ĐÃ SỬA CHUẨN: Bấm vào thẻ <button type="submit"> thay vì <input>
+                submit_button = await page.query_selector('button[type="submit"], button.submit, input[type="submit"]')
+                if submit_button:
+                    await submit_button.click()
+                else:
+                    # Nút dự phòng: Nhấn Enter ngay ô Password
+                    await page.press('input[name="passwd"]', 'Enter')
+
                 await page.wait_for_load_state("networkidle")
 
             # 2. Chuyển sang trang Open Tickets
-            await page.goto("https://support.pythaverse.space/scp/tickets.php?status=open")
-            await page.wait_for_selector("table.list")
+            await page.goto("https://support.pythaverse.space/scp/tickets.php?status=open", timeout=30000)
+            await page.wait_for_selector("table.list", timeout=15000)
 
-            # 3. Lấy danh sách các dòng trong bảng
+            # 3. Lấy danh sách các dòng trong bảng ticket
             rows = await page.query_selector_all("table.list tbody tr")
             
             for row in rows:
-                # Bóc tách thông tin sơ bộ
                 ticket_link_el = await row.query_selector("a.preview")
                 if not ticket_link_el:
                     continue
 
-                ticket_id = (await ticket_link_el.inner_text()).strip() # Mã ID ticket
+                ticket_id = (await ticket_link_el.inner_text()).strip() # Mã ID ticket (VD: #849201)
                 subject = (await ticket_link_el.get_attribute("title") or "").strip()
                 
                 # 4. Kiểm tra xem Ticket ID này đã có trong Supabase chưa
@@ -68,19 +83,19 @@ async def poll_open_ostickets():
                 new_ticket = {
                     "source": "osticket",
                     "source_id": ticket_id,
-                    "sender_email": "osticket_user@pythaverse.space", # Hoặc parse email người gửi
+                    "sender_email": "osticket_user@pythaverse.space",
                     "subject": subject,
                     "raw_content": raw_content,
                     "status": "pending"
                 }
                 res = get_supabase_client().table("inbox_tickets").insert(new_ticket).execute()
                 
-                # 7. Đẩy qua Gemini AI phân tích & Bắn Telegram
+                # 7. Đẩy qua Gemini AI phân tích & Bắn Telegram / Web Admin
                 if res.data:
                     await process_ticket_with_ai(res.data[0]["id"])
-                    print(f"✅ Đã cào thành công Ticket OS Ticket mới: {ticket_id}")
+                    logger.info(f"✅ Đã cào thành công Ticket OS Ticket mới: {ticket_id}")
 
         except Exception as e:
-            print(f"❌ Lỗi khi quét OS Ticket: {str(e)}")
+            logger.error(f"❌ Lỗi khi quét OS Ticket: {str(e)}")
         finally:
             await browser.close()
