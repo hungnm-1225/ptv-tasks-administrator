@@ -1,33 +1,35 @@
+# backend/app/api/v1/endpoints/tickets.py
+from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, HTTPException
-from typing import List, Dict, Any
-from app.models.ticket import TicketCreate, TicketResponse, TicketStatus
+from app.core.supabase import get_supabase_client
+from app.models.ticket import TicketCreate
 from app.workers.ticket_processor import process_incoming_ticket
 
 router = APIRouter()
 
-
 @router.post("/", response_model=Dict[str, Any])
 async def create_ticket(ticket: TicketCreate):
-    """Receive incoming ticket from Gmail / Google Form / OS Ticket webhook."""
+    """Tiếp nhận ticket mới từ webhook"""
     res = await process_incoming_ticket(ticket.dict())
     return {"status": "success", "data": res}
 
-
 @router.get("/", response_model=List[Dict[str, Any]])
-async def list_tickets(status: str = None, category: str = None):
-    """List inbox tickets with optional status & category filtering."""
-    # Placeholder returning sample ticket list
-    return [
-        {
-            "id": "123e4567-e89b-12d3-a456-426614174000",
-            "source": "gmail",
-            "sender_email": "user@dtt.vn",
-            "subject": "Lỗi không tạo được tài khoản Keycloak",
-            "raw_content": "Xin hãy tạo tài khoản Keycloak cho nhân viên mới.",
-            "ai_summary": "Yêu cầu cấp tài khoản Keycloak mới.",
-            "category": "account_keycloak",
-            "priority": "normal",
-            "status": "pending",
-            "created_at": "2026-08-12T12:00:00Z",
-        }
-    ]
+async def list_tickets(status: Optional[str] = None, category: Optional[str] = None):
+    """Lấy danh sách inbox_tickets THẬT từ Supabase (Lọc theo status & category)"""
+    try:
+        supabase = get_supabase_client()
+        # Lấy tất cả tickets, sắp xếp mới nhất lên đầu
+        query = supabase.table("inbox_tickets").select("*").order("created_at", desc=True)
+        
+        if status and status != "all":
+            query = query.eq("status", status)
+            
+        if category and category != "all":
+            query = query.eq("category", category)
+            
+        res = query.execute()
+        return res.data or []
+        
+    except Exception as e:
+        print(f"❌ Lỗi khi đọc inbox_tickets từ Supabase: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

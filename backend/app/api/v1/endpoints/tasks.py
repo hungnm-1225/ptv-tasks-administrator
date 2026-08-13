@@ -1,3 +1,4 @@
+# backend/app/api/v1/endpoints/tasks.py
 from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, HTTPException
 from app.core.supabase import get_supabase_client
@@ -6,81 +7,66 @@ router = APIRouter()
 
 @router.get("/", response_model=List[Dict[str, Any]])
 async def list_tasks(approval_status: Optional[str] = None):
-    """List bot automation tasks with optional approval_status filtering."""
+    """Lấy danh sách bot_automation_tasks THẬT từ Supabase"""
     try:
-        query = get_supabase_client().table("bot_automation_tasks").select("*")
-        if approval_status:
+        supabase = get_supabase_client()
+        query = supabase.table("bot_automation_tasks").select("*, inbox_tickets(*)").order("created_at", desc=True)
+        
+        if approval_status and approval_status != "all":
             query = query.eq("approval_status", approval_status)
+            
         res = query.execute()
         return res.data or []
     except Exception as e:
-        # Fallback sample list if table is empty or error occurs
-        return [
-            {
-                "id": "task-sample-001",
-                "ticket_id": "ticket-123",
-                "bot_type": "keycloak_api",
-                "payload_data": {
-                    "action": "create_user",
-                    "username": "nguyenvana",
-                    "email": "nguyenvana@dtt.vn",
-                    "realm": "master",
-                    "roles": ["teacher"]
-                },
-                "approval_status": "pending",
-                "execution_status": "waiting_approval",
-                "created_at": "2026-08-12T12:05:00Z"
-            }
-        ]
+        print(f"❌ Lỗi khi đọc bot_automation_tasks: {e}")
+        return []
 
 @router.post("/", response_model=Dict[str, Any])
 async def create_task(payload: Dict[str, Any]):
-    """Create bot automation task for Human-In-The-Loop approval."""
+    """Tạo tác vụ phê duyệt bot mới"""
     ticket_id = payload.get("ticket_id")
     bot_type = payload.get("bot_type", "keycloak_api")
     
     try:
-        res = get_supabase_client().table("bot_automation_tasks").insert({
+        supabase = get_supabase_client()
+        res = supabase.table("bot_automation_tasks").insert({
             "ticket_id": ticket_id,
             "bot_type": bot_type,
             "payload_data": payload.get("payload_data", {"action": "auto_triage", "ticket_id": ticket_id}),
             "approval_status": "pending",
-            "execution_status": "created"
+            "execution_status": "queued"
         }).execute()
         return {"status": "success", "data": res.data[0] if res.data else {}}
     except Exception as e:
-        return {"status": "success", "message": f"Tác vụ đã được tạo cho ticket {ticket_id}", "ticket_id": ticket_id}
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.put("/{task_id}/approve")
 async def approve_task(task_id: str):
-    """Endpoint xử lý khi Anh bấm nút [✅ Phê Duyệt] trên Web Admin Vercel"""
-    # 1. Lấy thông tin task từ Supabase
+    """Phê duyệt và thực thi tác vụ"""
     try:
-        task_res = get_supabase_client().table("bot_automation_tasks").select("*, inbox_tickets(*)").eq("id", task_id).execute()
+        supabase = get_supabase_client()
+        # 1. Lấy thông tin task & ticket
+        task_res = supabase.table("bot_automation_tasks").select("*, inbox_tickets(*)").eq("id", task_id).execute()
         if not task_res.data:
-            return {"status": "success", "message": f"Đã phê duyệt thành công tác vụ {task_id}"}
+            raise HTTPException(status_code=404, detail="Không tìm thấy task!")
 
         task = task_res.data[0]
         ticket = task.get("inbox_tickets") or {}
         payload = task.get("payload_data") or {}
 
-        # 2. Nếu là tác vụ Form Feedback -> Gọi hàm đồng bộ ngược về Google Sheet
+        # 2. Đồng bộ ngược nếu là Google Form
         if ticket.get("source") == "google_form":
             from app.services.google_sheet_service import GoogleSheetManager
-            manager = GoogleSheetManager()
-            row_index = payload.get("row_index")
-            sheet_name = payload.get("sheet_name", "Feedbacks")
-            category = payload.get("category", "other")
+            row_index = ticket.get("metadata", {}).get("row_index")
             if row_index:
-                manager.update_feedback_row(sheet_name, row_index, category)
+                manager = GoogleSheetManager()
+                manager.update_feedback_row("Form_Responses", row_index, payload.get("category", "other"), "To Implement")
 
-        # 3. Cập nhật trạng thái trong Supabase
-        db = get_supabase_client()
-        db.table("bot_automation_tasks").update({"approval_status": "approved"}).eq("id", task_id).execute()
+        # 3. Đổi trạng thái trong Supabase
+        supabase.table("bot_automation_tasks").update({"approval_status": "approved", "execution_status": "success"}).eq("id", task_id).execute()
         if ticket.get("id"):
-            db.table("inbox_tickets").update({"status": "completed"}).eq("id", ticket["id"]).execute()
+            supabase.table("inbox_tickets").update({"status": "completed"}).eq("id", ticket["id"]).execute()
 
-        return {"status": "success", "message": f"Đã phê duyệt và thực thi thành công task {task_id}"}
-
+        return {"status": "success", "message": f"Đã phê duyệt thành công tác vụ {task_id}"}
     except Exception as e:
-        return {"status": "success", "message": f"Đã phê duyệt và thực thi task {task_id} (fallback mode)"}
+        raise HTTPException(status_code=500, detail=str(e))
