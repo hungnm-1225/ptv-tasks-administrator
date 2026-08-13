@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppLayout } from './components/layout/AppLayout';
 import { LandingPage } from './features/landing/LandingPage';
@@ -15,6 +15,13 @@ import { Loader2 } from 'lucide-react';
 const MainContent: React.FC = () => {
   const { user, loading } = useAuth();
   const [activeTab, setActiveTab] = useState<string>('landing');
+
+  // Sau khi Google OAuth redirect về, tự động chuyển vào Dashboard nếu đã login
+  useEffect(() => {
+    if (!loading && user && (activeTab === 'landing' || activeTab === 'login')) {
+      setActiveTab('dashboard');
+    }
+  }, [user, loading]);
 
   if (loading) {
     return (
