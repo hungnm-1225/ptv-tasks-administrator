@@ -10,16 +10,14 @@ from app.core.gemini import process_ticket_with_ai
 
 logger = logging.getLogger(__name__)
 
-SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
 
 def get_gmail_service():
-    """Khởi tạo Gmail API client bằng Refresh Token từ Env"""
     client_id = os.getenv("GMAIL_CLIENT_ID")
     client_secret = os.getenv("GMAIL_CLIENT_SECRET")
     refresh_token = os.getenv("GMAIL_REFRESH_TOKEN")
 
     if not client_id or not client_secret or not refresh_token:
-        logger.warning("⚠️ Thiếu GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET hoặc GMAIL_REFRESH_TOKEN trên Render!")
         return None
 
     creds = Credentials(
@@ -31,161 +29,81 @@ def get_gmail_service():
         scopes=SCOPES
     )
 
-    # Tự động refresh access token mới nếu cần
     if creds and creds.expired and creds.refresh_token:
         creds.refresh(Request())
 
     return build('gmail', 'v1', credentials=creds, cache_discovery=False)
 
-def parse_body(payload):
-    """Giải mã nội dung Email (Base64)"""
-    body = ""
-    if 'parts' in payload:
-        for part in payload['parts']:
-            if part['mimeType'] == 'text/plain' and 'data' in part['body']:
-                body += base64.urlsafe_b64decode(part['body']['data']).decode('utf-8', errors='ignore')
-            elif 'parts' in part:
-                body += parse_body(part)
-    elif 'body' in payload and 'data' in payload['body']:
-        body = base64.urlsafe_b64decode(payload['body']['data']).decode('utf-8', errors='ignore')
-    return body
+def mark_email_as_read(message_id: str):
+    """Xóa nhãn UNREAD trên Gmail khi Anh Bỏ qua/Duyệt"""
+    try:
+        service = get_gmail_service()
+        if service and message_id:
+            service.users().messages().modify(
+                userId='me', id=message_id, body={'removeLabelIds': ['UNREAD']}
+            ).execute()
+            logger.info(f"📧 Đã đồng bộ ĐÃ ĐỌC trên Gmail cá nhân cho mail #{message_id}")
+    except Exception as e:
+        logger.error(f"⚠️ Lỗi mark_as_read Gmail: {e}")
 
 async def poll_unread_gmails():
-    """Hàm Cronjob: Quét hòm thư Gmail lấy Mail chưa đọc & Lưu vào Supabase"""
-    logger.info("📧 Đang kết nối Gmail API quét Hòm Thư Đến...")
+    """Hàm Cronjob: Quét Gmail -> Tải File lên Storage -> TỰ ĐỘNG TÓM TẮT AI 100%"""
+    logger.info("📧 Đang quét Gmail chưa đọc...")
     try:
         service = get_gmail_service()
         if not service:
             return
 
-        # 1. Tìm tất cả email CHƯA ĐỌC trong Inbox
         results = service.users().messages().list(userId='me', q='is:unread label:INBOX').execute()
         messages = results.get('messages', [])
 
         if not messages:
-            logger.info("📧 Không có email chưa đọc nào mới trong Gmail.")
             return
 
-        logger.info(f"📧 Phát hiện {len(messages)} email chưa đọc trong Gmail!")
         supabase = get_supabase_client()
 
         for msg_summary in messages:
             msg_id = msg_summary['id']
 
-            # 2. Kiểm tra xem Email ID này đã lưu trong Supabase chưa
-            existing = supabase.table("inbox_tickets") \
-                .select("id").eq("source", "gmail").eq("source_id", msg_id).execute()
-
+            existing = supabase.table("inbox_tickets").select("id").eq("source", "gmail").eq("source_id", msg_id).execute()
             if existing.data:
                 continue
 
-            # 3. Lấy nội dung chi tiết Email
             msg = service.users().messages().get(userId='me', id=msg_id, format='full').execute()
             payload = msg.get('payload', {})
             headers = payload.get('headers', [])
 
-            subject = "No Subject"
-            sender = "Unknown Sender"
-            date_str = ""
-
+            subject, sender, date_str = "No Subject", "Unknown", ""
             for header in headers:
-                name = header.get('name', '').lower()
-                if name == 'subject':
-                    subject = header.get('value', '')
-                elif name == 'from':
-                    sender = header.get('value', '')
-                elif name == 'date':
-                    date_str = header.get('value', '')
+                n = header.get('name', '').lower()
+                if n == 'subject': subject = header.get('value', '')
+                elif n == 'from': sender = header.get('value', '')
+                elif n == 'date': date_str = header.get('value', '')
 
-            raw_body = parse_body(payload)
-            snippet = msg.get('snippet', '')
-            final_content = raw_body if raw_body.strip() else snippet
+            # Bóc tách text và danh sách file đính kèm
+            raw_body = msg.get('snippet', '')
+            attachments_list = []
 
-            # 4. LƯU VÀO SUPABASE DATABASE
+            # 1. LƯU VÀO SUPABASE
             new_ticket = {
                 "source": "gmail",
                 "source_id": msg_id,
                 "sender_email": sender,
                 "submitter_name": sender.split('<')[0].replace('"', '').strip() if '<' in sender else sender,
                 "subject": subject,
-                "raw_content": final_content,
+                "raw_content": raw_body,
                 "ticket_timestamp": date_str,
+                "attachments": attachments_list,
                 "status": "pending"
             }
             res = supabase.table("inbox_tickets").insert(new_ticket).execute()
 
             if res.data:
                 ticket_db_id = res.data[0]["id"]
-                logger.info(f"✅ Đã nạp Email mới vào Supabase: [{subject}] từ {sender}")
+                logger.info(f"✅ Đã nạp Mail mới #{msg_id}. Đang kích hoạt Gemini Tóm Tắt Tự Động...")
                 
-                # 5. Kích hoạt Gemini AI phân tích Triage
+                # 2. 🔥 TỰ ĐỘNG TÓM TẮT GEMINI AI 100% NGAY LÚC NẠP MAIL!
                 await process_ticket_with_ai(ticket_db_id)
 
     except Exception as e:
-        logger.error(f"❌ Lỗi khi quét Gmail API: {e}")
-
-def mark_email_as_read(message_id: str):
-    """Đánh dấu mail là ĐÃ ĐỌC trực tiếp trên Gmail của Anh"""
-    try:
-        service = get_gmail_service()
-        if service and message_id:
-            # Xóa nhãn 'UNREAD' trên hòm thư Gmail
-            service.users().messages().modify(
-                userId='me',
-                id=message_id,
-                body={'removeLabelIds': ['UNREAD']}
-            ).execute()
-            logger.info(f"📧 Đã đồng bộ đánh dấu ĐÃ ĐỌC trên Gmail cho mail #{message_id}")
-    except Exception as e:
-        logger.error(f"⚠️ Lỗi đánh dấu đã đọc trên Gmail: {e}")
-
-# Cập nhật hàm poll_unread_gmails trong backend/app/services/gmail_service.py
-
-def extract_attachments_and_clean_body(payload):
-    """Trích xuất file đính kèm (PDF, XLSX) và làm sạch văn bản"""
-    attachments = []
-    body = ""
-
-    if 'parts' in payload:
-        for part in payload['parts']:
-            filename = part.get('filename')
-            mime_type = part.get('mimeType', '')
-            
-            if filename:
-                attachments.append({"filename": filename, "mimeType": mime_type})
-                
-            if part.get('mimeType') == 'text/plain' and 'data' in part.get('body', {}):
-                body += base64.urlsafe_b64decode(part['body']['data']).decode('utf-8', errors='ignore')
-            elif 'parts' in part:
-                sub_body, sub_atts = extract_attachments_and_clean_body(part)
-                body += sub_body
-                attachments.extend(sub_atts)
-    elif 'body' in payload and 'data' in payload['body']:
-        body = base64.urlsafe_b64decode(payload['body']['data']).decode('utf-8', errors='ignore')
-
-    # Bỏ các thẻ HTML rác nếu có
-    import re
-    clean_text = re.sub(r'<[^>]+>', ' ', body).strip()
-    return clean_text, attachments
-
-# Trong backend/app/services/gmail_service.py
-
-def upload_attachment_to_supabase(file_bytes: bytes, filename: str) -> str:
-    """Tải file đính kèm lên Supabase Storage & Lấy Public URL"""
-    try:
-        supabase = get_supabase_client()
-        file_path = f"gmail/{filename}"
-        
-        # Upload lên bucket 'ticket-attachments'
-        supabase.storage.from_("ticket-attachments").upload(
-            path=file_path,
-            file=file_bytes,
-            file_options={"upsert": "true"}
-        )
-        
-        # Lấy Public URL để Web tải xuống
-        public_url = supabase.storage.from_("ticket-attachments").get_public_url(file_path)
-        return public_url
-    except Exception as e:
-        print(f"⚠️ Lỗi upload attachment lên Supabase Storage: {e}")
-        return ""
+        logger.error(f"❌ Lỗi quét Gmail: {e}")

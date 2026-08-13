@@ -5,6 +5,7 @@ export type TicketSource = 'gmail' | 'google_form' | 'osticket';
 export type TicketStatus = 'pending' | 'approved' | 'processing' | 'completed' | 'dismissed';
 
 export interface InboxTicket {
+  attachments: never[];
   id: string;
   source: TicketSource | string;
   source_id: string;
