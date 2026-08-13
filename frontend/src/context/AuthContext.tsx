@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 export type AuthContextType = {
   user: any;
   loading: boolean;
+  signInWithGoogle: () => Promise<void>;
 };
 
 // 🛑 CHỈ CHO PHÉP EMAIL DUY NHẤT NÀY ĐĂNG NHẬP
@@ -46,8 +47,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setLoading(false);
   };
 
+  const signInWithGoogle = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin,
+      },
+    });
+    if (error) throw error;
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading }}>
+    <AuthContext.Provider value={{ user, loading, signInWithGoogle }}>
       {children}
     </AuthContext.Provider>
   );
