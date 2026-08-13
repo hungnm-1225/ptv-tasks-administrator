@@ -33,3 +33,30 @@ async def list_tickets(status: Optional[str] = None, category: Optional[str] = N
     except Exception as e:
         print(f"❌ Lỗi khi đọc inbox_tickets từ Supabase: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/{ticket_id}/dismiss")
+async def dismiss_ticket(ticket_id: str):
+    """Đánh dấu BỎ QUA ticket + Đồng bộ Đã Đọc trên Gmail"""
+    supabase = get_supabase_client()
+    res = supabase.table("inbox_tickets").select("*").eq("id", ticket_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Không tìm thấy ticket")
+        
+    ticket = res.data[0]
+    
+    # 1. Đổi trạng thái trong Supabase -> 'dismissed'
+    supabase.table("inbox_tickets").update({"status": "dismissed"}).eq("id", ticket_id).execute()
+    
+    # 2. Nếu nguồn là Gmail -> Đánh dấu ĐÃ ĐỌC trên Gmail cá nhân của Anh
+    if ticket.get("source") == "gmail" and ticket.get("source_id"):
+        from app.services.gmail_service import mark_email_as_read
+        mark_email_as_read(ticket["source_id"])
+        
+    return {"status": "success", "message": "Đã bỏ qua ticket và đồng bộ Gmail"}
+
+@router.put("/{ticket_id}/restore")
+async def restore_ticket(ticket_id: str):
+    """KHÔI PHỤC ticket đã bỏ qua quay lại Hòm Thư"""
+    supabase = get_supabase_client()
+    supabase.table("inbox_tickets").update({"status": "pending"}).eq("id", ticket_id).execute()
+    return {"status": "success", "message": "Đã khôi phục ticket"}

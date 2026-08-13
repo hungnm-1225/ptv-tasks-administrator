@@ -123,3 +123,18 @@ async def poll_unread_gmails():
 
     except Exception as e:
         logger.error(f"❌ Lỗi khi quét Gmail API: {e}")
+
+def mark_email_as_read(message_id: str):
+    """Đánh dấu mail là ĐÃ ĐỌC trực tiếp trên Gmail của Anh"""
+    try:
+        service = get_gmail_service()
+        if service and message_id:
+            # Xóa nhãn 'UNREAD' trên hòm thư Gmail
+            service.users().messages().modify(
+                userId='me',
+                id=message_id,
+                body={'removeLabelIds': ['UNREAD']}
+            ).execute()
+            logger.info(f"📧 Đã đồng bộ đánh dấu ĐÃ ĐỌC trên Gmail cho mail #{message_id}")
+    except Exception as e:
+        logger.error(f"⚠️ Lỗi đánh dấu đã đọc trên Gmail: {e}")
