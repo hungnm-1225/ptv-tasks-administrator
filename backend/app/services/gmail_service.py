@@ -15,3 +15,8 @@ class GmailService:
 
 
 gmail_service = GmailService()
+
+
+async def poll_unread_gmails():
+    """Cron job wrapper: quét Gmail và xử lý email chưa đọc."""
+    await gmail_service.fetch_unread_messages()

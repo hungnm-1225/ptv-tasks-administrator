@@ -1,7 +1,7 @@
 import os
 import asyncio
 from playwright.async_api import async_playwright
-from app.core.supabase import supabase_client
+from app.core.supabase import get_supabase_client
 from app.core.gemini import process_ticket_with_ai
 
 OSTICKET_URL = os.getenv("OSTICKET_URL", "https://support.pythaverse.space/scp/login.php")
@@ -46,6 +46,7 @@ async def poll_open_ostickets():
                 subject = (await ticket_link_el.get_attribute("title") or "").strip()
                 
                 # 4. Kiểm tra xem Ticket ID này đã có trong Supabase chưa
+                supabase_client = get_supabase_client()
                 existing = supabase_client.table("inbox_tickets") \
                     .select("id").eq("source", "osticket").eq("source_id", ticket_id).execute()
 
@@ -72,7 +73,7 @@ async def poll_open_ostickets():
                     "raw_content": raw_content,
                     "status": "pending"
                 }
-                res = supabase_client.table("inbox_tickets").insert(new_ticket).execute()
+                res = get_supabase_client().table("inbox_tickets").insert(new_ticket).execute()
                 
                 # 7. Đẩy qua Gemini AI phân tích & Bắn Telegram
                 if res.data:

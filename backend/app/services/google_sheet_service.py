@@ -112,3 +112,13 @@ class GoogleSheetManager:
         ).execute()
         
         logger.info(f"✅ Đã cập nhật dòng {row_index} [{target_sheet_name}]: Category={category}, Assigned=TRUE, Status={status}")
+
+
+async def poll_form_feedbacks():
+    """Cron job wrapper: quét Google Sheet tìm feedback chưa xử lý."""
+    try:
+        manager = GoogleSheetManager()
+        rows = manager.get_unprocessed_rows()
+        logger.info(f"📊 Google Sheet: tìm thấy {len(rows)} feedback chưa xử lý.")
+    except Exception as e:
+        logger.error(f"❌ Lỗi khi quét Google Sheet: {e}")

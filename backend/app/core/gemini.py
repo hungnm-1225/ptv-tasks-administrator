@@ -75,3 +75,36 @@ Trả về DUY NHẤT một JSON object:
             "summary_vi": f"Tiêu đề: {subject}",
             "summary_en": f"Subject: {subject}"
         }
+
+
+async def process_ticket_with_ai(ticket_id: str):
+    """Xử lý ticket qua Gemini AI: phân loại và ghi kết quả vào Supabase."""
+    try:
+        from app.core.supabase import get_supabase_client
+        client = get_supabase_client()
+
+        result = client.table("inbox_tickets").select("*").eq("id", ticket_id).single().execute()
+        if not result.data:
+            logger.warning(f"Không tìm thấy ticket {ticket_id} trong Supabase.")
+            return
+
+        ticket = result.data
+        engine = AIEngine()
+        analysis = engine.analyze_feedback(
+            subject=ticket.get("subject", ""),
+            remarks=ticket.get("raw_content", ""),
+            doc_content="",
+            country=""
+        )
+
+        client.table("inbox_tickets").update({
+            "category": analysis.get("category"),
+            "assigned_name": analysis.get("assigned_name"),
+            "assigned_email": analysis.get("assigned_email"),
+            "summary_vi": analysis.get("summary_vi"),
+            "status": "analyzed"
+        }).eq("id", ticket_id).execute()
+
+        logger.info(f"✅ AI đã phân tích ticket {ticket_id}: {analysis.get('category')}")
+    except Exception as e:
+        logger.error(f"❌ Lỗi process_ticket_with_ai({ticket_id}): {e}")
