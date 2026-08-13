@@ -1,80 +1,49 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, Session } from '@supabase/supabase-js';
+// frontend/src/context/AuthContext.tsx
+import { useEffect, useState, createContext, useContext } from 'react';
 import { supabase } from '../lib/supabase';
 
-interface AuthContextType {
-  user: User | null;
-  session: Session | null;
-  loading: boolean;
-  signInWithGoogle: () => Promise<void>;
-  signOut: () => Promise<void>;
-}
+// 🛑 CHỈ CHO PHÉP EMAIL DUY NHẤT NÀY ĐĂNG NHẬP
+const ALLOWED_ADMIN_EMAIL = "hung.nguyenmanh@dtt.vn";
 
-const AuthContext = createContext<AuthContextType>({
-  user: null,
-  session: null,
-  loading: true,
-  signInWithGoogle: async () => {},
-  signOut: async () => {},
-});
+export const AuthContext = createContext<any>(null);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+  const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check initial active session
+    // Kiểm tra Session hiện tại
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
+      checkUserAccess(session?.user ?? null);
     });
 
-    // Listen to Auth State Changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
+    // Lắng nghe sự kiện Đăng nhập từ Google
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      checkUserAccess(session?.user ?? null);
     });
 
-    return () => {
-      subscription.unsubscribe();
-    };
+    return () => listener.subscription.unsubscribe();
   }, []);
 
-  const signInWithGoogle = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}`,
-        queryParams: {
-          access_type: 'offline',
-          prompt: 'consent',
-        },
-      },
-    });
-    if (error) {
-      console.error('Google Sign In Error:', error.message);
-      throw error;
+  const checkUserAccess = async (currentUser: any) => {
+    if (currentUser) {
+      // ⚠️ KIỂM TRA EMAIL: Nếu KHÔNG PHẢI hung.nguyenmanh@dtt.vn -> ĐĂNG XUẤT NGAY!
+      if (currentUser.email !== ALLOWED_ADMIN_EMAIL) {
+        alert(`❌ Quyền truy cập bị từ chối! Email ${currentUser.email} không có quyền Admin.`);
+        await supabase.auth.signOut();
+        setUser(null);
+      } else {
+        setUser(currentUser);
+      }
+    } else {
+      setUser(null);
     }
-  };
-
-  const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      console.error('Sign Out Error:', error.message);
-      throw error;
-    }
-    setUser(null);
-    setSession(null);
+    setLoading(false);
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, signInWithGoogle, signOut }}>
+    <AuthContext.Provider value={{ user, loading }}>
       {children}
     </AuthContext.Provider>
   );
 };
-
-export const useAuth = () => useContext(AuthContext);
