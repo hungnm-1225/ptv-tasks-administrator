@@ -1,23 +1,33 @@
-export type TicketSource = 'gmail' | 'google_form' | 'osticket';
+
 export type TicketCategory = 'bug' | 'account_keycloak' | 'lms_enroll' | 'license' | 'other';
 export type TicketPriority = 'critical' | 'normal';
+export type TicketSource = 'gmail' | 'google_form' | 'osticket';
 export type TicketStatus = 'pending' | 'approved' | 'processing' | 'completed' | 'dismissed';
 
 export interface InboxTicket {
   id: string;
-  source: TicketSource;
-  source_id?: string;
+  source: TicketSource | string;
+  source_id: string;
   sender_email: string;
-  submitter_name?: string;
-  subject?: string;
+  submitter_name?: string | null;
+  subject: string;
   raw_content: string;
-  ai_summary?: string;
-  category: TicketCategory;
-  priority: TicketPriority;
-  status: TicketStatus;
+  ai_summary?: string | null;
+  category?: string | null;
+  priority?: string | null;
+  status: TicketStatus | string;
+
+  // 🎯 CÁC TRƯỜNG BỔ SUNG CHO GOOGLE FORM & OS TICKET
+  country?: string | null;
+  doc_url?: string | null;
+  assigned_name?: string | null;
+  assigned_email?: string | null;
+  assigned_to?: string | null;
+  ticket_timestamp?: string | null;
+
   metadata?: Record<string, any>;
   created_at: string;
-  updated_at: string;
+  updated_at?: string;
 }
 
 export type BotType = 'keycloak_api' | 'lms_playwright' | 'github_issue_creator' | 'google_doc_comment';
@@ -25,14 +35,15 @@ export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 
 export interface BotAutomationTask {
   id: string;
-  ticket_id?: string;
-  bot_type: BotType;
+  ticket_id: string;
+  bot_type: 'keycloak_api' | 'lms_playwright' | 'github_issue_creator' | 'google_doc_comment';
   payload_data: Record<string, any>;
-  approval_status: ApprovalStatus;
-  execution_status: string;
+  approval_status: 'pending' | 'approved' | 'rejected';
+  execution_status: 'queued' | 'running' | 'success' | 'failed';
   execution_logs?: string;
   created_at: string;
   executed_at?: string;
+  inbox_tickets?: InboxTicket;
 }
 
 export interface TemplateConfig {
