@@ -43,3 +43,38 @@ export interface TemplateConfig {
   fields_mapping: Array<Record<string, any>>;
   updated_at: string;
 }
+
+export interface CategoryRatio {
+  name: string;
+  value: number;
+}
+
+export interface ReportsSummary {
+  total_tickets: number;
+  pending_approval: number;
+  resolved_this_month: number;
+  system_health: string;
+  category_ratios: CategoryRatio[];
+}
+
+export interface BotWorkersStatusResponse {
+  gmail_sync_worker?: string;
+  keycloak_api_worker?: string;
+  lms_playwright_worker?: string;
+  github_dispatcher?: string;
+  [key: string]: string | undefined;
+}
+
+export interface GithubIssuePayload {
+  repo: string;
+  title: string;
+  body: string;
+}
+
+export interface GithubIssueResponse {
+  status: string;
+  issue_url?: string;
+  issue_number?: number;
+  message?: string;
+}
+

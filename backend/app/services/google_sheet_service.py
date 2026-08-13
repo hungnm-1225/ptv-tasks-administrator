@@ -1,0 +1,114 @@
+import os
+import json
+import logging
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+
+logger = logging.getLogger(__name__)
+
+SCOPES = [
+    'https://www.googleapis.com/auth/spreadsheets',
+    'https://www.googleapis.com/auth/drive'
+]
+
+def get_google_credentials():
+    creds_json_str = os.getenv("GOOGLE_CREDENTIALS_JSON")
+    if not creds_json_str:
+        raise ValueError("❌ THIẾU CẤU HÌNH: Không tìm thấy biến môi trường GOOGLE_CREDENTIALS_JSON trên Render!")
+    try:
+        info = json.loads(creds_json_str)
+        return Credentials.from_service_account_info(info, scopes=SCOPES)
+    except Exception as e:
+        raise ValueError(f"❌ Lỗi định dạng JSON trong biến GOOGLE_CREDENTIALS_JSON: {e}")
+
+class GoogleSheetManager:
+    def __init__(self, spreadsheet_id: str = None, *args, **kwargs):
+        self.spreadsheet_id = spreadsheet_id or os.getenv("SPREADSHEET_ID")
+        self.creds = get_google_credentials()
+        # ĐẶT BÊN TRONG HÀM __init__
+        self.service = build('sheets', 'v4', credentials=self.creds, cache_discovery=False)
+
+    def _get_valid_sheet_name(self, requested_name: str) -> str:
+        try:
+            spreadsheet_info = self.service.spreadsheets().get(
+                spreadsheetId=self.spreadsheet_id
+            ).execute()
+            sheets = spreadsheet_info.get('sheets', [])
+            sheet_names = [s['properties']['title'] for s in sheets]
+            
+            if requested_name in sheet_names:
+                return requested_name
+            if len(sheet_names) > 0:
+                return sheet_names[0]
+        except Exception as e:
+            logger.error(f"Lỗi đọc tên Sheet: {e}")
+        return requested_name
+
+    def get_unprocessed_rows(self, sheet_name: str = "Feedbacks", *args, **kwargs):
+        target_sheet_name = self._get_valid_sheet_name(sheet_name)
+        range_name = f"'{target_sheet_name}'!A2:P"
+        
+        result = self.service.spreadsheets().values().get(
+            spreadsheetId=self.spreadsheet_id,
+            range=range_name
+        ).execute()
+        
+        rows = result.get('values', [])
+        unprocessed = []
+
+        for index, row in enumerate(rows, start=2):
+            def get_col(idx):
+                return row[idx].strip() if idx < len(row) else ""
+
+            country = get_col(2)       # Cột C (COUNTRY)
+            submitter = get_col(3)     # Cột D (SUBMITTER NAME)
+            subject = get_col(5)       # Cột F (SUBJECT)
+            doc_url = get_col(6)       # Cột G (REPORT GoogleDoc)
+            remarks = get_col(7)       # Cột H (REMARKS)
+            fb_id = get_col(8)         # Cột I (FB ID)
+            category = get_col(11)     # Cột L (CATEGORY)
+            assigned_cb = get_col(12)  # Cột M (Assigned Checkbox)
+            status = get_col(15)       # Cột P (STATUS)
+
+            if assigned_cb.upper() != "TRUE" and (submitter or subject or fb_id):
+                logger.info(f"📌 Phát hiện Ticket CHƯA XỬ LÝ ở dòng {index} [{fb_id or subject}]")
+                unprocessed.append({
+                    "row_index": index,
+                    "sheet_name": target_sheet_name,
+                    "timestamp": get_col(0),
+                    "country": country,
+                    "submitter": submitter,
+                    "subject": subject,
+                    "doc_url": doc_url,
+                    "remarks": remarks,
+                    "fb_id": fb_id if fb_id else f"FB-AUTO-{index}",
+                    "category": category,
+                    "status": status
+                })
+
+        return unprocessed
+
+    def update_feedback_row(self, sheet_name: str, row_index: int, category: str, status: str = "To Implement", *args, **kwargs):
+        target_sheet_name = self._get_valid_sheet_name(sheet_name)
+
+        range_lm = f"'{target_sheet_name}'!L{row_index}:M{row_index}"
+        body_lm = {"values": [[category, True]]}
+        
+        self.service.spreadsheets().values().update(
+            spreadsheetId=self.spreadsheet_id,
+            range=range_lm,
+            valueInputOption="USER_ENTERED",
+            body=body_lm
+        ).execute()
+
+        range_p = f"'{target_sheet_name}'!P{row_index}"
+        body_p = {"values": [[status]]}
+        
+        self.service.spreadsheets().values().update(
+            spreadsheetId=self.spreadsheet_id,
+            range=range_p,
+            valueInputOption="USER_ENTERED",
+            body=body_p
+        ).execute()
+        
+        logger.info(f"✅ Đã cập nhật dòng {row_index} [{target_sheet_name}]: Category={category}, Assigned=TRUE, Status={status}")

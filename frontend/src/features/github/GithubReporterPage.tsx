@@ -1,16 +1,42 @@
 import React, { useState } from 'react';
-import { Github, Sparkles, Send } from 'lucide-react';
+import { Github, Sparkles, Send, Loader2 } from 'lucide-react';
+import { fetchApi } from '../../lib/api';
+import { GithubIssueResponse } from '../../types';
 
 export const GithubReporterPage: React.FC = () => {
   const [repo, setRepo] = useState<string>('pythaverse/private-tasks-repo');
   const [title, setTitle] = useState<string>('');
   const [body, setBody] = useState<string>('');
+  const [submitting, setSubmitting] = useState<boolean>(false);
 
   const handleAiAutoFill = () => {
     setTitle('🐛 [BUG]: Lỗi đồng bộ dữ liệu điểm số giữa LMS và Supabase Engine');
     setBody(
       `### Mô Tả Sự Cố\nPhát hiện lỗi không ghi được record vào bảng \`inbox_tickets\` khi có webhook từ LMS.\n\n### Môi Trường\n- Backend: FastAPI 0.115\n- Database: Supabase PostgreSQL 16\n\n### Các Bước Tái Hiện\n1. Gửi request webhook thử nghiệm từ LMS.\n2. Kiểm tra log backend.`
     );
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title || !body) {
+      alert('Vui lòng nhập đầy đủ tiêu đề và nội dung Issue!');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await fetchApi<GithubIssueResponse>('/github/create-issue', {
+        method: 'POST',
+        body: JSON.stringify({ repo, title, body }),
+      });
+      alert(`🎉 Gửi Issue tới GitHub thành công! ${res.issue_url ? `URL: ${res.issue_url}` : ''}`);
+      setTitle('');
+      setBody('');
+    } catch (err) {
+      alert('❌ Lỗi gửi GitHub Issue: ' + (err as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -27,7 +53,7 @@ export const GithubReporterPage: React.FC = () => {
       </div>
 
       {/* Form */}
-      <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4">
+      <form onSubmit={handleSubmit} className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4">
         <div className="flex items-center justify-between">
           <label className="text-xs font-semibold text-slate-300">Target Repository</label>
           <button
@@ -70,13 +96,20 @@ export const GithubReporterPage: React.FC = () => {
         </div>
 
         <button
-          type="button"
-          className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2"
+          type="submit"
+          disabled={submitting}
+          className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white text-xs font-semibold rounded-lg transition shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2"
         >
-          <Send className="w-4 h-4" />
-          <span>Gửi Issue Tới GitHub REST API</span>
+          {submitting ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <>
+              <Send className="w-4 h-4" />
+              <span>Gửi Issue Tới GitHub REST API</span>
+            </>
+          )}
         </button>
-      </div>
+      </form>
     </div>
   );
 };

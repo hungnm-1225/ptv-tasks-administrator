@@ -1,82 +1,77 @@
-import logging
+import os
 import json
-from typing import Dict, Any, Optional
-from app.core.config import settings
+import logging
+import google.generativeai as genai
 
 logger = logging.getLogger(__name__)
 
+GEMINI_MODELS = [
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-3.1-pro-preview",
+    "gemini-3-flash-preview",
+    "gemini-pro-latest",
+    "gemini-flash-latest",
+    "gemini-flash-lite-latest"
+]
 
-class GeminiEngine:
-    """Gemini AI Triage Engine with model fallback capability."""
-
-    def __init__(self):
-        self.primary_model = settings.GEMINI_PRIMARY_MODEL
-        self.fallback_model = settings.GEMINI_FALLBACK_MODEL
-        self.api_key = settings.GEMINI_API_KEY
-
-    async def triage_ticket(
-        self, raw_content: str, subject: str = ""
-    ) -> Dict[str, Any]:
-        """Analyze ticket raw content, classify category, summarize, and produce automation payload recommendation."""
-        prompt = f"""
-        You are an AI Triage Assistant for Pythaverse Admin.
-        Analyze this incoming ticket subject: "{subject}"
-        Content: "{raw_content}"
+class AIEngine:
+    def __init__(self, api_key: str = None):
+        api_key = api_key or os.getenv("GEMINI_API_KEY")
+        genai.configure(api_key=api_key)
         
-        Return JSON with key fields:
-        - "category": ("bug" | "account_keycloak" | "lms_enroll" | "license" | "other")
-        - "priority": ("critical" | "normal")
-        - "summary": short 1-2 sentence Vietnamese summary
-        - "suggested_bot_type": ("keycloak_api" | "lms_playwright" | "github_issue_creator" | "google_doc_comment" | null)
-        - "suggested_payload": JSON object with parameters for the bot execution if applicable.
-        """
+        # Đọc file knowledge_base.json
+        kb_path = os.path.join(os.path.dirname(__file__), "../brain/knowledge_base.json")
+        with open(kb_path, 'r', encoding='utf-8') as f:
+            self.kb = json.load(f)
 
-        try:
-            # Try primary model via google-genai SDK
-            return await self._call_gemini_api(self.primary_model, prompt)
-        except Exception as e:
-            logger.warning(
-                f"Primary model {self.primary_model} failed: {e}. Falling back to {self.fallback_model}"
-            )
+    def analyze_feedback(self, subject: str, remarks: str, doc_content: str, country: str) -> dict:
+        prompt = f"""
+Bạn là trợ lý AI chuyên phân loại ticket hỗ trợ cho hệ thống Pythaverse. Hãy phân tích thông tin sau:
+
+[THÔNG TIN FEEDBACK]
+- Quốc gia: {country}
+- Tiêu đề (Subject): {subject}
+- Ghi chú (Remarks): {remarks}
+- Nội dung file Doc đính kèm: {doc_content if doc_content else "Không có file Doc."}
+
+[KNOWLEDGE BASE]
+Danh mục hợp lệ (Category): {json.dumps(self.kb['categories'])}
+Danh sách nhân sự (Team): {json.dumps(self.kb['team_members'], ensure_ascii=False)}
+
+[QUY TẮC GÁN NGƯỜI PHỤ TRÁCH]
+1. Nếu vấn đề khớp rõ ràng với từ khóa/vai trò của nhân sự nào, hãy gán cho nhân sự đó.
+2. Nếu không khớp cụ thể, MẶC ĐỊNH gán cho Administrator: Hung Nguyen (email: hung.nguyenmanh@dtt.vn).
+
+Trả về DUY NHẤT một JSON object:
+{{
+    "category": "Chọn 1 Category phù hợp nhất",
+    "assigned_name": "Tên người phụ trách",
+    "assigned_email": "Email người phụ trách",
+    "summary_vi": "Tóm tắt ngắn 2 câu bằng tiếng Việt cho Telegram và Web Admin.",
+    "summary_en": "Short 2-sentence summary in English for Google Doc comment."
+}}
+"""
+        for model_name in GEMINI_MODELS:
             try:
-                return await self._call_gemini_api(self.fallback_model, prompt)
-            except Exception as fallback_err:
-                logger.error(f"Fallback model failed: {fallback_err}")
-                return {
-                    "category": "other",
-                    "priority": "normal",
-                    "summary": f"Raw ticket content: {raw_content[:150]}...",
-                    "suggested_bot_type": None,
-                    "suggested_payload": {},
-                }
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content(
+                    prompt,
+                    generation_config={"response_mime_type": "application/json"}
+                )
+                return json.loads(response.text)
+            except Exception as e:
+                logger.warning(f"Lỗi model {model_name}: {e}")
+                continue
 
-    async def _call_gemini_api(self, model_name: str, prompt: str) -> Dict[str, Any]:
-        """Invoke Gemini API."""
-
-        # Lightweight fallback parser / demonstration response structure
-        # When GEMINI_API_KEY is configured, SDK call is executed.
-        if not self.api_key:
-            return {
-                "category": "bug",
-                "priority": "normal",
-                "summary": "Mô tả sự cố hệ thống cần được xử lý.",
-                "suggested_bot_type": "github_issue_creator",
-                "suggested_payload": {
-                    "title": prompt[:50],
-                    "body": prompt,
-                    "labels": ["bug"],
-                },
-            }
-
-        # Imports inside call for safety
-        import google.generativeai as genai
-
-        genai.configure(api_key=self.api_key)
-        model = genai.GenerativeModel(model_name)
-        response = model.generate_content(
-            prompt, generation_config={"response_mime_type": "application/json"}
-        )
-        return json.loads(response.text)
-
-
-gemini_engine = GeminiEngine()
+        # Fallback an toàn nếu AI lỗi
+        default_person = self.kb.get("default_assignee", {"name": "Hung Nguyen", "email": "hung.nguyenmanh@dtt.vn"})
+        return {
+            "category": "other",
+            "assigned_name": default_person["name"],
+            "assigned_email": default_person["email"],
+            "summary_vi": f"Tiêu đề: {subject}",
+            "summary_en": f"Subject: {subject}"
+        }

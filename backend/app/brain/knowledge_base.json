@@ -1,0 +1,84 @@
+{
+    "categories": [
+        "Hardware",
+        "Software",
+        "Content",
+        "Account",
+        "Operations",
+        "other"
+    ],
+    "statuses": [
+        "Critical",
+        "Non-Critical",
+        "To Implement",
+        "Backlog",
+        "Resolved",
+        "Closed"
+    ],
+    "team_members": [
+        {
+            "name": "Hung Nguyen",
+            "email": "hung.nguyenmanh@dtt.vn",
+            "role": "Administrator / Overall Lead",
+            "keywords": [
+                "general",
+                "other",
+                "admin",
+                "system",
+                "uncategorized",
+                "default",
+                "platform"
+            ]
+        },
+        {
+            "name": "Jezer Diaz",
+            "email": "jezer.diaz@example.com",
+            "role": "Support / Software Specialist",
+            "keywords": [
+                "support ticket",
+                "access",
+                "workspace",
+                "delting",
+                "account"
+            ]
+        },
+        {
+            "name": "Bryan",
+            "email": "bryan@example.com",
+            "role": "Software Lead / Hardware",
+            "keywords": [
+                "website",
+                "leanbot",
+                "bluetooth",
+                "ipad",
+                "reseller demo"
+            ]
+        },
+        {
+            "name": "Linh Đặng Thủy",
+            "email": "linhdang@example.com",
+            "role": "Product / E-Certificate / Curriculum",
+            "keywords": [
+                "e-certificate",
+                "curriculum",
+                "swrp",
+                "plearn",
+                "upload lessons"
+            ]
+        },
+        {
+            "name": "Afiq",
+            "email": "afiq@example.com",
+            "role": "Software Support",
+            "keywords": [
+                "ide bluetooth",
+                "hostel students",
+                "phil jezer"
+            ]
+        }
+    ],
+    "default_assignee": {
+        "name": "Hung Nguyen",
+        "email": "hung.nguyenmanh@dtt.vn"
+    }
+}
