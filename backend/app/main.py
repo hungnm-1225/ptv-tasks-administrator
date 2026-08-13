@@ -67,12 +67,19 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Cấu hình CORS cho phép Web Admin Vercel truy cập
+# 🔓 CẤU HÌNH BẬT CORS CHO PHÉP VERCEL GỌI API
+origins = [
+    "https://ptv-tasks-administrator.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "*",  # Cho phép tất cả các nguồn truy cập trong giai đoạn Dev
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["*"],  # Cho phép tất cả GET, POST, PUT, DELETE
     allow_headers=["*"],
 )
 
