@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Status
+from fastapi import APIRouter, HTTPException
 from typing import List, Dict, Any
 from app.models.ticket import TicketCreate, TicketResponse, TicketStatus
 from app.workers.ticket_processor import process_incoming_ticket

@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import google.generativeai as genai
+from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -108,3 +109,40 @@ async def process_ticket_with_ai(ticket_id: str):
         logger.info(f"✅ AI đã phân tích ticket {ticket_id}: {analysis.get('category')}")
     except Exception as e:
         logger.error(f"❌ Lỗi process_ticket_with_ai({ticket_id}): {e}")
+
+
+class GeminiEngine:
+    """High-level engine used by ticket_processor for triage workflows."""
+
+    async def triage_ticket(self, raw_content: str, subject: str) -> Dict[str, Any]:
+        """Phân tích ticket và trả về category, bot_type gợi ý, và payload."""
+        try:
+            engine = AIEngine()
+            result = engine.analyze_feedback(
+                subject=subject,
+                remarks=raw_content,
+                doc_content="",
+                country=""
+            )
+            # Map sang format ticket_processor expects
+            return {
+                "category": result.get("category", "other"),
+                "summary": result.get("summary_vi", subject),
+                "suggested_bot_type": None,
+                "suggested_payload": {
+                    "assigned_name": result.get("assigned_name"),
+                    "assigned_email": result.get("assigned_email"),
+                    "category": result.get("category"),
+                }
+            }
+        except Exception as e:
+            logger.error(f"❌ GeminiEngine.triage_ticket lỗi: {e}")
+            return {
+                "category": "other",
+                "summary": subject,
+                "suggested_bot_type": None,
+                "suggested_payload": {}
+            }
+
+
+gemini_engine = GeminiEngine()

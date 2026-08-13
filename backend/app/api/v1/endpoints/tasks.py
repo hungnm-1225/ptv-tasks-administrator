@@ -1,7 +1,6 @@
 from typing import Optional, Dict, Any, List
-from fastapi import APIRouter, HTTPException, Depends
-from app.core.supabase import supabase_client
-from app.services.google_sheet_service import sync_back_to_sheet_and_doc
+from fastapi import APIRouter, HTTPException
+from app.core.supabase import get_supabase_client
 
 router = APIRouter()
 
@@ -9,7 +8,7 @@ router = APIRouter()
 async def list_tasks(approval_status: Optional[str] = None):
     """List bot automation tasks with optional approval_status filtering."""
     try:
-        query = supabase_client.table("bot_automation_tasks").select("*")
+        query = get_supabase_client().table("bot_automation_tasks").select("*")
         if approval_status:
             query = query.eq("approval_status", approval_status)
         res = query.execute()
@@ -41,7 +40,7 @@ async def create_task(payload: Dict[str, Any]):
     bot_type = payload.get("bot_type", "keycloak_api")
     
     try:
-        res = supabase_client.table("bot_automation_tasks").insert({
+        res = get_supabase_client().table("bot_automation_tasks").insert({
             "ticket_id": ticket_id,
             "bot_type": bot_type,
             "payload_data": payload.get("payload_data", {"action": "auto_triage", "ticket_id": ticket_id}),
@@ -57,7 +56,7 @@ async def approve_task(task_id: str):
     """Endpoint xử lý khi Anh bấm nút [✅ Phê Duyệt] trên Web Admin Vercel"""
     # 1. Lấy thông tin task từ Supabase
     try:
-        task_res = supabase_client.table("bot_automation_tasks").select("*, inbox_tickets(*)").eq("id", task_id).execute()
+        task_res = get_supabase_client().table("bot_automation_tasks").select("*, inbox_tickets(*)").eq("id", task_id).execute()
         if not task_res.data:
             return {"status": "success", "message": f"Đã phê duyệt thành công tác vụ {task_id}"}
 
@@ -65,19 +64,21 @@ async def approve_task(task_id: str):
         ticket = task.get("inbox_tickets") or {}
         payload = task.get("payload_data") or {}
 
-        # 2. Nếu là tác vụ Form Feedback -> Gọi hàm đồng bộ ngược về Google Sheet & Doc
+        # 2. Nếu là tác vụ Form Feedback -> Gọi hàm đồng bộ ngược về Google Sheet
         if ticket.get("source") == "google_form":
-            await sync_back_to_sheet_and_doc(
-                ticket_data=ticket,
-                category=payload.get("category", "other"),
-                status="To Implement",
-                assigned_email=payload.get("assigned_email")
-            )
+            from app.services.google_sheet_service import GoogleSheetManager
+            manager = GoogleSheetManager()
+            row_index = payload.get("row_index")
+            sheet_name = payload.get("sheet_name", "Feedbacks")
+            category = payload.get("category", "other")
+            if row_index:
+                manager.update_feedback_row(sheet_name, row_index, category)
 
         # 3. Cập nhật trạng thái trong Supabase
-        supabase_client.table("bot_automation_tasks").update({"approval_status": "approved"}).eq("id", task_id).execute()
+        db = get_supabase_client()
+        db.table("bot_automation_tasks").update({"approval_status": "approved"}).eq("id", task_id).execute()
         if ticket.get("id"):
-            supabase_client.table("inbox_tickets").update({"status": "completed"}).eq("id", ticket["id"]).execute()
+            db.table("inbox_tickets").update({"status": "completed"}).eq("id", ticket["id"]).execute()
 
         return {"status": "success", "message": f"Đã phê duyệt và thực thi thành công task {task_id}"}
 
