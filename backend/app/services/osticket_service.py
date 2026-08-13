@@ -33,15 +33,20 @@ async def poll_open_ostickets():
                 await page.fill('input[name="passwd"]', ADMIN_PASS)
                 
                 # Bấm button submit chuẩn HTML
-                submit_btn = await page.query_selector('button[type="submit"]')
+                submit_btn = await page.query_selector('button[type="submit"], button.submit, input[type="submit"]')
                 if submit_btn:
                     await submit_btn.click()
                 else:
                     await page.press('input[name="passwd"]', 'Enter')
+
+                # 🛑 Chờ cho trang đăng nhập xong hoàn toàn
+                await page.wait_for_load_state("domcontentloaded")
                 await page.wait_for_load_state("networkidle")
 
             # 2. Đã ở trang Admin Panel -> Mở danh sách Open Queue
-            await page.goto("https://support.pythaverse.space/scp/tickets.php", timeout=30000)
+            if "tickets.php" not in page.url:
+                await page.goto("https://support.pythaverse.space/scp/tickets.php", wait_until="domcontentloaded", timeout=30000)
+                
             await page.wait_for_selector("table.queue.tickets", timeout=15000)
 
             # 3. Duyệt qua từng dòng <tr> trong Bảng theo HTML thật
