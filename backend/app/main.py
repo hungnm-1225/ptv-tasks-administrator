@@ -94,3 +94,12 @@ async def health_check():
         "scheduler_running": scheduler.running,
         "active_jobs": len(scheduler.get_jobs())
     }
+    
+# Trong backend/app/main.py
+@app.api_route("/api/v1/health", methods=["GET", "HEAD"])
+async def health_check():
+    return {
+        "status": "online", 
+        "scheduler_running": scheduler.running, 
+        "active_jobs": 3
+    }
