@@ -13,89 +13,94 @@ ADMIN_USER = os.getenv("OSTICKET_ADMIN_USER")
 ADMIN_PASS = os.getenv("OSTICKET_ADMIN_PASS")
 
 async def poll_open_ostickets():
-    """Hàm quét Ticket chưa xử lý trên OS Ticket bằng Playwright"""
+    """Hàm cào OS Ticket dựa trên đúng cấu trúc HTML thật"""
     logger.info("🔎 Đang quét OS Ticket (support.pythaverse.space)...")
     
     if not ADMIN_USER or not ADMIN_PASS:
-        logger.warning("⚠️ Thiếu OSTICKET_ADMIN_USER hoặc OSTICKET_ADMIN_PASS trên Render Environment!")
+        logger.warning("⚠️ Thiếu OSTICKET_ADMIN_USER hoặc OSTICKET_ADMIN_PASS!")
         return
 
     async with async_playwright() as p:
-        # Bật trình duyệt Chromium ẩn
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context()
         page = await context.new_page()
 
         try:
-            # 1. Đi tới trang Đăng nhập
+            # 1. Đăng nhập OS Ticket
             await page.goto(OSTICKET_URL, timeout=30000)
-            
-            # Nếu thấy ô đăng nhập thì thực hiện Login
             if await page.is_visible('input[name="userid"]'):
                 await page.fill('input[name="userid"]', ADMIN_USER)
                 await page.fill('input[name="passwd"]', ADMIN_PASS)
                 
-                # 🎯 ĐÃ SỬA CHUẨN: Bấm vào thẻ <button type="submit"> thay vì <input>
-                submit_button = await page.query_selector('button[type="submit"], button.submit, input[type="submit"]')
-                if submit_button:
-                    await submit_button.click()
+                # Bấm button submit chuẩn HTML
+                submit_btn = await page.query_selector('button[type="submit"]')
+                if submit_btn:
+                    await submit_btn.click()
                 else:
-                    # Nút dự phòng: Nhấn Enter ngay ô Password
                     await page.press('input[name="passwd"]', 'Enter')
-
                 await page.wait_for_load_state("networkidle")
 
-            # 2. Chuyển sang trang Open Tickets
-            await page.goto("https://support.pythaverse.space/scp/tickets.php?status=open", timeout=30000)
-            await page.wait_for_selector("table.list", timeout=15000)
+            # 2. Đã ở trang Admin Panel -> Mở danh sách Open Queue
+            await page.goto("https://support.pythaverse.space/scp/tickets.php", timeout=30000)
+            await page.wait_for_selector("table.queue.tickets", timeout=15000)
 
-            # 3. Lấy danh sách các dòng trong bảng ticket
-            rows = await page.query_selector_all("table.list tbody tr")
-            
+            # 3. Duyệt qua từng dòng <tr> trong Bảng theo HTML thật
+            rows = await page.query_selector_all("table.queue.tickets tbody tr")
+            supabase = get_supabase_client()
+
             for row in rows:
-                ticket_link_el = await row.query_selector("a.preview")
-                if not ticket_link_el:
+                cols = await row.query_selector_all("td")
+                if len(cols) < 7:
                     continue
 
-                ticket_id = (await ticket_link_el.inner_text()).strip() # Mã ID ticket (VD: #849201)
-                subject = (await ticket_link_el.get_attribute("title") or "").strip()
-                
-                # 4. Kiểm tra xem Ticket ID này đã có trong Supabase chưa
-                supabase_client = get_supabase_client()
-                existing = supabase_client.table("inbox_tickets") \
+                # Bóc tách chính xác từng cột theo file HTML
+                ticket_a = await cols[1].query_selector("a.preview")
+                if not ticket_a:
+                    continue
+
+                ticket_id = (await ticket_a.inner_text()).strip()        # VD: 871582
+                last_updated = (await cols[2].inner_text()).strip()      # VD: 03/07/2026 12:39 PM
+                subject = (await cols[3].inner_text()).strip()           # VD: Technical Issue - PLearn
+                from_person = (await cols[4].inner_text()).strip()       # VD: Nguyen Hung
+                priority = (await cols[5].inner_text()).strip()          # VD: Emergency
+                assigned_to = (await cols[6].inner_text()).strip()       # VD: Mohd Afiq
+
+                # 4. Kiểm tra xem Ticket ID đã lưu trong Supabase chưa
+                existing = supabase.table("inbox_tickets") \
                     .select("id").eq("source", "osticket").eq("source_id", ticket_id).execute()
 
                 if existing.data:
-                    # Đã lưu rồi -> Bỏ qua không cào lại nữa
                     continue
 
-                # 5. Nếu là Ticket mới -> Mở trang chi tiết để lấy full nội dung
-                detail_url = await ticket_link_el.get_attribute("href")
+                # 5. Mở trang chi tiết lấy Nội dung Thread
+                detail_href = await ticket_a.get_attribute("href")
                 detail_page = await context.new_page()
-                await detail_page.goto(f"https://support.pythaverse.space/scp/{detail_url}")
+                await detail_page.goto(f"https://support.pythaverse.space{detail_href}")
                 
-                # Lấy nội dung tin nhắn đầu tiên của ticket
-                thread_body_el = await detail_page.query_selector(".thread-body")
-                raw_content = await thread_body_el.inner_text() if thread_body_el else subject
+                thread_body = await detail_page.query_selector(".thread-body")
+                raw_content = await thread_body.inner_text() if thread_body else subject
                 await detail_page.close()
 
-                # 6. Lưu vào Supabase Database
+                # 6. LƯU ĐẦY ĐỦ THÔNG TIN VÀO SUPABASE
                 new_ticket = {
                     "source": "osticket",
                     "source_id": ticket_id,
-                    "sender_email": "osticket_user@pythaverse.space",
+                    "sender_email": f"{from_person.lower().replace(' ', '')}@pythaverse.space",
+                    "submitter_name": from_person,
                     "subject": subject,
                     "raw_content": raw_content,
+                    "priority": priority,
+                    "assigned_to": assigned_to,
+                    "ticket_timestamp": last_updated,
                     "status": "pending"
                 }
-                res = get_supabase_client().table("inbox_tickets").insert(new_ticket).execute()
+                res = supabase.table("inbox_tickets").insert(new_ticket).execute()
                 
-                # 7. Đẩy qua Gemini AI phân tích & Bắn Telegram / Web Admin
                 if res.data:
+                    logger.info(f"✅ Đã cào thành công Ticket OS Ticket mới: #{ticket_id} ({subject})")
                     await process_ticket_with_ai(res.data[0]["id"])
-                    logger.info(f"✅ Đã cào thành công Ticket OS Ticket mới: {ticket_id}")
 
         except Exception as e:
-            logger.error(f"❌ Lỗi khi quét OS Ticket: {str(e)}")
+            logger.error(f"❌ Lỗi khi quét OS Ticket: {e}")
         finally:
             await browser.close()

@@ -1,8 +1,11 @@
+# backend/app/services/google_sheet_service.py
 import os
 import json
 import logging
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
+from app.core.supabase import get_supabase_client
+from app.core.gemini import process_ticket_with_ai
 
 logger = logging.getLogger(__name__)
 
@@ -14,47 +17,47 @@ SCOPES = [
 def get_google_credentials():
     creds_json_str = os.getenv("GOOGLE_CREDENTIALS_JSON")
     if not creds_json_str:
-        raise ValueError("❌ THIẾU CẤU HÌNH: Không tìm thấy biến môi trường GOOGLE_CREDENTIALS_JSON trên Render!")
+        raise ValueError("❌ THIẾU GOOGLE_CREDENTIALS_JSON trên Render!")
+    info = json.loads(creds_json_str)
+    return Credentials.from_service_account_info(info, scopes=SCOPES)
+
+def get_sheets_service():
+    creds = get_google_credentials()
+    return build('sheets', 'v4', credentials=creds, cache_discovery=False)
+
+def get_valid_sheet_name(service, spreadsheet_id: str, requested_name: str = "Form_Responses") -> str:
+    """Tự động kiểm tra xem Tab tên là Form_Responses hay Feedbacks"""
     try:
-        info = json.loads(creds_json_str)
-        return Credentials.from_service_account_info(info, scopes=SCOPES)
+        spreadsheet_info = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+        sheet_names = [s['properties']['title'] for s in spreadsheet_info.get('sheets', [])]
+        if requested_name in sheet_names:
+            return requested_name
+        if "Feedbacks" in sheet_names:
+            return "Feedbacks"
+        return sheet_names[0] if sheet_names else requested_name
     except Exception as e:
-        raise ValueError(f"❌ Lỗi định dạng JSON trong biến GOOGLE_CREDENTIALS_JSON: {e}")
-
-class GoogleSheetManager:
-    def __init__(self, spreadsheet_id: str = None, *args, **kwargs):
-        self.spreadsheet_id = spreadsheet_id or os.getenv("SPREADSHEET_ID")
-        self.creds = get_google_credentials()
-        # ĐẶT BÊN TRONG HÀM __init__
-        self.service = build('sheets', 'v4', credentials=self.creds, cache_discovery=False)
-
-    def _get_valid_sheet_name(self, requested_name: str) -> str:
-        try:
-            spreadsheet_info = self.service.spreadsheets().get(
-                spreadsheetId=self.spreadsheet_id
-            ).execute()
-            sheets = spreadsheet_info.get('sheets', [])
-            sheet_names = [s['properties']['title'] for s in sheets]
-            
-            if requested_name in sheet_names:
-                return requested_name
-            if len(sheet_names) > 0:
-                return sheet_names[0]
-        except Exception as e:
-            logger.error(f"Lỗi đọc tên Sheet: {e}")
+        logger.error(f"Lỗi đọc tên Sheet: {e}")
         return requested_name
 
-    def get_unprocessed_rows(self, sheet_name: str = "Feedbacks", *args, **kwargs):
-        target_sheet_name = self._get_valid_sheet_name(sheet_name)
-        range_name = f"'{target_sheet_name}'!A2:P"
-        
-        result = self.service.spreadsheets().values().get(
-            spreadsheetId=self.spreadsheet_id,
-            range=range_name
+# =========================================================================
+# 1. HÀM QUÉT INGESTION: ĐỌC GOOGLE SHEET ➔ LƯU ĐẦY ĐỦ VÀO SUPABASE
+# =========================================================================
+async def poll_form_feedbacks():
+    """Hàm Cronjob: Quét Google Sheet Form Feedback & Lưu đầy đủ vào Supabase"""
+    logger.info("🔎 Đang quét Google Sheet Form Feedback...")
+    try:
+        spreadsheet_id = os.getenv("SPREADSHEET_ID")
+        service = get_sheets_service()
+        target_sheet = get_valid_sheet_name(service, spreadsheet_id, "Form_Responses")
+
+        # Đọc dữ liệu từ dòng 2
+        result = service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{target_sheet}'!A2:P100"
         ).execute()
-        
         rows = result.get('values', [])
-        unprocessed = []
+
+        supabase = get_supabase_client()
 
         for index, row in enumerate(rows, start=2):
             def get_col(idx):
@@ -66,90 +69,68 @@ class GoogleSheetManager:
             doc_url = get_col(6)       # Cột G (REPORT GoogleDoc)
             remarks = get_col(7)       # Cột H (REMARKS)
             fb_id = get_col(8)         # Cột I (FB ID)
-            category = get_col(11)     # Cột L (CATEGORY)
             assigned_cb = get_col(12)  # Cột M (Assigned Checkbox)
-            status = get_col(15)       # Cột P (STATUS)
 
+            # Nếu chưa gán (Assigned != TRUE) và có dữ liệu
             if assigned_cb.upper() != "TRUE" and (submitter or subject or fb_id):
-                logger.info(f"📌 Phát hiện Ticket CHƯA XỬ LÝ ở dòng {index} [{fb_id or subject}]")
-                unprocessed.append({
-                    "row_index": index,
-                    "sheet_name": target_sheet_name,
-                    "timestamp": get_col(0),
-                    "country": country,
-                    "submitter": submitter,
-                    "subject": subject,
-                    "doc_url": doc_url,
-                    "remarks": remarks,
-                    "fb_id": fb_id if fb_id else f"FB-AUTO-{index}",
-                    "category": category,
-                    "status": status
-                })
+                real_fb_id = fb_id if fb_id else f"FB-ROW-{index}"
+                
+                # Kiểm tra trùng lặp trong Supabase
+                existing = supabase.table("inbox_tickets") \
+                    .select("id").eq("source", "google_form").eq("source_id", real_fb_id).execute()
 
-        return unprocessed
+                if not existing.data:
+                    # LƯU ĐẦY ĐỦ CÁC CỘT VÀO SUPABASE
+                    new_ticket = {
+                        "source": "google_form",
+                        "source_id": real_fb_id,
+                        "sender_email": submitter if "@" in submitter else "form_user@dtt.vn",
+                        "submitter_name": submitter,
+                        "subject": subject,
+                        "raw_content": remarks if remarks else subject,
+                        "country": country,
+                        "doc_url": doc_url,
+                        "status": "pending",
+                        "metadata": {"row_index": index, "doc_url": doc_url, "sheet_name": target_sheet}
+                    }
+                    res = supabase.table("inbox_tickets").insert(new_ticket).execute()
+                    if res.data:
+                        logger.info(f"✅ Đã lưu Form Feedback mới vào Supabase: {real_fb_id}")
+                        await process_ticket_with_ai(res.data[0]["id"])
 
-    def update_feedback_row(self, sheet_name: str, row_index: int, category: str, status: str = "To Implement", *args, **kwargs):
-        target_sheet_name = self._get_valid_sheet_name(sheet_name)
+    except Exception as e:
+        logger.error(f"❌ Lỗi khi quét và lưu Google Sheet: {e}")
 
-        range_lm = f"'{target_sheet_name}'!L{row_index}:M{row_index}"
+# =========================================================================
+# 2. HÀM ĐỒNG BỘ NGƯỢC: CẬP NHẬT SHEET KHI ANH BẤM DUYỆT TRÊN WEB / TELEGRAM
+# =========================================================================
+async def update_feedback_row(sheet_name: str, row_index: int, category: str, status: str = "To Implement"):
+    """Cập nhật Cột L (Category), Cột M (Assigned Checkbox = TRUE), Cột P (Status) trên Google Sheet"""
+    try:
+        spreadsheet_id = os.getenv("SPREADSHEET_ID")
+        service = get_sheets_service()
+        target_sheet = get_valid_sheet_name(service, spreadsheet_id, sheet_name)
+
+        # 1. Cập nhật Category (Cột L) và Assigned Checkbox = TRUE (Cột M)
+        range_lm = f"'{target_sheet}'!L{row_index}:M{row_index}"
         body_lm = {"values": [[category, True]]}
-        
-        self.service.spreadsheets().values().update(
-            spreadsheetId=self.spreadsheet_id,
+        service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
             range=range_lm,
             valueInputOption="USER_ENTERED",
             body=body_lm
         ).execute()
 
-        range_p = f"'{target_sheet_name}'!P{row_index}"
+        # 2. Cập nhật Status (Cột P)
+        range_p = f"'{target_sheet}'!P{row_index}"
         body_p = {"values": [[status]]}
-        
-        self.service.spreadsheets().values().update(
-            spreadsheetId=self.spreadsheet_id,
+        service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
             range=range_p,
             valueInputOption="USER_ENTERED",
             body=body_p
         ).execute()
-        
-        logger.info(f"✅ Đã cập nhật dòng {row_index} [{target_sheet_name}]: Category={category}, Assigned=TRUE, Status={status}")
 
-
-# backend/app/services/google_sheet_service.py
-
-async def poll_form_feedbacks():
-    """Hàm Cronjob: Quét Google Sheet & Lưu thẳng vào Supabase"""
-    logger.info("🔎 Đang quét Google Sheet Form Feedback...")
-    try:
-        # 1. Đọc danh sách các dòng chưa xử lý từ Sheet
-        unprocessed_rows = get_unprocessed_rows_from_sheet() 
-        
-        for row in unprocessed_rows:
-            fb_id = row['fb_id']
-            
-            # 2. Kiểm tra xem Ticket ID này đã có trong Supabase chưa
-            existing = supabase_client.table("inbox_tickets") \
-                .select("id").eq("source", "google_form").eq("source_id", fb_id).execute()
-
-            if not existing.data:
-                # 3. LƯU THẲNG VÀO SUPABASE DATABASE
-                new_ticket = {
-                    "source": "google_form",
-                    "source_id": fb_id,
-                    "sender_email": row['submitter'] or "user@dtt.vn",
-                    "submitter_name": row['submitter'],
-                    "subject": row['subject'],
-                    "raw_content": f"Country: {row['country']}\nRemarks: {row['remarks']}\nDoc: {row['doc_url']}",
-                    "status": "pending",
-                    "metadata": {"row_index": row['row_index'], "doc_url": row['doc_url']}
-                }
-                res = supabase_client.table("inbox_tickets").insert(new_ticket).execute()
-                
-                if res.data:
-                    ticket_id = res.data[0]["id"]
-                    logger.info(f"✅ ĐÃ LƯU THÀNH CÔNG VÀO SUPABASE: {fb_id}")
-                    
-                    # 4. GỌI AI GEMINI PHÂN TÍCH & BẮN TELEGRAM + ĐẨY TẠO TASK TRÊN WEB ADMIN
-                    await process_ticket_with_ai(ticket_id)
-
+        logger.info(f"✅ Đã đồng bộ ngược Google Sheet dòng {row_index}: Category={category}, Assigned=TRUE, Status={status}")
     except Exception as e:
-        logger.error(f"❌ Lỗi khi quét và lưu Google Sheet: {e}")
+        logger.error(f"⚠️ Lỗi khi đồng bộ ngược về Google Sheet: {e}")
