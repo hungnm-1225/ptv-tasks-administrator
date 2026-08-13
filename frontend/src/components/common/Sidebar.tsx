@@ -8,6 +8,7 @@ import {
   FileSpreadsheet,
   Send,
   Zap,
+  Home,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -42,6 +43,22 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
 
         {/* Navigation Menu */}
         <nav className="p-4 space-y-1.5">
+          <button
+            onClick={() => setActiveTab('landing')}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium transition-all mb-2 ${
+              activeTab === 'landing'
+                ? 'bg-cyan-600/15 border border-cyan-500/30 text-cyan-300 font-semibold shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+            }`}
+          >
+            <Home className="w-4 h-4 text-cyan-400" />
+            <span>Trang Chủ (Landing)</span>
+          </button>
+
+          <div className="text-[10px] font-bold text-slate-500 uppercase px-3.5 pt-2 pb-1 tracking-wider">
+            Admin Modules
+          </div>
+
           {menuItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
