@@ -1,6 +1,11 @@
 // frontend/src/context/AuthContext.tsx
-import { useEffect, useState, createContext, useContext } from 'react';
+import React, { useEffect, useState, createContext, useContext } from 'react';
 import { supabase } from '../lib/supabase';
+
+export type AuthContextType = {
+  user: any;
+  loading: boolean;
+};
 
 // 🛑 CHỈ CHO PHÉP EMAIL DUY NHẤT NÀY ĐĂNG NHẬP
 const ALLOWED_ADMIN_EMAIL = "hung.nguyenmanh@dtt.vn";
@@ -47,3 +52,5 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     </AuthContext.Provider>
   );
 };
+
+export const useAuth = () => useContext(AuthContext);
