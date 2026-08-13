@@ -6,7 +6,6 @@ from app.core.supabase import get_supabase_client
 
 logger = logging.getLogger(__name__)
 
-# Danh sách Model Gemini ưu tiên tự động chuyển khi bị lỗi 429 Quota
 GEMINI_MODELS = [
     "gemini-3.6-flash",
     "gemini-3.5-flash-lite",
@@ -22,7 +21,8 @@ GEMINI_MODELS = [
 class AIEngine:
     def __init__(self, api_key: str = None):
         api_key = api_key or os.getenv("GEMINI_API_KEY")
-        genai.configure(api_key=api_key)
+        if api_key:
+            genai.configure(api_key=api_key)
         
         kb_path = os.path.join(os.path.dirname(__file__), "../brain/knowledge_base.json")
         try:
@@ -51,7 +51,6 @@ Hãy trả về DUY NHẤT một JSON object:
     "assigned_email": "hung.nguyenmanh@dtt.vn"
 }}
 """
-        # Auto-Fallback lặp qua từng Model nếu bị lỗi 429
         for model_name in GEMINI_MODELS:
             try:
                 model = genai.GenerativeModel(model_name)
@@ -59,17 +58,15 @@ Hãy trả về DUY NHẤT một JSON object:
                     prompt,
                     generation_config={"response_mime_type": "application/json"}
                 )
-                logger.info(f"✨ Gemini AI dùng model [{model_name}] tóm tắt thành công!")
+                logger.info(f"✨ Gemini AI tóm tắt thành công với model [{model_name}]")
                 return json.loads(response.text)
             except Exception as e:
                 err_msg = str(e).lower()
                 if "429" in err_msg or "quota" in err_msg or "resource_exhausted" in err_msg:
-                    logger.warning(f"⚠️ Model {model_name} hết Quota 429. Đang chuyển sang model tiếp theo...")
+                    logger.warning(f"⚠️ Model {model_name} hết quota, chuyển model...")
                     continue
-                logger.error(f"⚠️ Lỗi model {model_name}: {e}")
                 continue
 
-        # Fallback cuối cùng nếu tất cả model đều bị quá tải
         return {
             "category": "other",
             "summary_vi": f"Tóm tắt: {subject}",
@@ -93,7 +90,6 @@ async def process_ticket_with_ai(ticket_id: str):
             source=ticket.get("source", "gmail")
         )
 
-        # Cập nhật tóm tắt và phân loại vào Supabase
         supabase.table("inbox_tickets").update({
             "ai_summary": ai_res.get("summary_vi"),
             "category": ai_res.get("category", "other"),
@@ -101,7 +97,10 @@ async def process_ticket_with_ai(ticket_id: str):
             "assigned_email": ai_res.get("assigned_email")
         }).eq("id", ticket_id).execute()
         
-        logger.info(f"✅ Đã cập nhật Tóm tắt AI cho ticket #{ticket_id}")
+        logger.info(f"✅ Đã tóm tắt AI cho ticket #{ticket_id}")
 
     except Exception as e:
         logger.error(f"❌ Lỗi process_ticket_with_ai: {e}")
+
+
+gemini_engine = AIEngine()
