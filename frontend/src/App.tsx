@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppLayout } from './components/layout/AppLayout';
 import { LandingPage } from './features/landing/LandingPage';
@@ -12,79 +14,63 @@ import { ReportsExportPage } from './features/reports/ReportsExportPage';
 import { TelegramAppPage } from './features/telegram/TelegramAppPage';
 import { Loader2 } from 'lucide-react';
 
-const MainContent: React.FC = () => {
+const ProtectedRoute: React.FC = () => {
   const { user, loading } = useAuth();
-  const [activeTab, setActiveTab] = useState<string>('landing');
-
-  // Sau khi Google OAuth redirect về, tự động chuyển vào Dashboard nếu đã login
-  useEffect(() => {
-    if (!loading && user && (activeTab === 'landing' || activeTab === 'login')) {
-      setActiveTab('dashboard');
-    }
-  }, [user, loading]);
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-400 gap-3">
-        <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
-        <span className="text-xs font-medium">Đang xác thực phiên làm việc Supabase...</span>
+      <div className="min-h-screen bg-[#0b0f19] flex flex-col items-center justify-center text-slate-400 gap-3">
+        <Loader2 className="w-8 h-8 animate-spin text-purple-400" />
+        <span className="text-xs font-medium text-slate-400">Đang xác thực phiên làm việc...</span>
       </div>
     );
   }
 
-  // Render Public Landing Page
-  if (activeTab === 'landing') {
-    return (
-      <LandingPage
-        onNavigateToLogin={() => setActiveTab('login')}
-        onNavigateToAdmin={() => setActiveTab('dashboard')}
-      />
-    );
-  }
-
-  // Render Public Login Page
-  if (activeTab === 'login') {
-    return <LoginPage onNavigateToHome={() => setActiveTab('landing')} />;
-  }
-
-  // Protected Admin Routes: If user is not authenticated, prompt Login Page
   if (!user) {
-    return <LoginPage onNavigateToHome={() => setActiveTab('landing')} />;
+    return <Navigate to="/login" replace />;
   }
 
-  // Render Protected Admin Modules in AppLayout
-  const renderAdminFeature = () => {
-    switch (activeTab) {
-      case 'dashboard':
-        return <DashboardPage />;
-      case 'unified-inbox':
-        return <UnifiedInboxPage />;
-      case 'task-management':
-        return <TaskManagementPage />;
-      case 'github-reporter':
-        return <GithubReporterPage />;
-      case 'bot-commander':
-        return <BotCommanderPage />;
-      case 'reports-export':
-        return <ReportsExportPage />;
-      case 'telegram-app':
-        return <TelegramAppPage />;
-      default:
-        return <DashboardPage />;
-    }
-  };
-
-  return (
-    <AppLayout activeTab={activeTab} setActiveTab={setActiveTab}>
-      {renderAdminFeature()}
-    </AppLayout>
-  );
+  return <AppLayout />;
 };
 
 export const App: React.FC = () => {
   return (
     <AuthProvider>
-      <MainContent />
+      <Toaster 
+        richColors 
+        position="top-right" 
+        theme="dark" 
+        closeButton 
+        toastOptions={{
+          style: {
+            background: '#131b2e',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            color: '#f8fafc',
+            fontSize: '13px',
+          }
+        }}
+      />
+      <BrowserRouter>
+        <Routes>
+          {/* Public Routes */}
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/login" element={<LoginPage />} />
+
+          {/* Protected Admin Routes */}
+          <Route element={<ProtectedRoute />}>
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/inbox" element={<UnifiedInboxPage />} />
+            <Route path="/tasks" element={<TaskManagementPage />} />
+            <Route path="/github" element={<GithubReporterPage />} />
+            <Route path="/bots" element={<BotCommanderPage />} />
+            <Route path="/reports" element={<ReportsExportPage />} />
+            <Route path="/telegram" element={<TelegramAppPage />} />
+          </Route>
+
+          {/* Fallback */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
     </AuthProvider>
   );
 };

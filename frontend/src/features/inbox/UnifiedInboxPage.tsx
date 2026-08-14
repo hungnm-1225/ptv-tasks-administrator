@@ -1,8 +1,34 @@
 // frontend/src/features/inbox/UnifiedInboxPage.tsx
 import React, { useState, useEffect } from 'react';
-import { Sparkles, ArrowRight, Loader2, Inbox, Mail, FileText, Ticket, ExternalLink, Paperclip, XCircle, RotateCcw, ChevronDown, ChevronUp, FileCode, Tag, Calendar, ArrowUpDown, Image as ImageIcon } from 'lucide-react';
+import { 
+  Sparkles, 
+  ArrowRight, 
+  Loader2, 
+  Inbox, 
+  Mail, 
+  FileText, 
+  Ticket, 
+  ExternalLink, 
+  Paperclip, 
+  XCircle, 
+  RotateCcw, 
+  ChevronDown, 
+  ChevronUp, 
+  FileCode, 
+  Tag, 
+  Calendar, 
+  ArrowUpDown, 
+  Image as ImageIcon,
+  FileSpreadsheet
+} from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { InboxTicket } from '../../types';
+import { toast } from 'sonner';
+
+interface FileViewerModalProps {
+  file: { filename: string; url: string } | null;
+  onClose: () => void;
+}
 
 export const UnifiedInboxPage: React.FC = () => {
   const [selectedSource, setSelectedSource] = useState<string>('all');
@@ -12,6 +38,7 @@ export const UnifiedInboxPage: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [expandedContent, setExpandedContent] = useState<Record<string, boolean>>({});
+  const [previewFile, setPreviewFile] = useState<{ filename: string; url: string } | null>(null);
 
   const SPREADSHEET_ID = "1rZgFBD2PuZWL1jvQefcYZztCQvo99Lhx0GATTKvj1Go";
 
@@ -21,10 +48,7 @@ export const UnifiedInboxPage: React.FC = () => {
     { id: 'google_form', label: '📝 Google Form' },
     { id: 'osticket', label: '🎫 OS Ticket' },
   ];
-  interface FileViewerModalProps {
-    file: { filename: string; url: string } | null;
-    onClose: () => void;
-  }
+
   const categories = [
     { id: 'all', label: 'Tất cả Category' },
     { id: 'bug', label: '🐛 System Bugs' },
@@ -54,85 +78,17 @@ export const UnifiedInboxPage: React.FC = () => {
       setTickets(data || []);
     } catch (err) {
       console.error('Lỗi nạp ticket:', err);
+      toast.error('Không thể tải danh sách ticket: ' + (err as Error).message);
       setTickets([]);
     } finally {
       setLoading(false);
     }
-  };
-  const FileViewerModal: React.FC<FileViewerModalProps> = ({ file, onClose }) => {
-    if (!file) return null;
-
-    const ext = file.filename.split('.').pop()?.toLowerCase() || '';
-    const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext);
-    const isPdf = ext === 'pdf';
-    const isDoc = ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(ext);
-
-    return (
-      <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-5xl h-[85vh] flex flex-col shadow-2xl overflow-hidden">
-          {/* Modal Header */}
-          <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-slate-100">{file.filename}</span>
-              <span className="text-[10px] font-mono px-2 py-0.5 bg-indigo-500/20 text-indigo-300 rounded uppercase">{ext}</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <a
-                href={file.url}
-                target="_blank"
-                download
-                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition"
-              >
-                Tải file về
-              </a>
-              <button
-                onClick={onClose}
-                className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg transition"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-
-          {/* Modal Content Preview */}
-          <div className="flex-1 p-4 bg-slate-950 overflow-auto flex items-center justify-center">
-            {isImage && (
-              <img src={file.url} alt={file.filename} className="max-h-full max-w-full rounded-lg object-contain" />
-            )}
-
-            {isPdf && (
-              /* XEM CHUẨN FILE PDF TRONG IFRAME */
-              <iframe src={file.url} title={file.filename} className="w-full h-full rounded-lg border border-slate-800" />
-            )}
-
-            {isDoc && (
-              /* XEM FILE WORD / EXCEL BẰNG GOOGLE DOCS VIEWER EMBED */
-              <iframe
-                src={`https://docs.google.com/gview?url=${encodeURIComponent(file.url)}&embedded=true`}
-                title={file.filename}
-                className="w-full h-full rounded-lg border border-slate-800"
-              />
-            )}
-
-            {!isImage && !isPdf && !isDoc && (
-              <div className="text-center space-y-3">
-                <p className="text-sm text-slate-400">Định dạng file này chưa hỗ trợ xem trước trực tiếp.</p>
-                <a href={file.url} target="_blank" download className="inline-block px-4 py-2 bg-indigo-600 text-white text-xs rounded-lg">
-                  Bấm vào đây để tải file về máy
-                </a>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
   };
 
   useEffect(() => {
     loadTickets();
   }, [selectedCategory, selectedSource, sortOrder]);
 
-  // HÀM TẠO DEEP LINK CHÍNH XÁC SANG TRANG GỐC
   const getDirectSourceUrl = (ticket: InboxTicket) => {
     if (ticket.source === 'gmail') {
       return `https://mail.google.com/mail/u/0/#search/id%3A${ticket.source_id}`;
@@ -151,9 +107,10 @@ export const UnifiedInboxPage: React.FC = () => {
         method: 'PUT',
         body: JSON.stringify({ category: newCategory })
       });
+      toast.success(`Đã cập nhật phân loại thành [${newCategory.toUpperCase()}]`);
       await loadTickets();
     } catch (err) {
-      alert('❌ Lỗi đổi Category: ' + (err as Error).message);
+      toast.error('Lỗi đổi Category: ' + (err as Error).message);
     }
   };
 
@@ -161,9 +118,10 @@ export const UnifiedInboxPage: React.FC = () => {
     setActionLoading(ticketId);
     try {
       await fetchApi(`/tickets/${ticketId}/dismiss`, { method: 'PUT' });
+      toast.success('Đã chuyển ticket vào mục Đã bỏ qua');
       await loadTickets();
     } catch (err) {
-      alert('❌ Lỗi bỏ qua: ' + (err as Error).message);
+      toast.error('Lỗi bỏ qua ticket: ' + (err as Error).message);
     } finally {
       setActionLoading(null);
     }
@@ -173,9 +131,10 @@ export const UnifiedInboxPage: React.FC = () => {
     setActionLoading(ticketId);
     try {
       await fetchApi(`/tickets/${ticketId}/restore`, { method: 'PUT' });
+      toast.success('Đã khôi phục ticket về Hòm Thư thành công');
       await loadTickets();
     } catch (err) {
-      alert('❌ Lỗi khôi phục: ' + (err as Error).message);
+      toast.error('Lỗi khôi phục ticket: ' + (err as Error).message);
     } finally {
       setActionLoading(null);
     }
@@ -188,10 +147,10 @@ export const UnifiedInboxPage: React.FC = () => {
         method: 'POST',
         body: JSON.stringify({ ticket_id: ticketId, bot_type: 'keycloak_api' }),
       });
-      alert('✅ Đã tạo tác vụ phê duyệt! Anh chuyển sang tab Task & Approval Hub để bấm Duyệt nhé.');
+      toast.success('Đã tạo tác vụ phê duyệt Bot thành công! Chuyển sang tab Task Hub để duyệt.');
       await loadTickets();
     } catch (err) {
-      alert('❌ Lỗi tạo tác vụ: ' + (err as Error).message);
+      toast.error('Lỗi tạo tác vụ: ' + (err as Error).message);
     } finally {
       setActionLoading(null);
     }
@@ -200,21 +159,105 @@ export const UnifiedInboxPage: React.FC = () => {
   const renderSourceBadge = (source: string) => {
     switch (source) {
       case 'gmail':
-        return <span className="px-2 py-0.5 bg-blue-500/10 border border-blue-500/30 text-blue-400 text-[10px] font-bold rounded flex items-center gap-1"><Mail className="w-3 h-3" /> GMAIL</span>;
+        return (
+          <span className="px-2.5 py-1 bg-sky-500/10 border border-sky-500/20 text-sky-300 text-[10px] font-semibold rounded-lg flex items-center gap-1.5">
+            <Mail className="w-3 h-3" /> GMAIL
+          </span>
+        );
       case 'google_form':
-        return <span className="px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold rounded flex items-center gap-1"><FileText className="w-3 h-3" /> GOOGLE FORM</span>;
+        return (
+          <span className="px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[10px] font-semibold rounded-lg flex items-center gap-1.5">
+            <FileText className="w-3 h-3" /> GOOGLE FORM
+          </span>
+        );
       case 'osticket':
-        return <span className="px-2 py-0.5 bg-purple-500/10 border border-purple-500/30 text-purple-400 text-[10px] font-bold rounded flex items-center gap-1"><Ticket className="w-3 h-3" /> OS TICKET</span>;
+        return (
+          <span className="px-2.5 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-200 text-[10px] font-semibold rounded-lg flex items-center gap-1.5">
+            <Ticket className="w-3 h-3" /> OS TICKET
+          </span>
+        );
       default:
-        return <span className="px-2 py-0.5 bg-slate-500/10 text-slate-400 text-[10px] font-bold rounded">{source.toUpperCase()}</span>;
+        return (
+          <span className="px-2.5 py-1 bg-slate-500/10 border border-slate-500/20 text-slate-300 text-[10px] font-semibold rounded-lg">
+            {source.toUpperCase()}
+          </span>
+        );
     }
+  };
+
+  const FileViewerModal: React.FC<FileViewerModalProps> = ({ file, onClose }) => {
+    if (!file) return null;
+
+    const ext = file.filename.split('.').pop()?.toLowerCase() || '';
+    const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext);
+    const isPdf = ext === 'pdf';
+    const isDoc = ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(ext);
+
+    return (
+      <div className="fixed inset-0 z-50 bg-[#0b0f19]/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div className="surface-card border border-slate-700/80 rounded-2xl w-full max-w-5xl h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+          {/* Modal Header */}
+          <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-[#0b0f19]">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-slate-100">{file.filename}</span>
+              <span className="text-[10px] font-mono px-2 py-0.5 bg-purple-500/15 text-purple-300 border border-purple-500/25 rounded uppercase">{ext}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <a
+                href={file.url}
+                target="_blank"
+                download
+                className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-xl transition"
+              >
+                Tải file về
+              </a>
+              <button
+                onClick={onClose}
+                className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg transition"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+
+          {/* Modal Content Preview */}
+          <div className="flex-1 p-4 bg-[#0b0f19] overflow-auto flex items-center justify-center">
+            {isImage && (
+              <img src={file.url} alt={file.filename} className="max-h-full max-w-full rounded-xl object-contain shadow-md" />
+            )}
+
+            {isPdf && (
+              <iframe src={file.url} title={file.filename} className="w-full h-full rounded-xl border border-slate-800" />
+            )}
+
+            {isDoc && (
+              <iframe
+                src={`https://docs.google.com/gview?url=${encodeURIComponent(file.url)}&embedded=true`}
+                title={file.filename}
+                className="w-full h-full rounded-xl border border-slate-800"
+              />
+            )}
+
+            {!isImage && !isPdf && !isDoc && (
+              <div className="text-center space-y-3">
+                <p className="text-xs text-slate-400">Định dạng file này chưa hỗ trợ xem trước trực tiếp.</p>
+                <a href={file.url} target="_blank" download className="inline-block px-4 py-2 bg-purple-600 text-white text-xs font-semibold rounded-xl">
+                  Bấm vào đây để tải file về máy
+                </a>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      {/* Top Header & Sort Button */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-xl font-bold text-slate-100">Unified Inbox Feed</h2>
+          <h2 className="text-xl font-bold text-slate-100 tracking-tight">Unified Inbox Feed</h2>
           <p className="text-xs text-slate-400 mt-1">
             Hợp nhất yêu cầu từ Gmail Workspace, Google Form và OS Ticket với sự hỗ trợ từ Gemini AI Triage.
           </p>
@@ -222,41 +265,45 @@ export const UnifiedInboxPage: React.FC = () => {
 
         <button
           onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 border border-slate-700 hover:border-slate-500 rounded-lg text-xs text-slate-300 transition"
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#131b2e] border border-slate-800 hover:border-slate-700 rounded-xl text-xs text-slate-300 transition shadow-sm"
         >
-          <ArrowUpDown className="w-3.5 h-3.5 text-indigo-400" />
+          <ArrowUpDown className="w-3.5 h-3.5 text-purple-300" />
           <span>{sortOrder === 'desc' ? "Mới nhất ➔ Cũ nhất" : "Cũ nhất ➔ Mới nhất"}</span>
         </button>
       </div>
 
-      {/* BỘ LỌC KÉP: NGUỒN VÀ CATEGORY */}
-      <div className="space-y-3 border-b border-slate-800 pb-4">
+      {/* Segmented Filter Bars (Pastel Theme) */}
+      <div className="space-y-3 border-b border-slate-800/80 pb-5">
+        {/* Nguồn */}
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-slate-400 font-semibold mr-1">Nguồn:</span>
+          <span className="text-xs text-slate-400 font-medium mr-1">Nguồn:</span>
           {sources.map((s) => (
             <button
               key={s.id}
               onClick={() => setSelectedSource(s.id)}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${selectedSource === s.id
-                ? 'bg-cyan-600 text-white shadow'
-                : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'
-                }`}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition ${
+                selectedSource === s.id
+                  ? 'bg-sky-500/15 border border-sky-500/30 text-sky-200 font-semibold shadow-sm'
+                  : 'bg-[#131b2e] border border-slate-800/80 text-slate-400 hover:text-slate-200'
+              }`}
             >
               {s.label}
             </button>
           ))}
         </div>
 
+        {/* Phân loại */}
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-slate-400 font-semibold mr-1">Phân loại:</span>
+          <span className="text-xs text-slate-400 font-medium mr-1">Phân loại:</span>
           {categories.map((cat) => (
             <button
               key={cat.id}
               onClick={() => setSelectedCategory(cat.id)}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${selectedCategory === cat.id
-                ? 'bg-indigo-600 text-white shadow'
-                : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'
-                }`}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition ${
+                selectedCategory === cat.id
+                  ? 'bg-purple-500/15 border border-purple-500/30 text-purple-200 font-semibold shadow-sm'
+                  : 'bg-[#131b2e] border border-slate-800/80 text-slate-400 hover:text-slate-200'
+              }`}
             >
               {cat.label}
             </button>
@@ -264,19 +311,19 @@ export const UnifiedInboxPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Loading */}
+      {/* Loading & Content */}
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-16 text-slate-400 gap-3">
-          <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
-          <span className="text-xs font-medium">Đang nạp danh sách ticket...</span>
+        <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-3">
+          <Loader2 className="w-7 h-7 animate-spin text-purple-400" />
+          <span className="text-xs font-medium text-slate-400">Đang nạp danh sách ticket...</span>
         </div>
       ) : tickets.length === 0 ? (
-        <div className="glass-panel p-12 text-center rounded-xl border border-slate-800 space-y-3">
+        <div className="surface-card p-12 text-center rounded-2xl border border-slate-800 space-y-3">
           <Inbox className="w-10 h-10 mx-auto text-slate-600" />
           <h3 className="text-sm font-semibold text-slate-300">Không có ticket nào trong bộ lọc này</h3>
         </div>
       ) : (
-        /* Danh sách Card */
+        /* Danh sách Card phẳng & sắc nét */
         <div className="space-y-4">
           {tickets.map((ticket) => {
             const isExpanded = expandedContent[ticket.id] || false;
@@ -284,49 +331,51 @@ export const UnifiedInboxPage: React.FC = () => {
             const attachments = ticket.attachments || ticket.metadata?.attachments || [];
 
             return (
-              <div key={ticket.id} className="glass-panel p-5 rounded-xl border border-slate-800 hover:border-indigo-500/40 space-y-4 relative transition">
+              <div key={ticket.id} className="surface-card p-5 sm:p-6 rounded-2xl hover:border-slate-700/80 space-y-4 relative transition-all duration-200">
                 {/* Header Card */}
-                <div className="flex items-start justify-between">
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-2 flex-1 min-w-0">
+                    <div className="flex items-center gap-2.5 flex-wrap">
                       {renderSourceBadge(ticket.source)}
 
-                      {/* DROPDOWN ĐỔI TAG CATEGORY */}
-                      <div className="flex items-center gap-1 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5">
-                        <Tag className="w-3 h-3 text-indigo-400" />
+                      {/* Dropdown Đổi Tag Category Inline */}
+                      <div className="flex items-center gap-1 bg-[#0b0f19] border border-slate-700/60 rounded-lg px-2 py-0.5">
+                        <Tag className="w-3 h-3 text-purple-300" />
                         <select
                           value={ticket.category || 'other'}
                           onChange={(e) => handleCategoryChange(ticket.id, e.target.value)}
-                          className="bg-transparent text-indigo-300 text-[10px] font-bold uppercase focus:outline-none cursor-pointer"
+                          className="bg-transparent text-purple-200 text-[10px] font-semibold uppercase focus:outline-none cursor-pointer"
                         >
-                          <option value="bug" className="bg-slate-900 text-slate-200">BUG</option>
-                          <option value="account_keycloak" className="bg-slate-900 text-slate-200">KEYCLOAK</option>
-                          <option value="lms_enroll" className="bg-slate-900 text-slate-200">LMS ENROLL</option>
-                          <option value="license" className="bg-slate-900 text-slate-200">LICENSE</option>
-                          <option value="other" className="bg-slate-900 text-slate-200">OTHER</option>
+                          <option value="bug" className="bg-[#131b2e] text-slate-200">BUG</option>
+                          <option value="account_keycloak" className="bg-[#131b2e] text-slate-200">KEYCLOAK</option>
+                          <option value="lms_enroll" className="bg-[#131b2e] text-slate-200">LMS ENROLL</option>
+                          <option value="license" className="bg-[#131b2e] text-slate-200">LICENSE</option>
+                          <option value="other" className="bg-[#131b2e] text-slate-200">OTHER</option>
                         </select>
                       </div>
 
-                      <span className="text-xs font-medium text-slate-300">{ticket.submitter_name || ticket.sender_email}</span>
+                      <span className="text-xs font-medium text-slate-300 truncate max-w-[200px]">
+                        {ticket.submitter_name || ticket.sender_email}
+                      </span>
 
-                      {/* HIỂN THỊ THỜI GIAN GỬI CHÍNH XÁC */}
-                      <span className="text-xs text-slate-500 flex items-center gap-1">
+                      {/* Thời gian */}
+                      <span className="text-xs text-slate-400 flex items-center gap-1">
                         <Calendar className="w-3 h-3" />
                         {ticket.ticket_timestamp || new Date(ticket.created_at).toLocaleDateString('vi-VN')}
                       </span>
                     </div>
 
-                    <h3 className="text-base font-semibold text-slate-100 mt-1">
+                    <h3 className="text-sm sm:text-base font-semibold text-slate-100 leading-snug">
                       {ticket.subject || 'Không có tiêu đề'}
                     </h3>
                   </div>
 
-                  {/* NÚT BẤM MỞ TRỰC TIẾP TRANG GỐC */}
+                  {/* Nút bấm mở trực tiếp trang gốc */}
                   <a
                     href={directUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-400 text-xs font-medium rounded-lg transition"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#0b0f19] hover:bg-slate-800 border border-slate-700/60 text-sky-300 text-xs font-medium rounded-xl transition shrink-0"
                     title="Mở nội dung gốc trên Gmail / Google Sheet / OS Ticket"
                   >
                     <span>Mở trang gốc</span>
@@ -334,72 +383,72 @@ export const UnifiedInboxPage: React.FC = () => {
                   </a>
                 </div>
 
-                {/* TỆP ĐÍNH KÈM (GOOGLE DOC / PDF / IMAGES) */}
-                <div className="flex flex-wrap items-center gap-2">
-                  {ticket.doc_url && (
-                    <a
-                      href={ticket.doc_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded text-xs text-emerald-400 transition"
-                    >
-                      <Paperclip className="w-3.5 h-3.5" />
-                      <span>Google Doc Báo Cáo</span>
-                    </a>
-                  )}
+                {/* Tệp đính kèm (Google Doc / PDF / Images / Excel) */}
+                {(ticket.doc_url || attachments.length > 0) && (
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    {ticket.doc_url && (
+                      <a
+                        href={ticket.doc_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-xl text-xs text-emerald-300 transition"
+                      >
+                        <Paperclip className="w-3.5 h-3.5" />
+                        <span>Google Doc Báo Cáo</span>
+                      </a>
+                    )}
 
-                  {attachments.map((att: any, idx: number) => (
-                    <a
-                      key={idx}
-                      href={att.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded text-xs text-cyan-300 transition"
-                    >
-                      <ImageIcon className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>{att.filename || `File đính kèm ${idx + 1}`}</span>
-                    </a>
-                  ))}
-                </div>
+                    {attachments.map((att: any, idx: number) => (
+                      <button
+                        key={idx}
+                        onClick={() => setPreviewFile(att)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/20 rounded-xl text-xs text-sky-300 transition"
+                      >
+                        <ImageIcon className="w-3.5 h-3.5" />
+                        <span>{att.filename || `File đính kèm ${idx + 1}`}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
 
-                {/* Tóm tắt Gemini AI */}
-                <div className="bg-slate-950/90 border border-indigo-500/20 rounded-lg p-4 space-y-2">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-indigo-300">
-                    <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                {/* Tóm tắt Gemini AI (Pastel Lavender box) */}
+                <div className="bg-purple-500/5 border border-purple-500/15 rounded-xl p-4 space-y-2">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-purple-300">
+                    <Sparkles className="w-3.5 h-3.5 text-purple-400" />
                     <span>Tóm tắt & Đề xuất tự động từ Gemini AI</span>
                   </div>
-                  <p className="text-xs text-slate-200 leading-relaxed font-sans">
+                  <p className="text-xs text-slate-200 leading-relaxed font-normal">
                     {ticket.ai_summary || "Hệ thống đã nhận thông tin và đang chờ Gemini AI phân tích tóm tắt..."}
                   </p>
                   {ticket.assigned_name && (
-                    <div className="text-[11px] text-slate-400 pt-2 border-t border-slate-800/80">
-                      👤 Phân công đề xuất: <strong className="text-indigo-300">{ticket.assigned_name}</strong> ({ticket.assigned_email})
+                    <div className="text-[11px] text-slate-400 pt-2 border-t border-purple-500/10">
+                      👤 Phân công đề xuất: <strong className="text-purple-300 font-semibold">{ticket.assigned_name}</strong> ({ticket.assigned_email})
                     </div>
                   )}
                 </div>
 
                 {/* Xem nội dung email gốc */}
-                <div className="border-t border-slate-800/80 pt-2">
+                <div className="border-t border-slate-800/60 pt-2">
                   <button
                     onClick={() => setExpandedContent(prev => ({ ...prev, [ticket.id]: !prev[ticket.id] }))}
                     className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition font-medium"
                   >
-                    <FileCode className="w-3.5 h-3.5 text-slate-500" />
+                    <FileCode className="w-3.5 h-3.5 text-slate-400" />
                     <span>{isExpanded ? "Thu gọn nội dung email gốc" : "Xem nội dung email gốc đầy đủ"}</span>
                     {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                   </button>
 
                   {isExpanded && (
-                    <div className="mt-2 p-3 bg-slate-950/60 rounded border border-slate-800 text-xs text-slate-300 whitespace-pre-wrap max-h-60 overflow-y-auto font-mono">
+                    <div className="mt-2 p-3 bg-[#0b0f19] rounded-xl border border-slate-800 text-xs text-slate-300 whitespace-pre-wrap max-h-60 overflow-y-auto font-mono leading-relaxed">
                       {ticket.raw_content}
                     </div>
                   )}
                 </div>
 
                 {/* Footer Buttons */}
-                <div className="flex items-center justify-between pt-1">
-                  <span className="text-xs text-slate-400">
-                    <strong className="text-emerald-400"><i>Thông tin tóm tắt có thể sai, cần check kỹ lại</i></strong>
+                <div className="flex items-center justify-between pt-1 flex-wrap gap-2">
+                  <span className="text-[11px] text-slate-400">
+                    <span className="text-emerald-300">✓ AI-Powered Feed</span>
                   </span>
 
                   <div className="flex items-center gap-2">
@@ -407,7 +456,7 @@ export const UnifiedInboxPage: React.FC = () => {
                       <button
                         onClick={() => handleRestoreTask(ticket.id)}
                         disabled={actionLoading === ticket.id}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg transition"
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-[#18223a] hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-xl transition"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
                         <span>Khôi phục Hòm Thư</span>
@@ -417,7 +466,7 @@ export const UnifiedInboxPage: React.FC = () => {
                         <button
                           onClick={() => handleDismissTask(ticket.id)}
                           disabled={actionLoading === ticket.id}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 text-xs font-medium rounded-lg transition"
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-300 text-xs font-medium rounded-xl transition"
                         >
                           {actionLoading === ticket.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
                           <span>Bỏ qua</span>
@@ -426,7 +475,7 @@ export const UnifiedInboxPage: React.FC = () => {
                         <button
                           onClick={() => handleCreateTask(ticket.id)}
                           disabled={actionLoading === ticket.id}
-                          className="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white text-xs font-semibold rounded-lg transition shadow-md shadow-indigo-600/20"
+                          className="flex items-center gap-2 px-4 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 text-white text-xs font-semibold rounded-xl transition shadow-sm"
                         >
                           {actionLoading === ticket.id ? (
                             <Loader2 className="w-4 h-4 animate-spin" />
@@ -445,6 +494,11 @@ export const UnifiedInboxPage: React.FC = () => {
             );
           })}
         </div>
+      )}
+
+      {/* Modal Xem File Đính Kèm */}
+      {previewFile && (
+        <FileViewerModal file={previewFile} onClose={() => setPreviewFile(null)} />
       )}
     </div>
   );

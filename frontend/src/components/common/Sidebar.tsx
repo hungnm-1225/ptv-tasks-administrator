@@ -1,4 +1,5 @@
 import React from 'react';
+import { NavLink, Link } from 'react-router-dom';
 import {
   LayoutDashboard,
   Inbox,
@@ -11,79 +12,81 @@ import {
   Home,
 } from 'lucide-react';
 
-interface SidebarProps {
-  activeTab: string;
-  setActiveTab: (tab: string) => void;
-}
-
-export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
+export const Sidebar: React.FC = () => {
   const menuItems = [
-    { id: 'dashboard', label: 'Executive Dashboard', icon: LayoutDashboard },
-    { id: 'unified-inbox', label: 'Unified Inbox Feed', icon: Inbox },
-    { id: 'task-management', label: 'Task & Approval Hub', icon: CheckSquare },
-    { id: 'github-reporter', label: 'GitHub Issue Dispatcher', icon: Github },
-    { id: 'bot-commander', label: 'Bot Execution Center', icon: Bot },
-    { id: 'reports-export', label: 'Analytics & XLSX Export', icon: FileSpreadsheet },
-    { id: 'telegram-app', label: 'Telegram Mini App', icon: Send },
+    { to: '/dashboard', label: 'Executive Dashboard', icon: LayoutDashboard },
+    { to: '/inbox', label: 'Unified Inbox Feed', icon: Inbox },
+    { to: '/tasks', label: 'Task & Approval Hub', icon: CheckSquare },
+    { to: '/github', label: 'GitHub Dispatcher', icon: Github },
+    { to: '/bots', label: 'Bot Execution Center', icon: Bot },
+    { to: '/reports', label: 'Analytics & XLSX Export', icon: FileSpreadsheet },
+    { to: '/telegram', label: 'Telegram Mini App', icon: Send },
   ];
 
   return (
-    <aside className="w-64 border-r border-slate-800 bg-slate-900/80 backdrop-blur-xl flex flex-col justify-between h-screen sticky top-0 shrink-0">
+    <aside className="w-64 border-r border-slate-800/80 bg-[#0d1322] flex flex-col justify-between h-screen sticky top-0 shrink-0 select-none">
       <div>
         {/* Brand Header */}
-        <div className="h-16 px-6 flex items-center gap-3 border-b border-slate-800">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-500 to-cyan-400 flex items-center justify-center text-white shadow-lg shadow-indigo-500/20">
-            <Zap className="w-5 h-5 fill-current" />
+        <Link 
+          to="/"
+          className="h-16 px-5 flex items-center gap-3 border-b border-slate-800/80 hover:bg-slate-800/30 transition-colors"
+        >
+          <div className="w-8 h-8 rounded-xl bg-purple-500/10 border border-purple-500/25 flex items-center justify-center text-purple-300 shadow-sm">
+            <Zap className="w-4 h-4 fill-current" />
           </div>
           <div>
-            <h1 className="font-bold text-slate-100 text-sm tracking-wide">Pythaverse Admin</h1>
-            <p className="text-[10px] text-cyan-400 font-semibold tracking-wider uppercase">Automation Hub</p>
+            <h1 className="font-bold text-slate-100 text-sm tracking-tight">Pythaverse Admin</h1>
+            <p className="text-[10px] text-purple-300/80 font-semibold tracking-wider uppercase">Automation Hub</p>
           </div>
-        </div>
+        </Link>
 
         {/* Navigation Menu */}
-        <nav className="p-4 space-y-1.5">
-          <button
-            onClick={() => setActiveTab('landing')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium transition-all mb-2 ${
-              activeTab === 'landing'
-                ? 'bg-cyan-600/15 border border-cyan-500/30 text-cyan-300 font-semibold shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
+        <nav className="p-3.5 space-y-1">
+          <Link
+            to="/"
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-all mb-3 border border-transparent hover:border-slate-800/60"
           >
-            <Home className="w-4 h-4 text-cyan-400" />
+            <Home className="w-4 h-4 text-sky-400" />
             <span>Trang Chủ (Landing)</span>
-          </button>
+          </Link>
 
-          <div className="text-[10px] font-bold text-slate-500 uppercase px-3.5 pt-2 pb-1 tracking-wider">
+          <div className="text-[10px] font-semibold text-slate-400 uppercase px-3 pt-2 pb-1.5 tracking-wider">
             Admin Modules
           </div>
 
           {menuItems.map((item) => {
             const Icon = item.icon;
-            const isActive = activeTab === item.id;
             return (
-              <button
-                key={item.id}
-                onClick={() => setActiveTab(item.id)}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium transition-all ${
-                  isActive
-                    ? 'bg-indigo-600/15 border border-indigo-500/30 text-indigo-300 font-semibold shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                }`}
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) =>
+                  `w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
+                    isActive
+                      ? 'bg-purple-500/10 border border-purple-500/25 text-purple-200 font-semibold shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent'
+                  }`
+                }
               >
-                <Icon className={`w-4 h-4 ${isActive ? 'text-indigo-400' : 'text-slate-400'}`} />
-                <span>{item.label}</span>
-              </button>
+                {({ isActive }) => (
+                  <>
+                    <Icon className={`w-4 h-4 transition-colors ${isActive ? 'text-purple-300' : 'text-slate-400'}`} />
+                    <span>{item.label}</span>
+                  </>
+                )}
+              </NavLink>
             );
           })}
         </nav>
       </div>
 
       {/* Footer Info */}
-      <div className="p-4 border-t border-slate-800 text-[11px] text-slate-500">
-        <div>Pythaverse Admin v1.0.0</div>
-        <div className="text-[10px] text-slate-600 mt-0.5">FastAPI + React 19 + Supabase</div>
+      <div className="p-4 border-t border-slate-800/80 text-[11px] text-slate-400">
+        <div className="flex items-center justify-between">
+          <span className="font-medium text-slate-400">PTV Admin</span>
+          <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] text-slate-400 font-mono">v1.0.0</span>
+        </div>
+        <div className="text-[10px] text-slate-400 mt-1">Enterprise Automation SaaS</div>
       </div>
     </aside>
   );

@@ -1,81 +1,75 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import { ShieldCheck, Zap, ArrowLeft, Loader2, Lock } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { toast } from 'sonner';
 
-interface LoginPageProps {
-  onNavigateToHome: () => void;
-}
-
-export const LoginPage: React.FC<LoginPageProps> = ({ onNavigateToHome }) => {
-  const { signInWithGoogle } = useAuth();
+export const LoginPage: React.FC = () => {
+  const { user, signInWithGoogle, loading: authLoading } = useAuth();
   const [loggingIn, setLoggingIn] = useState<boolean>(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!authLoading && user) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [user, authLoading, navigate]);
 
   const handleGoogleLogin = async () => {
     setLoggingIn(true);
-    setErrorMsg(null);
     try {
       await signInWithGoogle();
     } catch (err) {
       console.error(err);
-      setErrorMsg('Đăng nhập thất bại. Vui lòng kiểm tra lại cấu hình Supabase Auth Google Provider.');
+      toast.error('Đăng nhập thất bại. Vui lòng kiểm tra lại cấu hình Supabase Google Provider.');
       setLoggingIn(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6 relative overflow-hidden">
-      {/* Background Ambient Glow */}
-      <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-indigo-600/10 rounded-full blur-[140px] pointer-events-none" />
-
+    <div className="min-h-screen bg-[#0b0f19] text-slate-100 flex items-center justify-center p-6 relative">
       {/* Top Left Navigation back to Home */}
-      <button
-        onClick={onNavigateToHome}
-        className="absolute top-6 left-6 flex items-center gap-2 px-3.5 py-2 bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 text-xs font-semibold rounded-xl transition"
+      <Link
+        to="/"
+        className="absolute top-6 left-6 flex items-center gap-2 px-3.5 py-2 bg-[#131b2e] border border-slate-800 text-slate-400 hover:text-slate-200 text-xs font-medium rounded-xl transition shadow-sm"
       >
-        <ArrowLeft className="w-4 h-4" />
+        <ArrowLeft className="w-3.5 h-3.5" />
         <span>Về Trang Chủ</span>
-      </button>
+      </Link>
 
       {/* Main Login Card */}
-      <div className="glass-panel p-8 rounded-3xl border border-slate-800/90 w-full max-w-md space-y-6 shadow-2xl relative z-10">
+      <div className="surface-card p-8 rounded-2xl border border-slate-800/80 w-full max-w-md space-y-6 shadow-xl relative z-10">
         {/* Header Logo & Title */}
-        <div className="text-center space-y-3">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-500 to-cyan-400 flex items-center justify-center text-white mx-auto shadow-lg shadow-indigo-500/25">
-            <Zap className="w-6 h-6 fill-current" />
+        <div className="text-center space-y-2.5">
+          <div className="w-11 h-11 rounded-xl bg-purple-500/10 border border-purple-500/25 flex items-center justify-center text-purple-300 mx-auto shadow-sm">
+            <Zap className="w-5 h-5 fill-current" />
           </div>
           <div>
-            <h2 className="text-2xl font-extrabold text-slate-100">Đăng Nhập Admin System</h2>
+            <h2 className="text-xl font-bold text-slate-100">Đăng Nhập Admin System</h2>
             <p className="text-xs text-slate-400 mt-1">Pythaverse Central Admin & Automation Hub</p>
           </div>
         </div>
 
         {/* Security Domain Whitelist Badge */}
-        <div className="bg-emerald-950/40 border border-emerald-500/30 p-3.5 rounded-xl flex items-center gap-3 text-xs text-emerald-300">
-          <ShieldCheck className="w-5 h-5 shrink-0 text-emerald-400" />
-          <div className="leading-snug">
-            <strong>Bảo Mật Domain:</strong> Chỉ các tài khoản Google thuộc domain <code className="bg-emerald-900/60 px-1 py-0.5 rounded text-emerald-200">@dtt.vn</code> được cấp quyền truy cập Admin Hub.
+        <div className="bg-emerald-500/10 border border-emerald-500/20 p-3.5 rounded-xl flex items-start gap-3 text-xs text-emerald-300">
+          <ShieldCheck className="w-4 h-4 shrink-0 text-emerald-400 mt-0.5" />
+          <div className="leading-relaxed">
+            <strong className="font-semibold text-emerald-200">Bảo Mật Domain:</strong> Chỉ các tài khoản Google thuộc domain <code className="bg-emerald-950/60 px-1 py-0.5 rounded text-emerald-200 font-mono">@dtt.vn</code> được cấp quyền truy cập hệ thống.
           </div>
         </div>
 
-        {errorMsg && (
-          <div className="bg-rose-950/60 border border-rose-500/30 p-3 rounded-xl text-xs text-rose-300 text-center">
-            {errorMsg}
-          </div>
-        )}
-
         {/* Exclusive Google Login Button */}
-        <div className="space-y-3 pt-2">
+        <div className="space-y-3 pt-1">
           <button
             onClick={handleGoogleLogin}
-            disabled={loggingIn}
-            className="w-full py-3.5 px-4 bg-white hover:bg-slate-100 text-slate-900 font-bold text-xs rounded-xl transition shadow-xl flex items-center justify-center gap-3 disabled:opacity-70"
+            disabled={loggingIn || authLoading}
+            className="w-full py-3 px-4 bg-white hover:bg-slate-100 text-slate-900 font-semibold text-xs rounded-xl transition shadow-sm flex items-center justify-center gap-3 disabled:opacity-60"
           >
             {loggingIn ? (
-              <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
+              <Loader2 className="w-4 h-4 animate-spin text-purple-600" />
             ) : (
               <>
-                <svg className="w-5 h-5" viewBox="0 0 24 24">
+                <svg className="w-4 h-4" viewBox="0 0 24 24">
                   <path
                     fill="#4285F4"
                     d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -100,12 +94,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigateToHome }) => {
         </div>
 
         {/* Footer info */}
-        <div className="pt-4 border-t border-slate-800/80 text-center text-[11px] text-slate-500 space-y-1">
-          <div className="flex items-center justify-center gap-1">
-            <Lock className="w-3.5 h-3.5 text-slate-400" />
-            <span>Supabase Authentication SSO Service</span>
+        <div className="pt-3 border-t border-slate-800/80 text-center text-[11px] text-slate-400 space-y-1">
+          <div className="flex items-center justify-center gap-1.5">
+            <Lock className="w-3 h-3 text-slate-400" />
+            <span>Supabase Authentication SSO Guard</span>
           </div>
-          <div>Phiên bản 1.0.0 • Protected Admin Portal</div>
+          <div>Phiên bản 1.0.0 • Protected Enterprise Portal</div>
         </div>
       </div>
     </div>

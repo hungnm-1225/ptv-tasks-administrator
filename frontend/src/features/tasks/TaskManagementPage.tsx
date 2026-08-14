@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Check, X, ShieldAlert, Code, Loader2, Inbox } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { BotAutomationTask } from '../../types';
+import { toast } from 'sonner';
 
 export const TaskManagementPage: React.FC = () => {
   const [tasks, setTasks] = useState<BotAutomationTask[]>([]);
@@ -17,6 +18,7 @@ export const TaskManagementPage: React.FC = () => {
       setTasks(data || []);
     } catch (err) {
       console.error('Lỗi khi tải danh sách tác vụ:', err);
+      toast.error('Lỗi khi tải danh sách tác vụ: ' + (err as Error).message);
       setTasks([]);
     } finally {
       setLoading(false);
@@ -44,11 +46,11 @@ export const TaskManagementPage: React.FC = () => {
       await fetchApi(`/tasks/${selectedTask.id}/approve`, {
         method: 'PUT',
       });
-      alert(`✅ Đã phê duyệt và khởi chạy worker thành công cho tác vụ ${selectedTask.id}!`);
+      toast.success(`Đã phê duyệt và khởi chạy worker cho tác vụ #${selectedTask.id.slice(0, 8)}!`);
       handleCloseModal();
       await loadTasks();
     } catch (err) {
-      alert('❌ Lỗi phê duyệt tác vụ: ' + (err as Error).message);
+      toast.error('Lỗi phê duyệt tác vụ: ' + (err as Error).message);
     } finally {
       setApproving(false);
     }
@@ -58,7 +60,7 @@ export const TaskManagementPage: React.FC = () => {
     <div className="space-y-6">
       {/* Title */}
       <div>
-        <h2 className="text-xl font-bold text-slate-100">Task Management & Approval Hub</h2>
+        <h2 className="text-xl font-bold text-slate-100 tracking-tight">Task Management & Approval Hub</h2>
         <p className="text-xs text-slate-400 mt-1">
           Cổng kiểm soát Human-in-the-Loop: Phê duyệt payload thực thi bot trước khi chạy Cloud Worker.
         </p>
@@ -66,21 +68,21 @@ export const TaskManagementPage: React.FC = () => {
 
       {/* Loading & Empty State */}
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-16 text-slate-400 gap-3">
-          <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
-          <span className="text-xs font-medium">Đang tải danh sách tác vụ chờ phê duyệt...</span>
+        <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-3">
+          <Loader2 className="w-7 h-7 animate-spin text-purple-400" />
+          <span className="text-xs font-medium text-slate-400">Đang tải danh sách tác vụ chờ phê duyệt...</span>
         </div>
       ) : tasks.length === 0 ? (
-        <div className="glass-panel p-12 text-center rounded-xl border border-slate-800 space-y-3">
+        <div className="surface-card p-12 text-center rounded-2xl border border-slate-800 space-y-3">
           <Inbox className="w-10 h-10 mx-auto text-slate-600" />
           <h3 className="text-sm font-semibold text-slate-300">Không có tác vụ nào cần phê duyệt</h3>
-          <p className="text-xs text-slate-500">Tất cả tác vụ bot đã được xử lý hoặc hoàn thành.</p>
+          <p className="text-xs text-slate-400">Tất cả tác vụ bot đã được xử lý hoặc hoàn thành.</p>
         </div>
       ) : (
-        /* Task Queue Table */
-        <div className="glass-panel rounded-xl border border-slate-800 overflow-hidden">
+        /* Task Queue Table (Pastel Theme) */
+        <div className="surface-card rounded-2xl border border-slate-800/80 overflow-hidden shadow-sm">
           <table className="w-full text-left text-xs text-slate-300">
-            <thead className="bg-slate-900/90 text-slate-400 font-semibold border-b border-slate-800">
+            <thead className="bg-[#0b0f19] text-slate-400 font-semibold border-b border-slate-800/80 uppercase tracking-wider text-[11px]">
               <tr>
                 <th className="p-4">Bot Type</th>
                 <th className="p-4">Payload Thô</th>
@@ -90,20 +92,24 @@ export const TaskManagementPage: React.FC = () => {
             </thead>
             <tbody className="divide-y divide-slate-800/60">
               {tasks.map((task) => (
-                <tr key={task.id} className="hover:bg-slate-900/40">
-                  <td className="p-4 font-semibold text-indigo-400">{task.bot_type}</td>
+                <tr key={task.id} className="hover:bg-slate-800/30 transition-colors">
+                  <td className="p-4 font-semibold text-purple-300">
+                    <span className="px-2.5 py-1 bg-purple-500/10 border border-purple-500/20 rounded-lg">
+                      {task.bot_type}
+                    </span>
+                  </td>
                   <td className="p-4 font-mono text-[11px] text-slate-400 max-w-xs truncate">
                     {JSON.stringify(task.payload_data)}
                   </td>
                   <td className="p-4">
-                    <span className="px-2.5 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-400 font-semibold rounded-full text-[10px] uppercase">
+                    <span className="px-2.5 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-200 font-semibold rounded-full text-[10px] uppercase">
                       {task.approval_status || 'pending'} Human Approval
                     </span>
                   </td>
-                  <td className="p-4 text-right space-x-2">
+                  <td className="p-4 text-right">
                     <button
                       onClick={() => handleOpenModal(task)}
-                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg transition"
+                      className="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-medium rounded-xl transition shadow-sm"
                     >
                       Xem & Phê Duyệt
                     </button>
@@ -117,14 +123,14 @@ export const TaskManagementPage: React.FC = () => {
 
       {/* Human-in-the-Loop Approval Modal */}
       {selectedTask && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="glass-panel bg-slate-900 border border-slate-700 rounded-xl w-full max-w-xl p-6 space-y-5 shadow-2xl">
+        <div className="fixed inset-0 bg-[#0b0f19]/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="surface-card bg-[#131b2e] border border-slate-700/80 rounded-2xl w-full max-w-xl p-6 space-y-5 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="font-bold text-slate-100 flex items-center gap-2">
-                <ShieldAlert className="w-5 h-5 text-amber-400" />
+              <h3 className="font-bold text-slate-100 flex items-center gap-2 text-sm">
+                <ShieldAlert className="w-5 h-5 text-amber-300" />
                 <span>Phê Duyệt Thực Thi Tác Vụ Cloud Bot ({selectedTask.bot_type})</span>
               </h3>
-              <button onClick={handleCloseModal} className="text-slate-400 hover:text-slate-200">
+              <button onClick={handleCloseModal} className="text-slate-400 hover:text-slate-200 p-1">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -132,14 +138,14 @@ export const TaskManagementPage: React.FC = () => {
             {/* Proposed Bot Payload Editor */}
             <div className="space-y-2">
               <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                <Code className="w-4 h-4 text-cyan-400" />
+                <Code className="w-4 h-4 text-purple-300" />
                 <span>Proposed Bot Payload (JSON)</span>
               </label>
               <textarea
-                rows={6}
+                rows={7}
                 value={payloadJson}
                 onChange={(e) => setPayloadJson(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs font-mono text-cyan-300 outline-none focus:border-indigo-500"
+                className="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3 text-xs font-mono text-purple-200 outline-none focus:border-purple-500/40"
               />
             </div>
 
@@ -147,14 +153,14 @@ export const TaskManagementPage: React.FC = () => {
             <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
               <button
                 onClick={handleCloseModal}
-                className="px-4 py-2 bg-rose-600/20 text-rose-400 border border-rose-500/30 hover:bg-rose-600/30 font-semibold text-xs rounded-lg transition"
+                className="px-4 py-2 bg-rose-500/10 text-rose-300 border border-rose-500/20 hover:bg-rose-500/20 font-medium text-xs rounded-xl transition"
               >
                 Hủy Bỏ / Reject
               </button>
               <button
                 onClick={handleApprove}
                 disabled={approving}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white font-semibold text-xs rounded-lg transition shadow-lg shadow-emerald-600/20 flex items-center gap-1.5"
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white font-medium text-xs rounded-xl transition shadow-sm flex items-center gap-1.5"
               >
                 {approving ? (
                   <Loader2 className="w-4 h-4 animate-spin" />

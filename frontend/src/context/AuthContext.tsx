@@ -1,17 +1,24 @@
 // frontend/src/context/AuthContext.tsx
 import React, { useEffect, useState, createContext, useContext } from 'react';
 import { supabase } from '../lib/supabase';
+import { toast } from 'sonner';
 
 export type AuthContextType = {
   user: any;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
+  signOut: () => Promise<void>;
 };
 
 // 🛑 CHỈ CHO PHÉP EMAIL DUY NHẤT NÀY ĐĂNG NHẬP
 const ALLOWED_ADMIN_EMAIL = "hung.nguyenmanh@dtt.vn";
 
-export const AuthContext = createContext<any>(null);
+export const AuthContext = createContext<AuthContextType>({
+  user: null,
+  loading: true,
+  signInWithGoogle: async () => {},
+  signOut: async () => {},
+});
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<any>(null);
@@ -35,7 +42,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     if (currentUser) {
       // ⚠️ KIỂM TRA EMAIL: Nếu KHÔNG PHẢI hung.nguyenmanh@dtt.vn -> ĐĂNG XUẤT NGAY!
       if (currentUser.email !== ALLOWED_ADMIN_EMAIL) {
-        alert(`❌ Quyền truy cập bị từ chối! Email ${currentUser.email} không có quyền Admin.`);
+        toast.error(`Truy cập bị từ chối! Email ${currentUser.email} không thuộc danh sách quản trị viên.`);
         await supabase.auth.signOut();
         setUser(null);
       } else {
@@ -57,8 +64,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     if (error) throw error;
   };
 
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    toast.success("Đã đăng xuất an toàn khỏi hệ thống");
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, signInWithGoogle }}>
+    <AuthContext.Provider value={{ user, loading, signInWithGoogle, signOut }}>
       {children}
     </AuthContext.Provider>
   );
