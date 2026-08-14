@@ -10,6 +10,7 @@ import {
   Send,
   Zap,
   Home,
+  Activity,
 } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
@@ -21,6 +22,7 @@ export const Sidebar: React.FC = () => {
     { to: '/bots', label: 'Bot Execution Center', icon: Bot },
     { to: '/reports', label: 'Analytics & XLSX Export', icon: FileSpreadsheet },
     { to: '/telegram', label: 'Telegram Mini App', icon: Send },
+    { to: '/monitor', label: 'Site Health Monitor', icon: Activity },
   ];
 
   return (

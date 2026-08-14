@@ -13,6 +13,7 @@ import { GithubReporterPage } from './features/github/GithubReporterPage';
 import { BotCommanderPage } from './features/bots/BotCommanderPage';
 import { ReportsExportPage } from './features/reports/ReportsExportPage';
 import { TelegramAppPage } from './features/telegram/TelegramAppPage';
+import { SiteMonitorPage } from './features/monitor/SiteMonitorPage';
 import { Loader2 } from 'lucide-react';
 
 const ProtectedRoute: React.FC = () => {
@@ -60,6 +61,7 @@ const AppContent: React.FC = () => {
             <Route path="/bots" element={<BotCommanderPage />} />
             <Route path="/reports" element={<ReportsExportPage />} />
             <Route path="/telegram" element={<TelegramAppPage />} />
+            <Route path="/monitor" element={<SiteMonitorPage />} />
           </Route>
 
           {/* Fallback */}

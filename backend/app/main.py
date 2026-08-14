@@ -10,6 +10,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.services.gmail_service import poll_unread_gmails
 from app.services.osticket_service import poll_open_ostickets
 from app.services.google_sheet_service import poll_form_feedbacks
+from app.services.site_monitor_service import poll_site_uptime_cron
 
 # Import API Router
 from app.api.v1.router import api_router
@@ -53,6 +54,12 @@ async def lifespan(app: FastAPI):
         safe_job_wrapper, 'interval', minutes=5, 
         args=[poll_form_feedbacks, "Quét Form Feedback"], id='sheet_cron'
     )
+
+    # 4. Quét Live Uptime các Website mỗi 1 giờ (60 phút)
+    scheduler.add_job(
+        safe_job_wrapper, 'interval', hours=1, 
+        args=[poll_site_uptime_cron, "Quét Live Uptime Website"], id='site_uptime_cron'
+    )
     
     scheduler.start()
     yield
@@ -86,20 +93,11 @@ app.add_middleware(
 # Mount các đường dẫn API
 app.include_router(api_router, prefix="/api/v1")
 
-@app.get("/api/v1/health")
+@app.api_route("/api/v1/health", methods=["GET", "HEAD"])
 async def health_check():
     """Endpoint dành riêng cho UptimeRobot Ping giữ Server sống 24/7"""
     return {
         "status": "online",
         "scheduler_running": scheduler.running,
         "active_jobs": len(scheduler.get_jobs())
-    }
-    
-# Trong backend/app/main.py
-@app.api_route("/api/v1/health", methods=["GET", "HEAD"])
-async def health_check():
-    return {
-        "status": "online", 
-        "scheduler_running": scheduler.running, 
-        "active_jobs": 3
     }
