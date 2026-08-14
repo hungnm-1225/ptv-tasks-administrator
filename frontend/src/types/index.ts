@@ -90,3 +90,24 @@ export interface GithubIssueResponse {
   message?: string;
 }
 
+export interface DailyTrendItem {
+  date: string;       // Hiển thị 'DD/MM' (ví dụ: 12/08, 13/08, 14/08)
+  received: number;   // Số lượng request tiếp nhận trong ngày
+  resolved: number;   // Số lượng request đã xử lý trong ngày
+}
+
+export interface CategoryRatio {
+  name: string;
+  value: number;
+}
+
+export interface ReportsSummary {
+  total_tickets: number;
+  pending_approval: number;
+  resolved_this_month: number;
+  automation_rate?: string;
+  weekly_trend?: string;
+  system_health: string;
+  category_ratios: CategoryRatio[];
+  daily_trend?: DailyTrendItem[];
+}
