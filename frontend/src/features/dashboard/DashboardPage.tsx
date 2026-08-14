@@ -1,3 +1,4 @@
+// frontend/src/features/dashboard/DashboardPage.tsx
 import React, { useState, useEffect, useCallback } from 'react';
 import { Inbox, CheckCircle2, Clock, Activity, TrendingUp, Loader2 } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, Legend } from 'recharts';
@@ -17,37 +18,63 @@ type TimeRangeOption = '7d' | '30d' | 'this_month';
 
 export const DashboardPage: React.FC = () => {
   const [summary, setSummary] = useState<ReportsSummary | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [initialLoading, setInitialLoading] = useState<boolean>(true);
+  const [isCatLoading, setIsCatLoading] = useState<boolean>(false);
+  const [isTrendLoading, setIsTrendLoading] = useState<boolean>(false);
+
   const [catRange, setCatRange] = useState<TimeRangeOption>('7d');
   const [trendRange, setTrendRange] = useState<TimeRangeOption>('7d');
   const { theme } = useTheme();
 
   const isDark = theme === 'dark';
 
-  const loadDashboardData = useCallback(async (isInitial = false) => {
-    if (isInitial) setLoading(true);
+  // Hàm load dữ liệu linh hoạt
+  const fetchDashboardData = useCallback(async (
+    target: 'all' | 'cat' | 'trend',
+    newCatRange: TimeRangeOption,
+    newTrendRange: TimeRangeOption
+  ) => {
+    if (target === 'all') setInitialLoading(true);
+    if (target === 'cat') setIsCatLoading(true);
+    if (target === 'trend') setIsTrendLoading(true);
+
     try {
-      const data = await fetchApi<ReportsSummary>(`/reports/summary?cat_range=${catRange}&trend_range=${trendRange}`);
+      const data = await fetchApi<ReportsSummary>(
+        `/reports/summary?cat_range=${newCatRange}&trend_range=${newTrendRange}`
+      );
       setSummary(data);
     } catch (err) {
       console.error('Lỗi khi tải báo cáo tổng quan:', err);
     } finally {
-      if (isInitial) setLoading(false);
+      if (target === 'all') setInitialLoading(false);
+      if (target === 'cat') setIsCatLoading(false);
+      if (target === 'trend') setIsTrendLoading(false);
     }
-  }, [catRange, trendRange]);
-
-  useEffect(() => {
-    loadDashboardData(true);
   }, []);
 
+  // Lần đầu vào trang
   useEffect(() => {
-    loadDashboardData(false);
-  }, [catRange, trendRange, loadDashboardData]);
+    fetchDashboardData('all', catRange, trendRange);
+  }, [fetchDashboardData]);
 
-  if (loading) {
+  // Xử lý đổi bộ lọc Danh mục
+  const handleCatRangeChange = (range: TimeRangeOption) => {
+    if (range === catRange) return;
+    setCatRange(range);
+    fetchDashboardData('cat', range, trendRange);
+  };
+
+  // Xử lý đổi bộ lọc Xu hướng
+  const handleTrendRangeChange = (range: TimeRangeOption) => {
+    if (range === trendRange) return;
+    setTrendRange(range);
+    fetchDashboardData('trend', catRange, range);
+  };
+
+  if (initialLoading) {
     return (
-      <div className="flex flex-col items-center justify-center py-28 text-slate-500 dark:text-slate-400 gap-3">
-        <Loader2 className="w-7 h-7 animate-spin text-violet-600 dark:text-violet-400" />
+      <div className="flex flex-col items-center justify-center py-32 text-slate-500 dark:text-slate-400 gap-3">
+        <Loader2 className="w-8 h-8 animate-spin text-violet-600 dark:text-violet-400" />
         <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Đang nạp dữ liệu báo cáo real-time...</span>
       </div>
     );
@@ -134,8 +161,16 @@ export const DashboardPage: React.FC = () => {
 
       {/* Recharts Visualizations */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Category Breakdown */}
-        <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 shadow-xs space-y-4">
+        {/* Category Breakdown Card */}
+        <div className="relative bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 shadow-xs space-y-4">
+          {/* Loading Overlay riêng cho Category */}
+          {isCatLoading && (
+            <div className="absolute inset-0 bg-white/70 dark:bg-slate-800/70 backdrop-blur-[2px] z-10 rounded-2xl flex flex-col items-center justify-center gap-2 transition-all">
+              <Loader2 className="w-6 h-6 animate-spin text-violet-600 dark:text-violet-400" />
+              <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300">Đang cập nhật danh mục...</span>
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="text-xs font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wider">Phân Phối Theo Danh Mục</h3>
@@ -145,7 +180,8 @@ export const DashboardPage: React.FC = () => {
             <div className="flex bg-slate-100 dark:bg-slate-700/60 p-0.5 rounded-lg text-[11px]">
               <button
                 type="button"
-                onClick={() => setCatRange('7d')}
+                disabled={isCatLoading}
+                onClick={() => handleCatRangeChange('7d')}
                 className={`px-2.5 py-1 rounded-md transition-all ${catRange === '7d'
                   ? 'bg-white dark:bg-slate-800 text-violet-600 dark:text-violet-400 font-semibold shadow-xs'
                   : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
@@ -155,7 +191,8 @@ export const DashboardPage: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={() => setCatRange('30d')}
+                disabled={isCatLoading}
+                onClick={() => handleCatRangeChange('30d')}
                 className={`px-2.5 py-1 rounded-md transition-all ${catRange === '30d'
                   ? 'bg-white dark:bg-slate-800 text-violet-600 dark:text-violet-400 font-semibold shadow-xs'
                   : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
@@ -165,7 +202,8 @@ export const DashboardPage: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={() => setCatRange('this_month')}
+                disabled={isCatLoading}
+                onClick={() => handleCatRangeChange('this_month')}
                 className={`px-2.5 py-1 rounded-md transition-all ${catRange === 'this_month'
                   ? 'bg-white dark:bg-slate-800 text-violet-600 dark:text-violet-400 font-semibold shadow-xs'
                   : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
@@ -219,8 +257,16 @@ export const DashboardPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Daily Trend (Tiếp nhận vs Đã xử lý) */}
-        <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 shadow-xs space-y-4">
+        {/* Daily Trend Card */}
+        <div className="relative bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 shadow-xs space-y-4">
+          {/* Loading Overlay riêng cho Trend */}
+          {isTrendLoading && (
+            <div className="absolute inset-0 bg-white/70 dark:bg-slate-800/70 backdrop-blur-[2px] z-10 rounded-2xl flex flex-col items-center justify-center gap-2 transition-all">
+              <Loader2 className="w-6 h-6 animate-spin text-violet-600 dark:text-violet-400" />
+              <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300">Đang nạp xu hướng...</span>
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="text-xs font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wider">Xu Hướng Xử Lý Hàng Ngày</h3>
@@ -230,7 +276,8 @@ export const DashboardPage: React.FC = () => {
             <div className="flex bg-slate-100 dark:bg-slate-700/60 p-0.5 rounded-lg text-[11px]">
               <button
                 type="button"
-                onClick={() => setTrendRange('7d')}
+                disabled={isTrendLoading}
+                onClick={() => handleTrendRangeChange('7d')}
                 className={`px-2.5 py-1 rounded-md transition-all ${trendRange === '7d'
                   ? 'bg-white dark:bg-slate-800 text-violet-600 dark:text-violet-400 font-semibold shadow-xs'
                   : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
@@ -240,7 +287,8 @@ export const DashboardPage: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={() => setTrendRange('30d')}
+                disabled={isTrendLoading}
+                onClick={() => handleTrendRangeChange('30d')}
                 className={`px-2.5 py-1 rounded-md transition-all ${trendRange === '30d'
                   ? 'bg-white dark:bg-slate-800 text-violet-600 dark:text-violet-400 font-semibold shadow-xs'
                   : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
@@ -250,7 +298,8 @@ export const DashboardPage: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={() => setTrendRange('this_month')}
+                disabled={isTrendLoading}
+                onClick={() => handleTrendRangeChange('this_month')}
                 className={`px-2.5 py-1 rounded-md transition-all ${trendRange === 'this_month'
                   ? 'bg-white dark:bg-slate-800 text-violet-600 dark:text-violet-400 font-semibold shadow-xs'
                   : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
