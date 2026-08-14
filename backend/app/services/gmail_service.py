@@ -2,6 +2,7 @@
 import os
 import base64
 import logging
+import mimetypes
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
@@ -149,3 +150,37 @@ async def poll_unread_gmails():
 
     except Exception as e:
         logger.error(f"❌ Lỗi khi quét Gmail API: {e}")
+
+def upload_attachment_to_supabase(file_bytes: bytes, filename: str) -> str:
+    """Upload tệp đính kèm lên Supabase Storage với Content-Type chuẩn xác 100%"""
+    try:
+        supabase = get_supabase_client()
+        storage_path = f"attachments/{filename}"
+        
+        # 🎯 TỰ ĐỘNG NHẬN DIỆN MIME TYPE (application/pdf, image/png, application/xlsx...)
+        content_type, _ = mimetypes.guess_type(filename)
+        if not content_type:
+            if filename.endswith('.pdf'):
+                content_type = 'application/pdf'
+            elif filename.endswith('.xlsx'):
+                content_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            elif filename.endswith('.docx'):
+                content_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            else:
+                content_type = 'application/octet-stream'
+
+        # Upload kèm Content-Type chuẩn
+        supabase.storage.from_("ticket-attachments").upload(
+            path=storage_path,
+            file=file_bytes,
+            file_options={
+                "upsert": "true",
+                "content-type": content_type  # 🔥 DÒNG QUAN TRỌNG NHẤT KHÔNG BỊ LỖI CHỮ ĐEN!
+            }
+        )
+        
+        public_url = supabase.storage.from_("ticket-attachments").get_public_url(storage_path)
+        return public_url
+    except Exception as e:
+        logger.error(f"⚠️ Lỗi upload attachment: {e}")
+        return ""

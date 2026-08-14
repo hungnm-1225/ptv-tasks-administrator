@@ -21,7 +21,10 @@ export const UnifiedInboxPage: React.FC = () => {
     { id: 'google_form', label: '📝 Google Form' },
     { id: 'osticket', label: '🎫 OS Ticket' },
   ];
-
+  interface FileViewerModalProps {
+    file: { filename: string; url: string } | null;
+    onClose: () => void;
+  }
   const categories = [
     { id: 'all', label: 'Tất cả Category' },
     { id: 'bug', label: '🐛 System Bugs' },
@@ -55,6 +58,74 @@ export const UnifiedInboxPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+  const FileViewerModal: React.FC<FileViewerModalProps> = ({ file, onClose }) => {
+    if (!file) return null;
+
+    const ext = file.filename.split('.').pop()?.toLowerCase() || '';
+    const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext);
+    const isPdf = ext === 'pdf';
+    const isDoc = ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(ext);
+
+    return (
+      <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-5xl h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+          {/* Modal Header */}
+          <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-slate-100">{file.filename}</span>
+              <span className="text-[10px] font-mono px-2 py-0.5 bg-indigo-500/20 text-indigo-300 rounded uppercase">{ext}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <a
+                href={file.url}
+                target="_blank"
+                download
+                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition"
+              >
+                Tải file về
+              </a>
+              <button
+                onClick={onClose}
+                className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg transition"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+
+          {/* Modal Content Preview */}
+          <div className="flex-1 p-4 bg-slate-950 overflow-auto flex items-center justify-center">
+            {isImage && (
+              <img src={file.url} alt={file.filename} className="max-h-full max-w-full rounded-lg object-contain" />
+            )}
+
+            {isPdf && (
+              /* XEM CHUẨN FILE PDF TRONG IFRAME */
+              <iframe src={file.url} title={file.filename} className="w-full h-full rounded-lg border border-slate-800" />
+            )}
+
+            {isDoc && (
+              /* XEM FILE WORD / EXCEL BẰNG GOOGLE DOCS VIEWER EMBED */
+              <iframe
+                src={`https://docs.google.com/gview?url=${encodeURIComponent(file.url)}&embedded=true`}
+                title={file.filename}
+                className="w-full h-full rounded-lg border border-slate-800"
+              />
+            )}
+
+            {!isImage && !isPdf && !isDoc && (
+              <div className="text-center space-y-3">
+                <p className="text-sm text-slate-400">Định dạng file này chưa hỗ trợ xem trước trực tiếp.</p>
+                <a href={file.url} target="_blank" download className="inline-block px-4 py-2 bg-indigo-600 text-white text-xs rounded-lg">
+                  Bấm vào đây để tải file về máy
+                </a>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   };
 
   useEffect(() => {
@@ -328,7 +399,7 @@ export const UnifiedInboxPage: React.FC = () => {
                 {/* Footer Buttons */}
                 <div className="flex items-center justify-between pt-1">
                   <span className="text-xs text-slate-400">
-                    Độ tin cậy AI: <strong className="text-emerald-400">98%</strong>
+                    <strong className="text-emerald-400"><i>Thông tin tóm tắt có thể sai, cần check kỹ lại</i></strong>
                   </span>
 
                   <div className="flex items-center gap-2">
