@@ -14,16 +14,23 @@ async def create_ticket(ticket: TicketCreate):
     return {"status": "success", "data": res}
 
 @router.get("/", response_model=List[Dict[str, Any]])
-async def list_tickets(status: Optional[str] = None, category: Optional[str] = None):
-    """Lấy danh sách tickets từ Supabase"""
+async def list_tickets(
+    status: Optional[str] = None, 
+    category: Optional[str] = None,
+    sort: Optional[str] = "desc", # "desc": Mới nhất, "asc": Cũ nhất
+    days: Optional[int] = None
+):
     try:
         supabase = get_supabase_client()
-        query = supabase.table("inbox_tickets").select("*").order("created_at", desc=True)
+        query = supabase.table("inbox_tickets").select("*")
+        
+        # Sắp xếp theo ngày tạo
+        query = query.order("created_at", desc=(sort == "desc"))
         
         if status and status != "all":
             query = query.eq("status", status)
         elif not status:
-            query = query.neq("status", "dismissed") # Mặc định ẩn ticket đã bỏ qua
+            query = query.neq("status", "dismissed")
             
         if category and category != "all":
             query = query.eq("category", category)

@@ -108,22 +108,34 @@ async def poll_unread_gmails():
     except Exception as e:
         logger.error(f"❌ Lỗi quét Gmail: {e}")
 
-def upload_attachment_to_supabase(file_bytes: bytes, filename: str) -> str:
-    """Tải file đính kèm lên Supabase Storage & Lấy Public URL"""
+
+def download_and_upload_gmail_attachment(service, msg_id, part, filename):
+    """Tải file đính kèm từ Gmail API & Upload lên Supabase Storage"""
     try:
-        supabase = get_supabase_client()
-        file_path = f"attachments/{filename}"
+        attachment_id = part['body'].get('attachmentId')
+        if not attachment_id:
+            return None
+
+        # 1. Tải dữ liệu nhị phân của file từ Gmail API
+        att = service.users().messages().attachments().get(
+            userId='me', messageId=msg_id, id=attachment_id
+        ).execute()
         
-        # Upload lên bucket 'ticket-attachments'
+        file_bytes = base64.urlsafe_b64decode(att['data'])
+        
+        # 2. Upload lên Supabase Storage Bucket 'ticket-attachments'
+        supabase = get_supabase_client()
+        storage_path = f"gmail/{msg_id}_{filename}"
+        
         supabase.storage.from_("ticket-attachments").upload(
-            path=file_path,
+            path=storage_path,
             file=file_bytes,
             file_options={"upsert": "true"}
         )
         
-        # Lấy Public URL để Web xem/tải trực tiếp
-        public_url = supabase.storage.from_("ticket-attachments").get_public_url(file_path)
-        return public_url
+        # 3. Lấy Public URL
+        public_url = supabase.storage.from_("ticket-attachments").get_public_url(storage_path)
+        return {"filename": filename, "url": public_url, "mimeType": part.get('mimeType')}
     except Exception as e:
-        print(f"⚠️ Lỗi upload attachment: {e}")
-        return ""
+        logger.error(f"⚠️ Lỗi tải/upload attachment Gmail: {e}")
+        return None

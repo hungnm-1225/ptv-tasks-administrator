@@ -1,16 +1,19 @@
 // frontend/src/features/inbox/UnifiedInboxPage.tsx
 import React, { useState, useEffect } from 'react';
-import { Sparkles, ArrowRight, Loader2, Inbox, Mail, FileText, Ticket, ExternalLink, Paperclip, XCircle, RotateCcw, ChevronDown, ChevronUp, FileCode, Tag } from 'lucide-react';
+import { Sparkles, ArrowRight, Loader2, Inbox, Mail, FileText, Ticket, ExternalLink, Paperclip, XCircle, RotateCcw, ChevronDown, ChevronUp, FileCode, Tag, Calendar, ArrowUpDown, Image as ImageIcon } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { InboxTicket } from '../../types';
 
 export const UnifiedInboxPage: React.FC = () => {
   const [selectedSource, setSelectedSource] = useState<string>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
   const [tickets, setTickets] = useState<InboxTicket[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [expandedContent, setExpandedContent] = useState<Record<string, boolean>>({});
+
+  const SPREADSHEET_ID = "1rZgFBD2PuZWL1jvQefcYZztCQvo99Lhx0GATTKvj1Go";
 
   const sources = [
     { id: 'all', label: 'Tất cả Nguồn' },
@@ -32,16 +35,15 @@ export const UnifiedInboxPage: React.FC = () => {
   const loadTickets = async () => {
     setLoading(true);
     try {
-      let endpoint = '/tickets';
+      let endpoint = `/tickets?sort=${sortOrder}`;
       if (selectedCategory === 'dismissed') {
-        endpoint = '/tickets?status=dismissed';
+        endpoint += '&status=dismissed';
       } else if (selectedCategory !== 'all') {
-        endpoint = `/tickets?category=${selectedCategory}`;
+        endpoint += `&category=${selectedCategory}`;
       }
 
       let data = await fetchApi<InboxTicket[]>(endpoint);
 
-      // Lọc theo Nguồn (Source) nếu người dùng chọn
       if (selectedSource !== 'all') {
         data = data.filter(t => t.source === selectedSource);
       }
@@ -57,9 +59,21 @@ export const UnifiedInboxPage: React.FC = () => {
 
   useEffect(() => {
     loadTickets();
-  }, [selectedCategory, selectedSource]);
+  }, [selectedCategory, selectedSource, sortOrder]);
 
-  // Đổi Tag Category trực tiếp trên Card
+  // HÀM TẠO LINK TRỰC TIẾP MỞ TRANG GỐC
+  const getDirectSourceUrl = (ticket: InboxTicket) => {
+    if (ticket.source === 'gmail') {
+      return `https://mail.google.com/mail/u/0/#search/id%3A${ticket.source_id}`;
+    } else if (ticket.source === 'google_form') {
+      const rowIdx = ticket.metadata?.row_index || 2;
+      return `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/edit#gid=0&range=A${rowIdx}:P${rowIdx}`;
+    } else if (ticket.source === 'osticket') {
+      return `https://support.pythaverse.space/scp/tickets.php?id=${ticket.source_id}`;
+    }
+    return '#';
+  };
+
   const handleCategoryChange = async (ticketId: string, newCategory: string) => {
     try {
       await fetchApi(`/tickets/${ticketId}/category`, {
@@ -127,17 +141,27 @@ export const UnifiedInboxPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-bold text-slate-100">Unified Inbox Feed</h2>
-        <p className="text-xs text-slate-400 mt-1">
-          Hợp nhất yêu cầu từ Gmail Workspace, Google Form và OS Ticket với sự hỗ trợ từ Gemini AI Triage.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-bold text-slate-100">Unified Inbox Feed</h2>
+          <p className="text-xs text-slate-400 mt-1">
+            Hợp nhất yêu cầu từ Gmail Workspace, Google Form và OS Ticket với Gemini AI Triage.
+          </p>
+        </div>
+
+        {/* NÚT ĐẢO CHIỀU SẮP XẾP CŨ / MỚI */}
+        <button
+          onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 border border-slate-700 hover:border-slate-500 rounded-lg text-xs text-slate-300 transition"
+        >
+          <ArrowUpDown className="w-3.5 h-3.5 text-indigo-400" />
+          <span>{sortOrder === 'desc' ? "Mới nhất ➔ Cũ nhất" : "Cũ nhất ➔ Mới nhất"}</span>
+        </button>
       </div>
 
       {/* BỘ LỌC KÉP: NGUỒN VÀ CATEGORY */}
       <div className="space-y-3 border-b border-slate-800 pb-4">
-        {/* Row 1: Lọc Nguồn */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-slate-400 font-semibold mr-1">Nguồn:</span>
           {sources.map((s) => (
             <button
@@ -153,7 +177,6 @@ export const UnifiedInboxPage: React.FC = () => {
           ))}
         </div>
 
-        {/* Row 2: Lọc Category */}
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-slate-400 font-semibold mr-1">Phân loại:</span>
           {categories.map((cat) => (
@@ -187,16 +210,18 @@ export const UnifiedInboxPage: React.FC = () => {
         <div className="space-y-4">
           {tickets.map((ticket) => {
             const isExpanded = expandedContent[ticket.id] || false;
+            const directUrl = getDirectSourceUrl(ticket);
+            const attachments = ticket.metadata?.attachments || [];
 
             return (
               <div key={ticket.id} className="glass-panel p-5 rounded-xl border border-slate-800 hover:border-indigo-500/40 space-y-4 relative transition">
                 {/* Header */}
                 <div className="flex items-start justify-between">
                   <div className="space-y-1.5">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       {renderSourceBadge(ticket.source)}
 
-                      {/* DROPDOWN ĐỔI TAG CATEGORY TÙY Ý NGAY TRÊN CARD */}
+                      {/* DROPDOWN ĐỔI TAG CATEGORY */}
                       <div className="flex items-center gap-1 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5">
                         <Tag className="w-3 h-3 text-indigo-400" />
                         <select
@@ -213,30 +238,59 @@ export const UnifiedInboxPage: React.FC = () => {
                       </div>
 
                       <span className="text-xs font-medium text-slate-300">{ticket.submitter_name || ticket.sender_email}</span>
-                      {ticket.country && <span className="text-xs text-slate-400">• 📍 {ticket.country}</span>}
+
+                      {/* HIỂN THỊ THỜI GIAN GỬI CHÍNH XÁC */}
+                      <span className="text-xs text-slate-500 flex items-center gap-1">
+                        <Calendar className="w-3 h-3" />
+                        {ticket.ticket_timestamp || new Date(ticket.created_at).toLocaleDateString('vi-VN')}
+                      </span>
                     </div>
+
                     <h3 className="text-base font-semibold text-slate-100 mt-1">
                       {ticket.subject || 'Không có tiêu đề'}
                     </h3>
                   </div>
-                  <span className="text-[10px] text-slate-500 font-mono">{ticket.source_id}</span>
+
+                  {/* NÚT BẤM BẬT SANG TRANG GỐC (GMAIL / FORM SHEET / OS TICKET) */}
+                  <a
+                    href={directUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-400 text-xs font-medium rounded-lg transition"
+                    title="Mở nội dung gốc trên Gmail / Google Sheet / OS Ticket"
+                  >
+                    <span>Mở trang gốc</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
                 </div>
 
-                {/* Tệp đính kèm (Mở Doc Link) */}
-                {ticket.doc_url && (
-                  <div className="flex items-center gap-2">
+                {/* FILE ĐÍNH KÈM (GOOGLE DOC / PDF / IMAGES) */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {ticket.doc_url && (
                     <a
                       href={ticket.doc_url}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded text-xs text-cyan-400 transition"
+                      className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded text-xs text-emerald-400 transition"
                     >
                       <Paperclip className="w-3.5 h-3.5" />
-                      <span>Mở Google Doc Đính Kèm</span>
-                      <ExternalLink className="w-3 h-3 ml-1" />
+                      <span>Google Doc Báo Cáo</span>
                     </a>
-                  </div>
-                )}
+                  )}
+
+                  {attachments.map((att: any, idx: number) => (
+                    <a
+                      key={idx}
+                      href={att.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded text-xs text-cyan-300 transition"
+                    >
+                      <ImageIcon className="w-3.5 h-3.5" />
+                      <span>{att.filename || `File đính kèm ${idx + 1}`}</span>
+                    </a>
+                  ))}
+                </div>
 
                 {/* Tóm tắt Gemini AI */}
                 <div className="bg-slate-950/90 border border-indigo-500/20 rounded-lg p-4 space-y-2">
@@ -244,8 +298,8 @@ export const UnifiedInboxPage: React.FC = () => {
                     <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
                     <span>Tóm tắt & Đề xuất tự động từ Gemini AI</span>
                   </div>
-                  <p className="text-xs text-slate-200 leading-relaxed">
-                    {ticket.ai_summary || "Hệ thống đã nhận thông tin ticket và đang chờ xử lý."}
+                  <p className="text-xs text-slate-200 leading-relaxed font-sans">
+                    {ticket.ai_summary || "Hệ thống đang chờ Gemini AI xử lý tóm tắt..."}
                   </p>
                   {ticket.assigned_name && (
                     <div className="text-[11px] text-slate-400 pt-2 border-t border-slate-800/80">
