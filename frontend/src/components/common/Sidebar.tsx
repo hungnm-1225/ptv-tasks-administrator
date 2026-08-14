@@ -24,19 +24,19 @@ export const Sidebar: React.FC = () => {
   ];
 
   return (
-    <aside className="w-64 border-r border-slate-800/80 bg-[#0d1322] flex flex-col justify-between h-screen sticky top-0 shrink-0 select-none">
+    <aside className="w-64 border-r border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md flex flex-col justify-between h-screen sticky top-0 shrink-0 select-none transition-colors duration-200">
       <div>
         {/* Brand Header */}
-        <Link 
+        <Link
           to="/"
-          className="h-16 px-5 flex items-center gap-3 border-b border-slate-800/80 hover:bg-slate-800/30 transition-colors"
+          className="h-16 px-5 flex items-center gap-3 border-b border-slate-200/80 dark:border-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors"
         >
-          <div className="w-8 h-8 rounded-xl bg-purple-500/10 border border-purple-500/25 flex items-center justify-center text-purple-300 shadow-sm">
+          <div className="w-8 h-8 rounded-xl bg-violet-50 text-violet-700 border border-violet-200 dark:bg-violet-500/15 dark:text-violet-300 dark:border-violet-500/30 flex items-center justify-center shadow-xs">
             <Zap className="w-4 h-4 fill-current" />
           </div>
           <div>
-            <h1 className="font-bold text-slate-100 text-sm tracking-tight">Pythaverse Admin</h1>
-            <p className="text-[10px] text-purple-300/80 font-semibold tracking-wider uppercase">Automation Hub</p>
+            <h1 className="font-bold text-slate-900 dark:text-slate-100 text-sm tracking-tight">Pythaverse Admin</h1>
+            <p className="text-[10px] text-violet-600 dark:text-violet-400 font-semibold tracking-wider uppercase">Automation Hub</p>
           </div>
         </Link>
 
@@ -44,13 +44,13 @@ export const Sidebar: React.FC = () => {
         <nav className="p-3.5 space-y-1">
           <Link
             to="/"
-            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-all mb-3 border border-transparent hover:border-slate-800/60"
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-all mb-3 border border-transparent hover:border-slate-200 dark:hover:border-slate-800"
           >
-            <Home className="w-4 h-4 text-sky-400" />
+            <Home className="w-4 h-4 text-sky-600 dark:text-sky-400" />
             <span>Trang Chủ (Landing)</span>
           </Link>
 
-          <div className="text-[10px] font-semibold text-slate-400 uppercase px-3 pt-2 pb-1.5 tracking-wider">
+          <div className="text-[10px] font-semibold text-slate-400 dark:text-slate-400 uppercase px-3 pt-2 pb-1.5 tracking-wider">
             Admin Modules
           </div>
 
@@ -61,16 +61,15 @@ export const Sidebar: React.FC = () => {
                 key={item.to}
                 to={item.to}
                 className={({ isActive }) =>
-                  `w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
-                    isActive
-                      ? 'bg-purple-500/10 border border-purple-500/25 text-purple-200 font-semibold shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent'
+                  `w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${isActive
+                    ? 'bg-violet-50 text-violet-700 border border-violet-200/80 dark:bg-violet-500/15 dark:text-violet-300 dark:border-violet-500/30 font-semibold shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800/50 border border-transparent'
                   }`
                 }
               >
                 {({ isActive }) => (
                   <>
-                    <Icon className={`w-4 h-4 transition-colors ${isActive ? 'text-purple-300' : 'text-slate-400'}`} />
+                    <Icon className={`w-4 h-4 transition-colors ${isActive ? 'text-violet-600 dark:text-violet-300' : 'text-slate-400 dark:text-slate-400'}`} />
                     <span>{item.label}</span>
                   </>
                 )}
@@ -81,12 +80,12 @@ export const Sidebar: React.FC = () => {
       </div>
 
       {/* Footer Info */}
-      <div className="p-4 border-t border-slate-800/80 text-[11px] text-slate-400">
+      <div className="p-4 border-t border-slate-200/80 dark:border-slate-800/80 text-[11px] text-slate-500 dark:text-slate-400">
         <div className="flex items-center justify-between">
-          <span className="font-medium text-slate-400">PTV Admin</span>
-          <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] text-slate-400 font-mono">v1.0.0</span>
+          <span className="font-medium text-slate-700 dark:text-slate-300">PTV Admin</span>
+          <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] text-slate-600 dark:text-slate-400 font-mono">v1.0.0</span>
         </div>
-        <div className="text-[10px] text-slate-400 mt-1">Enterprise Automation SaaS</div>
+        <div className="text-[10px] text-slate-400 dark:text-slate-400 mt-1">Enterprise Automation SaaS</div>
       </div>
     </aside>
   );

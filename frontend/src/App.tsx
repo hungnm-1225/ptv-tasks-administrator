@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { AppLayout } from './components/layout/AppLayout';
 import { LandingPage } from './features/landing/LandingPage';
 import { LoginPage } from './features/auth/LoginPage';
@@ -19,9 +20,9 @@ const ProtectedRoute: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0b0f19] flex flex-col items-center justify-center text-slate-400 gap-3">
-        <Loader2 className="w-8 h-8 animate-spin text-purple-400" />
-        <span className="text-xs font-medium text-slate-400">Đang xác thực phiên làm việc...</span>
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 gap-3 transition-colors">
+        <Loader2 className="w-8 h-8 animate-spin text-violet-600 dark:text-violet-400" />
+        <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Đang xác thực phiên làm việc...</span>
       </div>
     );
   }
@@ -33,22 +34,16 @@ const ProtectedRoute: React.FC = () => {
   return <AppLayout />;
 };
 
-export const App: React.FC = () => {
+const AppContent: React.FC = () => {
+  const { theme } = useTheme();
+
   return (
-    <AuthProvider>
+    <>
       <Toaster 
         richColors 
         position="top-right" 
-        theme="dark" 
+        theme={theme}
         closeButton 
-        toastOptions={{
-          style: {
-            background: '#131b2e',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            color: '#f8fafc',
-            fontSize: '13px',
-          }
-        }}
       />
       <BrowserRouter>
         <Routes>
@@ -71,7 +66,17 @@ export const App: React.FC = () => {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
-    </AuthProvider>
+    </>
+  );
+};
+
+export const App: React.FC = () => {
+  return (
+    <ThemeProvider>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </ThemeProvider>
   );
 };
 

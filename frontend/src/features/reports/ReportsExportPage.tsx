@@ -32,61 +32,61 @@ export const ReportsExportPage: React.FC = () => {
     <div className="space-y-6 max-w-3xl">
       {/* Title */}
       <div>
-        <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2.5 tracking-tight">
-          <FileSpreadsheet className="w-5 h-5 text-emerald-300" />
+        <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2.5 tracking-tight">
+          <FileSpreadsheet className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
           <span>Analytics & Custom XLSX Exporter</span>
         </h2>
-        <p className="text-xs text-slate-400 mt-1">
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
           Xuất dữ liệu thống kê từ Supabase ra file Excel (.xlsx) chuẩn thiết kế với SheetJS phía client.
         </p>
       </div>
 
       {/* Exporter Controls */}
-      <div className="surface-card p-6 sm:p-7 rounded-2xl border border-slate-800/80 space-y-5 shadow-sm">
+      <div className="bg-white dark:bg-slate-800 p-6 sm:p-7 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-5 shadow-xs">
         <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-            <FileText className="w-4 h-4 text-purple-300" />
+          <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+            <FileText className="w-4 h-4 text-violet-600 dark:text-violet-400" />
             <span>Chọn Template Xuất Dữ Liệu</span>
           </label>
           <select
             value={template}
             onChange={(e) => setTemplate(e.target.value)}
-            className="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3 text-xs text-slate-200 outline-none focus:border-purple-500/40 cursor-pointer"
+            className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-violet-500/50 cursor-pointer"
           >
-            <option value="monthly_summary" className="bg-[#131b2e]">Báo Cáo Tổng Hợp Ticket Tháng 8/2026</option>
-            <option value="bot_executions" className="bg-[#131b2e]">Báo Cáo Nhật Ký Chạy Bot Worker</option>
-            <option value="keycloak_users" className="bg-[#131b2e]">Danh Sách Cấp Tài Khoản Keycloak</option>
+            <option value="monthly_summary" className="bg-white dark:bg-slate-800">Báo Cáo Tổng Hợp Ticket Tháng 8/2026</option>
+            <option value="bot_executions" className="bg-white dark:bg-slate-800">Báo Cáo Nhật Ký Chạy Bot Worker</option>
+            <option value="keycloak_users" className="bg-white dark:bg-slate-800">Danh Sách Cấp Tài Khoản Keycloak</option>
           </select>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-              <Calendar className="w-3.5 h-3.5 text-sky-300" />
+            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
               <span>Từ Ngày</span>
             </label>
             <input
               type="date"
               defaultValue="2026-08-01"
-              className="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-2.5 text-xs text-slate-200 outline-none focus:border-purple-500/40"
+              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-violet-500/50"
             />
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-              <Calendar className="w-3.5 h-3.5 text-sky-300" />
+            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
               <span>Đến Ngày</span>
             </label>
             <input
               type="date"
               defaultValue="2026-08-14"
-              className="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-2.5 text-xs text-slate-200 outline-none focus:border-purple-500/40"
+              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-violet-500/50"
             />
           </div>
         </div>
 
         <button
           onClick={handleExportXlsx}
-          className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl transition shadow-sm flex items-center justify-center gap-2"
+          className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl transition shadow-xs flex items-center justify-center gap-2"
         >
           <Download className="w-4 h-4" />
           <span>Tải Xuất File Excel (.xlsx) Ngay</span>

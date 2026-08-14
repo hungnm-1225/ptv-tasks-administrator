@@ -45,25 +45,25 @@ export const GithubReporterPage: React.FC = () => {
     <div className="space-y-6 max-w-3xl">
       {/* Title */}
       <div>
-        <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2.5 tracking-tight">
-          <Github className="w-5 h-5 text-slate-200" />
+        <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2.5 tracking-tight">
+          <Github className="w-5 h-5 text-slate-700 dark:text-slate-200" />
           <span>GitHub Issue Dispatcher</span>
         </h2>
-        <p className="text-xs text-slate-400 mt-1">
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
           Soạn thảo và gửi GitHub Issue trực tiếp vào Private Repository bằng Fine-Grained PAT.
         </p>
       </div>
 
       {/* Form */}
-      <form onSubmit={handleSubmit} className="surface-card p-6 sm:p-7 rounded-2xl border border-slate-800/80 space-y-4 shadow-sm">
+      <form onSubmit={handleSubmit} className="bg-white dark:bg-slate-800 p-6 sm:p-7 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-4 shadow-xs">
         <div className="flex items-center justify-between">
-          <label className="text-xs font-semibold text-slate-300">Target Repository</label>
+          <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Target Repository</label>
           <button
             type="button"
             onClick={handleAiAutoFill}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-500/10 border border-purple-500/20 text-purple-300 hover:bg-purple-500/20 text-xs font-medium rounded-xl transition"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-50 text-violet-700 border border-violet-200/80 dark:bg-violet-500/15 dark:text-violet-300 dark:border-violet-500/30 hover:bg-violet-100 text-xs font-medium rounded-xl transition shadow-2xs"
           >
-            <Sparkles className="w-3.5 h-3.5" />
+            <Sparkles className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
             <span>AI Auto-Fill Bug Report</span>
           </button>
         </div>
@@ -72,35 +72,35 @@ export const GithubReporterPage: React.FC = () => {
           type="text"
           value={repo}
           onChange={(e) => setRepo(e.target.value)}
-          className="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3 text-xs text-slate-200 outline-none focus:border-purple-500/40"
+          className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-xs text-slate-900 dark:text-slate-100 outline-none focus:border-violet-500/50"
         />
 
         <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-slate-300">Issue Title</label>
+          <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Issue Title</label>
           <input
             type="text"
             placeholder="[BUG] / [FEATURE]: Mô tả ngắn gọn..."
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            className="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3 text-xs text-slate-200 outline-none focus:border-purple-500/40"
+            className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-xs text-slate-900 dark:text-slate-100 outline-none focus:border-violet-500/50"
           />
         </div>
 
         <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-slate-300">Issue Body (Markdown)</label>
+          <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Issue Body (Markdown)</label>
           <textarea
             rows={8}
             placeholder="Nội dung Markdown mô tả chi tiết..."
             value={body}
             onChange={(e) => setBody(e.target.value)}
-            className="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3 text-xs font-mono text-slate-200 outline-none focus:border-purple-500/40"
+            className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-xs font-mono text-slate-900 dark:text-slate-100 outline-none focus:border-violet-500/50 leading-relaxed"
           />
         </div>
 
         <button
           type="submit"
           disabled={submitting}
-          className="w-full py-3 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 text-white text-xs font-semibold rounded-xl transition shadow-sm flex items-center justify-center gap-2"
+          className="w-full py-3 bg-violet-600 hover:bg-violet-500 disabled:bg-slate-300 dark:disabled:bg-slate-700 text-white text-xs font-semibold rounded-xl transition shadow-xs flex items-center justify-center gap-2"
         >
           {submitting ? (
             <Loader2 className="w-4 h-4 animate-spin" />

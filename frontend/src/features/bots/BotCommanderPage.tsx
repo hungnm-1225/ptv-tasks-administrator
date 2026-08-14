@@ -71,20 +71,20 @@ export const BotCommanderPage: React.FC = () => {
     <div className="space-y-6">
       {/* Title */}
       <div>
-        <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2.5 tracking-tight">
-          <Bot className="w-5 h-5 text-purple-300" />
+        <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2.5 tracking-tight">
+          <Bot className="w-5 h-5 text-violet-600 dark:text-violet-400" />
           <span>Bot Command & Execution Center</span>
         </h2>
-        <p className="text-xs text-slate-400 mt-1">
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
           Theo dõi trạng thái real-time của các Cloud Worker và xem log thực thi hệ thống.
         </p>
       </div>
 
       {/* Workers Status Grid */}
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-12 text-slate-400 gap-2">
-          <Loader2 className="w-6 h-6 animate-spin text-purple-400" />
-          <span className="text-xs text-slate-400">Đang kiểm tra kết nối Cloud Worker...</span>
+        <div className="flex flex-col items-center justify-center py-16 text-slate-500 dark:text-slate-400 gap-3">
+          <Loader2 className="w-7 h-7 animate-spin text-violet-600 dark:text-violet-400" />
+          <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Đang kiểm tra kết nối Cloud Worker...</span>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -92,18 +92,18 @@ export const BotCommanderPage: React.FC = () => {
             const status = botStatus?.[w.key] || w.defaultStatus;
             const isOnline = status === 'active' || status === 'online';
             return (
-              <div key={w.key} className="surface-card p-4 rounded-2xl border border-slate-800/80 space-y-2.5 shadow-sm">
+              <div key={w.key} className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-3 shadow-xs">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-200">{w.name}</span>
-                  <CheckCircle2 className={`w-4 h-4 ${isOnline ? 'text-emerald-300' : 'text-amber-300'}`} />
+                  <span className="text-xs font-semibold text-slate-900 dark:text-slate-100">{w.name}</span>
+                  <CheckCircle2 className={`w-4 h-4 ${isOnline ? 'text-emerald-500' : 'text-amber-500'}`} />
                 </div>
-                <div className="text-[11px] text-slate-400 font-mono">{w.type}</div>
-                <div className="flex items-center justify-between pt-1 border-t border-slate-800/60">
-                  <span className="text-[10px] text-emerald-300 font-semibold uppercase">{status}</span>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">{w.type}</div>
+                <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-700/60">
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold uppercase">{status}</span>
                   <button
                     onClick={() => handleRetryBotTask(w.key)}
                     disabled={retryingTask === w.key}
-                    className="flex items-center gap-1 text-[10px] text-purple-300 hover:text-purple-200 transition font-medium"
+                    className="flex items-center gap-1 text-[11px] text-violet-600 dark:text-violet-400 hover:underline transition font-medium"
                   >
                     {retryingTask === w.key ? (
                       <Loader2 className="w-3 h-3 animate-spin" />
@@ -122,16 +122,16 @@ export const BotCommanderPage: React.FC = () => {
       )}
 
       {/* Execution Terminal Console */}
-      <div className="surface-card rounded-2xl border border-slate-800/80 overflow-hidden shadow-sm">
-        <div className="bg-[#0b0f19] px-4 py-3 border-b border-slate-800/80 flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2 text-xs font-mono text-slate-300">
-            <Terminal className="w-4 h-4 text-purple-300" />
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 overflow-hidden shadow-xs">
+        <div className="bg-slate-50 dark:bg-slate-900 px-4 py-3 border-b border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2 text-xs font-mono text-slate-700 dark:text-slate-300">
+            <Terminal className="w-4 h-4 text-violet-600 dark:text-violet-400" />
             <span>Worker Live Execution Terminal Logs</span>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={handleCopyLogs}
-              className="flex items-center gap-1 px-2.5 py-1 bg-[#131b2e] hover:bg-slate-800 border border-slate-800 rounded-lg text-[11px] text-slate-300 transition"
+              className="flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg text-[11px] text-slate-700 dark:text-slate-300 transition shadow-2xs"
               title="Sao chép toàn bộ logs"
             >
               <Copy className="w-3 h-3" />
@@ -139,7 +139,7 @@ export const BotCommanderPage: React.FC = () => {
             </button>
             <button
               onClick={handleClearLogs}
-              className="flex items-center gap-1 px-2.5 py-1 bg-[#131b2e] hover:bg-slate-800 border border-slate-800 rounded-lg text-[11px] text-slate-300 transition"
+              className="flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg text-[11px] text-slate-700 dark:text-slate-300 transition shadow-2xs"
               title="Xóa màn hình console"
             >
               <Trash2 className="w-3 h-3" />
@@ -148,7 +148,7 @@ export const BotCommanderPage: React.FC = () => {
             <button 
               onClick={loadBotStatus}
               disabled={loading}
-              className="flex items-center gap-1 px-2.5 py-1 bg-[#131b2e] hover:bg-slate-800 border border-slate-800 rounded-lg text-[11px] text-slate-300 transition"
+              className="flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg text-[11px] text-slate-700 dark:text-slate-300 transition shadow-2xs"
             >
               <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
               <span>Refresh</span>
@@ -156,9 +156,9 @@ export const BotCommanderPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="p-4 bg-[#0b0f19] font-mono text-xs text-emerald-300/90 space-y-1.5 h-64 overflow-y-auto leading-relaxed">
+        <div className="p-4 bg-slate-900 font-mono text-xs text-emerald-400 space-y-1.5 h-64 overflow-y-auto leading-relaxed border-t border-slate-800">
           {logs.map((log, index) => (
-            <div key={index} className={log.includes('RETRY') ? 'text-amber-200' : log.includes('SUCCESS') ? 'text-emerald-300' : 'text-slate-300'}>
+            <div key={index} className={log.includes('RETRY') ? 'text-amber-300' : log.includes('SUCCESS') ? 'text-emerald-300' : 'text-slate-300'}>
               {log}
             </div>
           ))}
