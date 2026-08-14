@@ -16,11 +16,11 @@ CATEGORY_MAP = {
 
 def get_start_date(time_range: str, now: datetime) -> datetime:
     if time_range == "30d":
-        return now - timedelta(days=30)
+        return (now - timedelta(days=29)).replace(hour=0, minute=0, second=0, microsecond=0)
     elif time_range == "this_month":
         return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    else:  # Mặc định 7d
-        return now - timedelta(days=6, hour=0, minute=0, second=0, microsecond=0)
+    else:  # Mặc định 7d (lấy 7 ngày tính cả hôm nay)
+        return (now - timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0)
 
 @router.get("/summary")
 async def get_reports_summary(
@@ -88,7 +88,7 @@ async def get_reports_summary(
         cat_name = CATEGORY_MAP.get(raw_cat, "Others")
         cat_counts[cat_name] += 1
 
-    # Đảm bảo đủ các danh mục chính
+    # Đảm bảo đủ các danh mục chính để màu hiển thị đồng nhất
     category_ratios = []
     for raw_code, label in CATEGORY_MAP.items():
         category_ratios.append({
@@ -127,7 +127,6 @@ async def get_reports_summary(
     daily_trends = []
     for d in date_list:
         d_iso = d.isoformat()
-        # Định dạng hiển thị nhãn trục X: DD/MM
         day_label = d.strftime("%d/%m")
         daily_trends.append({
             "date": d_iso,
