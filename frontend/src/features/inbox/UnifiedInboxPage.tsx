@@ -61,7 +61,7 @@ export const UnifiedInboxPage: React.FC = () => {
     loadTickets();
   }, [selectedCategory, selectedSource, sortOrder]);
 
-  // HÀM TẠO LINK TRỰC TIẾP MỞ TRANG GỐC
+  // HÀM TẠO DEEP LINK CHÍNH XÁC SANG TRANG GỐC
   const getDirectSourceUrl = (ticket: InboxTicket) => {
     if (ticket.source === 'gmail') {
       return `https://mail.google.com/mail/u/0/#search/id%3A${ticket.source_id}`;
@@ -145,11 +145,10 @@ export const UnifiedInboxPage: React.FC = () => {
         <div>
           <h2 className="text-xl font-bold text-slate-100">Unified Inbox Feed</h2>
           <p className="text-xs text-slate-400 mt-1">
-            Hợp nhất yêu cầu từ Gmail Workspace, Google Form và OS Ticket với Gemini AI Triage.
+            Hợp nhất yêu cầu từ Gmail Workspace, Google Form và OS Ticket với sự hỗ trợ từ Gemini AI Triage.
           </p>
         </div>
 
-        {/* NÚT ĐẢO CHIỀU SẮP XẾP CŨ / MỚI */}
         <button
           onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 border border-slate-700 hover:border-slate-500 rounded-lg text-xs text-slate-300 transition"
@@ -211,11 +210,11 @@ export const UnifiedInboxPage: React.FC = () => {
           {tickets.map((ticket) => {
             const isExpanded = expandedContent[ticket.id] || false;
             const directUrl = getDirectSourceUrl(ticket);
-            const attachments = ticket.metadata?.attachments || [];
+            const attachments = ticket.attachments || ticket.metadata?.attachments || [];
 
             return (
               <div key={ticket.id} className="glass-panel p-5 rounded-xl border border-slate-800 hover:border-indigo-500/40 space-y-4 relative transition">
-                {/* Header */}
+                {/* Header Card */}
                 <div className="flex items-start justify-between">
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -251,20 +250,20 @@ export const UnifiedInboxPage: React.FC = () => {
                     </h3>
                   </div>
 
-                  {/* NÚT BẤM BẬT SANG TRANG GỐC (GMAIL / FORM SHEET / OS TICKET) */}
+                  {/* NÚT BẤM MỞ TRỰC TIẾP TRANG GỐC */}
                   <a
                     href={directUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-400 text-xs font-medium rounded-lg transition"
+                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-400 text-xs font-medium rounded-lg transition"
                     title="Mở nội dung gốc trên Gmail / Google Sheet / OS Ticket"
                   >
                     <span>Mở trang gốc</span>
-                    <ExternalLink className="w-3 h-3" />
+                    <ExternalLink className="w-3.5 h-3.5" />
                   </a>
                 </div>
 
-                {/* FILE ĐÍNH KÈM (GOOGLE DOC / PDF / IMAGES) */}
+                {/* TỆP ĐÍNH KÈM (GOOGLE DOC / PDF / IMAGES) */}
                 <div className="flex flex-wrap items-center gap-2">
                   {ticket.doc_url && (
                     <a
@@ -286,7 +285,7 @@ export const UnifiedInboxPage: React.FC = () => {
                       rel="noreferrer"
                       className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded text-xs text-cyan-300 transition"
                     >
-                      <ImageIcon className="w-3.5 h-3.5" />
+                      <ImageIcon className="w-3.5 h-3.5 text-cyan-400" />
                       <span>{att.filename || `File đính kèm ${idx + 1}`}</span>
                     </a>
                   ))}
@@ -299,7 +298,7 @@ export const UnifiedInboxPage: React.FC = () => {
                     <span>Tóm tắt & Đề xuất tự động từ Gemini AI</span>
                   </div>
                   <p className="text-xs text-slate-200 leading-relaxed font-sans">
-                    {ticket.ai_summary || "Hệ thống đang chờ Gemini AI xử lý tóm tắt..."}
+                    {ticket.ai_summary || "Hệ thống đã nhận thông tin và đang chờ Gemini AI phân tích tóm tắt..."}
                   </p>
                   {ticket.assigned_name && (
                     <div className="text-[11px] text-slate-400 pt-2 border-t border-slate-800/80">

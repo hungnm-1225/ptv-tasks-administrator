@@ -13,7 +13,7 @@ ADMIN_USER = os.getenv("OSTICKET_ADMIN_USER")
 ADMIN_PASS = os.getenv("OSTICKET_ADMIN_PASS")
 
 async def poll_open_ostickets():
-    """Hàm cào OS Ticket dựa trên đúng cấu trúc HTML thật"""
+    """Hàm cào OS Ticket bóc tách đúng ID Nội Bộ & Số Hiệu Hiển Thị"""
     logger.info("🔎 Đang quét OS Ticket (support.pythaverse.space)...")
     
     if not ADMIN_USER or not ADMIN_PASS:
@@ -39,7 +39,7 @@ async def poll_open_ostickets():
                 else:
                     await page.press('input[name="passwd"]', 'Enter')
 
-                # 🛑 Chờ cho trang đăng nhập xong hoàn toàn
+                # Chờ đăng nhập hoàn tất
                 await page.wait_for_load_state("domcontentloaded")
                 await page.wait_for_load_state("networkidle")
 
@@ -49,7 +49,7 @@ async def poll_open_ostickets():
                 
             await page.wait_for_selector("table.queue.tickets", timeout=15000)
 
-            # 3. Duyệt qua từng dòng <tr> trong Bảng theo HTML thật
+            # 3. Duyệt qua từng dòng <tr> trong Bảng
             rows = await page.query_selector_all("table.queue.tickets tbody tr")
             supabase = get_supabase_client()
 
@@ -58,51 +58,61 @@ async def poll_open_ostickets():
                 if len(cols) < 7:
                     continue
 
-                # Bóc tách chính xác từng cột theo file HTML
                 ticket_a = await cols[1].query_selector("a.preview")
                 if not ticket_a:
                     continue
 
-                ticket_id = (await ticket_a.inner_text()).strip()        # VD: 871582
+                # 🎯 TÁC VỤ GỘP: BÓC TÁCH ĐÚNG ID NỘI BỘ VÀ SỐ HIỆU HIỂN THỊ
+                href = await ticket_a.get_attribute("href") or ""  # VD: "/scp/tickets.php?id=3338"
+                display_number = (await ticket_a.inner_text()).strip() # VD: "965278"
+                
+                # Trích xuất ID nội bộ từ `id=3338` trên URL
+                if "id=" in href:
+                    internal_id = href.split("id=")[1].split("&")[0]
+                else:
+                    internal_id = display_number
+
                 last_updated = (await cols[2].inner_text()).strip()      # VD: 03/07/2026 12:39 PM
-                subject = (await cols[3].inner_text()).strip()           # VD: Technical Issue - PLearn
+                subject_raw = (await cols[3].inner_text()).strip()       # VD: Technical Issue - PLearn
                 from_person = (await cols[4].inner_text()).strip()       # VD: Nguyen Hung
                 priority = (await cols[5].inner_text()).strip()          # VD: Emergency
                 assigned_to = (await cols[6].inner_text()).strip()       # VD: Mohd Afiq
 
-                # 4. Kiểm tra xem Ticket ID đã lưu trong Supabase chưa
+                formatted_subject = f"[#{display_number}] {subject_raw}"
+
+                # 4. Kiểm tra xem Internal ID đã lưu trong Supabase chưa
                 existing = supabase.table("inbox_tickets") \
-                    .select("id").eq("source", "osticket").eq("source_id", ticket_id).execute()
+                    .select("id").eq("source", "osticket").eq("source_id", internal_id).execute()
 
                 if existing.data:
                     continue
 
                 # 5. Mở trang chi tiết lấy Nội dung Thread
-                detail_href = await ticket_a.get_attribute("href")
                 detail_page = await context.new_page()
-                await detail_page.goto(f"https://support.pythaverse.space{detail_href}")
+                await detail_page.goto(f"https://support.pythaverse.space/scp/{href.lstrip('/')}")
                 
                 thread_body = await detail_page.query_selector(".thread-body")
-                raw_content = await thread_body.inner_text() if thread_body else subject
+                raw_content = await thread_body.inner_text() if thread_body else subject_raw
                 await detail_page.close()
 
                 # 6. LƯU ĐẦY ĐỦ THÔNG TIN VÀO SUPABASE
                 new_ticket = {
                     "source": "osticket",
-                    "source_id": ticket_id,
+                    "source_id": internal_id, # Lưu ID nội bộ (3338) để link bấm đúng 100%
                     "sender_email": f"{from_person.lower().replace(' ', '')}@pythaverse.space",
                     "submitter_name": from_person,
-                    "subject": subject,
+                    "subject": formatted_subject,
                     "raw_content": raw_content,
                     "priority": priority,
                     "assigned_to": assigned_to,
                     "ticket_timestamp": last_updated,
-                    "status": "pending"
+                    "status": "pending",
+                    "metadata": {"ticket_number": display_number, "detail_href": href}
                 }
                 res = supabase.table("inbox_tickets").insert(new_ticket).execute()
                 
                 if res.data:
-                    logger.info(f"✅ Đã cào thành công Ticket OS Ticket mới: #{ticket_id} ({subject})")
+                    logger.info(f"✅ Đã cào thành công Ticket OS Ticket mới: #{display_number} (ID: {internal_id})")
                     await process_ticket_with_ai(res.data[0]["id"])
 
         except Exception as e:
