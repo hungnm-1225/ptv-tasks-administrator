@@ -100,3 +100,12 @@ async def batch_ai_triage():
         return {"status": "success", "message": f"Đã chạy tóm tắt Gemini AI cho {count} ticket cũ!"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{ticket_id}/category")
+async def update_ticket_category(ticket_id: str, payload: Dict[str, Any]):
+    """Cho phép Admin đổi Category/Tag trực tiếp trên Web Card"""
+    new_category = payload.get("category", "other")
+    supabase = get_supabase_client()
+    supabase.table("inbox_tickets").update({"category": new_category}).eq("id", ticket_id).execute()
+    return {"status": "success", "category": new_category}

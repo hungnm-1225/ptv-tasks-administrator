@@ -107,3 +107,23 @@ async def poll_unread_gmails():
 
     except Exception as e:
         logger.error(f"❌ Lỗi quét Gmail: {e}")
+
+def upload_attachment_to_supabase(file_bytes: bytes, filename: str) -> str:
+    """Tải file đính kèm lên Supabase Storage & Lấy Public URL"""
+    try:
+        supabase = get_supabase_client()
+        file_path = f"attachments/{filename}"
+        
+        # Upload lên bucket 'ticket-attachments'
+        supabase.storage.from_("ticket-attachments").upload(
+            path=file_path,
+            file=file_bytes,
+            file_options={"upsert": "true"}
+        )
+        
+        # Lấy Public URL để Web xem/tải trực tiếp
+        public_url = supabase.storage.from_("ticket-attachments").get_public_url(file_path)
+        return public_url
+    except Exception as e:
+        print(f"⚠️ Lỗi upload attachment: {e}")
+        return ""
