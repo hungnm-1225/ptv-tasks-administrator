@@ -1,18 +1,22 @@
-import logging
+# backend/app/api/v1/endpoints/github.py
 from fastapi import APIRouter, HTTPException
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from pydantic import BaseModel
+import google.generativeai as genai
 from app.services.github_service import github_service
 from app.core.config import settings
+from app.core.gemini import ai_engine
 
-logger = logging.getLogger(__name__)
 router = APIRouter()
 
 class GenerateBugPromptRequest(BaseModel):
-    raw_issue_summary: str = ""
+    ticket_id: Optional[str] = None
+    subject: str = ""
+    raw_content: str = ""
+    source: str = "osticket"
+    sender: str = "hung.nguyenmanh@dtt.vn"
     impacted_system: str = "Workspace"
-    priority: str = "High"
-
+    priority: str = "Urgent"
 
 @router.post("/create-issue")
 async def create_github_issue(payload: Dict[str, Any]):
@@ -20,21 +24,30 @@ async def create_github_issue(payload: Dict[str, Any]):
     res = await github_service.create_issue(payload)
     return res
 
-
 @router.post("/ai-generate-template")
-@router.post("/ai-generate-template/")
 async def ai_generate_bug_template(req: GenerateBugPromptRequest):
-    """Sử dụng Gemini AI để điền mẫu Bug Markdown chuẩn QA DTT từ nội dung tóm tắt ngắn."""
-    
-    raw_summary = req.raw_issue_summary.strip() or "Phát hiện lỗi không thể thực hiện thao tác trên hệ thống"
+    """Gọi Gemini AI để phân tích sự cố và soạn thảo mẫu Bug Report chuẩn QA DTT."""
     
     prompt = f"""
-Bạn là Chuyên gia QA Lead tại Pythaverse. Hãy chuyển đổi thông tin sự cố dưới đây thành một bản Báo Cáo Lỗi (Bug Report) hoàn chỉnh theo đúng cấu trúc Markdown sau:
+Bạn là Chuyên gia Lead QA & Automation tại Pythaverse (Công ty DTT).
+Nhiệm vụ của bạn: Đọc thông tin sự cố/ticket dưới đây và tự động viết một bản Báo Cáo Lỗi (Bug Report) CHUYÊN NGHIỆP, CHI TIẾT bằng tiếng Việt theo ĐÚNG CẤU TRÚC MARKDOWN dưới đây:
 
-### [BUG][{req.priority.upper()}] <Tiêu đề ngắn gọn, rõ ràng>
+### THÔNG TIN ĐẦU VÀO TỪ TICKET:
+- Tiêu đề gốc: {req.subject}
+- Nội dung chi tiết: {req.raw_content}
+- Nguồn tiếp nhận: {req.source}
+- Người báo cáo gốc: {req.sender}
+- Hệ thống nghi vấn: {req.impacted_system}
+- Mức độ ưu tiên: {req.priority}
+
+---
+
+### CẤU TRÚC MARKDOWN BẮT BUỘC TRẢ VỀ:
+
+### [BUG][{req.priority.upper()}] <Tiêu đề ngắn gọn, chuẩn xác thể hiện đúng bản chất lỗi>
 
 **📌 MÔ TẢ TỔNG QUAN (METADATA)**
-- **Người báo cáo (Reported By):** Hùng QA
+- **Người báo cáo (Reported By):** {req.sender} (Qua Hùng QA)
 - **Mức độ ưu tiên (Priority/Severity):** [{req.priority}]
 - **Vai trò bị ảnh hưởng (Affected Roles):** [Admin / Partner / School / Teacher / Student]
 - **Hệ thống liên quan (Impacted System):** [{req.impacted_system}]
@@ -42,7 +55,7 @@ Bạn là Chuyên gia QA Lead tại Pythaverse. Hãy chuyển đổi thông tin 
 ---
 
 **🌐 MÔI TRƯỜNG & ĐƯỜNG DẪN (ENVIRONMENT & ABSOLUTE URLS)**
-- **URL bị lỗi (Absolute URL):** `https://pythaverse.space`
+- **URL bị lỗi (Absolute URL):** `https://pythaverse.space` (hoặc domain phù hợp như `https://learn.pythaverse.space` hay `https://ide.pythaverse.space`)
 - **So sánh Môi trường (QA vs Prod):**
   - **Môi trường QA (`qa.pythaverse.space`):** [Bị lỗi]
   - **Môi trường Production (`pythaverse.space`):** [Bị lỗi]
@@ -51,22 +64,22 @@ Bạn là Chuyên gia QA Lead tại Pythaverse. Hãy chuyển đổi thông tin 
 
 **📝 ĐIỀU KIỆN TIÊN QUYẾT & DỮ LIỆU TEST (PREREQUISITES & TEST DATA)**
 - **Tài khoản test (Credentials):** `hung.nguyenmanh@dtt.vn`
-- **Định danh thực thể:** Course_ID, School_ID nếu có
-- **Link báo cáo từ người dùng (User Report Link):** Support Ticket / Feedback Form
+- **Định danh thực thể:** School_ID / User_ID / Ticket #{req.ticket_id or 'N/A'}
+- **Link báo cáo từ người dùng (User Report Link):** OS Ticket #{req.ticket_id or ''} / Google Form
 
 ---
 
 **👣 CÁC BƯỚC TÁI HIỆN (STEPS TO REPRODUCE)**
-1. Đăng nhập hệ thống với vai trò tương ứng.
-2. Điều hướng đến tính năng xảy ra sự cố.
-3. Thực hiện thao tác gây ra lỗi.
-4. Quan sát kết quả.
+1. <Tự suy luận bước 1 cụ thể theo nghiệp vụ của lỗi trên>
+2. <Tự suy luận bước 2>
+3. <Tự suy luận bước 3>
+4. Quan sát thông báo lỗi và phản hồi của hệ thống.
 
 ---
 
 **⚖️ KẾT QUẢ THỰC TẾ VS MONG ĐỢI (EXPECTED VS ACTUAL)**
-- **Kết quả mong đợi (Expected Results):** Hệ thống xử lý mượt mà, trả về dữ liệu chuẩn xác.
-- **Kết quả thực tế (Actual Results):** {raw_summary}
+- **Kết quả mong đợi (Expected Results):** <Mô tả trạng thái hoạt động đúng tiêu chuẩn>
+- **Kết quả thực tế (Actual Results):** <Mô tả chính xác lỗi đang xảy ra dựa theo nội dung ticket>
 
 ---
 
@@ -75,79 +88,48 @@ Bạn là Chuyên gia QA Lead tại Pythaverse. Hãy chuyển đổi thông tin 
 - **API Endpoint:** `https://pythaverse.space/api/...`
 - **Payload gửi đi (Request Payload):** 
 ```json
-{{ "action": "test_action" }}
+{{
+  "system": "{req.impacted_system}",
+  "error_context": "{req.subject}"
+}}
 ```
 
-Dựa trên thông tin sự cố sau: "{raw_summary}", hãy suy luận và điền chi tiết vào mẫu trên, giữ nguyên cấu trúc Markdown tiếng Việt. Trả về toàn bộ nội dung Markdown thuần túy.
+CHÚ Ý: Chỉ trả về nội dung Markdown hoàn chỉnh, không thêm lời chào mở đầu hay kết thúc.
 """
 
-    generated_markdown = None
+    try:
+        # Cấu hình API Key và gọi Model Gemini
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        
+        # Thử lần lượt các model để đảm bảo luôn thành công
+        models_to_try = [
+            getattr(settings, "GEMINI_PRIMARY_MODEL", "gemini-2.5-flash"),
+            getattr(settings, "GEMINI_FALLBACK_MODEL", "gemini-1.5-flash"),
+            "gemini-pro-latest"
+        ]
+        
+        generated_text = ""
+        for model_name in models_to_try:
+            try:
+                model = genai.GenerativeModel(model_name)
+                res = model.generate_content(prompt)
+                if res and res.text:
+                    generated_text = res.text.strip()
+                    break
+            except Exception as model_err:
+                print(f"⚠️ Model {model_name} lỗi: {model_err}, thử model kế tiếp...")
 
-    # 1. Thử gọi qua google.generativeai trực tiếp bằng GEMINI_API_KEY
-    if settings.GEMINI_API_KEY:
-        try:
-            import google.generativeai as genai
-            genai.configure(api_key=settings.GEMINI_API_KEY)
-            model = genai.GenerativeModel(getattr(settings, "GEMINI_PRIMARY_MODEL", "gemini-2.5-flash"))
-            response = model.generate_content(prompt)
-            if response and response.text:
-                generated_markdown = response.text.strip()
-        except Exception as e:
-            logger.warning(f"Lỗi gọi Gemini trực tiếp: {e}")
+        if not generated_text:
+            raise Exception("Tất cả model Gemini đều bận.")
 
-    # 2. Nếu Gemini bận hoặc chưa có API key -> Sử dụng Mẫu Format Chuẩn QA DTT
-    if not generated_markdown:
-        generated_markdown = f"""### [BUG][{req.priority.upper()}] {raw_summary[:60]}
-
-**📌 MÔ TẢ TỔNG QUAN (METADATA)**
-- **Người báo cáo (Reported By):** Hùng QA
-- **Mức độ ưu tiên (Priority/Severity):** [{req.priority}]
-- **Vai trò bị ảnh hưởng (Affected Roles):** [Admin / Partner / School / Teacher / Student]
-- **Hệ thống liên quan (Impacted System):** [{req.impacted_system}]
-
----
-
-**🌐 MÔI TRƯỜNG & ĐƯỜNG DẪN (ENVIRONMENT & ABSOLUTE URLS)**
-- **URL bị lỗi (Absolute URL):** `https://pythaverse.space`
-- **So sánh Môi trường (QA vs Prod):**
-  - **Môi trường QA (`qa.pythaverse.space`):** [Bị lỗi]
-  - **Môi trường Production (`pythaverse.space`):** [Bị lỗi]
-
----
-
-**📝 ĐIỀU KIỆN TIÊN QUYẾT & DỮ LIỆU TEST (PREREQUISITES & TEST DATA)**
-- **Tài khoản test (Credentials):** `hung.nguyenmanh@dtt.vn`
-- **Định danh thực thể:** Course_ID, School_ID
-- **Link báo cáo từ người dùng (User Report Link):** Support Ticket / Feedback Form
-
----
-
-**👣 CÁC BƯỚC TÁI HIỆN (STEPS TO REPRODUCE)**
-1. Đăng nhập vào hệ thống với vai trò tương ứng tại `https://pythaverse.space`.
-2. Điều hướng đến mục **{req.impacted_system}**.
-3. Thực hiện thao tác: {raw_summary}.
-4. Quan sát lỗi hiển thị trên màn hình.
-
----
-
-**⚖️ KẾT QUẢ THỰC TẾ VS MONG ĐỢI (EXPECTED VS ACTUAL)**
-- **Kết quả mong đợi (Expected Results):** Hệ thống xử lý thành công, phản hồi mượt mà.
-- **Kết quả thực tế (Actual Results):** {raw_summary}
-
----
-
-**🔍 BẰNG CHỨNG KỸ THUẬT (TECHNICAL EVIDENCE & LOGS)**
-- **HTTP Status Code:** 500 Internal Server Error
-- **API Endpoint:** `https://pythaverse.space/api/v1/...`
-- **Payload gửi đi (Request Payload):** 
-```json
-{{ "system": "{req.impacted_system}", "status": "failed" }}
-```"""
-
-    # Tách tiêu đề từ dòng đầu tiên
-    first_line = generated_markdown.split("\n")[0].replace("###", "").strip()
-    
-    return {
-        "title": first_line if first_line else f"[BUG][{req.priority.upper()}] {raw_summary[:50]}",
-        "body": generated_markdown
-    }
+        # Tách tiêu đề từ dòng đầu tiên
+        first_line = generated_text.split("\n")[0].replace("###", "").strip()
+        
+        return {
+            "status": "success",
+            "title": first_line if first_line else f"[BUG][{req.priority.upper()}] {req.subject}",
+            "body": generated_text
+        }
+    except Exception as e:
+        print(f"❌ Lỗi gọi Gemini AI: {e}")
+        raise HTTPException(status_code=500, detail=f"Lỗi AI Engine: {str(e)}")

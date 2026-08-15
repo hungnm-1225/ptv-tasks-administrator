@@ -59,16 +59,13 @@ export const GithubReporterPage: React.FC = () => {
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [aiGenerating, setAiGenerating] = useState<boolean>(false);
 
-  // Tự động nhận diện Ticket truyền từ Inbox sang
+  // Khi mở từ Unified Inbox sang, set tiêu đề ban đầu
   useEffect(() => {
     if (incomingTicket) {
-      const isFeedback = incomingTicket.source === 'google_form';
-      if (isFeedback && !selectedLabels.includes('from-feedback')) {
+      setTitle(`### [BUG][${priority.toUpperCase()}] ${incomingTicket.subject}`);
+      if (incomingTicket.source === 'google_form' && !selectedLabels.includes('from-feedback')) {
         setSelectedLabels(prev => [...prev, 'from-feedback']);
       }
-
-      const rawText = incomingTicket.ai_summary || incomingTicket.raw_content || incomingTicket.subject;
-      generateTemplateFromText(rawText, incomingTicket.subject);
     }
   }, [incomingTicket]);
 
@@ -84,70 +81,35 @@ export const GithubReporterPage: React.FC = () => {
     );
   };
 
-  const generateTemplateFromText = (rawNote: string, subjectTitle?: string) => {
-    const issueTitle = subjectTitle ? `### [BUG][${priority.toUpperCase()}] ${subjectTitle}` : `### [BUG][${priority.toUpperCase()}] ${rawNote.slice(0, 80)}`;
-    const reporter = incomingTicket ? `${incomingTicket.submitter_name || incomingTicket.sender_email} (Qua Hùng QA)` : 'Hùng QA';
-    const evidenceLink = incomingTicket?.doc_url || (incomingTicket ? `https://support.pythaverse.space/scp/tickets.php?id=${incomingTicket.source_id}` : 'Support Ticket / Google Form');
+  // 🔥 GỌI API GEMINI THẬT SANG BACKEND
+  const handleAiAutoFill = async () => {
+    setAiGenerating(true);
+    try {
+      const payload = {
+        ticket_id: incomingTicket?.source_id || '',
+        subject: incomingTicket?.subject || title.replace(/^###\s*\[BUG\]\[\w+\]\s*/i, '').trim() || "Sự cố hệ thống",
+        raw_content: incomingTicket?.raw_content || incomingTicket?.ai_summary || title,
+        source: incomingTicket?.source || 'osticket',
+        sender: incomingTicket?.sender_email || incomingTicket?.submitter_name || 'hung.nguyenmanh@dtt.vn',
+        impacted_system: system,
+        priority: priority
+      };
 
-    const formattedTemplate = `### [BUG][${priority.toUpperCase()}] ${subjectTitle || rawNote.slice(0, 80)}
+      const res = await fetchApi<{ title: string; body: string }>('/github/ai-generate-template', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
 
-**📌 MÔ TẢ TỔNG QUAN (METADATA)**
-- **Người báo cáo (Reported By):** ${reporter}
-- **Mức độ ưu tiên (Priority/Severity):** [${priority}]
-- **Vai trò bị ảnh hưởng (Affected Roles):** [Admin / Partner / School / Teacher / Student]
-- **Hệ thống liên quan (Impacted System):** [${system}]
+      if (res?.title) setTitle(res.title);
+      if (res?.body) setBody(res.body);
 
----
-
-**🌐 MÔI TRƯỜNG & ĐƯỜNG DẪN (ENVIRONMENT & ABSOLUTE URLS)**
-- **URL bị lỗi (Absolute URL):** \`https://pythaverse.space\`
-- **So sánh Môi trường (QA vs Prod):**
-  - **Môi trường QA (\`qa.pythaverse.space\`):** [Bị lỗi]
-  - **Môi trường Production (\`pythaverse.space\`):** [Bị lỗi]
-
----
-
-**📝 ĐIỀU KIỆN TIÊN QUYẾT & DỮ LIỆU TEST (PREREQUISITES & TEST DATA)**
-- **Tài khoản test (Credentials):** \`hung.nguyenmanh@dtt.vn\`
-- **Định danh thực thể:** School_ID, Course_ID (nếu có)
-- **Link báo cáo từ người dùng (User Report Link):** ${evidenceLink}
-
----
-
-**👣 CÁC BƯỚC TÁI HIỆN (STEPS TO REPRODUCE)**
-1. Đăng nhập vào hệ thống với vai trò tương ứng tại \`https://pythaverse.space\`.
-2. Điều hướng đến phân hệ **${system}**.
-3. Thực hiện thao tác gây lỗi.
-4. Quan sát phản hồi của giao diện.
-
----
-
-**⚖️ KẾT QUẢ THỰC TẾ VS MONG ĐỢI (EXPECTED VS ACTUAL)**
-- **Kết quả mong đợi (Expected Results):** Hệ thống xử lý mượt mà, trả về dữ liệu chuẩn xác, giao diện hiển thị đúng thiết kế.
-- **Kết quả thực tế (Actual Results):** ${rawNote}
-
----
-
-**🔍 BẰNG CHỨNG KỸ THUẬT (TECHNICAL EVIDENCE & LOGS)**
-- **HTTP Status Code:** 500 Internal Server Error / 400 Bad Request
-- **API Endpoint:** \`https://pythaverse.space/api/v1/...\`
-- **Payload gửi đi (Request Payload):** 
-\`\`\`json
-{
-  "system": "${system}",
-  "details": "${rawNote.slice(0, 100)}"
-}
-\`\`\``;
-
-    setTitle(issueTitle);
-    setBody(formattedTemplate);
-  };
-
-  const handleAiAutoFill = () => {
-    const rawNote = title.replace(/^###\s*\[BUG\]\[\w+\]\s*/i, '').trim() ||
-      "Người dùng báo lỗi không tạo được Order và License bị hết hạn trước ngày quy định trên Workspace";
-    generateTemplateFromText(rawNote);
-    toast.success('Đã tự động điền mẫu Bug Report chuẩn QA DTT!');
+      toast.success('Gemini AI đã phân tích ticket và soạn thảo Bug Report thành công!');
+    } catch (err) {
+      console.error('Lỗi gọi AI:', err);
+      toast.error('Lỗi kết nối Gemini AI: ' + (err as Error).message);
+    } finally {
+      setAiGenerating(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -237,16 +199,16 @@ export const GithubReporterPage: React.FC = () => {
             type="button"
             onClick={handleAiAutoFill}
             disabled={aiGenerating}
-            className="w-full py-2.5 px-4 bg-violet-50 hover:bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300 dark:hover:bg-violet-500/25 border border-violet-200/80 dark:border-violet-500/30 text-xs font-semibold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
+            className="w-full py-2.5 px-4 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 text-white text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
           >
             {aiGenerating ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin text-violet-600" />
-                <span>AI Đang Soạn Mẫu...</span>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Gemini Đang Phân Tích...</span>
               </>
             ) : (
               <>
-                <Sparkles className="w-4 h-4 text-violet-600 dark:text-violet-400" />
+                <Sparkles className="w-4 h-4 text-violet-200" />
                 <span>AI Soạn Mẫu Chuẩn QA DTT</span>
               </>
             )}
@@ -265,7 +227,7 @@ export const GithubReporterPage: React.FC = () => {
             <select
               value={priority}
               onChange={(e) => setPriority(e.target.value)}
-              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2 text-xs text-slate-800 dark:text-slate-200 outline-none"
+              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2 text-xs text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
             >
               <option value="Urgent">🔥 Urgent</option>
               <option value="High">🔴 High</option>
@@ -283,7 +245,7 @@ export const GithubReporterPage: React.FC = () => {
             <select
               value={system}
               onChange={(e) => setSystem(e.target.value)}
-              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2 text-xs text-slate-800 dark:text-slate-200 outline-none"
+              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2 text-xs text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
             >
               {IMPACTED_SYSTEMS.map(s => (
                 <option key={s} value={s}>{s}</option>
