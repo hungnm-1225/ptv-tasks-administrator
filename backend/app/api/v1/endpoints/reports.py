@@ -145,3 +145,92 @@ async def get_reports_summary(
         "category_ratios": category_ratios,
         "daily_trends": daily_trends
     }
+    # Thêm vào cuối file backend/app/api/v1/endpoints/reports.py
+
+@router.get("/kpi-export-data")
+async def get_kpi_export_data(
+    from_date: str = Query(..., description="YYYY-MM-DD"),
+    to_date: str = Query(..., description="YYYY-MM-DD")
+):
+    """
+    Trích xuất và tổng hợp toàn bộ dữ liệu công việc trong tháng để phục vụ xuất Báo cáo KPI DTT 3Đ.
+    """
+    supabase = get_supabase_client()
+    
+    start_iso = f"{from_date}T00:00:00Z"
+    end_iso = f"{to_date}T23:59:59Z"
+    
+    # 1. Lấy toàn bộ tickets trong kỳ
+    tickets_res = supabase.table("inbox_tickets")\
+        .select("*")\
+        .gte("created_at", start_iso)\
+        .lte("created_at", end_iso)\
+        .order("created_at", desc=False)\
+        .execute()
+        
+    tickets = tickets_res.data or []
+    
+    # 2. Lấy toàn bộ tasks bot trong kỳ
+    tasks_res = supabase.table("bot_automation_tasks")\
+        .select("*")\
+        .gte("created_at", start_iso)\
+        .lte("created_at", end_iso)\
+        .execute()
+        
+    tasks = tasks_res.data or []
+    
+    # 3. Phân loại và gom link dẫn chứng
+    osticket_links = []
+    gmail_items = []
+    feedback_items = []
+    
+    total_users_created = 0
+    total_courses_enrolled = 0
+    
+    for t in tickets:
+        src = t.get("source")
+        src_id = t.get("source_id") or ""
+        subj = t.get("subject") or "Yêu cầu hỗ trợ"
+        ai_sum = t.get("ai_summary") or subj
+        
+        # Rút gọn tóm tắt trong ngoặc đơn
+        short_desc = ai_sum.replace("\n", " ").strip()
+        if len(short_desc) > 80:
+            short_desc = short_desc[:77] + "..."
+            
+        if src == "osticket":
+            # Tạo link chuẩn cho OS Ticket
+            clean_id = src_id.replace("#", "").strip()
+            link_entry = f"https://support.pythaverse.space/scp/tickets.php?id={clean_id} ({short_desc})"
+            osticket_links.append(link_entry)
+            
+            # Ước lượng số user nếu có trong metadata
+            meta = t.get("metadata") or {}
+            if "total_users" in meta:
+                total_users_created += int(meta["total_users"])
+        elif src == "gmail":
+            gmail_items.append(f"- Email từ {t.get('sender_email')}: {short_desc}")
+        elif src == "google_form":
+            doc_url = t.get("doc_url") or "Google Form Sheet"
+            feedback_items.append(f"- [{t.get('country') or 'VN'}] {t.get('submitter_name') or 'User'}: {short_desc} (Doc: {doc_url})")
+
+    # 4. Tính toán số liệu thống kê KPI
+    total_tickets = len(tickets)
+    completed_tickets = sum(1 for t in tickets if t.get("status") == "completed")
+    on_time_rate = round((completed_tickets / total_tickets * 100), 1) if total_tickets > 0 else 100.0
+    total_bugs = sum(1 for t in tickets if t.get("category") == "bug")
+    
+    return {
+        "from_date": from_date,
+        "to_date": to_date,
+        "total_tickets": total_tickets,
+        "completed_tickets": completed_tickets,
+        "on_time_rate": on_time_rate,
+        "total_bugs": total_bugs,
+        "total_users_created": total_users_created,
+        "osticket_evidence": "\n".join(osticket_links) if osticket_links else "https://support.pythaverse.space/scp/ (Đã xử lý đầy đủ các ticket trong kỳ)",
+        "gmail_evidence": "\n".join(gmail_items) if gmail_items else "Hòm thư Gmail @dtt.vn (Đã hoàn thành các yêu cầu tiếp nhận)",
+        "feedback_evidence": "[PTV TASKFORCE]_Master Feedback Tracking\n" + "\n".join(feedback_items[:15]),
+        "tickets_raw": tickets,
+        "tasks_raw": tasks
+    }
