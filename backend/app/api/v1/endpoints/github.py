@@ -10,6 +10,20 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Danh sách Model Gemini chuẩn của hệ thống
+GEMINI_MODELS = [
+"gemini-3.7-flash",
+"gemini-3.6-flash",
+"gemini-3.5-flash-lite",
+"gemini-3.5-flash",
+"gemini-3.1-flash-lite",
+"gemini-3.1-pro-preview",
+"gemini-3-flash-preview",
+"gemini-pro-latest",
+"gemini-flash-latest",
+"gemini-flash-lite-latest"
+]
+
 class GenerateBugPromptRequest(BaseModel):
     ticket_id: Optional[str] = None
     subject: str = ""
@@ -27,12 +41,11 @@ async def create_github_issue(payload: Dict[str, Any]):
 
 @router.post("/ai-generate-template")
 async def ai_generate_bug_template(req: GenerateBugPromptRequest):
-    """Gọi trực tiếp Google Gemini AI để phân tích sâu nội dung sự cố."""
+    """Gọi Gemini AI phân tích sâu nội dung sự cố theo danh sách Model mới."""
     
     if not settings.GEMINI_API_KEY:
-        raise HTTPException(status_code=500, detail="GEMINI_API_KEY chưa được cấu hình trong file .env")
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY chưa được cấu hình.")
 
-    # Prompt chuyên sâu yêu cầu Gemini phân tích bản chất lỗi của từng ticket cụ thể
     prompt = f"""
 Bạn là Chuyên gia Lead QA & Automation của Công ty Công nghệ DTT (Hệ sinh thái Pythaverse).
 Nhiệm vụ: Đọc kỹ thông tin sự cố dưới đây và viết một bản Báo Cáo Lỗi (Bug Report) CHUYÊN SÂU bằng tiếng Việt theo ĐÚNG CẤU TRÚC MARKDOWN quy định.
@@ -49,9 +62,9 @@ Nhiệm vụ: Đọc kỹ thông tin sự cố dưới đây và viết một b�
 - Mức độ: {req.priority}
 
 === YÊU CẦU ĐẶC BIỆT DÀNH CHO AI ===
-1. PHẢI phân tích đúng bản chất kỹ thuật của lỗi này (Ví dụ nếu là App Inventor Companion thì phân tích về phiên bản APK/Bluetooth; nếu là Deploy Vercel thì phân tích về Build Logs/Next.js/Env).
-2. Các bước tái hiện (Steps to Reproduce) phải được tự suy luận cụ thể theo từng click chuột/hành động tương ứng với lỗi đó, KHÔNG dùng câu chung chung.
-3. Kết quả thực tế (Actual Results) và Kết quả mong đợi (Expected Results) phải mô tả chính xác hiện tượng được nhắc đến trong nội dung sự cố.
+1. Phân tích đúng bản chất kỹ thuật của lỗi này (Ví dụ: App Inventor Companion APK/Bluetooth, Vercel Build Logs, Keycloak SSO, LMS Enroll...).
+2. Các bước tái hiện (Steps to Reproduce) phải suy luận chi tiết, logic theo từng hành động cụ thể.
+3. Kết quả thực tế (Actual Results) và Kết quả mong đợi (Expected Results) phải mô tả chính xác hiện tượng trong sự cố.
 
 === CẤU TRÚC MARKDOWN BẮT BUỘC TRẢ VỀ ===
 ### [BUG][{req.priority.upper()}] <Tiêu đề ngắn gọn phản ánh đúng lỗi>
@@ -65,7 +78,7 @@ Nhiệm vụ: Đọc kỹ thông tin sự cố dưới đây và viết một b�
 ---
 
 **🌐 MÔI TRƯỜNG & ĐƯỜNG DẪN (ENVIRONMENT & ABSOLUTE URLS)**
-- **URL bị lỗi (Absolute URL):** `https://pythaverse.space` (hoặc domain phân hệ phù hợp như `learn.pythaverse.space`, `ide.pythaverse.space`)
+- **URL bị lỗi (Absolute URL):** `https://pythaverse.space`
 - **So sánh Môi trường (QA vs Prod):**
   - **Môi trường QA (`qa.pythaverse.space`):** [Bị lỗi]
   - **Môi trường Production (`pythaverse.space`):** [Bị lỗi]
@@ -110,18 +123,11 @@ CHÚ Ý: Chỉ trả về nội dung Markdown thuần, KHÔNG thêm lời chào 
     try:
         genai.configure(api_key=settings.GEMINI_API_KEY)
         
-        # Danh sách model Gemini thực tế
-        models_to_try = [
-            "gemini-1.5-flash",
-            "gemini-2.0-flash-exp",
-            "gemini-1.5-pro",
-            "gemini-pro"
-        ]
-        
         ai_response_text = ""
         last_error = ""
 
-        for m_name in models_to_try:
+        # Duyệt qua danh sách Model thế hệ mới với cơ chế Auto-Fallback
+        for m_name in GEMINI_MODELS:
             try:
                 model = genai.GenerativeModel(m_name)
                 res = model.generate_content(prompt)
@@ -131,12 +137,11 @@ CHÚ Ý: Chỉ trả về nội dung Markdown thuần, KHÔNG thêm lời chào 
                     break
             except Exception as err:
                 last_error = str(err)
-                logger.warning(f"⚠️ Model [{m_name}] không khả dụng: {err}, chuyển sang model kế tiếp...")
+                logger.warning(f"⚠️ Model [{m_name}] lỗi ({err}), chuyển sang model kế tiếp...")
 
         if not ai_response_text:
-            raise Exception(f"Không thể gọi Gemini AI: {last_error}")
+            raise Exception(f"Tất cả model Gemini đều không phản hồi: {last_error}")
 
-        # Tách tiêu đề từ dòng đầu tiên
         first_line = ai_response_text.split("\n")[0].replace("###", "").strip()
 
         return {
