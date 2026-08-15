@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+// frontend/src/features/github/GithubReporterPage.tsx
+import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Github,
   Sparkles,
@@ -11,10 +13,11 @@ import {
   Eye,
   Edit3,
   Check,
-  ExternalLink
+  ExternalLink,
+  Ticket as TicketIcon
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
-import { GithubIssueResponse } from '../../types';
+import { GithubIssueResponse, InboxTicket } from '../../types';
 import { toast } from 'sonner';
 
 const AVAILABLE_ASSIGNEES = [
@@ -23,11 +26,11 @@ const AVAILABLE_ASSIGNEES = [
 ];
 
 const AVAILABLE_LABELS = [
-  { id: 'bug', name: 'bug', color: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-800' },
-  { id: 'from-feedback', name: 'from-feedback', color: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800' },
-  { id: 'enhancement', name: 'enhancement', color: 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-200 dark:border-sky-800' },
-  { id: 'documentation', name: 'documentation', color: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800' },
-  { id: 'feedback-digest', name: 'feedback-digest', color: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-200 dark:border-purple-800' },
+  { id: 'bug', name: 'bug' },
+  { id: 'from-feedback', name: 'from-feedback' },
+  { id: 'enhancement', name: 'enhancement' },
+  { id: 'documentation', name: 'documentation' },
+  { id: 'feedback-digest', name: 'feedback-digest' },
 ];
 
 const IMPACTED_SYSTEMS = [
@@ -41,11 +44,14 @@ const IMPACTED_SYSTEMS = [
 ];
 
 export const GithubReporterPage: React.FC = () => {
+  const location = useLocation();
+  const incomingTicket = (location.state as { ticket?: InboxTicket })?.ticket;
+
   const [repo, setRepo] = useState<string>('PTV-TechHub/Pythaverse2026');
   const [title, setTitle] = useState<string>('');
   const [body, setBody] = useState<string>('');
   const [selectedAssignees, setSelectedAssignees] = useState<string[]>(['nguyenthetrung5-PTV', 'thetrungdtt']);
-  const [selectedLabels, setSelectedLabels] = useState<string[]>(['bug', 'from-feedback']);
+  const [selectedLabels, setSelectedLabels] = useState<string[]>(['bug']);
   const [priority, setPriority] = useState<string>('Urgent');
   const [system, setSystem] = useState<string>('Workspace');
 
@@ -53,42 +59,95 @@ export const GithubReporterPage: React.FC = () => {
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [aiGenerating, setAiGenerating] = useState<boolean>(false);
 
-  // Toggle Assignee
+  // Tự động nhận diện Ticket truyền từ Inbox sang
+  useEffect(() => {
+    if (incomingTicket) {
+      const isFeedback = incomingTicket.source === 'google_form';
+      if (isFeedback && !selectedLabels.includes('from-feedback')) {
+        setSelectedLabels(prev => [...prev, 'from-feedback']);
+      }
+
+      const rawText = incomingTicket.ai_summary || incomingTicket.raw_content || incomingTicket.subject;
+      generateTemplateFromText(rawText, incomingTicket.subject);
+    }
+  }, [incomingTicket]);
+
   const toggleAssignee = (username: string) => {
     setSelectedAssignees(prev =>
       prev.includes(username) ? prev.filter(u => u !== username) : [...prev, username]
     );
   };
 
-  // Toggle Label
   const toggleLabel = (labelName: string) => {
     setSelectedLabels(prev =>
       prev.includes(labelName) ? prev.filter(l => l !== labelName) : [...prev, labelName]
     );
   };
 
-  // Kích hoạt AI tạo Bug Template chuẩn QA DTT
-  const handleAiAutoFill = async () => {
-    const rawNote = title || "Người dùng báo lỗi không tạo được Order và License bị hết hạn trước ngày quy định trên Workspace";
-    setAiGenerating(true);
-    try {
-      const res = await fetchApi<{ title: string; body: string }>('/github/ai-generate-template', {
-        method: 'POST',
-        body: JSON.stringify({
-          raw_issue_summary: rawNote,
-          impacted_system: system,
-          priority: priority
-        })
-      });
-      if (res.title) setTitle(res.title);
-      if (res.body) setBody(res.body);
-      toast.success('Gemini AI đã soạn thảo mẫu Bug Report chuẩn QA DTT thành công!');
-    } catch (err) {
-      console.error(err);
-      toast.error('Lỗi khi gọi AI soạn mẫu: ' + (err as Error).message);
-    } finally {
-      setAiGenerating(false);
-    }
+  const generateTemplateFromText = (rawNote: string, subjectTitle?: string) => {
+    const issueTitle = subjectTitle ? `### [BUG][${priority.toUpperCase()}] ${subjectTitle}` : `### [BUG][${priority.toUpperCase()}] ${rawNote.slice(0, 80)}`;
+    const reporter = incomingTicket ? `${incomingTicket.submitter_name || incomingTicket.sender_email} (Qua Hùng QA)` : 'Hùng QA';
+    const evidenceLink = incomingTicket?.doc_url || (incomingTicket ? `https://support.pythaverse.space/scp/tickets.php?id=${incomingTicket.source_id}` : 'Support Ticket / Google Form');
+
+    const formattedTemplate = `### [BUG][${priority.toUpperCase()}] ${subjectTitle || rawNote.slice(0, 80)}
+
+**📌 MÔ TẢ TỔNG QUAN (METADATA)**
+- **Người báo cáo (Reported By):** ${reporter}
+- **Mức độ ưu tiên (Priority/Severity):** [${priority}]
+- **Vai trò bị ảnh hưởng (Affected Roles):** [Admin / Partner / School / Teacher / Student]
+- **Hệ thống liên quan (Impacted System):** [${system}]
+
+---
+
+**🌐 MÔI TRƯỜNG & ĐƯỜNG DẪN (ENVIRONMENT & ABSOLUTE URLS)**
+- **URL bị lỗi (Absolute URL):** \`https://pythaverse.space\`
+- **So sánh Môi trường (QA vs Prod):**
+  - **Môi trường QA (\`qa.pythaverse.space\`):** [Bị lỗi]
+  - **Môi trường Production (\`pythaverse.space\`):** [Bị lỗi]
+
+---
+
+**📝 ĐIỀU KIỆN TIÊN QUYẾT & DỮ LIỆU TEST (PREREQUISITES & TEST DATA)**
+- **Tài khoản test (Credentials):** \`hung.nguyenmanh@dtt.vn\`
+- **Định danh thực thể:** School_ID, Course_ID (nếu có)
+- **Link báo cáo từ người dùng (User Report Link):** ${evidenceLink}
+
+---
+
+**👣 CÁC BƯỚC TÁI HIỆN (STEPS TO REPRODUCE)**
+1. Đăng nhập vào hệ thống với vai trò tương ứng tại \`https://pythaverse.space\`.
+2. Điều hướng đến phân hệ **${system}**.
+3. Thực hiện thao tác gây lỗi.
+4. Quan sát phản hồi của giao diện.
+
+---
+
+**⚖️ KẾT QUẢ THỰC TẾ VS MONG ĐỢI (EXPECTED VS ACTUAL)**
+- **Kết quả mong đợi (Expected Results):** Hệ thống xử lý mượt mà, trả về dữ liệu chuẩn xác, giao diện hiển thị đúng thiết kế.
+- **Kết quả thực tế (Actual Results):** ${rawNote}
+
+---
+
+**🔍 BẰNG CHỨNG KỸ THUẬT (TECHNICAL EVIDENCE & LOGS)**
+- **HTTP Status Code:** 500 Internal Server Error / 400 Bad Request
+- **API Endpoint:** \`https://pythaverse.space/api/v1/...\`
+- **Payload gửi đi (Request Payload):** 
+\`\`\`json
+{
+  "system": "${system}",
+  "details": "${rawNote.slice(0, 100)}"
+}
+\`\`\``;
+
+    setTitle(issueTitle);
+    setBody(formattedTemplate);
+  };
+
+  const handleAiAutoFill = () => {
+    const rawNote = title.replace(/^###\s*\[BUG\]\[\w+\]\s*/i, '').trim() ||
+      "Người dùng báo lỗi không tạo được Order và License bị hết hạn trước ngày quy định trên Workspace";
+    generateTemplateFromText(rawNote);
+    toast.success('Đã tự động điền mẫu Bug Report chuẩn QA DTT!');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -146,6 +205,19 @@ export const GithubReporterPage: React.FC = () => {
         </p>
       </div>
 
+      {/* Banner thông báo nếu nhận từ Ticket */}
+      {incomingTicket && (
+        <div className="p-4 rounded-2xl bg-violet-50/80 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-800/50 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 text-xs text-violet-900 dark:text-violet-200">
+            <TicketIcon className="w-4 h-4 text-violet-600 dark:text-violet-400 shrink-0" />
+            <span>Đang tạo Bug Report từ Ticket: <strong className="font-semibold">{incomingTicket.subject}</strong> ({incomingTicket.source.toUpperCase()})</span>
+          </div>
+          <span className="px-2 py-0.5 bg-violet-200/80 dark:bg-violet-500/20 text-violet-800 dark:text-violet-300 text-[10px] font-bold rounded-md uppercase">
+            Auto Context Loaded
+          </span>
+        </div>
+      )}
+
       {/* Form Container */}
       <form onSubmit={handleSubmit} className="bg-white dark:bg-slate-800 p-6 sm:p-7 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-5 shadow-xs">
 
@@ -181,7 +253,7 @@ export const GithubReporterPage: React.FC = () => {
           </button>
         </div>
 
-        {/* Row 2: Metadata Config (Assignees, Labels, Priority, System) */}
+        {/* Row 2: Metadata Config (Priority, System, Assignees) */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 rounded-xl bg-slate-50/80 dark:bg-slate-900/60 border border-slate-200/60 dark:border-slate-700/50">
 
           {/* Priority */}
@@ -233,9 +305,9 @@ export const GithubReporterPage: React.FC = () => {
                     key={a.username}
                     type="button"
                     onClick={() => toggleAssignee(a.username)}
-                    className={`px-2 py-1 rounded-md text-[11px] font-mono flex items-center gap-1 border transition ${isSelected
-                      ? 'bg-violet-600 text-white border-violet-600 shadow-2xs'
-                      : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-slate-300'
+                    className={`px-2 py-1 rounded-md text-[11px] font-mono flex items-center gap-1 border transition cursor-pointer ${isSelected
+                      ? 'bg-violet-600 text-white border-violet-600 shadow-2xs font-semibold'
+                      : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
                       }`}
                   >
                     {isSelected && <Check className="w-3 h-3" />}
@@ -261,7 +333,7 @@ export const GithubReporterPage: React.FC = () => {
                   key={l.id}
                   type="button"
                   onClick={() => toggleLabel(l.name)}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium border flex items-center gap-1 transition ${isSelected
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium border flex items-center gap-1 transition cursor-pointer ${isSelected
                     ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 border-slate-900 shadow-2xs font-semibold'
                     : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
                     }`}
@@ -294,7 +366,7 @@ export const GithubReporterPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setActiveTab('write')}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-md transition ${activeTab === 'write'
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md transition cursor-pointer ${activeTab === 'write'
                   ? 'bg-white dark:bg-slate-800 text-violet-600 dark:text-violet-400 font-semibold shadow-xs'
                   : 'text-slate-500 dark:text-slate-400'
                   }`}
@@ -305,7 +377,7 @@ export const GithubReporterPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setActiveTab('preview')}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-md transition ${activeTab === 'preview'
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md transition cursor-pointer ${activeTab === 'preview'
                   ? 'bg-white dark:bg-slate-800 text-violet-600 dark:text-violet-400 font-semibold shadow-xs'
                   : 'text-slate-500 dark:text-slate-400'
                   }`}

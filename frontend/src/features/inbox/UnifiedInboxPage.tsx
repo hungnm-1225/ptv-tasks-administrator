@@ -1,27 +1,32 @@
 // frontend/src/features/inbox/UnifiedInboxPage.tsx
 import React, { useState, useEffect } from 'react';
-import { 
-  Sparkles, 
-  ArrowRight, 
-  Loader2, 
-  Inbox, 
-  Mail, 
-  FileText, 
-  Ticket, 
-  ExternalLink, 
-  Paperclip, 
-  XCircle, 
-  RotateCcw, 
-  ChevronDown, 
-  ChevronUp, 
-  FileCode, 
-  Tag, 
-  Calendar, 
-  ArrowUpDown, 
-  Image as ImageIcon
+import { useNavigate } from 'react-router-dom';
+import {
+  Sparkles,
+  ArrowRight,
+  Loader2,
+  Inbox,
+  Mail,
+  FileText,
+  Ticket,
+  ExternalLink,
+  Paperclip,
+  XCircle,
+  RotateCcw,
+  ChevronDown,
+  ChevronUp,
+  FileCode,
+  Tag,
+  Calendar,
+  ArrowUpDown,
+  Image as ImageIcon,
+  Github,
+  Bot,
+  CheckCircle2,
+  X
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
-import { InboxTicket } from '../../types';
+import { InboxTicket, BotType } from '../../types';
 import { toast } from 'sonner';
 
 interface FileViewerModalProps {
@@ -30,6 +35,8 @@ interface FileViewerModalProps {
 }
 
 export const UnifiedInboxPage: React.FC = () => {
+  const navigate = useNavigate();
+
   const [selectedSource, setSelectedSource] = useState<string>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
@@ -38,6 +45,12 @@ export const UnifiedInboxPage: React.FC = () => {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [expandedContent, setExpandedContent] = useState<Record<string, boolean>>({});
   const [previewFile, setPreviewFile] = useState<{ filename: string; url: string } | null>(null);
+
+  // Modal tạo Task Bot
+  const [taskModalTicket, setTaskModalTicket] = useState<InboxTicket | null>(null);
+  const [selectedBotType, setSelectedBotType] = useState<BotType>('keycloak_api');
+  const [payloadText, setPayloadText] = useState<string>('');
+  const [creatingTask, setCreatingTask] = useState<boolean>(false);
 
   const SPREADSHEET_ID = "1rZgFBD2PuZWL1jvQefcYZztCQvo99Lhx0GATTKvj1Go";
 
@@ -139,19 +152,97 @@ export const UnifiedInboxPage: React.FC = () => {
     }
   };
 
-  const handleCreateTask = async (ticketId: string) => {
-    setActionLoading(ticketId);
+  // 1. Chuyển sang trang GitHub Issue kèm ngữ cảnh của Ticket
+  const handleNavigateToGitHub = (ticket: InboxTicket) => {
+    navigate('/github', { state: { ticket } });
+  };
+
+  // 2. Mở Modal tạo Bot Task với Payload được gợi ý tự động
+  const handleOpenTaskModal = (ticket: InboxTicket) => {
+    setTaskModalTicket(ticket);
+
+    // Tự động đoán Bot Type theo category
+    let botType: BotType = 'keycloak_api';
+    let defaultPayload: Record<string, any> = {
+      ticket_id: ticket.id,
+      sender_email: ticket.sender_email,
+      action: 'auto_triage'
+    };
+
+    if (ticket.category === 'account_keycloak') {
+      botType = 'keycloak_api';
+      defaultPayload = {
+        action: 'reset_password',
+        target_email: ticket.sender_email,
+        temp_pass: 'Ptv@2026',
+        ticket_id: ticket.id
+      };
+    } else if (ticket.category === 'lms_enroll') {
+      botType = 'workspace_rpa';
+      defaultPayload = {
+        action: 'enroll_student',
+        student_email: ticket.sender_email,
+        school_name: ticket.submitter_name || 'Partner School',
+        course_name: 'Python Robotics / AIROC',
+        ticket_id: ticket.id
+      };
+    } else if (ticket.source === 'google_form') {
+      botType = 'feedback_doc_triage';
+      defaultPayload = {
+        action: 'comment_and_assign',
+        doc_url: ticket.doc_url || '',
+        assignee_email: ticket.assigned_email || 'hung.nguyenmanh@dtt.vn',
+        category: ticket.category || 'other',
+        row_index: ticket.metadata?.row_index || 2,
+        ticket_id: ticket.id
+      };
+    }
+
+    setSelectedBotType(botType);
+    setPayloadText(JSON.stringify(defaultPayload, null, 2));
+  };
+
+  // 3. Thực thi lưu Task vào database
+  const handleConfirmCreateTask = async () => {
+    if (!taskModalTicket) return;
+
+    let parsedPayload = {};
+    try {
+      parsedPayload = JSON.parse(payloadText);
+    } catch (e) {
+      toast.error('Payload JSON không hợp lệ, vui lòng kiểm tra lại cú pháp!');
+      return;
+    }
+
+    setCreatingTask(true);
     try {
       await fetchApi('/tasks', {
         method: 'POST',
-        body: JSON.stringify({ ticket_id: ticketId, bot_type: 'keycloak_api' }),
+        body: JSON.stringify({
+          ticket_id: taskModalTicket.id,
+          bot_type: selectedBotType,
+          payload_data: parsedPayload
+        }),
       });
-      toast.success('Đã tạo tác vụ phê duyệt Bot thành công! Chuyển sang tab Task Hub để duyệt.');
+
+      toast.success(
+        <div className="space-y-1">
+          <div className="font-bold">Đã tạo tác vụ phê duyệt Bot thành công!</div>
+          <button
+            onClick={() => navigate('/tasks')}
+            className="text-violet-400 underline text-xs font-semibold"
+          >
+            Chuyển đến Task Hub để duyệt ngay ➔
+          </button>
+        </div>
+      );
+
+      setTaskModalTicket(null);
       await loadTickets();
     } catch (err) {
       toast.error('Lỗi tạo tác vụ: ' + (err as Error).message);
     } finally {
-      setActionLoading(null);
+      setCreatingTask(false);
     }
   };
 
@@ -264,7 +355,7 @@ export const UnifiedInboxPage: React.FC = () => {
 
         <button
           onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 rounded-xl text-xs text-slate-700 dark:text-slate-300 transition shadow-2xs"
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 rounded-xl text-xs text-slate-700 dark:text-slate-300 transition shadow-2xs cursor-pointer"
         >
           <ArrowUpDown className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
           <span>{sortOrder === 'desc' ? "Mới nhất ➔ Cũ nhất" : "Cũ nhất ➔ Mới nhất"}</span>
@@ -280,11 +371,10 @@ export const UnifiedInboxPage: React.FC = () => {
             <button
               key={s.id}
               onClick={() => setSelectedSource(s.id)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition ${
-                selectedSource === s.id
-                  ? 'bg-sky-50 text-sky-700 border border-sky-200/80 dark:bg-sky-500/15 dark:text-sky-300 dark:border-sky-500/30 font-semibold shadow-xs'
-                  : 'bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/60 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-              }`}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition cursor-pointer ${selectedSource === s.id
+                ? 'bg-sky-50 text-sky-700 border border-sky-200/80 dark:bg-sky-500/15 dark:text-sky-300 dark:border-sky-500/30 font-semibold shadow-xs'
+                : 'bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/60 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
             >
               {s.label}
             </button>
@@ -298,11 +388,10 @@ export const UnifiedInboxPage: React.FC = () => {
             <button
               key={cat.id}
               onClick={() => setSelectedCategory(cat.id)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition ${
-                selectedCategory === cat.id
-                  ? 'bg-violet-50 text-violet-700 border border-violet-200/80 dark:bg-violet-500/15 dark:text-violet-300 dark:border-violet-500/30 font-semibold shadow-xs'
-                  : 'bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/60 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-              }`}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition cursor-pointer ${selectedCategory === cat.id
+                ? 'bg-violet-50 text-violet-700 border border-violet-200/80 dark:bg-violet-500/15 dark:text-violet-300 dark:border-violet-500/30 font-semibold shadow-xs'
+                : 'bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/60 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
             >
               {cat.label}
             </button>
@@ -401,7 +490,7 @@ export const UnifiedInboxPage: React.FC = () => {
                       <button
                         key={idx}
                         onClick={() => setPreviewFile(att)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1 bg-sky-50 text-sky-700 hover:bg-sky-100 dark:bg-sky-500/15 dark:text-sky-300 dark:border-sky-500/30 border border-sky-200 rounded-xl text-xs transition shadow-2xs"
+                        className="inline-flex items-center gap-1.5 px-3 py-1 bg-sky-50 text-sky-700 hover:bg-sky-100 dark:bg-sky-500/15 dark:text-sky-300 dark:border-sky-500/30 border border-sky-200 rounded-xl text-xs transition shadow-2xs cursor-pointer"
                       >
                         <ImageIcon className="w-3.5 h-3.5" />
                         <span>{att.filename || `File đính kèm ${idx + 1}`}</span>
@@ -430,7 +519,7 @@ export const UnifiedInboxPage: React.FC = () => {
                 <div className="border-t border-slate-200/60 dark:border-slate-700/60 pt-2">
                   <button
                     onClick={() => setExpandedContent(prev => ({ ...prev, [ticket.id]: !prev[ticket.id] }))}
-                    className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition font-medium"
+                    className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition font-medium cursor-pointer"
                   >
                     <FileCode className="w-3.5 h-3.5 text-slate-400" />
                     <span>{isExpanded ? "Thu gọn nội dung email gốc" : "Xem nội dung email gốc đầy đủ"}</span>
@@ -444,46 +533,52 @@ export const UnifiedInboxPage: React.FC = () => {
                   )}
                 </div>
 
-                {/* Footer Buttons */}
+                {/* Footer Action Buttons */}
                 <div className="flex items-center justify-between pt-1 flex-wrap gap-2">
                   <span className="text-[11px] text-slate-500 dark:text-slate-400">
                     <span className="text-emerald-600 dark:text-emerald-400">✓ AI-Powered Feed</span>
                   </span>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     {selectedCategory === 'dismissed' ? (
                       <button
                         onClick={() => handleRestoreTask(ticket.id)}
                         disabled={actionLoading === ticket.id}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-xs font-medium rounded-xl transition shadow-2xs"
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-xs font-medium rounded-xl transition shadow-2xs cursor-pointer"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
                         <span>Khôi phục Hòm Thư</span>
                       </button>
                     ) : (
                       <>
+                        {/* Nút Bỏ qua */}
                         <button
                           onClick={() => handleDismissTask(ticket.id)}
                           disabled={actionLoading === ticket.id}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/80 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 dark:border-rose-500/20 dark:text-rose-300 text-xs font-medium rounded-xl transition shadow-2xs"
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/80 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 dark:border-rose-500/20 dark:text-rose-300 text-xs font-medium rounded-xl transition shadow-2xs cursor-pointer"
                         >
                           {actionLoading === ticket.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
                           <span>Bỏ qua</span>
                         </button>
 
+                        {/* Nút 1: Tạo GitHub Issue */}
                         <button
-                          onClick={() => handleCreateTask(ticket.id)}
-                          disabled={actionLoading === ticket.id}
-                          className="flex items-center gap-2 px-4 py-1.5 bg-violet-600 hover:bg-violet-500 disabled:bg-slate-300 dark:disabled:bg-slate-700 text-white text-xs font-semibold rounded-xl transition shadow-xs"
+                          onClick={() => handleNavigateToGitHub(ticket)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-100 dark:hover:bg-white dark:text-slate-900 text-xs font-semibold rounded-xl transition shadow-xs cursor-pointer"
+                          title="Tạo GitHub Issue từ Ticket này"
                         >
-                          {actionLoading === ticket.id ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <>
-                              <span>Tạo Tác Vụ Phê Duyệt Bot</span>
-                              <ArrowRight className="w-4 h-4" />
-                            </>
-                          )}
+                          <Github className="w-3.5 h-3.5" />
+                          <span>Tạo Issue GitHub</span>
+                        </button>
+
+                        {/* Nút 2: Tạo Tác Vụ Phê Duyệt Bot */}
+                        <button
+                          onClick={() => handleOpenTaskModal(ticket)}
+                          className="flex items-center gap-2 px-3.5 py-1.5 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 text-white text-xs font-semibold rounded-xl transition shadow-xs cursor-pointer"
+                        >
+                          <Bot className="w-3.5 h-3.5" />
+                          <span>Tạo Tác Vụ Bot</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
                         </button>
                       </>
                     )}
@@ -495,9 +590,102 @@ export const UnifiedInboxPage: React.FC = () => {
         </div>
       )}
 
-      {/* Modal Xem File Đính Kèm */}
+      {/* Modal 1: Xem File Đính Kèm */}
       {previewFile && (
         <FileViewerModal file={previewFile} onClose={() => setPreviewFile(null)} />
+      )}
+
+      {/* Modal 2: Tạo & Tùy Chỉnh Bot Automation Task */}
+      {taskModalTicket && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden space-y-4 p-6">
+
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-700">
+              <div className="flex items-center gap-2">
+                <Bot className="w-5 h-5 text-violet-600 dark:text-violet-400" />
+                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                  Khởi Tạo Tác Vụ Bot Automation
+                </h3>
+              </div>
+              <button
+                onClick={() => setTaskModalTicket(null)}
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Ticket Info Summary */}
+            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-700 text-xs space-y-1">
+              <div className="font-semibold text-slate-800 dark:text-slate-200 truncate">
+                {taskModalTicket.subject || 'Không có tiêu đề'}
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                Người gửi: {taskModalTicket.sender_email} | Nguồn: {taskModalTicket.source.toUpperCase()}
+              </div>
+            </div>
+
+            {/* Bot Type Selection */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Chọn Cỗ Máy Bot Worker
+              </label>
+              <select
+                value={selectedBotType}
+                onChange={(e) => setSelectedBotType(e.target.value as BotType)}
+                className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs text-slate-800 dark:text-slate-200 font-medium outline-none focus:border-violet-500"
+              >
+                <option value="keycloak_api">🔑 Keycloak Identity Bot (Reset Pass / Quản Trị User)</option>
+                <option value="workspace_rpa">🏢 Workspace License RPA (Bulk User .xlsx, Order / Contract)</option>
+                <option value="lms_playwright">🎓 LMS Playwright Worker (Ghi danh khóa học PLearn)</option>
+                <option value="feedback_doc_triage">📝 Feedback Doc Triage (Gắn tag @Doc & Check Sheet)</option>
+                <option value="github_issue_creator">🐙 GitHub Issue Dispatcher (Tạo Bug Issue)</option>
+              </select>
+            </div>
+
+            {/* Payload JSON Editor */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                <span>Tham Số Thực Thi (Payload JSON)</span>
+                <span className="text-[10px] text-slate-400 font-normal">Có thể chỉnh sửa</span>
+              </label>
+              <textarea
+                rows={6}
+                value={payloadText}
+                onChange={(e) => setPayloadText(e.target.value)}
+                className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-xs font-mono text-slate-900 dark:text-slate-100 outline-none focus:border-violet-500 leading-relaxed"
+              />
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-700">
+              <button
+                type="button"
+                onClick={() => setTaskModalTicket(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl transition cursor-pointer"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                disabled={creatingTask}
+                onClick={handleConfirmCreateTask}
+                className="px-5 py-2 bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold rounded-xl transition flex items-center gap-2 shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                {creatingTask ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Lưu Tác Vụ Vào Hàng Đợi Duyệt</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+          </div>
+        </div>
       )}
     </div>
   );
