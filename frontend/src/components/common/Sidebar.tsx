@@ -33,9 +33,7 @@ export const Sidebar: React.FC = () => {
           to="/"
           className="h-16 px-5 flex items-center gap-3 border-b border-slate-200/80 dark:border-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors"
         >
-          <div className="w-8 h-8 rounded-xl bg-violet-50 text-violet-700 border border-violet-200 dark:bg-violet-500/15 dark:text-violet-300 dark:border-violet-500/30 flex items-center justify-center shadow-xs">
-            <Zap className="w-4 h-4 fill-current" />
-          </div>
+          <img src="/logo.png" alt="Pythaverse Logo" className="w-8 h-8 rounded-xl" />
           <div>
             <h1 className="font-bold text-slate-900 dark:text-slate-100 text-sm tracking-tight">Pythaverse Admin</h1>
             <p className="text-[10px] text-violet-600 dark:text-violet-400 font-semibold tracking-wider uppercase">Automation Hub</p>

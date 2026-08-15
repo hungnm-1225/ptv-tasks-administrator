@@ -27,9 +27,7 @@ export const LandingPage: React.FC = () => {
       <header className="border-b border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-violet-50 text-violet-700 border border-violet-200 dark:bg-violet-500/15 dark:text-violet-300 dark:border-violet-500/30 flex items-center justify-center shadow-xs">
-              <Zap className="w-4 h-4 fill-current" />
-            </div>
+            <img src="/logo.png" alt="Pythaverse Logo" className="w-8 h-8 rounded-xl" />
             <div>
               <span className="font-bold text-slate-900 dark:text-slate-100 text-sm tracking-tight">Pythaverse Admin</span>
               <span className="text-[10px] text-violet-600 dark:text-violet-400 font-semibold uppercase tracking-wider ml-1.5 hidden sm:inline">Hub</span>
