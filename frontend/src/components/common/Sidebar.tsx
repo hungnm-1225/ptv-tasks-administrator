@@ -42,13 +42,6 @@ export const Sidebar: React.FC = () => {
 
         {/* Navigation Menu */}
         <nav className="p-3.5 space-y-1">
-          <Link
-            to="/"
-            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-all mb-3 border border-transparent hover:border-slate-200 dark:hover:border-slate-800"
-          >
-            <Home className="w-4 h-4 text-sky-600 dark:text-sky-400" />
-            <span>Trang Chủ (Landing)</span>
-          </Link>
 
           <div className="text-[10px] font-semibold text-slate-400 dark:text-slate-400 uppercase px-3 pt-2 pb-1.5 tracking-wider">
             Admin Modules

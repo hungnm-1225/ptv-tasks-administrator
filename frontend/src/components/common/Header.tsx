@@ -26,20 +26,7 @@ export const Header: React.FC = () => {
 
       {/* Right User & Controls */}
       <div className="flex items-center gap-3">
-        {/* Navigation back to Landing Page */}
-        <Link
-          to="/"
-          className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200/80 dark:bg-slate-800 dark:hover:bg-slate-700/80 border border-slate-200/80 dark:border-slate-700/60 text-slate-700 dark:text-slate-200 text-xs font-medium rounded-xl transition shadow-xs"
-        >
-          <Home className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
-          <span>Trang Chủ</span>
-        </Link>
 
-        {/* Domain Whitelist Badge (Soft Sage Mint) */}
-        <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200/80 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30 text-[11px] font-medium rounded-full transition-colors">
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-          <span>@dtt.vn</span>
-        </div>
 
         {/* ☀️ / 🌙 THEME TOGGLE BUTTON */}
         <button
