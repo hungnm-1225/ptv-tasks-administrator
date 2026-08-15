@@ -88,7 +88,7 @@ export const GithubReporterPage: React.FC = () => {
       const payload = {
         ticket_id: incomingTicket?.source_id || '',
         subject: incomingTicket?.subject || title.replace(/^###\s*\[BUG\]\[\w+\]\s*/i, '').trim() || "Sự cố hệ thống",
-        raw_content: incomingTicket?.raw_content || incomingTicket?.ai_summary || title,
+        raw_content: incomingTicket?.raw_content || incomingTicket?.ai_summary || body || title,
         source: incomingTicket?.source || 'osticket',
         sender: incomingTicket?.sender_email || incomingTicket?.submitter_name || 'hung.nguyenmanh@dtt.vn',
         impacted_system: system,
@@ -103,7 +103,7 @@ export const GithubReporterPage: React.FC = () => {
       if (res?.title) setTitle(res.title);
       if (res?.body) setBody(res.body);
 
-      toast.success('Gemini AI đã phân tích ticket và soạn thảo Bug Report thành công!');
+      toast.success('Gemini AI đã phân tích chi tiết sự cố và soạn thảo xong Bug Report!');
     } catch (err) {
       console.error('Lỗi gọi AI:', err);
       toast.error('Lỗi kết nối Gemini AI: ' + (err as Error).message);
