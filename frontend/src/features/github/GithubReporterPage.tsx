@@ -14,7 +14,8 @@ import {
   Edit3,
   Check,
   ExternalLink,
-  Ticket as TicketIcon
+  Ticket as TicketIcon,
+  Wrench
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { GithubIssueResponse, InboxTicket } from '../../types';
@@ -50,6 +51,7 @@ export const GithubReporterPage: React.FC = () => {
   const [repo, setRepo] = useState<string>('PTV-TechHub/Pythaverse2026');
   const [title, setTitle] = useState<string>('');
   const [body, setBody] = useState<string>('');
+  const [qaNotes, setQaNotes] = useState<string>(''); // 🎯 Ghi chú khảo sát của QA
   const [selectedAssignees, setSelectedAssignees] = useState<string[]>(['nguyenthetrung5-PTV', 'thetrungdtt']);
   const [selectedLabels, setSelectedLabels] = useState<string[]>(['bug']);
   const [priority, setPriority] = useState<string>('Urgent');
@@ -59,10 +61,18 @@ export const GithubReporterPage: React.FC = () => {
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [aiGenerating, setAiGenerating] = useState<boolean>(false);
 
-  // Khi mở từ Unified Inbox sang, set tiêu đề ban đầu
+  // Nhận diện Ticket truyền từ Inbox sang
   useEffect(() => {
     if (incomingTicket) {
       setTitle(`### [BUG][${priority.toUpperCase()}] ${incomingTicket.subject}`);
+
+      // Đoán hệ thống dựa theo category
+      if (incomingTicket.category === 'account_keycloak') setSystem('Keycloak (Auth IDP)');
+      else if (incomingTicket.category === 'lms_enroll') setSystem('PLearn (LMS)');
+      else if (incomingTicket.subject?.toLowerCase().includes('companion') || incomingTicket.subject?.toLowerCase().includes('leanbot')) {
+        setSystem('Leanbot / Hardware');
+      }
+
       if (incomingTicket.source === 'google_form' && !selectedLabels.includes('from-feedback')) {
         setSelectedLabels(prev => [...prev, 'from-feedback']);
       }
@@ -81,7 +91,7 @@ export const GithubReporterPage: React.FC = () => {
     );
   };
 
-  // 🔥 GỌI API GEMINI THẬT SANG BACKEND
+  // 🔥 GỌI API GEMINI VỚI ĐẦY ĐỦ DOMAIN KNOWLEDGE & QA NOTES
   const handleAiAutoFill = async () => {
     setAiGenerating(true);
     try {
@@ -92,7 +102,8 @@ export const GithubReporterPage: React.FC = () => {
         source: incomingTicket?.source || 'osticket',
         sender: incomingTicket?.sender_email || incomingTicket?.submitter_name || 'hung.nguyenmanh@dtt.vn',
         impacted_system: system,
-        priority: priority
+        priority: priority,
+        qa_notes: qaNotes // Gửi kèm ghi chú khảo sát của QA
       };
 
       const res = await fetchApi<{ title: string; body: string }>('/github/ai-generate-template', {
@@ -103,7 +114,7 @@ export const GithubReporterPage: React.FC = () => {
       if (res?.title) setTitle(res.title);
       if (res?.body) setBody(res.body);
 
-      toast.success('Gemini AI đã phân tích chi tiết sự cố và soạn thảo xong Bug Report!');
+      toast.success('Gemini AI đã phân tích kiến trúc & soạn thảo Bug Report chuẩn xác!');
     } catch (err) {
       console.error('Lỗi gọi AI:', err);
       toast.error('Lỗi kết nối Gemini AI: ' + (err as Error).message);
@@ -144,6 +155,7 @@ export const GithubReporterPage: React.FC = () => {
         );
         setTitle('');
         setBody('');
+        setQaNotes('');
       } else {
         toast.error(`Lỗi từ GitHub API: ${res.message || 'Không thể tạo issue'}`);
       }
@@ -183,36 +195,15 @@ export const GithubReporterPage: React.FC = () => {
       {/* Form Container */}
       <form onSubmit={handleSubmit} className="bg-white dark:bg-slate-800 p-6 sm:p-7 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-5 shadow-xs">
 
-        {/* Row 1: Target Repo & AI Generate Button */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-          <div className="md:col-span-2 space-y-1.5">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Target Repository</label>
-            <input
-              type="text"
-              value={repo}
-              onChange={(e) => setRepo(e.target.value)}
-              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono text-slate-900 dark:text-slate-100 outline-none focus:border-violet-500"
-            />
-          </div>
-
-          <button
-            type="button"
-            onClick={handleAiAutoFill}
-            disabled={aiGenerating}
-            className="w-full py-2.5 px-4 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 text-white text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
-          >
-            {aiGenerating ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Gemini Đang Phân Tích...</span>
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-4 h-4 text-violet-200" />
-                <span>AI Soạn Mẫu Chuẩn QA DTT</span>
-              </>
-            )}
-          </button>
+        {/* Row 1: Target Repo */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Target Repository</label>
+          <input
+            type="text"
+            value={repo}
+            onChange={(e) => setRepo(e.target.value)}
+            className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono text-slate-900 dark:text-slate-100 outline-none focus:border-violet-500"
+          />
         </div>
 
         {/* Row 2: Metadata Config (Priority, System, Assignees) */}
@@ -245,7 +236,7 @@ export const GithubReporterPage: React.FC = () => {
             <select
               value={system}
               onChange={(e) => setSystem(e.target.value)}
-              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2 text-xs text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
+              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2 text-xs text-slate-800 dark:text-slate-200 outline-none cursor-pointer font-medium"
             >
               {IMPACTED_SYSTEMS.map(s => (
                 <option key={s} value={s}>{s}</option>
@@ -308,6 +299,44 @@ export const GithubReporterPage: React.FC = () => {
           </div>
         </div>
 
+        {/* 🎯 Ô NHẬP GHI CHÚ KHẢO SÁT CỦA QA */}
+        <div className="space-y-1.5 p-4 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-800/40">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-amber-900 dark:text-amber-300 flex items-center gap-1.5">
+              <Wrench className="w-3.5 h-3.5 text-amber-600" />
+              <span>Ghi Chú Khảo Sát Kỹ Thuật Của QA (QA Extra Clues)</span>
+            </label>
+            <span className="text-[10px] text-amber-700 dark:text-amber-400 font-mono">Tùy chọn - Giúp AI viết siêu sát thực tế</span>
+          </div>
+          <input
+            type="text"
+            placeholder="VD: Đã test: Companion v2.60 lệch với server compiler / Moodle API trả về 403 Forbidden ở endpoint enrol_manual..."
+            value={qaNotes}
+            onChange={(e) => setQaNotes(e.target.value)}
+            className="w-full bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 outline-none focus:border-amber-500 placeholder-slate-400"
+          />
+        </div>
+
+        {/* Nút AI Soạn Thảo */}
+        <button
+          type="button"
+          onClick={handleAiAutoFill}
+          disabled={aiGenerating}
+          className="w-full py-3 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 text-white text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
+        >
+          {aiGenerating ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>Gemini Đang Kết Hợp Kiến Trúc Pythaverse & Ghi Chú QA...</span>
+            </>
+          ) : (
+            <>
+              <Sparkles className="w-4 h-4 text-violet-200" />
+              <span>AI Soạn Mẫu Chuẩn QA DTT (Theo Domain & Ghi Chú)</span>
+            </>
+          )}
+        </button>
+
         {/* Title Input */}
         <div className="space-y-1.5">
           <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Tiêu Đề Issue (Title)</label>
@@ -352,7 +381,7 @@ export const GithubReporterPage: React.FC = () => {
 
           {activeTab === 'write' ? (
             <textarea
-              rows={12}
+              rows={13}
               placeholder="Nội dung Markdown mô tả chi tiết các bước tái hiện, môi trường..."
               value={body}
               onChange={(e) => setBody(e.target.value)}

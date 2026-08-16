@@ -80,5 +80,49 @@
     "default_assignee": {
         "name": "Hung Nguyen",
         "email": "hung.nguyenmanh@dtt.vn"
+    },
+    "systems": {
+        "Workspace": {
+            "domain": "pythaverse.space",
+            "core_platform": "Role-Based Hierarchy Platform (Admin > Distributor > Partner > School > Teacher/Student)",
+            "tech_notes": "Giao dịch License giữa Admin-Distributor-Partner gọi là Contract (vĩnh viễn vào kho). Giao dịch School lên Partner gọi là Order (có Start/End Date hết hạn). Có chức năng Bulk tạo User qua file Excel (.xlsx). Sau đăng nhập điều hướng sang workspace tương ứng.",
+            "common_endpoints": "/admin-workspace/, /school-workspace/, /api/orders, /api/contracts"
+        },
+        "PLearn (LMS)": {
+            "domain": "learn.pythaverse.space",
+            "core_platform": "Moodle LMS (PHP / MariaDB / REST WebServices)",
+            "tech_notes": "Quản lý khóa học, bài học và ghi danh học viên/giáo viên. Giáo viên được cấp miễn phí license, học sinh trừ theo Order của trường. Admin có thể cấp quyền trực tiếp làm quen hệ thống (training mode).",
+            "common_endpoints": "/webservice/rest/server.php, /enrol/manual/, /course/view.php"
+        },
+        "PGit (git.pythaverse.space)": {
+            "domain": "git.pythaverse.space",
+            "core_platform": "Custom Git Code Repository Service (Gitea Engine)",
+            "tech_notes": "Lưu trữ mã nguồn mẫu phục vụ khóa học. BẮT BUỘC người dùng phải đăng nhập SSO ít nhất 1 lần để hệ thống kích hoạt (seeding) tài khoản thì Admin mới tìm thấy để add quyền vào Repository.",
+            "common_endpoints": "/user/login, /api/v1/repos/{owner}/{repo}/collaborators"
+        },
+        "Keycloak (Auth IDP)": {
+            "domain": "eid.pythaverse.space",
+            "core_platform": "Keycloak Identity & Access Management (Realm: idp / master console)",
+            "tech_notes": "Cổng xác thực tập trung Single Sign-On (OAuth2/OIDC). Quản lý reset password hàng loạt, đổi tên hiển thị, disable/enable, gỡ verified email.",
+            "common_endpoints": "/auth/admin/realms/idp/users, /auth/realms/idp/protocol/openid-connect/token"
+        },
+        "Leanbot / Hardware": {
+            "domain": "ide.pythaverse.space & App Inventor",
+            "core_platform": "Blockly Web IDE / MIT App Inventor + Bluetooth BLE Companion APK",
+            "tech_notes": "Lập trình điều khiển robot Leanbot qua Bluetooth Web BLE hoặc App Inventor Companion APK. Lỗi Out of Date Companion xảy ra khi version APK trên thiết bị di động lệch với máy chủ biên dịch Compiler.",
+            "common_endpoints": "/companion/version, /compiler/build"
+        },
+        "Support Helpdesk": {
+            "domain": "support.pythaverse.space",
+            "core_platform": "osTicket Helpdesk Engine (PHP / MySQL)",
+            "tech_notes": "Kênh tiếp nhận ticket hỗ trợ. Phân biệt Ticket Internal ID (VD: id=3338) trên đường dẫn SCP với Ticket Number hiển thị ngoài giao diện.",
+            "common_endpoints": "/scp/tickets.php?id={id}"
+        },
+        "PContest": {
+            "domain": "contest.pythaverse.space",
+            "core_platform": "Online Competition & Arena Engine",
+            "tech_notes": "Hệ thống thi đấu trực tuyến, nộp bài code và bảng xếp hạng Leaderboard.",
+            "common_endpoints": "/contest, /api/submissions"
+        }
     }
 }
