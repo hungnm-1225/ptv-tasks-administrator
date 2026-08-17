@@ -316,17 +316,6 @@ export const ReportsExportPage: React.FC = () => {
           )}
         </button>
       </div>
-
-      {/* Feature Highlights Info Card */}
-      <div className="p-5 rounded-2xl bg-violet-50/70 dark:bg-violet-950/20 border border-violet-200/70 dark:border-violet-800/30 flex items-start gap-3">
-        <Sparkles className="w-5 h-5 text-violet-600 dark:text-violet-400 shrink-0 mt-0.5" />
-        <div className="text-xs space-y-1">
-          <span className="font-bold text-violet-950 dark:text-violet-200">Đặc Quyền Tự Động Hóa Báo Cáo DTT 3Đ:</span>
-          <p className="text-violet-800 dark:text-violet-300/80 leading-relaxed">
-            Hệ thống tự động trích xuất tất cả ID vé OS Ticket, link Google Doc/Form và tóm tắt Gemini AI để ghép thành danh sách dẫn chứng chi tiết. Anh chỉ cần bấm tải về và nộp báo cáo cho Quản lý & Ban Giám Đốc!
-          </p>
-        </div>
-      </div>
     </div>
   );
 };

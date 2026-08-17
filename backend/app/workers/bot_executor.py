@@ -11,7 +11,6 @@ async def execute_approved_bot_task(bot_type: str, payload_data: dict):
                 credentials=payload_data["school_credentials"],
                 order_data=payload_data["order_details"]
             )
-            
         # 2. Luồng Sales Admin duyệt Contract
         elif action == "admin_approve_contract":
             return await workspace_playwright_service.admin_approve_distributor_contract(

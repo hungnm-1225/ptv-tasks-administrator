@@ -40,11 +40,11 @@ const AppContent: React.FC = () => {
 
   return (
     <>
-      <Toaster 
-        richColors 
-        position="top-right" 
+      <Toaster
+        richColors
+        position="top-right"
         theme={theme}
-        closeButton 
+        closeButton
       />
       <BrowserRouter>
         <Routes>

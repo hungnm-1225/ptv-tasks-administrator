@@ -304,9 +304,8 @@ export const GithubReporterPage: React.FC = () => {
           <div className="flex items-center justify-between">
             <label className="text-xs font-bold text-amber-900 dark:text-amber-300 flex items-center gap-1.5">
               <Wrench className="w-3.5 h-3.5 text-amber-600" />
-              <span>Ghi Chú Khảo Sát Kỹ Thuật Của QA (QA Extra Clues)</span>
+              <span>Ghi chú/Log</span>
             </label>
-            <span className="text-[10px] text-amber-700 dark:text-amber-400 font-mono">Tùy chọn - Giúp AI viết siêu sát thực tế</span>
           </div>
           <input
             type="text"

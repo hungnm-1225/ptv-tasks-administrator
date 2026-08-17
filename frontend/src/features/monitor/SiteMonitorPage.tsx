@@ -133,17 +133,17 @@ const UptimeBar: React.FC<UptimeBarProps> = ({ history, loading, uptime_pct = 10
   const barColor = (day: DayHistory) => {
     if (!day.date) return 'bg-slate-100 dark:bg-slate-800'; // padding (no data)
     switch (day.status) {
-      case 'DOWN':     return 'bg-rose-500 dark:bg-rose-500';
+      case 'DOWN': return 'bg-rose-500 dark:bg-rose-500';
       case 'DEGRADED': return 'bg-amber-400 dark:bg-amber-500';
-      default:         return 'bg-emerald-400 dark:bg-emerald-500';
+      default: return 'bg-emerald-400 dark:bg-emerald-500';
     }
   };
 
   const uptimeColor = uptime_pct >= 99.9
     ? 'text-emerald-600 dark:text-emerald-400'
     : uptime_pct >= 99
-    ? 'text-amber-600 dark:text-amber-400'
-    : 'text-rose-600 dark:text-rose-400';
+      ? 'text-amber-600 dark:text-amber-400'
+      : 'text-rose-600 dark:text-rose-400';
 
   return (
     <div className="space-y-1.5">
@@ -152,9 +152,8 @@ const UptimeBar: React.FC<UptimeBarProps> = ({ history, loading, uptime_pct = 10
         {padded.map((day, i) => (
           <div
             key={i}
-            className={`flex-1 rounded-[2px] transition-all duration-150 cursor-default ${barColor(day)} ${
-              day.date ? 'opacity-80 hover:opacity-100 hover:scale-y-110 origin-bottom' : 'opacity-30'
-            }`}
+            className={`flex-1 rounded-[2px] transition-all duration-150 cursor-default ${barColor(day)} ${day.date ? 'opacity-80 hover:opacity-100 hover:scale-y-110 origin-bottom' : 'opacity-30'
+              }`}
             style={{ height: day.status === 'DOWN' ? '100%' : day.status === 'DEGRADED' ? '85%' : '75%' }}
             onMouseEnter={(e) => {
               if (!day.date) return;
@@ -199,11 +198,11 @@ const UptimeBar: React.FC<UptimeBarProps> = ({ history, loading, uptime_pct = 10
 // ─── Status Badge ────────────────────────────────────────────────────────────
 function StatusDot({ status }: { status: MonitoredSite['last_status'] }) {
   const map = {
-    UP:       { pulse: 'bg-emerald-500', ring: 'ring-emerald-500/30', label: 'Đang hoạt động' },
-    DOWN:     { pulse: 'bg-rose-500',    ring: 'ring-rose-500/30',    label: 'Bị sập' },
-    WARNING:  { pulse: 'bg-amber-400',   ring: 'ring-amber-400/30',   label: 'Cảnh báo' },
-    PAUSED:   { pulse: 'bg-slate-400',   ring: 'ring-slate-400/30',   label: 'Đã dừng' },
-    CHECKING: { pulse: 'bg-sky-400',     ring: 'ring-sky-400/30',     label: 'Đang kiểm tra' },
+    UP: { pulse: 'bg-emerald-500', ring: 'ring-emerald-500/30', label: 'Đang hoạt động' },
+    DOWN: { pulse: 'bg-rose-500', ring: 'ring-rose-500/30', label: 'Bị sập' },
+    WARNING: { pulse: 'bg-amber-400', ring: 'ring-amber-400/30', label: 'Cảnh báo' },
+    PAUSED: { pulse: 'bg-slate-400', ring: 'ring-slate-400/30', label: 'Đã dừng' },
+    CHECKING: { pulse: 'bg-sky-400', ring: 'ring-sky-400/30', label: 'Đang kiểm tra' },
   };
   const cfg = map[status] || map.WARNING;
   return (
@@ -235,11 +234,10 @@ const SiteCard: React.FC<SiteCardProps> = ({
   const isWarning = site.last_status === 'WARNING';
 
   return (
-    <div className={`bg-white dark:bg-slate-800/80 border rounded-2xl overflow-hidden shadow-xs transition-all duration-200 ${
-      isDown    ? 'border-rose-200 dark:border-rose-500/30'
+    <div className={`bg-white dark:bg-slate-800/80 border rounded-2xl overflow-hidden shadow-xs transition-all duration-200 ${isDown ? 'border-rose-200 dark:border-rose-500/30'
       : isWarning ? 'border-amber-200 dark:border-amber-500/30'
-      : 'border-slate-200/80 dark:border-slate-700/60 hover:border-slate-300 dark:hover:border-slate-600'
-    }`}>
+        : 'border-slate-200/80 dark:border-slate-700/60 hover:border-slate-300 dark:hover:border-slate-600'
+      }`}>
       {/* Accent line top */}
       <div className={`h-0.5 w-full ${isDown ? 'bg-rose-500' : isWarning ? 'bg-amber-400' : 'bg-emerald-400'}`} />
 
@@ -273,20 +271,18 @@ const SiteCard: React.FC<SiteCardProps> = ({
           {/* Right: metrics */}
           <div className="shrink-0 text-right space-y-1">
             {site.http_code > 0 && (
-              <div className={`inline-block text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border ${
-                site.http_code < 400
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200/80 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/25'
-                  : 'bg-rose-50 text-rose-700 border-rose-200/80 dark:bg-rose-500/10 dark:text-rose-300 dark:border-rose-500/25'
-              }`}>
+              <div className={`inline-block text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border ${site.http_code < 400
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200/80 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/25'
+                : 'bg-rose-50 text-rose-700 border-rose-200/80 dark:bg-rose-500/10 dark:text-rose-300 dark:border-rose-500/25'
+                }`}>
                 HTTP {site.http_code}
               </div>
             )}
             {site.response_time_ms > 0 && (
-              <div className={`text-xs font-mono font-semibold ${
-                site.response_time_ms < 300 ? 'text-emerald-600 dark:text-emerald-400'
+              <div className={`text-xs font-mono font-semibold ${site.response_time_ms < 300 ? 'text-emerald-600 dark:text-emerald-400'
                 : site.response_time_ms < 800 ? 'text-amber-600 dark:text-amber-400'
-                : 'text-rose-600 dark:text-rose-400'
-              }`}>
+                  : 'text-rose-600 dark:text-rose-400'
+                }`}>
                 <Zap className="w-3 h-3 inline mr-0.5 -mt-0.5" />
                 {site.response_time_ms}ms
               </div>
@@ -318,11 +314,10 @@ const SiteCard: React.FC<SiteCardProps> = ({
             {site.login_status && site.login_status !== 'SKIP' && (
               <span>
                 SSO:{' '}
-                <span className={`font-semibold ${
-                  site.login_status === 'PASS' ? 'text-emerald-600 dark:text-emerald-400'
+                <span className={`font-semibold ${site.login_status === 'PASS' ? 'text-emerald-600 dark:text-emerald-400'
                   : site.login_status === 'FAIL' ? 'text-rose-500'
-                  : 'text-slate-500'
-                }`}>
+                    : 'text-slate-500'
+                  }`}>
                   {site.login_status}
                 </span>
               </span>
@@ -338,11 +333,10 @@ const SiteCard: React.FC<SiteCardProps> = ({
           <div className="flex items-center gap-4">
             <button
               onClick={() => onToggleEnabled(site)}
-              className={`flex items-center gap-1.5 text-xs font-medium transition ${
-                site.enabled
-                  ? 'text-emerald-700 dark:text-emerald-400'
-                  : 'text-slate-400 dark:text-slate-500'
-              }`}
+              className={`flex items-center gap-1.5 text-xs font-medium transition ${site.enabled
+                ? 'text-emerald-700 dark:text-emerald-400'
+                : 'text-slate-400 dark:text-slate-500'
+                }`}
               title={site.enabled ? 'Tắt check' : 'Bật check'}
             >
               {site.enabled
@@ -353,11 +347,10 @@ const SiteCard: React.FC<SiteCardProps> = ({
 
             <button
               onClick={() => onToggleAlert(site)}
-              className={`flex items-center gap-1.5 text-xs font-medium transition ${
-                site.show_live_alert
-                  ? 'text-violet-600 dark:text-violet-400'
-                  : 'text-slate-400 dark:text-slate-500'
-              }`}
+              className={`flex items-center gap-1.5 text-xs font-medium transition ${site.show_live_alert
+                ? 'text-violet-600 dark:text-violet-400'
+                : 'text-slate-400 dark:text-slate-500'
+                }`}
               title={site.show_live_alert ? 'Tắt thông báo' : 'Bật thông báo'}
             >
               {site.show_live_alert
@@ -621,13 +614,12 @@ export const SiteMonitorPage: React.FC = () => {
               Site Uptime & Health Monitor
             </h2>
             {/* Overall status pill */}
-            <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${
-              overallStatus === 'UP'
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-200/80 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30'
-                : overallStatus === 'DOWN'
+            <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${overallStatus === 'UP'
+              ? 'bg-emerald-50 text-emerald-700 border-emerald-200/80 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30'
+              : overallStatus === 'DOWN'
                 ? 'bg-rose-50 text-rose-700 border-rose-200/80 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30'
                 : 'bg-amber-50 text-amber-800 border-amber-200/80 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30'
-            }`}>
+              }`}>
               {overallStatus === 'UP' ? '● All Systems Operational' : overallStatus === 'DOWN' ? '● Có Sự Cố' : '● Cảnh Báo'}
             </span>
           </div>
@@ -643,7 +635,7 @@ export const SiteMonitorPage: React.FC = () => {
           className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-300 dark:disabled:bg-slate-700 text-white text-xs font-semibold rounded-xl transition shadow-sm"
         >
           <RefreshCw className={`w-4 h-4 ${checking ? 'animate-spin' : ''}`} />
-          {checking ? 'Đang kiểm tra...' : '↺ Check Now'}
+          {checking ? 'Đang kiểm tra...' : 'Check Now'}
         </button>
       </div>
 
@@ -651,12 +643,12 @@ export const SiteMonitorPage: React.FC = () => {
       {summary && !loading && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {[
-            { label: 'Tổng Sites',       value: summary.total_sites,    icon: <Globe className="w-3.5 h-3.5" />,          cls: 'text-slate-700 dark:text-slate-100' },
-            { label: 'Đang UP',          value: summary.up_count,       icon: <Wifi className="w-3.5 h-3.5" />,           cls: 'text-emerald-600 dark:text-emerald-400' },
-            { label: 'Bị DOWN',          value: summary.down_count,     icon: <WifiOff className="w-3.5 h-3.5" />,        cls: summary.down_count > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400' },
-            { label: 'Cảnh Báo',         value: summary.warning_count,  icon: <AlertTriangle className="w-3.5 h-3.5" />,  cls: summary.warning_count > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400' },
-            { label: 'Tạm Dừng',         value: summary.paused_count,   icon: <PauseCircle className="w-3.5 h-3.5" />,    cls: 'text-slate-500 dark:text-slate-400' },
-            { label: 'Avg Latency',      value: `${summary.avg_latency_ms}ms`, icon: <Zap className="w-3.5 h-3.5" />, cls: 'text-sky-600 dark:text-sky-400' },
+            { label: 'Tổng Sites', value: summary.total_sites, icon: <Globe className="w-3.5 h-3.5" />, cls: 'text-slate-700 dark:text-slate-100' },
+            { label: 'Đang UP', value: summary.up_count, icon: <Wifi className="w-3.5 h-3.5" />, cls: 'text-emerald-600 dark:text-emerald-400' },
+            { label: 'Bị DOWN', value: summary.down_count, icon: <WifiOff className="w-3.5 h-3.5" />, cls: summary.down_count > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400' },
+            { label: 'Cảnh Báo', value: summary.warning_count, icon: <AlertTriangle className="w-3.5 h-3.5" />, cls: summary.warning_count > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400' },
+            { label: 'Tạm Dừng', value: summary.paused_count, icon: <PauseCircle className="w-3.5 h-3.5" />, cls: 'text-slate-500 dark:text-slate-400' },
+            { label: 'Avg Latency', value: `${summary.avg_latency_ms}ms`, icon: <Zap className="w-3.5 h-3.5" />, cls: 'text-sky-600 dark:text-sky-400' },
           ].map(({ label, value, icon, cls }) => (
             <div key={label} className="bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 rounded-xl px-4 py-3 text-center space-y-1 shadow-xs">
               <div className={`flex items-center justify-center gap-1 text-[10px] font-semibold uppercase tracking-wider ${cls}`}>
@@ -694,26 +686,14 @@ export const SiteMonitorPage: React.FC = () => {
         <IncidentLog incidents={incidents} loading={incidentsLoading} />
       )}
 
-      {/* ── Note về Supabase setup ── */}
-      {!loading && incidents.length === 0 && (
-        <div className="flex items-start gap-3 p-4 bg-sky-50 dark:bg-sky-500/10 border border-sky-200/80 dark:border-sky-500/25 rounded-xl text-xs text-sky-800 dark:text-sky-300">
-          <Info className="w-4 h-4 shrink-0 mt-0.5 text-sky-600 dark:text-sky-400" />
-          <div>
-            <p className="font-semibold mb-1">Để xem lịch sử downtime, bạn cần tạo bảng Supabase:</p>
-            <code className="block bg-white/60 dark:bg-sky-900/30 px-3 py-1.5 rounded-lg font-mono text-[10px] mt-1 border border-sky-200/50 dark:border-sky-500/20">
-              CREATE TABLE site_downtime_events (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), site_id TEXT, site_name TEXT, started_at TIMESTAMPTZ DEFAULT now(), ended_at TIMESTAMPTZ, duration_s INTEGER, http_code INTEGER, error_msg TEXT, is_ongoing BOOLEAN DEFAULT TRUE);
-            </code>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
 
 // ─── Mock data fallback (khi backend chưa chạy) ──────────────────────────────
 const MOCK_SITES: MonitoredSite[] = [
-  { id: 'pythaverse_main', name: 'Pythaverse Main Portal',  url: 'https://pythaverse.space/',                   category: 'core',      enabled: true, show_live_alert: true,  last_status: 'UP', http_code: 200, response_time_ms: 185, last_checked_at: null, login_status: 'PASS', details: 'Main Portal & 6/6 Roles', uptime_pct_24h: 100, uptime_pct_7d: 100, uptime_pct_30d: 100, total_incidents: 0, is_down_since: null, history: Array.from({length:45},(_,i)=>({date:'',status:'UP' as const,incidents:0,downtime_s:0})), historyLoading: false },
-  { id: 'ide',             name: 'Pythaverse IDE',          url: 'https://ide.pythaverse.space/#/',              category: 'satellite', enabled: true, show_live_alert: true,  last_status: 'UP', http_code: 200, response_time_ms: 220, last_checked_at: null, login_status: 'SKIP', details: 'Online IDE', uptime_pct_24h: 100, uptime_pct_7d: 99.8, uptime_pct_30d: 99.9, total_incidents: 1, is_down_since: null, history: Array.from({length:45},(_,i)=>({date:'',status: i===40 ? 'DOWN' as const : 'UP' as const,incidents: i===40 ? 1 : 0,downtime_s: i===40 ? 1800 : 0})), historyLoading: false },
+  { id: 'pythaverse_main', name: 'Pythaverse Main Portal', url: 'https://pythaverse.space/', category: 'core', enabled: true, show_live_alert: true, last_status: 'UP', http_code: 200, response_time_ms: 185, last_checked_at: null, login_status: 'PASS', details: 'Main Portal & 6/6 Roles', uptime_pct_24h: 100, uptime_pct_7d: 100, uptime_pct_30d: 100, total_incidents: 0, is_down_since: null, history: Array.from({ length: 45 }, (_, i) => ({ date: '', status: 'UP' as const, incidents: 0, downtime_s: 0 })), historyLoading: false },
+  { id: 'ide', name: 'Pythaverse IDE', url: 'https://ide.pythaverse.space/#/', category: 'satellite', enabled: true, show_live_alert: true, last_status: 'UP', http_code: 200, response_time_ms: 220, last_checked_at: null, login_status: 'SKIP', details: 'Online IDE', uptime_pct_24h: 100, uptime_pct_7d: 99.8, uptime_pct_30d: 99.9, total_incidents: 1, is_down_since: null, history: Array.from({ length: 45 }, (_, i) => ({ date: '', status: i === 40 ? 'DOWN' as const : 'UP' as const, incidents: i === 40 ? 1 : 0, downtime_s: i === 40 ? 1800 : 0 })), historyLoading: false },
 ];
 
 const MOCK_SUMMARY: MonitorSummary = {

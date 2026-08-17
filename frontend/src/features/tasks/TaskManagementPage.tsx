@@ -288,10 +288,6 @@ export const TaskManagementPage: React.FC = () => {
                 />
               </div>
 
-              <div className="p-3 bg-amber-50 text-amber-800 border border-amber-200/80 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30 rounded-xl text-[11px] space-y-1">
-                <strong>Lưu ý:</strong> Khi bạn bấm Phê Duyệt, hệ thống sẽ gọi worker tương ứng để thực thi ngay lập tức và tự động đồng bộ kết quả ngược về Google Sheet.
-              </div>
-
               {/* Action Buttons */}
               <div className="flex items-center justify-between pt-2">
                 <button

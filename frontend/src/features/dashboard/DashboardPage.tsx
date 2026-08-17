@@ -174,7 +174,6 @@ export const DashboardPage: React.FC = () => {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="text-xs font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wider">Phân Phối Theo Danh Mục</h3>
-              <span className="text-[10px] text-slate-400 font-mono">Gemini AI Triaged</span>
             </div>
             {/* Bộ lọc riêng Category */}
             <div className="flex bg-slate-100 dark:bg-slate-700/60 p-0.5 rounded-lg text-[11px]">
@@ -270,7 +269,6 @@ export const DashboardPage: React.FC = () => {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="text-xs font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wider">Xu Hướng Xử Lý Hàng Ngày</h3>
-              <span className="text-[10px] text-slate-400 font-mono">Tiếp nhận vs Hoàn thành</span>
             </div>
             {/* Bộ lọc riêng Trend */}
             <div className="flex bg-slate-100 dark:bg-slate-700/60 p-0.5 rounded-lg text-[11px]">
