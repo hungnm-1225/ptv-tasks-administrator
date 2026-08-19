@@ -1,121 +1,272 @@
 # backend/app/services/osticket_service.py
+import re
 import os
-import asyncio
+import mimetypes
 import logging
+from typing import Dict, Any, List, Optional
+from urllib.parse import urljoin
 from playwright.async_api import async_playwright
+from app.core.config import settings
 from app.core.supabase import get_supabase_client
 from app.core.gemini import process_ticket_with_ai
 
 logger = logging.getLogger(__name__)
 
-OSTICKET_URL = os.getenv("OSTICKET_URL", "https://support.pythaverse.space/scp/login.php")
-ADMIN_USER = os.getenv("OSTICKET_ADMIN_USER")
-ADMIN_PASS = os.getenv("OSTICKET_ADMIN_PASS")
+OSTICKET_BASE_URL = settings.OSTICKET_URL.replace("/scp/login.php", "").replace("/login.php", "")
 
-async def poll_open_ostickets():
-    """Hàm cào OS Ticket bóc tách đúng ID Nội Bộ & Số Hiệu Hiển Thị"""
-    logger.info("🔎 Đang quét OS Ticket (support.pythaverse.space)...")
-    
-    if not ADMIN_USER or not ADMIN_PASS:
-        logger.warning("⚠️ Thiếu OSTICKET_ADMIN_USER hoặc OSTICKET_ADMIN_PASS!")
-        return
+class OSTicketService:
+    """Service Playwright chuyên cào vé OS Ticket, bóc tách Form tùy chỉnh và tải Attachment lên Supabase."""
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context()
+    def __init__(self):
+        self.headless = True
+
+    async def _create_context(self, p) -> tuple:
+        browser = await p.chromium.launch(
+            headless=self.headless,
+            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+        )
+        context = await browser.new_context(
+            viewport={"width": 1440, "height": 900},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        )
         page = await context.new_page()
+        return browser, context, page
 
+    async def login(self, page) -> bool:
+        """Đăng nhập vào bảng điều khiển quản trị OS Ticket (/scp/login.php)."""
         try:
-            # 1. Đăng nhập OS Ticket
-            await page.goto(OSTICKET_URL, timeout=30000)
-            if await page.is_visible('input[name="userid"]'):
-                await page.fill('input[name="userid"]', ADMIN_USER)
-                await page.fill('input[name="passwd"]', ADMIN_PASS)
-                
-                # Bấm button submit chuẩn HTML
-                submit_btn = await page.query_selector('button[type="submit"], button.submit, input[type="submit"]')
-                if submit_btn:
-                    await submit_btn.click()
-                else:
-                    await page.press('input[name="passwd"]', 'Enter')
+            login_url = f"{OSTICKET_BASE_URL}/scp/login.php"
+            logger.info(f"🔑 Đang đăng nhập OS Ticket: {settings.OSTICKET_ADMIN_USER}...")
+            await page.goto(login_url, wait_until="networkidle", timeout=30000)
 
-                # Chờ đăng nhập hoàn tất
-                await page.wait_for_load_state("domcontentloaded")
-                await page.wait_for_load_state("networkidle")
+            # Nếu đã đăng nhập sẵn
+            if "/scp/index.php" in page.url or "/scp/tickets.php" in page.url:
+                return True
 
-            # 2. Đã ở trang Admin Panel -> Mở danh sách Open Queue
-            if "tickets.php" not in page.url:
-                await page.goto("https://support.pythaverse.space/scp/tickets.php", wait_until="domcontentloaded", timeout=30000)
-                
-            await page.wait_for_selector("table.queue.tickets", timeout=15000)
+            await page.fill("input[name='userid'], #name", settings.OSTICKET_ADMIN_USER)
+            await page.fill("input[name='passwd'], #pass", settings.OSTICKET_ADMIN_PASS)
+            await page.click("input[type='submit'], button[type='submit']")
+            await page.wait_for_timeout(3000)
 
-            # 3. Duyệt qua từng dòng <tr> trong Bảng
-            rows = await page.query_selector_all("table.queue.tickets tbody tr")
-            supabase = get_supabase_client()
+            if "login.php" in page.url:
+                logger.error("❌ Đăng nhập OS Ticket thất bại! Vui lòng kiểm tra lại mật khẩu.")
+                return False
 
-            for row in rows:
-                cols = await row.query_selector_all("td")
-                if len(cols) < 7:
-                    continue
-
-                ticket_a = await cols[1].query_selector("a.preview")
-                if not ticket_a:
-                    continue
-
-                # 🎯 TÁC VỤ GỘP: BÓC TÁCH ĐÚNG ID NỘI BỘ VÀ SỐ HIỆU HIỂN THỊ
-                href = await ticket_a.get_attribute("href") or ""  # VD: "/scp/tickets.php?id=3338"
-                display_number = (await ticket_a.inner_text()).strip() # VD: "965278"
-                
-                # Trích xuất ID nội bộ từ `id=3338` trên URL
-                if "id=" in href:
-                    internal_id = href.split("id=")[1].split("&")[0]
-                else:
-                    internal_id = display_number
-
-                last_updated = (await cols[2].inner_text()).strip()      # VD: 03/07/2026 12:39 PM
-                subject_raw = (await cols[3].inner_text()).strip()       # VD: Technical Issue - PLearn
-                from_person = (await cols[4].inner_text()).strip()       # VD: Nguyen Hung
-                priority = (await cols[5].inner_text()).strip()          # VD: Emergency
-                assigned_to = (await cols[6].inner_text()).strip()       # VD: Mohd Afiq
-
-                formatted_subject = f"[#{display_number}] {subject_raw}"
-
-                # 4. Kiểm tra xem Internal ID đã lưu trong Supabase chưa
-                existing = supabase.table("inbox_tickets") \
-                    .select("id").eq("source", "osticket").eq("source_id", internal_id).execute()
-
-                if existing.data:
-                    continue
-
-                # 5. Mở trang chi tiết lấy Nội dung Thread
-                detail_page = await context.new_page()
-                await detail_page.goto(f"https://support.pythaverse.space/scp/{href.lstrip('/')}")
-                
-                thread_body = await detail_page.query_selector(".thread-body")
-                raw_content = await thread_body.inner_text() if thread_body else subject_raw
-                await detail_page.close()
-
-                # 6. LƯU ĐẦY ĐỦ THÔNG TIN VÀO SUPABASE
-                new_ticket = {
-                    "source": "osticket",
-                    "source_id": internal_id, # Lưu ID nội bộ (3338) để link bấm đúng 100%
-                    "sender_email": f"{from_person.lower().replace(' ', '')}@pythaverse.space",
-                    "submitter_name": from_person,
-                    "subject": formatted_subject,
-                    "raw_content": raw_content,
-                    "priority": priority,
-                    "assigned_to": assigned_to,
-                    "ticket_timestamp": last_updated,
-                    "status": "pending",
-                    "metadata": {"ticket_number": display_number, "detail_href": href}
-                }
-                res = supabase.table("inbox_tickets").insert(new_ticket).execute()
-                
-                if res.data:
-                    logger.info(f"✅ Đã cào thành công Ticket OS Ticket mới: #{display_number} (ID: {internal_id})")
-                    await process_ticket_with_ai(res.data[0]["id"])
-
+            logger.info("✅ Đăng nhập OS Ticket thành công!")
+            return True
         except Exception as e:
-            logger.error(f"❌ Lỗi khi quét OS Ticket: {e}")
-        finally:
-            await browser.close()
+            logger.error(f"❌ Lỗi đăng nhập OS Ticket: {e}")
+            return False
+
+    async def upload_attachment_to_supabase(self, context, file_url: str, filename: str, ticket_internal_id: str) -> Optional[str]:
+        """Tải file từ OS Ticket bằng context đã đăng nhập và upload lên Supabase Storage."""
+        try:
+            supabase = get_supabase_client()
+            clean_filename = re.sub(r'[^a-zA-Z0-9_.-]', '_', filename)
+            storage_path = f"osticket/{ticket_internal_id}_{clean_filename}"
+
+            # Tải dữ liệu nhị phân của file
+            response = await context.request.get(file_url)
+            if response.status != 200:
+                logger.warning(f"⚠️ Không tải được file {filename} từ OS Ticket (Status: {response.status})")
+                return None
+
+            file_bytes = await response.body()
+            content_type, _ = mimetypes.guess_type(filename)
+            content_type = content_type or "application/octet-stream"
+
+            # Upload vào bucket 'ticket-attachments'
+            bucket = supabase.storage.from_("ticket-attachments")
+            bucket.upload(storage_path, file_bytes, file_options={"content-type": content_type, "upsert": "true"})
+            
+            public_url = bucket.get_public_url(storage_path)
+            logger.info(f"💾 Đã lưu Attachment '{filename}' lên Supabase Storage: {public_url}")
+            return public_url
+        except Exception as e:
+            logger.error(f"❌ Lỗi upload attachment OS Ticket: {e}")
+            return None
+
+    async def scrape_ticket_detail(self, page, context, internal_id: str) -> Optional[Dict[str, Any]]:
+        """Mở chi tiết vé và bóc tách toàn bộ thông tin, form Partner và các tệp đính kèm."""
+        detail_url = f"{OSTICKET_BASE_URL}/scp/tickets.php?id={internal_id}"
+        logger.info(f"🔍 Đang mở chi tiết vé #{internal_id}: {detail_url}")
+        
+        await page.goto(detail_url, wait_until="networkidle", timeout=30000)
+        await page.wait_for_selector(".tixTitle, #ticket_info", timeout=15000)
+
+        # 1. Bóc tách Tiêu đề
+        subject = ""
+        title_el = page.locator(".tixTitle h3, h2 a").first
+        if await title_el.count() > 0:
+            subject = (await title_el.inner_text()).strip()
+
+        # 2. Bóc tách Người gửi (Tên & Email)
+        submitter_name = "User"
+        sender_email = "support@pythaverse.space"
+        user_name_el = page.locator("span[id^='user-'][id$='-name']").first
+        user_email_el = page.locator("span[id^='user-'][id$='-email']").first
+
+        if await user_name_el.count() > 0:
+            submitter_name = (await user_name_el.inner_text()).strip()
+        if await user_email_el.count() > 0:
+            sender_email = (await user_email_el.inner_text()).strip()
+
+        # 3. Bóc tách Help Topic
+        help_topic = ""
+        topic_row = page.locator("//tr[contains(., 'Help Topic:')]//td").first
+        if await topic_row.count() > 0:
+            help_topic = (await topic_row.inner_text()).strip()
+
+        # 4. Bóc tách Custom Form: Partner Account Request Form (nếu có)
+        school_name = ""
+        country = ""
+        school_cell = page.locator("//tr[contains(., 'School Name for the COF:')]//td[2]").first
+        if await school_cell.count() > 0:
+            school_name = (await school_cell.inner_text()).strip()
+
+        country_cell = page.locator("//tr[contains(., 'Country:')]//td[2]").first
+        if await country_cell.count() > 0:
+            country = (await country_cell.inner_text()).strip()
+
+        # 5. Bóc tách Nội dung tin nhắn đầu tiên trong Thread
+        message_body = ""
+        first_msg = page.locator(".thread-entry.message .thread-body").first
+        if await first_msg.count() > 0:
+            message_body = (await first_msg.inner_text()).strip()
+
+        # 6. Bóc tách & Tải toàn bộ Attachments (từ Form và từ Thread)
+        attachments_list = []
+        
+        # A. File trong Custom Form
+        form_file_link = page.locator("//tr[contains(., 'Upload your COF File:')]//a").first
+        if await form_file_link.count() > 0:
+            raw_href = await form_file_link.get_attribute("href")
+            fname = (await form_file_link.inner_text()).strip()
+            if raw_href:
+                full_file_url = urljoin(OSTICKET_BASE_URL + "/scp/", raw_href)
+                storage_url = await self.upload_attachment_to_supabase(context, full_file_url, fname, internal_id)
+                if storage_url:
+                    attachments_list.append({"filename": fname, "url": storage_url})
+
+        # B. File trong Thread Messages
+        thread_attachments = page.locator(".attachments .attachment-info a, .attachments a.filename")
+        attach_count = await thread_attachments.count()
+        for idx in range(attach_count):
+            link = thread_attachments.nth(idx)
+            raw_href = await link.get_attribute("href")
+            fname = (await link.inner_text()).strip()
+            if raw_href and fname:
+                full_file_url = urljoin(OSTICKET_BASE_URL + "/scp/", raw_href)
+                storage_url = await self.upload_attachment_to_supabase(context, full_file_url, fname, internal_id)
+                if storage_url:
+                    attachments_list.append({"filename": fname, "url": storage_url})
+
+        # Ghép nội dung hoàn chỉnh
+        raw_content = (
+            f"📌 Subject: {subject}\n"
+            f"👤 Submitter: {submitter_name} ({sender_email})\n"
+            f"📋 Help Topic: {help_topic}\n"
+        )
+        if school_name:
+            raw_content += f"🏫 School Name: {school_name} | Country: {country}\n"
+        raw_content += f"\n--- THREAD MESSAGE ---\n{message_body}"
+
+        return {
+            "source": "osticket",
+            "source_id": internal_id,
+            "sender_email": sender_email,
+            "submitter_name": submitter_name,
+            "subject": subject,
+            "raw_content": raw_content,
+            "country": country,
+            "school_name": school_name,
+            "attachments": attachments_list,
+            "metadata": {
+                "help_topic": help_topic,
+                "school_name": school_name
+            }
+        }
+
+    async def poll_open_ostickets(self):
+        """Quét danh sách Open Queue và cào các vé mới."""
+        supabase = get_supabase_client()
+        async with async_playwright() as p:
+            browser, context, page = await self._create_context(p)
+            try:
+                if not await self.login(page):
+                    return
+
+                # Mở danh sách Open Tickets
+                queue_url = f"{OSTICKET_BASE_URL}/scp/tickets.php?queue=1"
+                await page.goto(queue_url, wait_until="networkidle", timeout=30000)
+                await page.wait_for_selector("table.list", timeout=15000)
+
+                # Lấy tất cả các dòng vé trong bảng
+                ticket_rows = page.locator("table.list tbody tr")
+                total_rows = await ticket_rows.count()
+                logger.info(f"📋 Tìm thấy {total_rows} vé trong Open Queue của OS Ticket.")
+
+                for r_idx in range(total_rows):
+                    row = ticket_rows.nth(r_idx)
+                    link_el = row.locator("a.preview").first
+                    
+                    if await link_el.count() == 0:
+                        continue
+
+                    href = await link_el.get_attribute("href")
+                    # Trích xuất internal ID (VD: tickets.php?id=3358 -> 3358)
+                    id_match = re.search(r'id=(\d+)', href or '')
+                    if not id_match:
+                        continue
+                    
+                    internal_id = id_match.group(1)
+
+                    # Kiểm tra xem vé này đã cào vào Supabase chưa
+                    check_db = supabase.table("inbox_tickets")\
+                        .select("id")\
+                        .eq("source", "osticket")\
+                        .eq("source_id", internal_id)\
+                        .execute()
+
+                    if check_db.data:
+                        # Đã có trong DB -> Bỏ qua
+                        continue
+
+                    logger.info(f"✨ Phát hiện vé mới #{internal_id}, đang cào chi tiết...")
+                    ticket_data = await self.scrape_ticket_detail(page, context, internal_id)
+                    
+                    if ticket_data:
+                        # Lưu vào Supabase inbox_tickets
+                        insert_res = supabase.table("inbox_tickets").insert({
+                            "source": ticket_data["source"],
+                            "source_id": ticket_data["source_id"],
+                            "sender_email": ticket_data["sender_email"],
+                            "submitter_name": ticket_data["submitter_name"],
+                            "subject": ticket_data["subject"],
+                            "raw_content": ticket_data["raw_content"],
+                            "country": ticket_data.get("country"),
+                            "attachments": ticket_data.get("attachments", []),
+                            "metadata": ticket_data.get("metadata", {}),
+                            "status": "pending"
+                        }).execute()
+
+                        if insert_res.data:
+                            new_id = insert_res.data[0]["id"]
+                            logger.info(f"💾 Đã lưu Ticket #{internal_id} vào Supabase (UUID: {new_id}). Đang kích hoạt Gemini AI Triage...")
+                            # Tự động gọi Gemini AI phân tích tóm tắt tiếng Việt 2 câu
+                            await process_ticket_with_ai(new_id)
+
+                    # Quay lại danh sách Open Queue để duyệt tiếp
+                    await page.goto(queue_url, wait_until="networkidle")
+                    await page.wait_for_selector("table.list", timeout=15000)
+
+            except Exception as e:
+                logger.error(f"❌ Lỗi polling OS Ticket: {e}")
+            finally:
+                await browser.close()
+
+osticket_service = OSTicketService()
+
+# Hàm wrapper cho APScheduler trong main.py
+async def poll_open_ostickets():
+    await osticket_service.poll_open_ostickets()
