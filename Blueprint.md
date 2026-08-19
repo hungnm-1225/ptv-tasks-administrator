@@ -207,7 +207,7 @@ Antigravity AI Agent shall execute implementation in these chronological steps:
 - [ ] **Step 1:** Initialize Supabase DB using the provided PostgreSQL DDL script.
 - [ ] **Step 2:** Scaffold React 19 + Vite 6 + Tailwind CSS 4 frontend with the 7 specified menu routes.
 - [ ] **Step 3:** Build FastAPI backend in Python 3.11 with Gmail API reader, Keycloak REST API wrapper (`python-keycloak`), and GitHub Issue creation endpoint.
-- [ ] **Step 4:** Integrate Gemini AI engine with fallback model list (`gemini-2.5-flash`, `gemini-1.5-flash`, etc.).
+- [ ] **Step 4:** Integrate Gemini AI engine with fallback model list (`gemini-3.7-flash`, `gemini-3.6-flash`, etc.).
 - [ ] **Step 5:** Setup Telegram Bot (`python-telegram-bot`) with Inline Keyboard approval buttons and Telegram Mini App webview link.
 - [ ] **Step 6:** Implement Client-Side XLSX Exporter using SheetJS (`xlsx`) in the Reports module.
 - [ ] **Step 7:** Run TypeScript linting (`npm run lint`) and Python type check (`mypy`) to ensure zero syntax/type errors.

@@ -12,7 +12,11 @@ from app.core.gemini import process_ticket_with_ai
 
 logger = logging.getLogger(__name__)
 
-OSTICKET_BASE_URL = settings.OSTICKET_URL.replace("/scp/login.php", "").replace("/login.php", "")
+raw_osticket_url = getattr(settings, "OSTICKET_URL", os.getenv("OSTICKET_URL", "https://support.pythaverse.space"))
+OSTICKET_BASE_URL = str(raw_osticket_url).replace("/scp/login.php", "").replace("/login.php", "").rstrip("/")
+
+OSTICKET_USER = getattr(settings, "OSTICKET_ADMIN_USER", os.getenv("OSTICKET_ADMIN_USER", ""))
+OSTICKET_PASS = getattr(settings, "OSTICKET_ADMIN_PASS", os.getenv("OSTICKET_ADMIN_PASS", ""))
 
 class OSTicketService:
     """Service Playwright chuyên cào vé OS Ticket, bóc tách Form tùy chỉnh và tải Attachment lên Supabase."""

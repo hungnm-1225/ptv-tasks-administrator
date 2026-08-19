@@ -330,7 +330,7 @@ ptv-tasks-administrator/
 Kế thừa từ `pydantic_settings.BaseSettings`, tự động đọc và ép kiểu từ file `.env`:
 - **Hệ thống:** `PROJECT_NAME`, `API_V1_STR` (`/api/v1`), `ENV` (`development`/`production`), `ALLOWED_DOMAIN` (`dtt.vn`).
 - **Supabase:** `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
-- **Gemini AI:** `GEMINI_API_KEY`, `GEMINI_PRIMARY_MODEL` (`gemini-2.5-flash`), `GEMINI_FALLBACK_MODEL` (`gemini-1.5-flash`).
+- **Gemini AI:** `GEMINI_API_KEY`, `GEMINI_PRIMARY_MODEL` (`gemini-3.7-flash`), `GEMINI_FALLBACK_MODEL` (`gemini-3.6-flash`).
 - **Telegram Bot:** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ADMIN_CHAT_ID`.
 - **Keycloak:** `KEYCLOAK_SERVER_URL`, `KEYCLOAK_REALM` (`idp`/`master`), `KEYCLOAK_CLIENT_ID` (`admin-cli`), `KEYCLOAK_ADMIN_USER`, `KEYCLOAK_ADMIN_PASS`.
 - **GitHub Dispatcher:** `GITHUB_PAT`, `GITHUB_DEFAULT_OWNER`, `GITHUB_DEFAULT_REPO`.
@@ -887,8 +887,8 @@ SUPABASE_SERVICE_ROLE_KEY="your-service-role-secret-key"
 
 # --- GOOGLE GEMINI AI ---
 GEMINI_API_KEY="AIzaSyYourGeminiApiKey"
-GEMINI_PRIMARY_MODEL="gemini-2.5-flash"
-GEMINI_FALLBACK_MODEL="gemini-1.5-flash"
+GEMINI_PRIMARY_MODEL="gemini-3.7-flash"
+GEMINI_FALLBACK_MODEL="gemini-3.6-flash"
 
 # --- GOOGLE WORKSPACE & APIS ---
 GOOGLE_CLIENT_ID="your-google-oauth-client-id.apps.googleusercontent.com"
