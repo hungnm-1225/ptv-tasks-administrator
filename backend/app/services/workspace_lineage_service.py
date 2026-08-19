@@ -1,100 +1,112 @@
 # backend/app/services/workspace_lineage_service.py
 import logging
 from typing import Dict, Any, Optional
+from cryptography.fernet import Fernet
 from app.core.supabase import get_supabase_client
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-class WorkspaceLineageResolver:
-    """Tự động truy vết phả hệ: School -> Partner -> Distributor -> Sales Admin và trích xuất credentials."""
+# Key giải mã mật khẩu két sắt
+SECRET_KEY = getattr(settings, "VAULT_SECRET_KEY", Fernet.generate_key())
+cipher_suite = Fernet(SECRET_KEY if isinstance(SECRET_KEY, bytes) else SECRET_KEY.encode())
+
+def decrypt_password(encrypted_pass: str) -> str:
+    """Giải mã mật khẩu an toàn khi Playwright cần đăng nhập."""
+    if not encrypted_pass:
+        return ""
+    try:
+        return cipher_suite.decrypt(encrypted_pass.encode("utf-8")).decode("utf-8")
+    except Exception as e:
+        logger.error(f"Lỗi giải mã mật khẩu: {e}")
+        return encrypted_pass
+
+class WorkspaceLineageService:
+    """Service tự động truy vết phả hệ Distributor -> Partner -> School."""
 
     @staticmethod
-    def resolve_hierarchy_by_school_name(school_name: str) -> Optional[Dict[str, Any]]:
+    def resolve_by_school(school_identifier: str) -> Optional[Dict[str, Any]]:
+        """
+        Nhập tên trường hoặc mã trường (VD: 'SCH_10266' hoặc 'Amsterdam') 
+        -> Trả về đầy đủ thông tin tài khoản của Trường, Partner và Distributor.
+        """
         supabase = get_supabase_client()
-        clean_name = school_name.strip()
-        logger.info(f"🔍 Đang truy vết phả hệ cho trường: '{clean_name}'...")
-
-        # 1. Tìm School trong database (ưu tiên khớp gần đúng ilike)
-        school_res = supabase.table("workspace_organizations")\
-            .select("id, name, code, role_type, parent_id, workspace_credentials(*)")\
-            .eq("role_type", "school")\
-            .ilike("name", f"%{clean_name}%")\
-            .execute()
+        
+        # 1. Tìm School theo Code hoặc Name
+        school_query = supabase.table("workspace_organizations")\
+            .select("*, workspace_credentials_vault(*)")\
+            .eq("role_type", "school")
+            
+        if school_identifier.startswith("SCH_"):
+            school_res = school_query.eq("code", school_identifier).execute()
+        else:
+            school_res = school_query.ilike("name", f"%{school_identifier.strip()}%").execute()
 
         if not school_res.data:
-            logger.warning(f"⚠️ Không tìm thấy trường '{clean_name}' trong database.")
+            logger.warning(f"Không tìm thấy trường học phù hợp với: '{school_identifier}'")
             return None
 
         school = school_res.data[0]
-        school_creds = (school.get("workspace_credentials") or [{}])[0]
+        school_vault = school.get("workspace_credentials_vault", [{}])
+        school_creds = school_vault[0] if school_vault else {}
 
-        partner = None
-        partner_creds = {}
-        distributor = None
-        distributor_creds = {}
-
-        # 2. Truy vết Partner (Cấp cha của School)
         partner_id = school.get("parent_id")
+        partner_data = None
+        distributor_data = None
+
+        # 2. Tìm Partner cấp trên
         if partner_id:
             partner_res = supabase.table("workspace_organizations")\
-                .select("id, name, code, role_type, parent_id, workspace_credentials(*)")\
+                .select("*, workspace_credentials_vault(*)")\
                 .eq("id", partner_id)\
                 .execute()
             if partner_res.data:
                 partner = partner_res.data[0]
-                partner_creds = (partner.get("workspace_credentials") or [{}])[0]
+                p_vault = partner.get("workspace_credentials_vault", [{}])
+                p_creds = p_vault[0] if p_vault else {}
                 
-                # 3. Truy vết Distributor (Cấp cha của Partner)
-                distributor_id = partner.get("parent_id")
-                if distributor_id:
+                partner_data = {
+                    "id": partner["id"],
+                    "code": partner["code"],
+                    "name": partner["name"],
+                    "username": p_creds.get("username", ""),
+                    "password": decrypt_password(p_creds.get("encrypted_password", ""))
+                }
+
+                # 3. Tìm Distributor cấp cao nhất
+                dist_id = partner.get("parent_id")
+                if dist_id:
                     dist_res = supabase.table("workspace_organizations")\
-                        .select("id, name, code, role_type, parent_id, workspace_credentials(*)")\
-                        .eq("id", distributor_id)\
+                        .select("*, workspace_credentials_vault(*)")\
+                        .eq("id", dist_id)\
                         .execute()
                     if dist_res.data:
-                        distributor = dist_res.data[0]
-                        distributor_creds = (distributor.get("workspace_credentials") or [{}])[0]
+                        dist = dist_res.data[0]
+                        d_vault = dist.get("workspace_credentials_vault", [{}])
+                        d_creds = d_vault[0] if d_vault else {}
+                        
+                        distributor_data = {
+                            "id": dist["id"],
+                            "code": dist["code"],
+                            "name": dist["name"],
+                            "username": d_creds.get("username", ""),
+                            "password": decrypt_password(d_creds.get("encrypted_password", ""))
+                        }
 
-        # 4. Sales Admin (Lấy từ biến môi trường hoặc Vault cấp cao nhất)
-        admin_creds = {
-            "username": settings.KEYCLOAK_ADMIN_USER,
-            "password": settings.KEYCLOAK_ADMIN_PASS
-        }
-
-        hierarchy_data = {
+        return {
             "school": {
-                "id": school.get("id"),
-                "name": school.get("name"),
-                "code": school.get("code"),
-                "credentials": {
-                    "username": school_creds.get("username", ""),
-                    "password": school_creds.get("encrypted_password", school_creds.get("password", ""))
-                }
+                "id": school["id"],
+                "code": school["code"],
+                "name": school["name"],
+                "username": school_creds.get("username", ""),
+                "password": decrypt_password(school_creds.get("encrypted_password", ""))
             },
-            "partner": {
-                "id": partner.get("id") if partner else None,
-                "name": partner.get("name") if partner else "Direct Partner",
-                "code": partner.get("code") if partner else "PRT-DIRECT",
-                "credentials": {
-                    "username": partner_creds.get("username", ""),
-                    "password": partner_creds.get("encrypted_password", partner_creds.get("password", ""))
-                }
+            "partner": partner_data or {
+                "name": "Direct Partner (Chưa gán)", "username": "", "password": ""
             },
-            "distributor": {
-                "id": distributor.get("id") if distributor else None,
-                "name": distributor.get("name") if distributor else "Master Distributor",
-                "code": distributor.get("code") if distributor else "DST-MASTER",
-                "credentials": {
-                    "username": distributor_creds.get("username", ""),
-                    "password": distributor_creds.get("encrypted_password", distributor_creds.get("password", ""))
-                }
-            },
-            "sales_admin": {
-                "name": "Pythaverse Sales Admin",
-                "credentials": admin_creds
+            "distributor": distributor_data or {
+                "name": "PTV Master Distributor", "username": "", "password": ""
             }
         }
-        
-        logger.info(f"✅ Đã giải mã phả hệ thành công: School [{school['name']}] ➔ Partner [{hierarchy_data['partner']['name']}] ➔ Dist [{hierarchy_data['distributor']['name']}]")
-        return hierarchy_data
+
+workspace_lineage_service = WorkspaceLineageService()

@@ -2,6 +2,7 @@
 node_modules/
 backend/venv/
 backend/__pycache__/
+backend/scripts/*.xlsx
 *.pyc
 
 # Build outputs
