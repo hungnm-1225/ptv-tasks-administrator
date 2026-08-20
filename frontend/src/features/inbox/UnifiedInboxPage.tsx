@@ -23,15 +23,29 @@ import {
   Github,
   Bot,
   CheckCircle2,
-  X
+  X,
+  Building2,
+  BookOpen,
+  Layers
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { InboxTicket, BotType } from '../../types';
 import { toast } from 'sonner';
 
-interface FileViewerModalProps {
-  file: { filename: string; url: string } | null;
-  onClose: () => void;
+interface HierarchySchoolItem {
+  school_id: string;
+  school_code: string;
+  school_name: string;
+  partner_name: string;
+  distributor_name: string;
+  full_lineage: string;
+}
+
+interface CourseItem {
+  course_code: string;
+  course_name: string;
+  lms_id: number;
+  lms_url: string;
 }
 
 export const UnifiedInboxPage: React.FC = () => {
@@ -46,11 +60,18 @@ export const UnifiedInboxPage: React.FC = () => {
   const [expandedContent, setExpandedContent] = useState<Record<string, boolean>>({});
   const [previewFile, setPreviewFile] = useState<{ filename: string; url: string } | null>(null);
 
-  // Modal tạo Task Bot
+  // Modal tạo Task Bot với Phả Hệ & Khóa Học
   const [taskModalTicket, setTaskModalTicket] = useState<InboxTicket | null>(null);
   const [selectedBotType, setSelectedBotType] = useState<BotType>('keycloak_api');
   const [payloadText, setPayloadText] = useState<string>('');
   const [creatingTask, setCreatingTask] = useState<boolean>(false);
+
+  // Dữ liệu Phả hệ & Khóa học
+  const [schoolsList, setSchoolsList] = useState<HierarchySchoolItem[]>([]);
+  const [coursesList, setCoursesList] = useState<CourseItem[]>([]);
+  const [selectedSchool, setSelectedSchool] = useState<HierarchySchoolItem | null>(null);
+  const [selectedCourse, setSelectedCourse] = useState<CourseItem | null>(null);
+  const [licenseCount, setLicenseCount] = useState<number>(50);
 
   const SPREADSHEET_ID = "1rZgFBD2PuZWL1jvQefcYZztCQvo99Lhx0GATTKvj1Go";
 
@@ -82,11 +103,9 @@ export const UnifiedInboxPage: React.FC = () => {
       }
 
       let data = await fetchApi<InboxTicket[]>(endpoint);
-
       if (selectedSource !== 'all') {
         data = data.filter(t => t.source === selectedSource);
       }
-
       setTickets(data || []);
     } catch (err) {
       console.error('Lỗi nạp ticket:', err);
@@ -96,6 +115,23 @@ export const UnifiedInboxPage: React.FC = () => {
       setLoading(false);
     }
   };
+
+  // Nạp danh sách Trường & Khóa học từ API
+  useEffect(() => {
+    const loadMetadata = async () => {
+      try {
+        const [schools, courses] = await Promise.all([
+          fetchApi<HierarchySchoolItem[]>('/workspace/hierarchy-schools'),
+          fetchApi<CourseItem[]>('/workspace/courses')
+        ]);
+        setSchoolsList(schools || []);
+        setCoursesList(courses || []);
+      } catch (e) {
+        console.warn('Chưa nạp được metadata workspace:', e);
+      }
+    };
+    loadMetadata();
+  }, []);
 
   useEffect(() => {
     loadTickets();
@@ -152,57 +188,95 @@ export const UnifiedInboxPage: React.FC = () => {
     }
   };
 
-  // 1. Chuyển sang trang GitHub Issue kèm ngữ cảnh của Ticket
   const handleNavigateToGitHub = (ticket: InboxTicket) => {
     navigate('/github', { state: { ticket } });
   };
 
-  // 2. Mở Modal tạo Bot Task với Payload được gợi ý tự động
+  // Mở Modal tạo Bot Task
   const handleOpenTaskModal = (ticket: InboxTicket) => {
     setTaskModalTicket(ticket);
 
-    // Tự động đoán Bot Type theo category
+    // Tự động tìm trường phù hợp trong 480 trường
+    const matchedSchool = schoolsList.find(s =>
+      ticket.subject?.toLowerCase().includes(s.school_name.toLowerCase()) ||
+      ticket.raw_content?.toLowerCase().includes(s.school_name.toLowerCase())
+    ) || schoolsList[0] || null;
+
+    const defaultCourse = coursesList[0] || null;
+
+    setSelectedSchool(matchedSchool);
+    setSelectedCourse(defaultCourse);
+
     let botType: BotType = 'keycloak_api';
-    let defaultPayload: Record<string, any> = {
+    if (ticket.category === 'account_keycloak') botType = 'keycloak_api';
+    else if (ticket.category === 'lms_enroll' || ticket.category === 'license') botType = 'workspace_rpa';
+    else if (ticket.source === 'google_form') botType = 'feedback_doc_triage';
+
+    setSelectedBotType(botType);
+    updatePayloadPreview(botType, ticket, matchedSchool, defaultCourse, 50);
+  };
+
+  // Tự động cập nhật JSON Payload khi đổi Phả hệ hoặc Khóa học
+  const updatePayloadPreview = (
+    bType: BotType,
+    ticket: InboxTicket,
+    school: HierarchySchoolItem | null,
+    course: CourseItem | null,
+    qty: number
+  ) => {
+    let payload: Record<string, any> = {
       ticket_id: ticket.id,
-      sender_email: ticket.sender_email,
-      action: 'auto_triage'
+      sender_email: ticket.sender_email
     };
 
-    if (ticket.category === 'account_keycloak') {
-      botType = 'keycloak_api';
-      defaultPayload = {
-        action: 'reset_password',
+    if (bType === 'workspace_rpa') {
+      payload = {
+        action: "school_create_order_and_enroll",
+        ticket_id: ticket.id,
+        hierarchy: {
+          school_name: school?.school_name || "THPT Amsterdam",
+          school_code: school?.school_code || "SCH_AMS",
+          partner_name: school?.partner_name || "VietStem",
+          distributor_name: school?.distributor_name || "PTV Distributor Demo"
+        },
+        order_details: {
+          contact_info: ticket.sender_email,
+          additional_notes: `Order tự động từ Ticket #${ticket.source_id || ticket.id.slice(0, 8)}`,
+          courses: [
+            {
+              course_code: course?.course_code || "SWRP_01",
+              course_name: course?.course_name || "SWRP 1: Exploring the Miniature World",
+              lms_id: course?.lms_id || 102,
+              lms_url: course?.lms_url || "http://learn.pythaverse.space/course/view.php?id=102",
+              licenses: qty,
+              start_date: "09/01/2026",
+              end_date: "05/31/2027"
+            }
+          ]
+        }
+      };
+    } else if (bType === 'keycloak_api') {
+      payload = {
+        action: "reset_password",
         target_email: ticket.sender_email,
-        temp_pass: 'Ptv@2026',
+        temp_pass: "Ptv@2026",
         ticket_id: ticket.id
       };
-    } else if (ticket.category === 'lms_enroll') {
-      botType = 'workspace_rpa';
-      defaultPayload = {
-        action: 'enroll_student',
-        student_email: ticket.sender_email,
-        school_name: ticket.submitter_name || 'Partner School',
-        course_name: 'Python Robotics / AIROC',
-        ticket_id: ticket.id
-      };
-    } else if (ticket.source === 'google_form') {
-      botType = 'feedback_doc_triage';
-      defaultPayload = {
-        action: 'comment_and_assign',
-        doc_url: ticket.doc_url || '',
-        assignee_email: ticket.assigned_email || 'hung.nguyenmanh@dtt.vn',
-        category: ticket.category || 'other',
+    } else if (bType === 'feedback_doc_triage') {
+      payload = {
+        action: "comment_and_assign",
+        doc_url: ticket.doc_url || "",
+        assignee_email: ticket.assigned_email || "hung.nguyenmanh@dtt.vn",
+        category: ticket.category || "other",
         row_index: ticket.metadata?.row_index || 2,
         ticket_id: ticket.id
       };
     }
 
-    setSelectedBotType(botType);
-    setPayloadText(JSON.stringify(defaultPayload, null, 2));
+    setPayloadText(JSON.stringify(payload, null, 2));
   };
 
-  // 3. Thực thi lưu Task vào database
+  // Gửi tạo Task (đảm bảo gọi đúng /tasks không lỗi 405)
   const handleConfirmCreateTask = async () => {
     if (!taskModalTicket) return;
 
@@ -210,7 +284,7 @@ export const UnifiedInboxPage: React.FC = () => {
     try {
       parsedPayload = JSON.parse(payloadText);
     } catch (e) {
-      toast.error('Payload JSON không hợp lệ, vui lòng kiểm tra lại cú pháp!');
+      toast.error('JSON không hợp lệ! Vui lòng kiểm tra lại cú pháp.');
       return;
     }
 
@@ -227,10 +301,10 @@ export const UnifiedInboxPage: React.FC = () => {
 
       toast.success(
         <div className="space-y-1">
-          <div className="font-bold">Đã tạo tác vụ phê duyệt Bot thành công!</div>
+          <div className="font-bold">Đã tạo tác vụ Bot thành công!</div>
           <button
             onClick={() => navigate('/tasks')}
-            className="text-violet-400 underline text-xs font-semibold"
+            className="text-violet-400 underline text-xs font-semibold cursor-pointer"
           >
             Chuyển đến Task Hub để duyệt ngay ➔
           </button>
@@ -273,73 +347,6 @@ export const UnifiedInboxPage: React.FC = () => {
           </span>
         );
     }
-  };
-
-  const FileViewerModal: React.FC<FileViewerModalProps> = ({ file, onClose }) => {
-    if (!file) return null;
-
-    const ext = file.filename.split('.').pop()?.toLowerCase() || '';
-    const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext);
-    const isPdf = ext === 'pdf';
-    const isDoc = ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(ext);
-
-    return (
-      <div className="fixed inset-0 z-50 bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl w-full max-w-5xl h-[85vh] flex flex-col shadow-2xl overflow-hidden">
-          {/* Modal Header */}
-          <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between bg-slate-50 dark:bg-slate-900">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{file.filename}</span>
-              <span className="text-[10px] font-mono px-2 py-0.5 bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300 border border-violet-200 dark:border-violet-500/30 rounded uppercase">{ext}</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <a
-                href={file.url}
-                target="_blank"
-                download
-                className="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold rounded-xl transition shadow-xs"
-              >
-                Tải file về
-              </a>
-              <button
-                onClick={onClose}
-                className="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 rounded-lg transition"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-
-          {/* Modal Content Preview */}
-          <div className="flex-1 p-4 bg-slate-100/50 dark:bg-slate-900 overflow-auto flex items-center justify-center">
-            {isImage && (
-              <img src={file.url} alt={file.filename} className="max-h-full max-w-full rounded-xl object-contain shadow-md" />
-            )}
-
-            {isPdf && (
-              <iframe src={file.url} title={file.filename} className="w-full h-full rounded-xl border border-slate-200 dark:border-slate-700" />
-            )}
-
-            {isDoc && (
-              <iframe
-                src={`https://docs.google.com/gview?url=${encodeURIComponent(file.url)}&embedded=true`}
-                title={file.filename}
-                className="w-full h-full rounded-xl border border-slate-200 dark:border-slate-700"
-              />
-            )}
-
-            {!isImage && !isPdf && !isDoc && (
-              <div className="text-center space-y-3">
-                <p className="text-xs text-slate-500 dark:text-slate-400">Định dạng file này chưa hỗ trợ xem trước trực tiếp.</p>
-                <a href={file.url} target="_blank" download className="inline-block px-4 py-2 bg-violet-600 text-white text-xs font-semibold rounded-xl">
-                  Bấm vào đây để tải file về máy
-                </a>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
   };
 
   return (
@@ -411,7 +418,6 @@ export const UnifiedInboxPage: React.FC = () => {
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">Không có ticket nào trong bộ lọc này</h3>
         </div>
       ) : (
-        /* Danh sách Card phẳng & sắc nét */
         <div className="space-y-4">
           {tickets.map((ticket) => {
             const isExpanded = expandedContent[ticket.id] || false;
@@ -446,7 +452,6 @@ export const UnifiedInboxPage: React.FC = () => {
                         {ticket.submitter_name || ticket.sender_email}
                       </span>
 
-                      {/* Thời gian */}
                       <span className="text-xs text-slate-400 dark:text-slate-500 flex items-center gap-1">
                         <Calendar className="w-3 h-3" />
                         {ticket.ticket_timestamp || new Date(ticket.created_at).toLocaleDateString('vi-VN')}
@@ -458,13 +463,11 @@ export const UnifiedInboxPage: React.FC = () => {
                     </h3>
                   </div>
 
-                  {/* Nút bấm mở trực tiếp trang gốc */}
                   <a
                     href={directUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200/80 dark:bg-slate-900 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-sky-700 dark:text-sky-300 text-xs font-medium rounded-xl transition shrink-0 shadow-2xs"
-                    title="Mở nội dung gốc trên Gmail / Google Sheet / OS Ticket"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200/80 dark:bg-slate-900 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-sky-700 dark:text-sky-300 text-xs font-medium rounded-xl transition shrink-0 shadow-2xs cursor-pointer"
                   >
                     <span>Mở trang gốc</span>
                     <ExternalLink className="w-3.5 h-3.5" />
@@ -479,7 +482,7 @@ export const UnifiedInboxPage: React.FC = () => {
                         href={ticket.doc_url}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30 border border-emerald-200 rounded-xl text-xs transition shadow-2xs"
+                        className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30 border border-emerald-200 rounded-xl text-xs transition shadow-2xs cursor-pointer"
                       >
                         <Paperclip className="w-3.5 h-3.5" />
                         <span>Google Doc Báo Cáo</span>
@@ -499,7 +502,7 @@ export const UnifiedInboxPage: React.FC = () => {
                   </div>
                 )}
 
-                {/* Tóm tắt Gemini AI (Pastel Lavender box) */}
+                {/* Tóm tắt Gemini AI */}
                 <div className="bg-violet-50/70 dark:bg-violet-950/30 border border-violet-200/80 dark:border-violet-800/50 rounded-xl p-4 space-y-2">
                   <div className="flex items-center gap-1.5 text-xs font-semibold text-violet-700 dark:text-violet-300">
                     <Sparkles className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
@@ -515,26 +518,11 @@ export const UnifiedInboxPage: React.FC = () => {
                   )}
                 </div>
 
-                {/* Xem nội dung email gốc */}
-                <div className="border-t border-slate-200/60 dark:border-slate-700/60 pt-2">
-                  <button
-                    onClick={() => setExpandedContent(prev => ({ ...prev, [ticket.id]: !prev[ticket.id] }))}
-                    className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition font-medium cursor-pointer"
-                  >
-                    <FileCode className="w-3.5 h-3.5 text-slate-400" />
-                    <span>{isExpanded ? "Thu gọn nội dung email gốc" : "Xem nội dung email gốc đầy đủ"}</span>
-                    {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                  </button>
-
-                  {isExpanded && (
-                    <div className="mt-2 p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap max-h-60 overflow-y-auto font-mono leading-relaxed">
-                      {ticket.raw_content}
-                    </div>
-                  )}
-                </div>
-
                 {/* Footer Action Buttons */}
                 <div className="flex items-center justify-between pt-1 flex-wrap gap-2">
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    <span className="text-emerald-600 dark:text-emerald-400">✓ AI-Powered Feed</span>
+                  </span>
 
                   <div className="flex items-center gap-2 flex-wrap">
                     {selectedCategory === 'dismissed' ? (
@@ -548,7 +536,6 @@ export const UnifiedInboxPage: React.FC = () => {
                       </button>
                     ) : (
                       <>
-                        {/* Nút Bỏ qua */}
                         <button
                           onClick={() => handleDismissTask(ticket.id)}
                           disabled={actionLoading === ticket.id}
@@ -558,17 +545,14 @@ export const UnifiedInboxPage: React.FC = () => {
                           <span>Bỏ qua</span>
                         </button>
 
-                        {/* Nút 1: Tạo GitHub Issue */}
                         <button
                           onClick={() => handleNavigateToGitHub(ticket)}
                           className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-100 dark:hover:bg-white dark:text-slate-900 text-xs font-semibold rounded-xl transition shadow-xs cursor-pointer"
-                          title="Tạo GitHub Issue từ Ticket này"
                         >
                           <Github className="w-3.5 h-3.5" />
                           <span>Tạo Issue GitHub</span>
                         </button>
 
-                        {/* Nút 2: Tạo Tác Vụ Phê Duyệt Bot */}
                         <button
                           onClick={() => handleOpenTaskModal(ticket)}
                           className="flex items-center gap-2 px-3.5 py-1.5 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 text-white text-xs font-semibold rounded-xl transition shadow-xs cursor-pointer"
@@ -587,17 +571,12 @@ export const UnifiedInboxPage: React.FC = () => {
         </div>
       )}
 
-      {/* Modal 1: Xem File Đính Kèm */}
-      {previewFile && (
-        <FileViewerModal file={previewFile} onClose={() => setPreviewFile(null)} />
-      )}
-
-      {/* Modal 2: Tạo & Tùy Chỉnh Bot Automation Task */}
+      {/* Modal Tạo Tác Vụ Bot Có Chọn Phả Hệ & Khóa Học */}
       {taskModalTicket && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden space-y-4 p-6">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden space-y-4 p-6 max-h-[90vh] overflow-y-auto">
 
-            {/* Header */}
+            {/* Modal Header */}
             <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-700">
               <div className="flex items-center gap-2">
                 <Bot className="w-5 h-5 text-violet-600 dark:text-violet-400" />
@@ -607,13 +586,13 @@ export const UnifiedInboxPage: React.FC = () => {
               </div>
               <button
                 onClick={() => setTaskModalTicket(null)}
-                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg"
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Ticket Info Summary */}
+            {/* Ticket Info */}
             <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-700 text-xs space-y-1">
               <div className="font-semibold text-slate-800 dark:text-slate-200 truncate">
                 {taskModalTicket.subject || 'Không có tiêu đề'}
@@ -623,32 +602,128 @@ export const UnifiedInboxPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Bot Type Selection */}
+            {/* Bot Type Selector */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                 Chọn Cỗ Máy Bot Worker
               </label>
               <select
                 value={selectedBotType}
-                onChange={(e) => setSelectedBotType(e.target.value as BotType)}
-                className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs text-slate-800 dark:text-slate-200 font-medium outline-none focus:border-violet-500"
+                onChange={(e) => {
+                  const bType = e.target.value as BotType;
+                  setSelectedBotType(bType);
+                  updatePayloadPreview(bType, taskModalTicket, selectedSchool, selectedCourse, licenseCount);
+                }}
+                className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs text-slate-800 dark:text-slate-200 font-medium outline-none focus:border-violet-500 cursor-pointer"
               >
                 <option value="keycloak_api">🔑 Keycloak Identity Bot (Reset Pass / Quản Trị User)</option>
-                <option value="workspace_rpa">🏢 Workspace License RPA (Bulk User .xlsx, Order / Contract)</option>
-                <option value="lms_playwright">🎓 LMS Playwright Worker (Ghi danh khóa học PLearn)</option>
+                <option value="workspace_rpa">🏢 Workspace License RPA (Tạo Order, Cấp Contract Phả Hệ)</option>
                 <option value="feedback_doc_triage">📝 Feedback Doc Triage (Gắn tag @Doc & Check Sheet)</option>
                 <option value="github_issue_creator">🐙 GitHub Issue Dispatcher (Tạo Bug Issue)</option>
               </select>
             </div>
 
+            {/* 🎯 NẾU LÀ WORKSPACE RPA: HIỂN THỊ BỘ CHỌN PHẢ HỆ VÀ KHÓA HỌC */}
+            {selectedBotType === 'workspace_rpa' && (
+              <div className="space-y-3 p-4 rounded-2xl bg-violet-50/60 dark:bg-violet-950/20 border border-violet-200/70 dark:border-violet-800/40">
+
+                {/* 1. Chọn Trường Học */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-violet-900 dark:text-violet-300 flex items-center gap-1.5">
+                    <Building2 className="w-3.5 h-3.5 text-violet-600" />
+                    <span>Chọn Trường Học (Trong 480 Trường Phả Hệ):</span>
+                  </label>
+                  <select
+                    value={selectedSchool?.school_code || ''}
+                    onChange={(e) => {
+                      const sch = schoolsList.find(s => s.school_code === e.target.value) || null;
+                      setSelectedSchool(sch);
+                      updatePayloadPreview(selectedBotType, taskModalTicket, sch, selectedCourse, licenseCount);
+                    }}
+                    className="w-full bg-white dark:bg-slate-800 border border-violet-300 dark:border-violet-700 rounded-xl p-2.5 text-xs text-slate-900 dark:text-slate-100 outline-none cursor-pointer"
+                  >
+                    {schoolsList.map(s => (
+                      <option key={s.school_code} value={s.school_code}>
+                        {s.school_name} ({s.school_code})
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* Hiển thị Breadcrumb Phả Hệ 3 Cấp */}
+                  {selectedSchool && (
+                    <div className="p-2.5 rounded-lg bg-white dark:bg-slate-800 border border-violet-200 dark:border-violet-800/60 text-[11px] font-mono text-violet-700 dark:text-violet-300 flex items-center gap-1.5 flex-wrap">
+                      <Layers className="w-3.5 h-3.5 text-violet-500 shrink-0" />
+                      <span>{selectedSchool.full_lineage}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Chọn Khóa Học & Số Lượng */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                  <div className="sm:col-span-2 space-y-1.5">
+                    <label className="text-xs font-bold text-violet-900 dark:text-violet-300 flex items-center gap-1.5">
+                      <BookOpen className="w-3.5 h-3.5 text-sky-600" />
+                      <span>Khóa Học LMS:</span>
+                    </label>
+                    <select
+                      value={selectedCourse?.course_code || ''}
+                      onChange={(e) => {
+                        const crs = coursesList.find(c => c.course_code === e.target.value) || null;
+                        setSelectedCourse(crs);
+                        updatePayloadPreview(selectedBotType, taskModalTicket, selectedSchool, crs, licenseCount);
+                      }}
+                      className="w-full bg-white dark:bg-slate-800 border border-violet-300 dark:border-violet-700 rounded-xl p-2 text-xs text-slate-900 dark:text-slate-100 outline-none cursor-pointer"
+                    >
+                      {coursesList.map(c => (
+                        <option key={c.course_code} value={c.course_code}>
+                          {c.course_name} (ID: {c.lms_id})
+                        </option>
+                      ))}
+                    </select>
+
+                    {/* Hiển thị link LMS trực tiếp */}
+                    {selectedCourse && (
+                      <a
+                        href={selectedCourse.lms_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[10px] text-sky-600 dark:text-sky-400 hover:underline flex items-center gap-1 font-mono pt-0.5"
+                      >
+                        <span>🔗 Mở trang khóa học LMS ({selectedCourse.lms_url})</span>
+                        <ExternalLink className="w-2.5 h-2.5" />
+                      </a>
+                    )}
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-violet-900 dark:text-violet-300">
+                      Số Licenses (Học viên):
+                    </label>
+                    <input
+                      type="number"
+                      value={licenseCount}
+                      min={1}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value) || 1;
+                        setLicenseCount(val);
+                        updatePayloadPreview(selectedBotType, taskModalTicket, selectedSchool, selectedCourse, val);
+                      }}
+                      className="w-full bg-white dark:bg-slate-800 border border-violet-300 dark:border-violet-700 rounded-xl p-2 text-xs text-slate-900 dark:text-slate-100 outline-none font-bold"
+                    />
+                  </div>
+                </div>
+
+              </div>
+            )}
+
             {/* Payload JSON Editor */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
                 <span>Tham Số Thực Thi (Payload JSON)</span>
-                <span className="text-[10px] text-slate-400 font-normal">Có thể chỉnh sửa</span>
+                <span className="text-[10px] text-slate-400 font-normal">Tự động đồng bộ theo lựa chọn</span>
               </label>
               <textarea
-                rows={6}
+                rows={7}
                 value={payloadText}
                 onChange={(e) => setPayloadText(e.target.value)}
                 className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-xs font-mono text-slate-900 dark:text-slate-100 outline-none focus:border-violet-500 leading-relaxed"
@@ -668,7 +743,7 @@ export const UnifiedInboxPage: React.FC = () => {
                 type="button"
                 disabled={creatingTask}
                 onClick={handleConfirmCreateTask}
-                className="px-5 py-2 bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold rounded-xl transition flex items-center gap-2 shadow-xs cursor-pointer disabled:opacity-50"
+                className="px-5 py-2.5 bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold rounded-xl transition flex items-center gap-2 shadow-xs cursor-pointer disabled:opacity-50"
               >
                 {creatingTask ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
