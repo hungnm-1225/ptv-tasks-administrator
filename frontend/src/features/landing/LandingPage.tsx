@@ -35,6 +35,7 @@ export const LandingPage: React.FC = () => {
         const { data, error } = await supabase
           .from('author_profile')
           .select('*')
+          .order('updated_at', { ascending: false })
           .limit(1)
           .maybeSingle();
 
