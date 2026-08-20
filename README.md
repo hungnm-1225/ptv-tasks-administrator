@@ -32,7 +32,7 @@
    - [5.8. Bảng Tra Cứu REST API Endpoints Chi Tiết (`backend/app/api/v1/endpoints/`)](#58-bảng-tra-cứu-rest-api-endpoints-chi-tiết-backendappapiv1endpoints)
 6. [Chi Tiết Cơ Sở Dữ Liệu Supabase (PostgreSQL 16)](#6-chi-tiết-cơ-sở-dữ-liệu-supabase-postgresql-16)
    - [6.1. Kiểu Dữ Liệu ENUMs](#61-kiểu-dữ-liệu-enums)
-   - [6.2. Cấu Trúc Chi Tiết 6 Bảng Dữ Liệu](#62-cấu-trúc-chi-tiết-6-bảng-dữ-liệu)
+   - [6.2. Cấu Trúc Chi Tiết 7 Bảng Dữ Liệu](#62-cấu-trúc-chi-tiết-7-bảng-dữ-liệu)
    - [6.3. Chỉ Mục (Indexes), Triggers, RLS Policies & Supabase Storage](#63-chỉ-mục-indexes-triggers-rls-policies--supabase-storage)
 7. [Chi Tiết Kiến Trúc Frontend (React 19 + TypeScript + Tailwind CSS v4)](#7-chi-tiết-kiến-trúc-frontend-react-19--typescript--tailwind-css-v4)
    - [7.1. Định Tuyến & Điều Phối Ứng Dụng (`App.tsx`)](#71-định-tuyến--điều-phối-ứng-dụng-appsx)
@@ -742,7 +742,7 @@ CREATE TYPE approval_status AS ENUM ('pending', 'approved', 'rejected');
 
 ---
 
-### 6.2. Cấu Trúc Chi Tiết 6 Bảng Dữ Liệu
+### 6.2. Cấu Trúc Chi Tiết 7 Bảng Dữ Liệu
 
 #### 1. Bảng `inbox_tickets` (Hòm thư hợp nhất đa kênh)
 | Tên Cột | Kiểu Dữ Liệu | Ràng Buộc / Mặc Định | Ý Nghĩa & Mục Đích Nghiệp Vụ |
@@ -825,6 +825,20 @@ CREATE TYPE approval_status AS ENUM ('pending', 'approved', 'rejected');
 | `encrypted_password`| `TEXT` | `NOT NULL` | Mật khẩu đã được mã hóa bằng thuật toán Fernet. |
 | `is_active` | `BOOLEAN` | `DEFAULT TRUE` | Trạng thái hoạt động của tài khoản. |
 | `updated_at` | `TIMESTAMPTZ` | `DEFAULT NOW()` | Thời điểm cập nhật cuối cùng. |
+
+#### 7. Bảng `author_profile` (Hồ sơ Tác Giả & Khẳng định Chủ Quyền Động)
+| Tên Cột | Kiểu Dữ Liệu | Ràng Buộc / Mặc Định | Ý Nghĩa & Mục Đích Nghiệp Vụ |
+|---|---|---|---|
+| `id` | `UUID` | `PRIMARY KEY DEFAULT uuid_generate_v4()` | Khóa chính hồ sơ tác giả. |
+| `name` | `VARCHAR(255)` | `NOT NULL` | Họ tên tác giả ("Nguyễn Mạnh Hùng"). |
+| `title` | `VARCHAR(255)` | `NOT NULL` | Chức danh chuyên môn ("Lead AI Engineer & Automation Architect"). |
+| `bio` | `TEXT` | `NOT NULL` | Mô tả tiểu sử và năng lực tự động hóa. |
+| `avatar_url` | `TEXT` | - | Đường dẫn ảnh đại diện. |
+| `location` | `VARCHAR(100)` | - | Địa điểm làm việc ("Hà Nội, Việt Nam"). |
+| `organization` | `VARCHAR(255)`| - | Đơn vị chủ quản ("Pythaverse / DTT Corporation"). |
+| `socials` | `JSONB` | `DEFAULT '[]'::jsonb` | Danh sách mạng xã hội ({name, url, iconName, colorClass}). |
+| `project_info` | `JSONB` | `DEFAULT '{}'::jsonb` | Thông tin phiên bản và điểm nhấn kiến trúc. |
+| `updated_at` | `TIMESTAMPTZ` | `DEFAULT NOW()` | Thời điểm cập nhật gần nhất. |
 
 ---
 
@@ -969,7 +983,7 @@ Khai báo đầy đủ TypeScript Types & Interfaces:
 - Giao diện Dark/Light mode sang trọng với các hiệu ứng ánh sáng mờ ambient blur blobs.
 - Header công khai điều hướng nhanh tới đăng nhập Google SSO.
 - Hero Section giới thiệu năng lực tự động hóa kết hợp Gemini AI.
-- Khu vực **Chủ Quyền Tác Giả (Author Ownership Section)**: Thẻ thông tin lớn giới thiệu tác giả Nguyễn Mạnh Hùng với ảnh đại diện, chức danh, mô tả năng lực và hệ thống nút bấm mạng xã hội tương tác trực tiếp.
+- Khu vực **Chủ Quyền Tác Giả (Author Ownership Section)**: Thẻ thông tin lớn giới thiệu tác giả Nguyễn Mạnh Hùng với ảnh đại diện, chức danh, mô tả năng lực và hệ thống nút bấm mạng xã hội tương tác trực tiếp (tự động đồng bộ động từ `author_profile` trong Supabase).
 
 #### 2. `LoginPage.tsx` (Trang Đăng Nhập Doanh Nghiệp)
 - Thẻ Card đăng nhập với huy hiệu giải thích quy tắc bảo mật chỉ cho phép tài khoản Google `@dtt.vn`.
@@ -984,6 +998,7 @@ Khai báo đầy đủ TypeScript Types & Interfaces:
 - **Bộ lọc kép đa chiều:**
   - Nguồn: `Tất cả Nguồn`, `✉️ Gmail`, `📝 Google Form`, `🎫 OS Ticket`.
   - Danh mục: `Tất cả Category`, `🐛 System Bugs`, `🔑 Keycloak/Account`, `🎓 LMS Enroll`, `📜 License`, `📌 Khác`, `🗑️ Đã Bỏ Qua`.
+  - Trạng thái: `Tất cả Trạng Thái`, `⏳ Chờ Xử Lý`, `🔄 Đang Xử Lý (Bot)`, `✅ Đã Giải Quyết`, `🗑️ Đã Bỏ Qua`.
 - **Đảo thứ tự sắp xếp:** Chuyển đổi nhanh giữa `Mới nhất` và `Cũ nhất`.
 - **Dropdown đổi Tag trực tiếp:** Cho phép Admin đổi Category của ticket ngay trên từng card và lưu tức thì vào Supabase.
 - **Deep Link mở trang nguồn gốc:**
@@ -991,8 +1006,9 @@ Khai báo đầy đủ TypeScript Types & Interfaces:
   - Google Form: Mở Google Sheet và bôi đen đúng dải ô dòng tương ứng (`range=A{row}:P{row}`).
   - OS Ticket: Mở đúng ticket qua Internal ID (`support.pythaverse.space/scp/tickets.php?id=...`).
 - **Modal xem trước tệp đa năng (`FileViewerModal`):** Xem ảnh trực tiếp, xem PDF trong `iframe`, nhúng Google Docs Viewer cho tài liệu DOCX/XLSX.
+- **Modal Tạo Tác Vụ Bot Automation:** Hỗ trợ Searchable Combobox tìm kiếm trường học trong 480+ trường phả hệ, thêm/xóa nhiều khóa học, AI tự động bóc tách file COF và trình soạn thảo JSON Payload đồng bộ tự động.
 - **Thẻ tóm tắt Gemini AI:** Hiển thị nội dung tóm tắt tiếng Việt và nhân sự được đề xuất phân công kèm email.
-- **Nút hành động:** `[Bỏ qua]`, `[Khôi phục]`, `[Tạo Tác Vụ Bot Automation]`.
+- **Nút hành động:** `[Bỏ qua]`, `[Khôi phục]`, `[Hoàn thành]`, `[Tạo Issue GitHub]`, `[Tạo Tác Vụ Bot Automation]`.
 
 #### 5. `TaskManagementPage.tsx` (Cổng Kiểm Soát Human-in-the-Loop)
 - Bảng danh sách các tác vụ Bot đang chờ phê duyệt, đã duyệt hoặc bị từ chối.
