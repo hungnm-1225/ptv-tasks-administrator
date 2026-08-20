@@ -4,6 +4,7 @@ import os
 import mimetypes
 import logging
 from typing import Dict, Any, List, Optional
+from datetime import datetime
 from urllib.parse import urljoin
 from playwright.async_api import async_playwright
 from app.core.config import settings
@@ -40,15 +41,14 @@ class OSTicketService:
         """Đăng nhập vào bảng điều khiển quản trị OS Ticket (/scp/login.php)."""
         try:
             login_url = f"{OSTICKET_BASE_URL}/scp/login.php"
-            logger.info(f"🔑 Đang đăng nhập OS Ticket: {settings.OSTICKET_ADMIN_USER}...")
+            logger.info(f"🔑 Đang đăng nhập OS Ticket: {OSTICKET_USER}...")
             await page.goto(login_url, wait_until="networkidle", timeout=30000)
 
-            # Nếu đã đăng nhập sẵn
             if "/scp/index.php" in page.url or "/scp/tickets.php" in page.url:
                 return True
 
-            await page.fill("input[name='userid'], #name", settings.OSTICKET_ADMIN_USER)
-            await page.fill("input[name='passwd'], #pass", settings.OSTICKET_ADMIN_PASS)
+            await page.fill("input[name='userid'], #name", OSTICKET_USER)
+            await page.fill("input[name='passwd'], #pass", OSTICKET_PASS)
             await page.click("input[type='submit'], button[type='submit']")
             await page.wait_for_timeout(3000)
 
@@ -69,7 +69,6 @@ class OSTicketService:
             clean_filename = re.sub(r'[^a-zA-Z0-9_.-]', '_', filename)
             storage_path = f"osticket/{ticket_internal_id}_{clean_filename}"
 
-            # Tải dữ liệu nhị phân của file
             response = await context.request.get(file_url)
             if response.status != 200:
                 logger.warning(f"⚠️ Không tải được file {filename} từ OS Ticket (Status: {response.status})")
@@ -79,7 +78,6 @@ class OSTicketService:
             content_type, _ = mimetypes.guess_type(filename)
             content_type = content_type or "application/octet-stream"
 
-            # Upload vào bucket 'ticket-attachments'
             bucket = supabase.storage.from_("ticket-attachments")
             bucket.upload(storage_path, file_bytes, file_options={"content-type": content_type, "upsert": "true"})
             
@@ -98,13 +96,13 @@ class OSTicketService:
         await page.goto(detail_url, wait_until="networkidle", timeout=30000)
         await page.wait_for_selector(".tixTitle, #ticket_info", timeout=15000)
 
-        # 1. Bóc tách Tiêu đề
+        # 1. Tiêu đề
         subject = ""
         title_el = page.locator(".tixTitle h3, h2 a").first
         if await title_el.count() > 0:
             subject = (await title_el.inner_text()).strip()
 
-        # 2. Bóc tách Người gửi (Tên & Email)
+        # 2. Người gửi (Tên & Email)
         submitter_name = "User"
         sender_email = "support@pythaverse.space"
         user_name_el = page.locator("span[id^='user-'][id$='-name']").first
@@ -115,13 +113,13 @@ class OSTicketService:
         if await user_email_el.count() > 0:
             sender_email = (await user_email_el.inner_text()).strip()
 
-        # 3. Bóc tách Help Topic
+        # 3. Help Topic
         help_topic = ""
         topic_row = page.locator("//tr[contains(., 'Help Topic:')]//td").first
         if await topic_row.count() > 0:
             help_topic = (await topic_row.inner_text()).strip()
 
-        # 4. Bóc tách Custom Form: Partner Account Request Form (nếu có)
+        # 4. Custom Form: Partner Account Request Form (nếu có)
         school_name = ""
         country = ""
         school_cell = page.locator("//tr[contains(., 'School Name for the COF:')]//td[2]").first
@@ -132,13 +130,32 @@ class OSTicketService:
         if await country_cell.count() > 0:
             country = (await country_cell.inner_text()).strip()
 
-        # 5. Bóc tách Nội dung tin nhắn đầu tiên trong Thread
+        # 5. Nội dung tin nhắn đầu tiên
         message_body = ""
         first_msg = page.locator(".thread-entry.message .thread-body").first
         if await first_msg.count() > 0:
             message_body = (await first_msg.inner_text()).strip()
 
-        # 6. Bóc tách & Tải toàn bộ Attachments (từ Form và từ Thread)
+        # 6. Bóc tách Thời gian gửi thật (Create Date)
+        created_at_str = ""
+        created_at_iso = None
+        
+        time_el = page.locator(".thread-entry.message time, time[datetime]").first
+        if await time_el.count() > 0:
+            created_at_iso = await time_el.get_attribute("datetime")
+            created_at_str = await time_el.inner_text()
+
+        if not created_at_iso:
+            create_date_cell = page.locator("//tr[contains(., 'Create Date:')]//td").first
+            if await create_date_cell.count() > 0:
+                created_at_str = (await create_date_cell.inner_text()).strip()
+                try:
+                    dt = datetime.strptime(created_at_str, "%d/%m/%Y %I:%M %p")
+                    created_at_iso = dt.isoformat() + "+07:00"
+                except Exception:
+                    pass
+
+        # 7. Tải toàn bộ Attachments (từ Form và từ Thread)
         attachments_list = []
         
         # A. File trong Custom Form
@@ -182,12 +199,15 @@ class OSTicketService:
             "submitter_name": submitter_name,
             "subject": subject,
             "raw_content": raw_content,
+            "created_at": created_at_iso,
+            "ticket_timestamp": created_at_str or created_at_iso,
             "country": country,
             "school_name": school_name,
             "attachments": attachments_list,
             "metadata": {
                 "help_topic": help_topic,
-                "school_name": school_name
+                "school_name": school_name,
+                "created_date_raw": created_at_str
             }
         }
 
@@ -200,12 +220,10 @@ class OSTicketService:
                 if not await self.login(page):
                     return
 
-                # Mở danh sách Open Tickets
                 queue_url = f"{OSTICKET_BASE_URL}/scp/tickets.php?queue=1"
                 await page.goto(queue_url, wait_until="networkidle", timeout=30000)
                 await page.wait_for_selector("table.list", timeout=15000)
 
-                # Lấy tất cả các dòng vé trong bảng
                 ticket_rows = page.locator("table.list tbody tr")
                 total_rows = await ticket_rows.count()
                 logger.info(f"📋 Tìm thấy {total_rows} vé trong Open Queue của OS Ticket.")
@@ -218,14 +236,13 @@ class OSTicketService:
                         continue
 
                     href = await link_el.get_attribute("href")
-                    # Trích xuất internal ID (VD: tickets.php?id=3358 -> 3358)
                     id_match = re.search(r'id=(\d+)', href or '')
                     if not id_match:
                         continue
                     
                     internal_id = id_match.group(1)
 
-                    # Kiểm tra xem vé này đã cào vào Supabase chưa
+                    # Kiểm tra trùng lặp
                     check_db = supabase.table("inbox_tickets")\
                         .select("id")\
                         .eq("source", "osticket")\
@@ -233,15 +250,13 @@ class OSTicketService:
                         .execute()
 
                     if check_db.data:
-                        # Đã có trong DB -> Bỏ qua
                         continue
 
                     logger.info(f"✨ Phát hiện vé mới #{internal_id}, đang cào chi tiết...")
                     ticket_data = await self.scrape_ticket_detail(page, context, internal_id)
                     
                     if ticket_data:
-                        # Lưu vào Supabase inbox_tickets
-                        insert_res = supabase.table("inbox_tickets").insert({
+                        insert_payload = {
                             "source": ticket_data["source"],
                             "source_id": ticket_data["source_id"],
                             "sender_email": ticket_data["sender_email"],
@@ -249,18 +264,21 @@ class OSTicketService:
                             "subject": ticket_data["subject"],
                             "raw_content": ticket_data["raw_content"],
                             "country": ticket_data.get("country"),
+                            "ticket_timestamp": ticket_data.get("ticket_timestamp"),
                             "attachments": ticket_data.get("attachments", []),
                             "metadata": ticket_data.get("metadata", {}),
                             "status": "pending"
-                        }).execute()
+                        }
+                        if ticket_data.get("created_at"):
+                            insert_payload["created_at"] = ticket_data["created_at"]
+
+                        insert_res = supabase.table("inbox_tickets").insert(insert_payload).execute()
 
                         if insert_res.data:
                             new_id = insert_res.data[0]["id"]
-                            logger.info(f"💾 Đã lưu Ticket #{internal_id} vào Supabase (UUID: {new_id}). Đang kích hoạt Gemini AI Triage...")
-                            # Tự động gọi Gemini AI phân tích tóm tắt tiếng Việt 2 câu
+                            logger.info(f"💾 Đã lưu Ticket #{internal_id} vào Supabase. Đang kích hoạt Gemini AI Triage...")
                             await process_ticket_with_ai(new_id)
 
-                    # Quay lại danh sách Open Queue để duyệt tiếp
                     await page.goto(queue_url, wait_until="networkidle")
                     await page.wait_for_selector("table.list", timeout=15000)
 
@@ -271,6 +289,5 @@ class OSTicketService:
 
 osticket_service = OSTicketService()
 
-# Hàm wrapper cho APScheduler trong main.py
 async def poll_open_ostickets():
     await osticket_service.poll_open_ostickets()

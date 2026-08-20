@@ -3,6 +3,7 @@ import os
 import base64
 import logging
 import mimetypes
+from datetime import datetime, timezone
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
@@ -21,7 +22,6 @@ def get_gmail_service():
         logger.warning("⚠️ Thiếu biến môi trường Gmail trên Render!")
         return None
 
-    # 🎯 ĐÃ GỠ BẪY INVALID_SCOPE: Không truyền 'scopes=...' để Google tự dùng scope gốc của Refresh Token
     creds = Credentials(
         token=None,
         refresh_token=refresh_token,
@@ -47,24 +47,23 @@ def process_gmail_attachments(service, msg_id, payload):
 
             if filename and att_id:
                 try:
-                    # 1. Tải dữ liệu nhị phân từ Gmail API
                     att = service.users().messages().attachments().get(
                         userId='me', messageId=msg_id, id=att_id
                     ).execute()
                     
                     file_bytes = base64.urlsafe_b64decode(att['data'])
-
-                    # 2. Upload lên Supabase Storage
                     supabase = get_supabase_client()
                     storage_path = f"attachments/{msg_id}_{filename}"
                     
+                    content_type, _ = mimetypes.guess_type(filename)
+                    content_type = content_type or "application/octet-stream"
+
                     supabase.storage.from_("ticket-attachments").upload(
                         path=storage_path,
                         file=file_bytes,
-                        file_options={"upsert": "true"}
+                        file_options={"upsert": "true", "content-type": content_type}
                     )
 
-                    # 3. Lấy Public URL công khai
                     public_url = supabase.storage.from_("ticket-attachments").get_public_url(storage_path)
                     attachments.append({"filename": filename, "url": public_url})
                     logger.info(f"📎 Đã upload tệp đính kèm [{filename}] lên Supabase Storage!")
@@ -81,14 +80,13 @@ def process_gmail_attachments(service, msg_id, payload):
     return attachments
 
 async def poll_unread_gmails():
-    """Hàm Cronjob chính: Quét hòm thư Gmail, bóc tách tệp đính kèm & lưu Supabase"""
+    """Hàm Cronjob chính: Quét hòm thư Gmail, bóc tách tệp đính kèm & lưu Supabase kèm Thời Gian Thật"""
     logger.info("📧 Đang kết nối Gmail API quét Hòm Thư Đến...")
     try:
         service = get_gmail_service()
         if not service:
             return
 
-        # Tìm tất cả mail chưa đọc trong Inbox
         results = service.users().messages().list(userId='me', q='is:unread label:INBOX').execute()
         messages = results.get('messages', [])
 
@@ -101,7 +99,6 @@ async def poll_unread_gmails():
         for msg_summary in messages:
             msg_id = msg_summary['id']
 
-            # Kiểm tra trùng lặp
             existing = supabase.table("inbox_tickets") \
                 .select("id").eq("source", "gmail").eq("source_id", msg_id).execute()
 
@@ -125,9 +122,14 @@ async def poll_unread_gmails():
                 elif name == 'date':
                     date_str = header.get('value', '')
 
+            # Lấy thời gian gửi từ internalDate (mili-giây chuẩn xác)
+            internal_date_ms = msg.get("internalDate")
+            created_at_iso = None
+            if internal_date_ms:
+                dt = datetime.fromtimestamp(int(internal_date_ms) / 1000.0, tz=timezone.utc)
+                created_at_iso = dt.isoformat()
+
             snippet = msg.get('snippet', '')
-            
-            # 🎯 BÓC TÁCH & UPLOAD TỆP ĐÍNH KÈM
             attachments = process_gmail_attachments(service, msg_id, payload)
 
             new_ticket = {
@@ -141,46 +143,15 @@ async def poll_unread_gmails():
                 "status": "pending",
                 "attachments": attachments
             }
+            if created_at_iso:
+                new_ticket["created_at"] = created_at_iso
+
             res = supabase.table("inbox_tickets").insert(new_ticket).execute()
 
             if res.data:
                 ticket_db_id = res.data[0]["id"]
-                logger.info(f"✅ Đã nạp Email mới kèm {len(attachments)} tệp đính kèm vào Supabase: [{subject}]")
+                logger.info(f"✅ Đã nạp Email mới vào Supabase: [{subject}] (Gửi lúc: {date_str})")
                 await process_ticket_with_ai(ticket_db_id)
 
     except Exception as e:
         logger.error(f"❌ Lỗi khi quét Gmail API: {e}")
-
-def upload_attachment_to_supabase(file_bytes: bytes, filename: str) -> str:
-    """Upload tệp đính kèm lên Supabase Storage với Content-Type chuẩn xác 100%"""
-    try:
-        supabase = get_supabase_client()
-        storage_path = f"attachments/{filename}"
-        
-        # 🎯 TỰ ĐỘNG NHẬN DIỆN MIME TYPE (application/pdf, image/png, application/xlsx...)
-        content_type, _ = mimetypes.guess_type(filename)
-        if not content_type:
-            if filename.endswith('.pdf'):
-                content_type = 'application/pdf'
-            elif filename.endswith('.xlsx'):
-                content_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            elif filename.endswith('.docx'):
-                content_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-            else:
-                content_type = 'application/octet-stream'
-
-        # Upload kèm Content-Type chuẩn
-        supabase.storage.from_("ticket-attachments").upload(
-            path=storage_path,
-            file=file_bytes,
-            file_options={
-                "upsert": "true",
-                "content-type": content_type  # 🔥 DÒNG QUAN TRỌNG NHẤT KHÔNG BỊ LỖI CHỮ ĐEN!
-            }
-        )
-        
-        public_url = supabase.storage.from_("ticket-attachments").get_public_url(storage_path)
-        return public_url
-    except Exception as e:
-        logger.error(f"⚠️ Lỗi upload attachment: {e}")
-        return ""

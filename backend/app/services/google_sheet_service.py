@@ -2,6 +2,7 @@
 import os
 import json
 import logging
+from datetime import datetime
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from app.core.supabase import get_supabase_client
@@ -39,11 +40,22 @@ def get_valid_sheet_name(service, spreadsheet_id: str, requested_name: str = "Fo
         logger.error(f"Lỗi đọc tên Sheet: {e}")
         return requested_name
 
+def parse_sheet_timestamp(timestamp_raw: str) -> Optional[str]:
+    """Parse ngày giờ cột A (ví dụ '6/17/2026 9:22:47' hoặc '24/06/2026 08:33:39') sang ISO string."""
+    if not timestamp_raw:
+        return None
+    for fmt in ("%m/%d/%Y %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%m/%d/%Y %I:%M:%S %p", "%d/%m/%Y %I:%M:%S %p", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(timestamp_raw.strip(), fmt).isoformat() + "+07:00"
+        except ValueError:
+            pass
+    return None
+
 # =========================================================================
 # 1. HÀM QUÉT INGESTION: ĐỌC GOOGLE SHEET ➔ LƯU ĐẦY ĐỦ VÀO SUPABASE
 # =========================================================================
 async def poll_form_feedbacks():
-    """Hàm Cronjob: Quét Google Sheet Form Feedback & Lưu đầy đủ vào Supabase"""
+    """Hàm Cronjob: Quét Google Sheet Form Feedback & Lưu đầy đủ vào Supabase kèm Thời Gian Thật"""
     logger.info("🔎 Đang quét Google Sheet Form Feedback...")
     try:
         spreadsheet_id = os.getenv("SPREADSHEET_ID")
@@ -63,6 +75,7 @@ async def poll_form_feedbacks():
             def get_col(idx):
                 return row[idx].strip() if idx < len(row) else ""
 
+            timestamp_raw = get_col(0) # Cột A (Timestamp)
             country = get_col(2)       # Cột C (COUNTRY)
             submitter = get_col(3)     # Cột D (SUBMITTER NAME)
             subject = get_col(5)       # Cột F (SUBJECT)
@@ -80,22 +93,27 @@ async def poll_form_feedbacks():
                     .select("id").eq("source", "google_form").eq("source_id", real_fb_id).execute()
 
                 if not existing.data:
-                    # LƯU ĐẦY ĐỦ CÁC CỘT VÀO SUPABASE
+                    created_at_iso = parse_sheet_timestamp(timestamp_raw)
+
                     new_ticket = {
                         "source": "google_form",
                         "source_id": real_fb_id,
                         "sender_email": submitter if "@" in submitter else "form_user@dtt.vn",
                         "submitter_name": submitter,
                         "subject": subject,
-                        "raw_content": remarks if remarks else subject,
+                        "raw_content": f"Form Feedback: {subject}\nRemarks: {remarks}\nGoogle Doc: {doc_url}",
                         "country": country,
                         "doc_url": doc_url,
+                        "ticket_timestamp": timestamp_raw,
                         "status": "pending",
-                        "metadata": {"row_index": index, "doc_url": doc_url, "sheet_name": target_sheet}
+                        "metadata": {"row_index": index, "doc_url": doc_url, "sheet_name": target_sheet, "remarks": remarks}
                     }
+                    if created_at_iso:
+                        new_ticket["created_at"] = created_at_iso
+
                     res = supabase.table("inbox_tickets").insert(new_ticket).execute()
                     if res.data:
-                        logger.info(f"✅ Đã lưu Form Feedback mới vào Supabase: {real_fb_id}")
+                        logger.info(f"✅ Đã lưu Form Feedback mới vào Supabase: {real_fb_id} (Gửi lúc: {timestamp_raw})")
                         await process_ticket_with_ai(res.data[0]["id"])
 
     except Exception as e:

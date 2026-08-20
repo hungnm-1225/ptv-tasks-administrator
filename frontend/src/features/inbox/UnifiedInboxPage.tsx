@@ -34,7 +34,8 @@ import {
   Wand2,
   Clock,
   CheckCheck,
-  Filter
+  Eye,
+  Download
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { InboxTicket, BotType } from '../../types';
@@ -81,6 +82,23 @@ const stripHtmlTags = (htmlString: string | null | undefined): string => {
     .replace(/&quot;/g, '"')
     .replace(/\n\s*\n/g, '\n\n')
     .trim();
+};
+
+// 🎯 HÀM CHUẨN HÓA NGÀY GIỜ CHI TIẾT (HH:mm - DD/MM/YYYY)
+const formatDateTime = (dateStr?: string): string => {
+  if (!dateStr) return '';
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    const hours = d.getHours().toString().padStart(2, '0');
+    const mins = d.getMinutes().toString().padStart(2, '0');
+    const day = d.getDate().toString().padStart(2, '0');
+    const month = (d.getMonth() + 1).toString().padStart(2, '0');
+    const year = d.getFullYear();
+    return `${hours}:${mins} - ${day}/${month}/${year}`;
+  } catch {
+    return dateStr;
+  }
 };
 
 export const UnifiedInboxPage: React.FC = () => {
@@ -176,10 +194,12 @@ export const UnifiedInboxPage: React.FC = () => {
     loadTickets();
   }, [selectedCategory, selectedSource, selectedStatus, sortOrder]);
 
+  // 🎯 HÀM MỞ TRANG GỐC CHUẨN XÁC 100%
   const getDirectSourceUrl = (ticket: InboxTicket) => {
     if (ticket.source === 'gmail') {
       return `https://mail.google.com/mail/u/0/#search/id%3A${ticket.source_id}`;
     } else if (ticket.source === 'google_form') {
+      if (ticket.doc_url) return ticket.doc_url;
       const rowIdx = ticket.metadata?.row_index || 2;
       return `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/edit#gid=0&range=A${rowIdx}:P${rowIdx}`;
     } else if (ticket.source === 'osticket') {
@@ -247,7 +267,7 @@ export const UnifiedInboxPage: React.FC = () => {
   const handleOpenTaskModal = (ticket: InboxTicket) => {
     setTaskModalTicket(ticket);
 
-    const fullText = `${ticket.subject || ''} ${ticket.raw_content || ''} ${ticket.submitter_name || ''}`.toLowerCase();
+    const fullText = `${ticket.subject || ''} ${ticket.raw_content || ''} ${ticket.submitter_name || ''} ${ticket.metadata?.school_name || ''}`.toLowerCase();
     const matchedSchool = schoolsList.find(s =>
       fullText.includes(s.school_name.toLowerCase()) ||
       fullText.includes(s.school_code.toLowerCase())
@@ -276,10 +296,14 @@ export const UnifiedInboxPage: React.FC = () => {
       sender_email: ticket.sender_email
     };
 
+    const firstAttachmentUrl = ticket.attachments?.[0]?.url || "";
+
     if (bType === 'workspace_rpa') {
       payload = {
-        action: "school_create_order_and_enroll",
+        action: "bulk_account_creation",
         ticket_id: ticket.id,
+        school_name: school?.school_name || "Pythaverse School Demo",
+        attachment_url: firstAttachmentUrl,
         hierarchy: {
           school_name: school?.school_name || "Pythaverse School Demo",
           school_code: school?.school_code || "SCH_10266",
@@ -412,7 +436,7 @@ export const UnifiedInboxPage: React.FC = () => {
         syncPayloadJson(selectedBotType, taskModalTicket, matchedSch, res.courses);
       }
 
-      toast.success(`AI đã bóc tách thành công ${res.courses?.length || 1} khóa học chuẩn cho trường [${res.school_name}]!`);
+      toast.success(`AI đã bóc tách thành công ${res.courses?.length || 1} khóa học cho [${res.school_name}]!`);
     } catch (err) {
       console.error(err);
       toast.error('Lỗi khi bóc tách COF: ' + (err as Error).message);
@@ -445,7 +469,7 @@ export const UnifiedInboxPage: React.FC = () => {
 
       toast.success(
         <div className="space-y-1">
-          <div className="font-bold">Đã tạo tác vụ Bot thành công! (Ticket chuyển sang Đang xử lý)</div>
+          <div className="font-bold">Đã tạo tác vụ Bot thành công!</div>
           <button
             onClick={() => navigate('/tasks')}
             className="text-violet-400 underline text-xs font-semibold cursor-pointer"
@@ -502,6 +526,7 @@ export const UnifiedInboxPage: React.FC = () => {
           </span>
         );
       case 'processing':
+      case 'waiting_poll':
         return (
           <span className="px-2 py-0.5 bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-300 text-[10px] font-bold rounded-md flex items-center gap-1 animate-pulse">
             <Clock className="w-3 h-3" /> ĐANG XỬ LÝ (BOT)
@@ -532,10 +557,8 @@ export const UnifiedInboxPage: React.FC = () => {
         </p>
       </div>
 
-      {/* 🎯 THANH CÔNG CỤ COMPACT: 3 SELECTION BOXES + NÚT SẮP XẾP GỌN GÀNG TRÊN 1 DÒNG */}
+      {/* THANH CÔNG CỤ COMPACT: 3 DROPDOWNS + SẮP XẾP */}
       <div className="bg-white dark:bg-slate-800/90 p-3 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 shadow-xs flex items-center justify-between flex-wrap gap-3">
-
-        {/* Nhóm 3 Dropdown Selection Boxes */}
         <div className="flex items-center gap-2.5 flex-wrap flex-1 min-w-0">
 
           {/* 1. Nguồn */}
@@ -588,7 +611,7 @@ export const UnifiedInboxPage: React.FC = () => {
 
         </div>
 
-        {/* 🎯 Nút Sắp Xếp: Đã Đưa Xuống Cùng Dòng Filter */}
+        {/* Nút Sắp Xếp */}
         <button
           onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-300 shadow-2xs transition shrink-0 cursor-pointer"
@@ -619,6 +642,7 @@ export const UnifiedInboxPage: React.FC = () => {
             const isDismissed = ticket.status === 'dismissed';
             const isCompleted = ticket.status === 'completed';
             const cleanRawContent = stripHtmlTags(ticket.raw_content);
+            const displayTime = formatDateTime(ticket.created_at || ticket.ticket_timestamp);
 
             return (
               <div key={ticket.id} className="bg-white dark:bg-slate-800 p-5 sm:p-6 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 hover:border-slate-300 dark:hover:border-slate-600 space-y-4 shadow-xs transition-all">
@@ -649,15 +673,45 @@ export const UnifiedInboxPage: React.FC = () => {
                         {ticket.submitter_name || ticket.sender_email}
                       </span>
 
+                      {/* 🎯 HIỂN THỊ ĐẦY ĐỦ NGÀY + GIỜ */}
                       <span className="text-xs text-slate-400 flex items-center gap-1">
                         <Calendar className="w-3 h-3" />
-                        {ticket.ticket_timestamp || new Date(ticket.created_at).toLocaleDateString('vi-VN')}
+                        <span>{displayTime}</span>
                       </span>
                     </div>
 
                     <h3 className="text-sm sm:text-base font-semibold text-slate-900 dark:text-slate-100 leading-snug">
                       {ticket.subject || 'Không có tiêu đề'}
                     </h3>
+
+                    {/* 🎯 HIỂN THỊ DANH SÁCH FILE ĐÍNH KÈM (XLSX, PNG, PDF...) */}
+                    {attachments.length > 0 && (
+                      <div className="flex items-center gap-2 flex-wrap pt-1">
+                        {attachments.map((file: any, idx: number) => {
+                          const isExcel = file.filename?.endsWith('.xlsx') || file.filename?.endsWith('.xls');
+                          const isImage = file.filename?.endsWith('.png') || file.filename?.endsWith('.jpg') || file.filename?.endsWith('.jpeg');
+
+                          return (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => setPreviewFile(file)}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-[11px] font-medium rounded-lg transition shadow-2xs cursor-pointer"
+                            >
+                              {isImage ? (
+                                <ImageIcon className="w-3 h-3 text-emerald-500" />
+                              ) : isExcel ? (
+                                <FileSpreadsheetIcon className="w-3 h-3 text-emerald-600" />
+                              ) : (
+                                <Paperclip className="w-3 h-3 text-violet-500" />
+                              )}
+                              <span className="truncate max-w-[220px]">{file.filename}</span>
+                              <Eye className="w-3 h-3 text-slate-400" />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
 
                   <a
@@ -687,7 +741,7 @@ export const UnifiedInboxPage: React.FC = () => {
                   )}
                 </div>
 
-                {/* 🎯 NỘI DUNG EMAIL GỐC MỞ RỘNG (ĐÃ BÓC SẠCH THẺ HTML) */}
+                {/* Nội dung gốc mở rộng */}
                 {isExpanded && (
                   <div className="p-4 bg-slate-50 dark:bg-slate-900/90 rounded-xl border border-slate-200 dark:border-slate-800 text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap max-h-72 overflow-y-auto font-mono leading-relaxed shadow-inner">
                     {cleanRawContent || "(Không có nội dung văn bản gốc)"}
@@ -697,13 +751,11 @@ export const UnifiedInboxPage: React.FC = () => {
                 {/* Footer Buttons */}
                 <div className="flex items-center justify-between pt-1 flex-wrap gap-2">
 
-                  {/* Cụm trái: AI-Powered & Nút Mở rộng nội dung gốc */}
                   <div className="flex items-center gap-3">
                     <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
                       ✓ AI-Powered Feed
                     </span>
 
-                    {/* Nút Xem/Thu gọn nội dung gốc */}
                     <button
                       type="button"
                       onClick={() => setExpandedContent(prev => ({ ...prev, [ticket.id]: !prev[ticket.id] }))}
@@ -715,7 +767,6 @@ export const UnifiedInboxPage: React.FC = () => {
                     </button>
                   </div>
 
-                  {/* Cụm phải: Các nút Hành động */}
                   <div className="flex items-center gap-2 flex-wrap">
                     {isDismissed ? (
                       <button
@@ -778,6 +829,56 @@ export const UnifiedInboxPage: React.FC = () => {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* 🎯 MODAL XEM TRƯỚC TỆP ĐÍNH KÈM ĐA NĂNG (IMAGE, PDF, EXCEL) */}
+      {previewFile && (
+        <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
+              <div className="flex items-center gap-2 truncate">
+                <Paperclip className="w-4 h-4 text-violet-600" />
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">{previewFile.filename}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={previewFile.url}
+                  download={previewFile.filename}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1 px-3 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 text-xs font-medium rounded-lg transition cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Tải Về Máy</span>
+                </a>
+                <button onClick={() => setPreviewFile(null)} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 p-4 overflow-auto flex items-center justify-center bg-slate-50 dark:bg-slate-900">
+              {previewFile.filename?.match(/\.(png|jpg|jpeg|gif|webp)$/i) ? (
+                <img src={previewFile.url} alt={previewFile.filename} className="max-w-full max-h-[70vh] object-contain rounded-xl shadow-md" />
+              ) : previewFile.filename?.endsWith('.pdf') ? (
+                <iframe src={previewFile.url} title={previewFile.filename} className="w-full h-[70vh] rounded-xl border border-slate-200" />
+              ) : (
+                <div className="text-center p-8 space-y-3">
+                  <FileSpreadsheetIcon className="w-12 h-12 mx-auto text-emerald-600" />
+                  <div className="text-xs font-medium text-slate-700 dark:text-slate-300">File bảng tính Excel (.xlsx): <strong>{previewFile.filename}</strong></div>
+                  <a
+                    href={previewFile.url}
+                    download
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-xs"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Tải File Excel Về Máy</span>
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -1070,3 +1171,24 @@ export const UnifiedInboxPage: React.FC = () => {
     </div>
   );
 };
+
+// Icon nhỏ bổ trợ cho file Excel
+const FileSpreadsheetIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className || "w-4 h-4"}
+  >
+    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+    <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+    <path d="M8 13h2" />
+    <path d="M14 13h2" />
+    <path d="M8 17h2" />
+    <path d="M14 17h2" />
+  </svg>
+);
