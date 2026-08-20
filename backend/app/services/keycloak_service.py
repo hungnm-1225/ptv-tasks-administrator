@@ -16,20 +16,23 @@ class KeycloakService:
         self.target_realm = settings.KEYCLOAK_REALM or 'idp'
         self.admin_user = settings.KEYCLOAK_ADMIN_USER
         self.admin_pass = settings.KEYCLOAK_ADMIN_PASS
+        self.client_id = settings.KEYCLOAK_CLIENT_ID or 'admin-cli'
         self._admin_client: Optional[KeycloakAdmin] = None
 
     def _get_admin_client(self) -> KeycloakAdmin:
         """Lấy hoặc làm mới kết nối Keycloak REST API qua OpenID Connect"""
         if not self._admin_client:
+            # Đã loại bỏ tham số auto_refresh_token thừa
             self._admin_client = KeycloakAdmin(
                 server_url=self.server_url,
                 username=self.admin_user,
                 password=self.admin_pass,
                 realm_name="master",
                 user_realm_name=self.target_realm,
-                auto_refresh_token=['get', 'post', 'put', 'delete'],
+                client_id=self.client_id,
                 verify=True
             )
+            # Chuyển ngữ cảnh sang realm idp
             self._admin_client.realm_name = self.target_realm
         return self._admin_client
 
@@ -215,5 +218,5 @@ class KeycloakService:
             return {"status": "failed", "message": str(e)}
 
 
-# 📌 KHỞI TẠO SINGLETON INSTANCE ĐỂ tasks.py IMPORT KHÔNG BỊ LỖI
+# 📌 Khởi tạo Singleton instance
 keycloak_service = KeycloakService()
