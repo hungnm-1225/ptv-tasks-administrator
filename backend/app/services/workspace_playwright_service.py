@@ -224,10 +224,16 @@ class WorkspacePlaywrightService:
                 if await target_row.count() == 0:
                     return {"status": "failed", "error": f"Không tìm thấy Order phù hợp ({order_identifier}) ở trạng thái 'Awaiting Partner'"}
 
-                # 2. Click nút Action (icon Menu 3 gạch) ở cột cuối cùng của dòng đó
-                action_btn = target_row.locator("[data-field=' '] button, button").first
+                # 2. Click nút Action (icon Menu 3 gạch) để mở Popover Menu
+                action_btn = target_row.locator("[data-field=' '] button, button:has(.lucide-menu)").first
                 await action_btn.click()
-                logger.info("📋 Đã click mở Modal Order Details...")
+                logger.info("📋 Đã bấm icon 3 gạch, chờ Popover Menu hiện...")
+                
+                # BẤM TIẾP CHỮ 'View' TRONG POPOVER MENU (Cực kỳ quan trọng!)
+                view_menu_item = page.locator("li[role='menuitem']:has-text('View'), .MuiMenu-list li:has-text('View'), text=View").first
+                await view_menu_item.wait_for(state="visible", timeout=5000)
+                await view_menu_item.click()
+                logger.info("✨ Đã click 'View'! Đang mở Modal Order Details...")
 
                 # Đợi Modal 'Order Details' hiển thị
                 await page.wait_for_selector("div[role='dialog']:has-text('Order Details')", timeout=15000)
@@ -574,7 +580,95 @@ class WorkspacePlaywrightService:
 
 
     # =========================================================================
-    # 4. SCHOOL WORKSPACE: GHI DANH HỌC VIÊN & TẠO GROUP LỚP TRONG KHÓA HỌC
+    # 4. SALES ADMIN WORKSPACE: DUYỆT CONTRACT TỐI CAO (DST-...)
+    # =========================================================================
+    async def admin_approve_distributor_contract(
+        self,
+        credentials: Dict[str, str],
+        contract_identifier: Optional[str] = None,
+        justification: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Sales Admin:
+        1. Đăng nhập Keycloak SSO -> Chuyển hướng chủ động tới /sales-admin-workspace/dashboard.
+        2. Tìm dòng Contract DST-... (Pending).
+        3. Click icon Con Mắt (View Details) để chuyển tới /sales-admin-workspace/dashboard/DST-...
+        4. Bấm nút 'Approve' (xanh lá).
+        5. Điền 'Justification Note' (Đảm bảo >= 15 ký tự).
+        6. Bấm nút 'Confirm Approval' hoàn tất!
+        """
+        async with async_playwright() as p:
+            browser, context, page = await self._create_context(p)
+            try:
+                if not await self.login_role(page, credentials["username"], credentials["password"]):
+                    return {"status": "failed", "error": "Không thể đăng nhập Sales Admin"}
+
+                logger.info("👑 Đang chuyển hướng Sales Admin tới /sales-admin-workspace/dashboard...")
+                await page.goto(f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard", wait_until="networkidle", timeout=45000)
+                await page.wait_for_selector(".MuiDataGrid-row", timeout=25000)
+
+                # 1. Tìm dòng Contract DST-... mục tiêu
+                target_row = None
+                if contract_identifier:
+                    target_row = page.locator(
+                        f".MuiDataGrid-row[data-id='{contract_identifier}'], "
+                        f".MuiDataGrid-row:has([data-field='order_code']:has-text('{contract_identifier}'))"
+                    ).first
+                
+                # Fallback: Lấy dòng đầu tiên có trạng thái 'Pending'
+                if not target_row or await target_row.count() == 0:
+                    target_row = page.locator(".MuiDataGrid-row:has([data-field='status']:has-text('Pending'))").first
+
+                if await target_row.count() == 0:
+                    return {"status": "failed", "error": f"Không tìm thấy Contract ({contract_identifier}) Pending trên Dashboard"}
+
+                # 2. Click icon Con Mắt ở cột Actions để mở trang chi tiết
+                eye_btn = target_row.locator("button[aria-label='View Details'], [data-field='actions'] button").first
+                await eye_btn.click()
+                logger.info("👁️ Đã click icon con mắt, chờ mở trang Order Details...")
+
+                # Đợi trang chi tiết Contract load xong
+                await page.wait_for_selector("button:has-text('Approve')", timeout=15000)
+                logger.info(f"📄 Đang ở trang chi tiết: {page.url}")
+
+                # 3. Bấm nút 'Approve' màu xanh lá
+                approve_btn = page.locator("button:has-text('Approve')").first
+                await approve_btn.click()
+                logger.info("✨ Đã bấm Approve, chờ Dialog Justification Note...")
+
+                # Đợi Dialog 'Confirm Order Approval' hiển thị
+                await page.wait_for_selector("div[role='dialog']:has-text('Confirm Order Approval')", timeout=10000)
+
+                # 4. Chuẩn bị Justification Note (Bắt buộc >= 15 ký tự)
+                default_note = "Afiq requests and approves the requests, Hung QA processes the contract via Automation Hub"
+                valid_justification = justification if (justification and len(justification.strip()) >= 15) else default_note
+                
+                # Điền vào Textarea
+                textarea = page.locator("div[role='dialog'] textarea").first
+                await textarea.fill(valid_justification)
+                await page.wait_for_timeout(800)
+
+                # 5. Bấm nút 'Confirm Approval'
+                confirm_btn = page.locator("div[role='dialog'] button:has-text('Confirm Approval')").first
+                await confirm_btn.click()
+                await page.wait_for_timeout(3000)
+
+                logger.info(f"🎉 Sales Admin đã phê duyệt Contract {contract_identifier or ''} thành công!")
+                return {
+                    "status": "success",
+                    "contract_identifier": contract_identifier,
+                    "justification": valid_justification,
+                    "message": "Sales Admin đã phê duyệt DST Contract thành công"
+                }
+
+            except Exception as e:
+                logger.error(f"❌ Lỗi Sales Admin Approve: {e}")
+                return {"status": "failed", "error": str(e)}
+            finally:
+                await browser.close()
+
+    # =========================================================================
+    # 5. SCHOOL WORKSPACE: GHI DANH HỌC VIÊN & TẠO GROUP LỚP TRONG KHÓA HỌC
     # =========================================================================
     async def school_enroll_users_and_groups(
         self,
@@ -688,11 +782,11 @@ class WorkspacePlaywrightService:
                 await browser.close()
 
     # =========================================================================
-    # 5. BULK ACCOUNT CREATION (TẠO TÀI KHOẢN HỌC SINH/GV HÀNG LOẠT)
+    # 6. BULK ACCOUNT CREATION (TẠO TÀI KHOẢN HỌC SINH/GV HÀNG LOẠT)
     # =========================================================================
 
     # =========================================================================
-    # 1. PHA 1: NỘP FILE ACCOUNTS VÀ LẤY REQUEST ID TỪ MUIDATAGRID
+    # 61. PHA 1: NỘP FILE ACCOUNTS VÀ LẤY REQUEST ID TỪ MUIDATAGRID
     # =========================================================================
     async def submit_account_creation_batch(
         self,
@@ -766,7 +860,7 @@ class WorkspacePlaywrightService:
                 await browser.close()
 
     # =========================================================================
-    # 2. PHA 2: CHECK TIẾN ĐỘ & EXPORT FILE KẾT QUẢ TỪ MUIDATAGRID
+    # 6.2. PHA 2: CHECK TIẾN ĐỘ & EXPORT FILE KẾT QUẢ TỪ MUIDATAGRID
     # =========================================================================
     async def check_and_export_batch_result(
         self,

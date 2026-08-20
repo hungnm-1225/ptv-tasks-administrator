@@ -47,7 +47,7 @@ Chỉ chọn 1 trong các giá trị: "bug", "account_keycloak", "lms_enroll", "
 Hãy trả về DUY NHẤT một JSON object:
 {{
     "category": "Chọn 1 danh mục hợp lệ ở trên",
-    "summary_vi": "Tóm tắt ngắn gọn 2 câu bằng tiếng Việt về vấn đề chính.",
+    "summary_vi": "Tóm tắt ngắn gọn bằng tiếng Việt về vấn đề chính.",
     "assigned_name": "Hung Nguyen",
     "assigned_email": "hung.nguyenmanh@dtt.vn"
 }}

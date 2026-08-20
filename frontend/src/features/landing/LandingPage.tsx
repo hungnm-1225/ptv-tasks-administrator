@@ -184,7 +184,7 @@ export const LandingPage: React.FC = () => {
             </div>
             <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Gemini AI Triage Engine</h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-normal">
-              Tự động phân loại danh mục, tóm tắt 2 câu tiếng Việt và đề xuất nhân sự dựa trên Knowledge Base phân quyền.
+              Tự động phân loại danh mục, tóm tắt bằng tiếng Việt và đề xuất nhân sự dựa trên Knowledge Base phân quyền.
             </p>
           </div>
 
