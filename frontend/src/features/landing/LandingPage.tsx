@@ -13,7 +13,8 @@ import {
   Sparkles,
   ExternalLink,
   Sun,
-  Moon
+  Moon,
+  Send, Instagram, MessageCircle, Twitter, Youtube, MessageSquare, AtSign
 } from 'lucide-react';
 import { authorConfig as defaultAuthorConfig } from '../../config/authorConfig';
 import { useAuth } from '../../context/AuthContext';
@@ -60,18 +61,19 @@ export const LandingPage: React.FC = () => {
   // Helper render đúng Icon cho từng mạng xã hội
   const renderSocialIcon = (iconName: string) => {
     switch (iconName) {
-      case 'github':
-        return <Github className="w-3.5 h-3.5" />;
-      case 'linkedin':
-        return <Linkedin className="w-3.5 h-3.5 text-blue-500" />;
-      case 'facebook':
-        return <Facebook className="w-3.5 h-3.5 text-blue-600" />;
-      case 'mail':
-        return <Mail className="w-3.5 h-3.5 text-rose-500" />;
-      case 'globe':
-        return <Globe className="w-3.5 h-3.5 text-cyan-500" />;
-      default:
-        return <ExternalLink className="w-3.5 h-3.5" />;
+      case 'github': return <Github className="w-3.5 h-3.5 text-slate-700 dark:text-slate-300" />;
+      case 'linkedin': return <Linkedin className="w-3.5 h-3.5 text-blue-500" />;
+      case 'facebook': return <Facebook className="w-3.5 h-3.5 text-blue-600" />;
+      case 'mail': return <Mail className="w-3.5 h-3.5 text-rose-500" />;
+      case 'telegram': return <Send className="w-3.5 h-3.5 text-sky-400" />;
+      case 'instagram': return <Instagram className="w-3.5 h-3.5 text-pink-500" />;
+      case 'threads': return <AtSign className="w-3.5 h-3.5 text-slate-800 dark:text-slate-200" />;
+      case 'whatsapp':
+      case 'zalo': return <MessageCircle className="w-3.5 h-3.5 text-emerald-500" />;
+      case 'twitter': return <Twitter className="w-3.5 h-3.5 text-sky-400" />;
+      case 'youtube': return <Youtube className="w-3.5 h-3.5 text-rose-500" />;
+      case 'discord': return <MessageSquare className="w-3.5 h-3.5 text-indigo-400" />;
+      default: return <Globe className="w-3.5 h-3.5 text-cyan-400" />;
     }
   };
 

@@ -1,17 +1,65 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
     Save, User, Link as LinkIcon, MapPin, Building, Github, Linkedin,
-    Facebook, Mail, Globe, Loader2, Sparkles, RefreshCw, CheckCircle2,
-    ExternalLink, Layers, Code2
+    Facebook, Mail, Globe, Loader2, Sparkles, Plus, Trash2, Upload,
+    ExternalLink, Layers, Send, Instagram, MessageCircle, Twitter,
+    Youtube, MessageSquare, Share2, AtSign
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { authorConfig, AuthorConfig, SocialLink } from '../../config/authorConfig';
 import { toast } from 'sonner';
 
+// Thuật toán tự động nhận diện nền tảng từ URL hoặc tên
+const detectPlatform = (url: string, name: string): { iconName: string; colorClass: string; defaultName: string } => {
+    const lowerUrl = url.toLowerCase();
+    const lowerName = name.toLowerCase();
+
+    if (lowerUrl.includes('threads.net') || lowerName.includes('threads')) {
+        return { iconName: 'threads', colorClass: 'hover:text-slate-100 hover:border-slate-400', defaultName: 'Threads' };
+    }
+    if (lowerUrl.includes('t.me') || lowerUrl.includes('telegram') || lowerName.includes('telegram')) {
+        return { iconName: 'telegram', colorClass: 'hover:text-sky-400 hover:border-sky-500/50', defaultName: 'Telegram' };
+    }
+    if (lowerUrl.includes('zalo.me') || lowerName.includes('zalo')) {
+        return { iconName: 'zalo', colorClass: 'hover:text-blue-500 hover:border-blue-500/50', defaultName: 'Zalo' };
+    }
+    if (lowerUrl.includes('whatsapp') || lowerUrl.includes('wa.me') || lowerName.includes('whatsapp')) {
+        return { iconName: 'whatsapp', colorClass: 'hover:text-emerald-400 hover:border-emerald-500/50', defaultName: 'WhatsApp' };
+    }
+    if (lowerUrl.includes('instagram.com') || lowerName.includes('instagram')) {
+        return { iconName: 'instagram', colorClass: 'hover:text-pink-500 hover:border-pink-500/50', defaultName: 'Instagram' };
+    }
+    if (lowerUrl.includes('twitter.com') || lowerUrl.includes('x.com') || lowerName.includes('twitter') || lowerName === 'x') {
+        return { iconName: 'twitter', colorClass: 'hover:text-slate-100 hover:border-slate-500', defaultName: 'X (Twitter)' };
+    }
+    if (lowerUrl.includes('youtube.com') || lowerUrl.includes('youtu.be') || lowerName.includes('youtube')) {
+        return { iconName: 'youtube', colorClass: 'hover:text-rose-500 hover:border-rose-500/50', defaultName: 'YouTube' };
+    }
+    if (lowerUrl.includes('discord') || lowerName.includes('discord')) {
+        return { iconName: 'discord', colorClass: 'hover:text-indigo-400 hover:border-indigo-500/50', defaultName: 'Discord' };
+    }
+    if (lowerUrl.includes('github.com') || lowerName.includes('github')) {
+        return { iconName: 'github', colorClass: 'hover:text-slate-100 hover:border-slate-500', defaultName: 'GitHub' };
+    }
+    if (lowerUrl.includes('linkedin.com') || lowerName.includes('linkedin')) {
+        return { iconName: 'linkedin', colorClass: 'hover:text-blue-400 hover:border-blue-500/40', defaultName: 'LinkedIn' };
+    }
+    if (lowerUrl.includes('facebook.com') || lowerUrl.includes('fb.com') || lowerName.includes('facebook')) {
+        return { iconName: 'facebook', colorClass: 'hover:text-blue-500 hover:border-blue-600/40', defaultName: 'Facebook' };
+    }
+    if (lowerUrl.startsWith('mailto:') || lowerName.includes('email') || lowerUrl.includes('@')) {
+        return { iconName: 'mail', colorClass: 'hover:text-rose-400 hover:border-rose-500/40', defaultName: 'Email' };
+    }
+    return { iconName: 'globe', colorClass: 'hover:text-cyan-400 hover:border-cyan-500/40', defaultName: 'Website' };
+};
+
 export const ProfileSettingsPage: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [uploadingAvatar, setUploadingAvatar] = useState(false);
     const [activeTab, setActiveTab] = useState<'profile' | 'project'>('profile');
+
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Form State
     const [name, setName] = useState(authorConfig.name);
@@ -23,7 +71,7 @@ export const ProfileSettingsPage: React.FC = () => {
     const [socials, setSocials] = useState<SocialLink[]>(authorConfig.socials);
     const [projectInfo, setProjectInfo] = useState(authorConfig.projectInfo);
 
-    // 1. Tải dữ liệu từ Supabase khi mở trang (Fallback vào authorConfig nếu chưa có)
+    // 1. Tải dữ liệu ban đầu
     useEffect(() => {
         async function loadProfile() {
             try {
@@ -40,11 +88,11 @@ export const ProfileSettingsPage: React.FC = () => {
                     setAvatarUrl(data.avatar_url || authorConfig.avatarUrl);
                     setLocation(data.location || authorConfig.location);
                     setOrganization(data.organization || authorConfig.organization);
-                    if (data.socials) setSocials(data.socials);
+                    if (data.socials && Array.isArray(data.socials)) setSocials(data.socials);
                     if (data.project_info) setProjectInfo(data.project_info);
                 }
             } catch (err) {
-                console.error("Lỗi tải thông tin:", err);
+                console.error("Lỗi nạp profile:", err);
             } finally {
                 setLoading(false);
             }
@@ -52,14 +100,84 @@ export const ProfileSettingsPage: React.FC = () => {
         loadProfile();
     }, []);
 
-    // 2. Cập nhật từng link mạng xã hội
-    const handleUpdateSocial = (index: number, newUrl: string) => {
-        const updated = [...socials];
-        updated[index].url = newUrl;
+    // 2. Xử lý Upload Avatar lên Supabase Storage Bucket
+    const handleAvatarFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        if (!file.type.startsWith('image/')) {
+            toast.error("Vui lòng chọn file định dạng hình ảnh (PNG, JPG, WEBP)!");
+            return;
+        }
+
+        setUploadingAvatar(true);
+        try {
+            const fileExt = file.name.split('.').pop();
+            const fileName = `author_avatar_${Date.now()}.${fileExt}`;
+            const filePath = `avatars/${fileName}`;
+
+            // Upload lên bucket ticket-attachments
+            const { error: uploadError } = await supabase.storage
+                .from('ticket-attachments')
+                .upload(filePath, file, { upsert: true });
+
+            if (uploadError) throw uploadError;
+
+            // Lấy URL công khai
+            const { data: publicUrlData } = supabase.storage
+                .from('ticket-attachments')
+                .getPublicUrl(filePath);
+
+            setAvatarUrl(publicUrlData.publicUrl);
+            toast.success("Tải ảnh đại diện lên Supabase Storage thành công!");
+        } catch (err: any) {
+            toast.error("Không thể tải ảnh: " + (err.message || "Lỗi bucket storage"));
+        } finally {
+            setUploadingAvatar(false);
+        }
+    };
+
+    // 3. Quản lý danh sách Mạng Xã Hội
+    const handleAddSocial = () => {
+        const newSocial: SocialLink = {
+            name: "Liên kết mới",
+            url: "",
+            iconName: "globe",
+            colorClass: "hover:text-cyan-400 hover:border-cyan-500/40"
+        };
+        setSocials([...socials, newSocial]);
+    };
+
+    const handleRemoveSocial = (index: number) => {
+        const updated = socials.filter((_, i) => i !== index);
         setSocials(updated);
     };
 
-    // 3. Hàm lưu toàn bộ thông tin lên Supabase
+    const handleUpdateSocialUrl = (index: number, newUrl: string) => {
+        const updated = [...socials];
+        const currentName = updated[index].name;
+        const detected = detectPlatform(newUrl, currentName);
+
+        updated[index].url = newUrl;
+        updated[index].iconName = detected.iconName as any;
+        updated[index].colorClass = detected.colorClass;
+        if (currentName === "Liên kết mới" || !currentName) {
+            updated[index].name = detected.defaultName;
+        }
+
+        setSocials(updated);
+    };
+
+    const handleUpdateSocialName = (index: number, newName: string) => {
+        const updated = [...socials];
+        const detected = detectPlatform(updated[index].url, newName);
+        updated[index].name = newName;
+        updated[index].iconName = detected.iconName as any;
+        updated[index].colorClass = detected.colorClass;
+        setSocials(updated);
+    };
+
+    // 4. Lưu dữ liệu lên Supabase
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
         setSaving(true);
@@ -84,21 +202,29 @@ export const ProfileSettingsPage: React.FC = () => {
 
             if (error) throw error;
 
-            toast.success("Đã cập nhật thông tin chủ quyền tác giả thành công! Trang chủ đã được đồng bộ.");
+            toast.success("Đã lưu thành công! Thông tin và ảnh mới đã được đồng bộ lên Trang Chủ.");
         } catch (error: any) {
-            toast.error("Lỗi khi lưu: " + (error.message || "Không thể kết nối Supabase"));
+            toast.error("Lỗi khi lưu: " + (error.message || "Vui lòng kiểm tra lại Supabase"));
         } finally {
             setSaving(false);
         }
     };
 
-    // Helper lấy icon tương ứng
+    // Render Icon động
     const getSocialIcon = (iconName: string) => {
         switch (iconName) {
-            case 'github': return <Github className="w-4 h-4 text-slate-700 dark:text-slate-300" />;
+            case 'github': return <Github className="w-4 h-4 text-slate-800 dark:text-slate-200" />;
             case 'linkedin': return <Linkedin className="w-4 h-4 text-blue-600" />;
             case 'facebook': return <Facebook className="w-4 h-4 text-blue-500" />;
             case 'mail': return <Mail className="w-4 h-4 text-rose-500" />;
+            case 'telegram': return <Send className="w-4 h-4 text-sky-500" />;
+            case 'instagram': return <Instagram className="w-4 h-4 text-pink-500" />;
+            case 'threads': return <AtSign className="w-4 h-4 text-slate-800 dark:text-slate-200" />;
+            case 'whatsapp':
+            case 'zalo': return <MessageCircle className="w-4 h-4 text-emerald-500" />;
+            case 'twitter': return <Twitter className="w-4 h-4 text-sky-400" />;
+            case 'youtube': return <Youtube className="w-4 h-4 text-rose-600" />;
+            case 'discord': return <MessageSquare className="w-4 h-4 text-indigo-500" />;
             default: return <Globe className="w-4 h-4 text-cyan-500" />;
         }
     };
@@ -107,7 +233,7 @@ export const ProfileSettingsPage: React.FC = () => {
         return (
             <div className="flex h-[70vh] flex-col items-center justify-center gap-3">
                 <Loader2 className="w-8 h-8 animate-spin text-violet-600" />
-                <p className="text-xs text-slate-500">Đang đồng bộ hồ sơ tác giả...</p>
+                <p className="text-xs text-slate-500">Đang đồng bộ dữ liệu hồ sơ...</p>
             </div>
         );
     }
@@ -125,20 +251,18 @@ export const ProfileSettingsPage: React.FC = () => {
                         </span>
                     </div>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                        Tất cả thông tin chỉnh sửa tại đây sẽ tự động hiển thị trực tiếp lên Trang Chủ (Landing Page).
+                        Cập nhật họ tên, ảnh đại diện và hệ sinh thái mạng xã hội hiển thị tại Trang Chủ.
                     </p>
                 </div>
 
-                <div className="flex items-center gap-3">
-                    <button
-                        onClick={handleSave}
-                        disabled={saving}
-                        className="flex items-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white px-5 py-2.5 rounded-xl font-semibold text-xs transition-all shadow-md shadow-violet-500/25 active:scale-95 disabled:opacity-50 cursor-pointer"
-                    >
-                        {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                        Lưu Thay Đổi Ngay
-                    </button>
-                </div>
+                <button
+                    onClick={handleSave}
+                    disabled={saving}
+                    className="flex items-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white px-5 py-2.5 rounded-xl font-semibold text-xs transition-all shadow-md shadow-violet-500/25 active:scale-95 disabled:opacity-50 cursor-pointer"
+                >
+                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    Lưu Thay Đổi Ngay
+                </button>
             </div>
 
             {/* Tabs Chuyển Đổi */}
@@ -170,7 +294,7 @@ export const ProfileSettingsPage: React.FC = () => {
             {activeTab === 'profile' && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-                    {/* Cột 1: Live Card Preview + Avatar URL */}
+                    {/* Cột 1: Live Card Preview + Avatar Upload */}
                     <div className="lg:col-span-1 space-y-6">
                         <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800/80 shadow-xs flex flex-col items-center text-center">
                             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-4">Xem Trước Thẻ Trang Chủ</p>
@@ -182,7 +306,30 @@ export const ProfileSettingsPage: React.FC = () => {
                                     onError={(e) => { (e.target as any).src = 'https://via.placeholder.com/150?text=Avatar'; }}
                                     className="w-28 h-28 rounded-full border-4 border-violet-500/20 object-cover shadow-lg group-hover:scale-105 transition-transform duration-300"
                                 />
+                                {uploadingAvatar && (
+                                    <div className="absolute inset-0 bg-slate-900/60 rounded-full flex items-center justify-center">
+                                        <Loader2 className="w-6 h-6 text-white animate-spin" />
+                                    </div>
+                                )}
                             </div>
+
+                            {/* Nút Upload Ảnh lên Supabase Storage */}
+                            <input
+                                type="file"
+                                ref={fileInputRef}
+                                onChange={handleAvatarFileUpload}
+                                accept="image/*"
+                                className="hidden"
+                            />
+                            <button
+                                type="button"
+                                onClick={() => fileInputRef.current?.click()}
+                                disabled={uploadingAvatar}
+                                className="flex items-center gap-2 px-3.5 py-1.5 bg-violet-50 dark:bg-violet-500/15 hover:bg-violet-100 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-500/30 rounded-xl text-xs font-semibold transition cursor-pointer mb-4"
+                            >
+                                <Upload className="w-3.5 h-3.5" />
+                                <span>{uploadingAvatar ? "Đang tải lên..." : "Tải ảnh từ máy tính"}</span>
+                            </button>
 
                             <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">{name || 'Chưa đặt tên'}</h3>
                             <p className="text-xs text-violet-600 dark:text-violet-400 font-medium mb-3">{title || 'Chức danh'}</p>
@@ -195,8 +342,8 @@ export const ProfileSettingsPage: React.FC = () => {
                                 <span>{location}</span>
                             </div>
 
-                            <div className="w-full pt-4 border-t border-slate-100 dark:border-slate-800 text-left space-y-3">
-                                <label className="block text-[10px] font-bold uppercase text-slate-400">Đường dẫn ảnh đại diện (Avatar URL)</label>
+                            <div className="w-full pt-4 border-t border-slate-100 dark:border-slate-800 text-left space-y-2">
+                                <label className="block text-[10px] font-bold uppercase text-slate-400">Hoặc dán Link Ảnh Trực Tiếp</label>
                                 <input
                                     type="text"
                                     value={avatarUrl}
@@ -208,7 +355,7 @@ export const ProfileSettingsPage: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* Cột 2 & 3: Chi tiết thông tin & Danh sách mạng xã hội */}
+                    {/* Cột 2 & 3: Thông tin cơ bản & Hệ sinh thái Mạng Xã Hội */}
                     <div className="lg:col-span-2 space-y-6">
                         <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800/80 shadow-xs space-y-5">
                             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Thông Tin Cơ Bản</h3>
@@ -265,43 +412,82 @@ export const ProfileSettingsPage: React.FC = () => {
                                 />
                             </div>
 
-                            {/* Danh sách 5 Mạng Xã Hội */}
+                            {/* Danh sách Mạng Xã Hội Tự Động Nhận Diện */}
                             <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-4">
-                                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Đường Dẫn Liên Kết Mạng Xã Hội (Click-to-Redirect)</h3>
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Hệ Sinh Thái Mạng Xã Hội</h3>
+                                        <p className="text-[11px] text-slate-500">Tự động nhận diện Threads, Telegram, Zalo, WhatsApp, Instagram, X, YouTube, Discord...</p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={handleAddSocial}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300 border border-violet-200 dark:border-violet-500/30 rounded-xl text-xs font-semibold hover:bg-violet-100 transition cursor-pointer"
+                                    >
+                                        <Plus className="w-3.5 h-3.5" />
+                                        <span>Thêm Liên Kết</span>
+                                    </button>
+                                </div>
 
-                                <div className="grid grid-cols-1 gap-3">
+                                <div className="space-y-3">
                                     {socials.map((social, idx) => (
-                                        <div key={social.name} className="flex items-center gap-3 bg-slate-50 dark:bg-slate-800/50 p-2.5 rounded-2xl border border-slate-200/70 dark:border-slate-700/50">
+                                        <div key={idx} className="flex items-center gap-3 bg-slate-50 dark:bg-slate-800/50 p-2.5 rounded-2xl border border-slate-200/70 dark:border-slate-700/50 transition-all focus-within:border-violet-500/40">
+                                            {/* Icon tự động đổi theo URL */}
                                             <div className="w-9 h-9 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs flex items-center justify-center shrink-0">
                                                 {getSocialIcon(social.iconName)}
                                             </div>
 
+                                            {/* Tên hiển thị */}
                                             <div className="w-32 shrink-0">
-                                                <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{social.name}</p>
+                                                <input
+                                                    type="text"
+                                                    value={social.name}
+                                                    onChange={(e) => handleUpdateSocialName(idx, e.target.value)}
+                                                    placeholder="Tên MXH"
+                                                    className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none"
+                                                />
                                             </div>
 
+                                            {/* Đường dẫn URL */}
                                             <div className="flex-1 flex items-center gap-2">
                                                 <input
                                                     type="text"
                                                     value={social.url}
-                                                    onChange={(e) => handleUpdateSocial(idx, e.target.value)}
-                                                    placeholder={`Link ${social.name}...`}
+                                                    onChange={(e) => handleUpdateSocialUrl(idx, e.target.value)}
+                                                    placeholder="Dán link trang cá nhân (VD: https://t.me/..., https://threads.net/@...)"
                                                     className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none"
                                                 />
+
                                                 {social.url && (
                                                     <a
                                                         href={social.url}
                                                         target="_blank"
                                                         rel="noreferrer"
-                                                        title="Mở thử link"
-                                                        className="p-2 text-slate-400 hover:text-violet-600 transition"
+                                                        title="Mở thử liên kết"
+                                                        className="p-1.5 text-slate-400 hover:text-violet-600 transition shrink-0"
                                                     >
                                                         <ExternalLink className="w-3.5 h-3.5" />
                                                     </a>
                                                 )}
+
+                                                {/* Nút Xóa */}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleRemoveSocial(idx)}
+                                                    title="Xóa liên kết này"
+                                                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition shrink-0 cursor-pointer"
+                                                >
+                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                </button>
                                             </div>
                                         </div>
                                     ))}
+
+                                    {socials.length === 0 && (
+                                        <div className="text-center py-6 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl">
+                                            <p className="text-xs text-slate-400">Chưa có liên kết mạng xã hội nào. Bấm nút "+ Thêm Liên Kết" để tạo mới nhé anh!</p>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
@@ -352,7 +538,7 @@ export const ProfileSettingsPage: React.FC = () => {
                         <label className="text-xs font-medium text-slate-700 dark:text-slate-300">Điểm Nhấn Công Nghệ (Tech Stack - Phân cách bằng dấu phẩy)</label>
                         <input
                             type="text"
-                            value={projectInfo.techStack.join(', ')}
+                            value={Array.isArray(projectInfo.techStack) ? projectInfo.techStack.join(', ') : ''}
                             onChange={e => setProjectInfo({ ...projectInfo, techStack: e.target.value.split(',').map(s => s.trim()) })}
                             className="w-full bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 rounded-xl px-3.5 py-2 text-xs text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-violet-500/20"
                         />
