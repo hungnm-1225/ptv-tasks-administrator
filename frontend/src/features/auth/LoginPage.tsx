@@ -74,7 +74,7 @@ export const LoginPage: React.FC = () => {
         {/* Google SSO Button */}
         <button
           onClick={handleLogin}
-          className="w-full py-3 px-4 bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-200 border border-slate-300/80 dark:border-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-3 transition shadow-xs"
+          className="cursor-pointer w-full py-3 px-4 bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-200 border border-slate-300/80 dark:border-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-3 transition shadow-xs"
         >
           <svg className="w-4 h-4" viewBox="0 0 24 24">
             <path
