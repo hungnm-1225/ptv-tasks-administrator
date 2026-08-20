@@ -16,8 +16,8 @@ const ALLOWED_ADMIN_EMAIL = "hung.nguyenmanh@dtt.vn";
 export const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
-  signInWithGoogle: async () => {},
-  signOut: async () => {},
+  signInWithGoogle: async () => { },
+  signOut: async () => { },
 });
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
@@ -67,7 +67,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const signOut = async () => {
     await supabase.auth.signOut();
     setUser(null);
-    toast.success("Đã đăng xuất an toàn khỏi hệ thống");
+    toast.success("Đã đăng xuất khỏi hệ thống");
   };
 
   return (

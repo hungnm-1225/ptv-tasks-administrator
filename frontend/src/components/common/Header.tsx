@@ -35,7 +35,7 @@ export const Header: React.FC = () => {
 
     try {
       await signOut();
-      toast.success("Đã đăng xuất an toàn. Hẹn gặp lại anh yêu!");
+      toast.success("Đã đăng xuất!");
     } catch (error) {
       toast.error("Có lỗi khi đăng xuất.");
       setIsLoggingOut(false);
@@ -48,7 +48,7 @@ export const Header: React.FC = () => {
         <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-900/60 backdrop-blur-md transition-all duration-500">
           <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-2xl flex flex-col items-center gap-4 animate-in zoom-in duration-300">
             <Loader2 className="w-10 h-10 text-violet-600 animate-spin" />
-            <p className="text-slate-600 dark:text-slate-300 font-medium text-xs">Đang đăng xuất an toàn...</p>
+            <p className="text-slate-600 dark:text-slate-300 font-medium text-xs">Đang đăng xuất...</p>
           </div>
         </div>
       )}
@@ -104,19 +104,6 @@ export const Header: React.FC = () => {
 
             {isDropdownOpen && (
               <div className="absolute right-0 mt-2 w-60 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl py-2 z-30 animate-in fade-in slide-in-from-top-2 duration-200">
-                <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-800 mb-1">
-                  <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Quản trị viên</p>
-                  <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">{userName}</p>
-                </div>
-
-                <Link
-                  to="/"
-                  className="flex items-center gap-3 px-4 py-2.5 text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-violet-600 dark:hover:text-violet-400 transition-colors"
-                  onClick={() => setIsDropdownOpen(false)}
-                >
-                  <Home className="w-4 h-4" />
-                  Xem Trang Chủ (Landing Page)
-                </Link>
 
                 <Link
                   to="/profile"
@@ -124,7 +111,7 @@ export const Header: React.FC = () => {
                   onClick={() => setIsDropdownOpen(false)}
                 >
                   <Settings className="w-4 h-4" />
-                  Thiết Lập Chủ Quyền Tác Giả
+                  Thông tin tài khoản
                 </Link>
 
                 <div className="my-1 border-t border-slate-100 dark:border-slate-800"></div>
@@ -134,7 +121,7 @@ export const Header: React.FC = () => {
                   className="w-full flex items-center gap-3 px-4 py-2.5 text-xs text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition-colors font-medium cursor-pointer"
                 >
                   <LogOut className="w-4 h-4" />
-                  Đăng xuất hệ thống
+                  Đăng xuất
                 </button>
               </div>
             )}
