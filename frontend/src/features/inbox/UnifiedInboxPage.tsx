@@ -752,9 +752,6 @@ export const UnifiedInboxPage: React.FC = () => {
                 <div className="flex items-center justify-between pt-1 flex-wrap gap-2">
 
                   <div className="flex items-center gap-3">
-                    <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
-                      ✓ AI-Powered Feed
-                    </span>
 
                     <button
                       type="button"
