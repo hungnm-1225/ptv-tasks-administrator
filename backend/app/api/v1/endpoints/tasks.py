@@ -32,7 +32,6 @@ async def list_tasks(approval_status: Optional[str] = None):
         logger.error(f"❌ Lỗi khi đọc bot_automation_tasks: {e}")
         return []
 
-# 🔥 Hỗ trợ cả /tasks và /tasks/ để không bao giờ bị lỗi 405
 @router.post("", response_model=Dict[str, Any])
 @router.post("/", response_model=Dict[str, Any])
 async def create_task(payload: Dict[str, Any]):
