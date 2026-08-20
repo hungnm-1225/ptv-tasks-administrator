@@ -334,7 +334,6 @@ export const ProfileSettingsPage: React.FC = () => {
                                 className="hidden"
                             />
 
-
                             <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">{name || 'Chưa đặt tên'}</h3>
                             <p className="text-xs text-violet-600 dark:text-violet-400 font-medium mb-3">{title || 'Chức danh'}</p>
 
