@@ -1,25 +1,79 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Zap,
   Bot,
   ArrowRight,
   Inbox,
   CheckSquare,
   Github,
+  Linkedin,
+  Facebook,
+  Mail,
+  Globe,
   Sparkles,
   ExternalLink,
-  Mail,
   Sun,
   Moon
 } from 'lucide-react';
-import { authorConfig } from '../../config/authorConfig';
+import { authorConfig as defaultAuthorConfig } from '../../config/authorConfig';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { supabase } from '../../lib/supabase';
 
 export const LandingPage: React.FC = () => {
   const { user } = useAuth();
   const { theme, toggleTheme } = useTheme();
+
+  // State lưu thông tin tác giả, khởi tạo mặc định bằng authorConfig
+  const [author, setAuthor] = useState(defaultAuthorConfig);
+
+  // Đồng bộ thông tin động từ Supabase
+  useEffect(() => {
+    async function fetchDynamicAuthor() {
+      try {
+        const { data, error } = await supabase
+          .from('author_profile')
+          .select('*')
+          .limit(1)
+          .maybeSingle();
+
+        if (data && !error) {
+          setAuthor({
+            name: data.name || defaultAuthorConfig.name,
+            title: data.title || defaultAuthorConfig.title,
+            bio: data.bio || defaultAuthorConfig.bio,
+            avatarUrl: data.avatar_url || defaultAuthorConfig.avatarUrl,
+            location: data.location || defaultAuthorConfig.location,
+            organization: data.organization || defaultAuthorConfig.organization,
+            socials: data.socials && data.socials.length > 0 ? data.socials : defaultAuthorConfig.socials,
+            projectInfo: data.project_info || defaultAuthorConfig.projectInfo,
+          });
+        }
+      } catch (err) {
+        console.warn("Không thể tải thông tin tác giả từ DB, chuyển sang dùng authorConfig mặc định:", err);
+      }
+    }
+
+    fetchDynamicAuthor();
+  }, []);
+
+  // Helper render đúng Icon cho từng mạng xã hội
+  const renderSocialIcon = (iconName: string) => {
+    switch (iconName) {
+      case 'github':
+        return <Github className="w-3.5 h-3.5" />;
+      case 'linkedin':
+        return <Linkedin className="w-3.5 h-3.5 text-blue-500" />;
+      case 'facebook':
+        return <Facebook className="w-3.5 h-3.5 text-blue-600" />;
+      case 'mail':
+        return <Mail className="w-3.5 h-3.5 text-rose-500" />;
+      case 'globe':
+        return <Globe className="w-3.5 h-3.5 text-cyan-500" />;
+      default:
+        return <ExternalLink className="w-3.5 h-3.5" />;
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex flex-col transition-colors duration-200">
@@ -39,7 +93,7 @@ export const LandingPage: React.FC = () => {
             <button
               onClick={toggleTheme}
               title={theme === 'light' ? 'Chuyển sang Giao diện Tối' : 'Chuyển sang Giao diện Sáng'}
-              className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200/80 dark:bg-slate-800 dark:hover:bg-slate-700/80 border border-slate-200/80 dark:border-slate-700/60 text-slate-600 dark:text-slate-300 transition shadow-2xs"
+              className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200/80 dark:bg-slate-800 dark:hover:bg-slate-700/80 border border-slate-200/80 dark:border-slate-700/60 text-slate-600 dark:text-slate-300 transition shadow-2xs cursor-pointer"
             >
               {theme === 'light' ? (
                 <Moon className="w-4 h-4 text-slate-700 hover:text-violet-600 transition-colors" />
@@ -143,44 +197,42 @@ export const LandingPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Author Ownership Section */}
+        {/* Author Ownership Section (Dữ liệu động từ Supabase / Fallback authorConfig) */}
         <div className="bg-white dark:bg-slate-800 p-8 rounded-3xl border border-slate-200/80 dark:border-slate-700/60 shadow-sm max-w-3xl mx-auto space-y-6">
           <div className="flex items-center gap-4 flex-wrap sm:flex-nowrap">
             <img
-              src={authorConfig.avatarUrl}
-              alt={authorConfig.name}
-              className="w-16 h-16 rounded-2xl border border-violet-500/30 object-cover shadow-sm"
+              src={author.avatarUrl}
+              alt={author.name}
+              onError={(e) => { (e.target as any).src = defaultAuthorConfig.avatarUrl; }}
+              className="w-16 h-16 rounded-2xl border border-violet-500/30 object-cover shadow-sm shrink-0"
             />
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">{authorConfig.name}</h3>
+                <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">{author.name}</h3>
                 <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30 text-[10px] font-semibold rounded-full">
                   Project Creator
                 </span>
               </div>
-              <p className="text-xs text-violet-600 dark:text-violet-400 font-medium">{authorConfig.title}</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-normal">{authorConfig.bio}</p>
+              <p className="text-xs text-violet-600 dark:text-violet-400 font-medium">{author.title}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-normal">{author.bio}</p>
             </div>
           </div>
 
           <div className="pt-4 border-t border-slate-200/80 dark:border-slate-700/60 flex items-center justify-between flex-wrap gap-3">
             <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Kết nối trực tiếp:</span>
             <div className="flex items-center gap-2 flex-wrap">
-              {authorConfig.socials.map((social) => {
-                const Icon = social.iconName === 'github' ? Github : social.iconName === 'mail' ? Mail : ExternalLink;
-                return (
-                  <a
-                    key={social.name}
-                    href={social.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200/80 dark:bg-slate-900 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-700 dark:text-slate-200 transition shadow-2xs"
-                  >
-                    <Icon className="w-3.5 h-3.5" />
-                    <span>{social.name}</span>
-                  </a>
-                );
-              })}
+              {author.socials && author.socials.map((social) => (
+                <a
+                  key={social.name}
+                  href={social.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200/80 dark:bg-slate-900 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-700 dark:text-slate-200 transition shadow-2xs ${social.colorClass || ''}`}
+                >
+                  {renderSocialIcon(social.iconName)}
+                  <span>{social.name}</span>
+                </a>
+              ))}
             </div>
           </div>
         </div>
@@ -189,7 +241,7 @@ export const LandingPage: React.FC = () => {
       {/* Footer */}
       <footer className="border-t border-slate-200/80 dark:border-slate-800/80 py-6 text-center text-xs text-slate-500 dark:text-slate-400 bg-white/50 dark:bg-slate-900/50">
         <div className="max-w-7xl mx-auto px-6 flex items-center justify-between flex-wrap gap-2">
-          <span>&copy; 2026 Pythaverse Education. Thiết kế bởi <strong>{authorConfig.name}</strong>.</span>
+          <span>&copy; 2026 Pythaverse Education. Thiết kế bởi <strong>{author.name}</strong>.</span>
           <span className="font-mono text-[11px] text-slate-400 dark:text-slate-500">Domain Whitelist: @dtt.vn</span>
         </div>
       </footer>

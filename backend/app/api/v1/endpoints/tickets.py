@@ -116,3 +116,27 @@ async def update_ticket_category(ticket_id: str, payload: Dict[str, Any]):
     supabase = get_supabase_client()
     supabase.table("inbox_tickets").update({"category": new_category}).eq("id", ticket_id).execute()
     return {"status": "success", "category": new_category}
+
+@router.put("/{ticket_id}/complete")
+async def mark_ticket_completed(ticket_id: str):
+    """Đánh dấu ticket đã hoàn thành thủ công từ giao diện Unified Inbox."""
+    supabase = get_supabase_client()
+    try:
+        # Cập nhật trạng thái thành completed
+        res = supabase.table("inbox_tickets").update({
+            "status": "completed"
+        }).eq("id", ticket_id).execute()
+
+        # Nếu là Gmail thì đánh dấu đã đọc trên Gmail gốc
+        if res.data:
+            ticket = res.data[0]
+            if ticket.get("source") == "gmail" and ticket.get("source_id"):
+                try:
+                    from app.services.gmail_service import mark_email_as_read
+                    mark_email_as_read(ticket["source_id"])
+                except Exception:
+                    pass
+
+        return {"status": "success", "message": f"Đã đánh dấu hoàn thành ticket #{ticket_id[:8]}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
