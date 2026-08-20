@@ -1,156 +1,162 @@
-# backend/app/services/keycloak_service.py
 import logging
-from typing import Dict, Any, List, Optional
+from typing import List, Dict, Any, Optional
 from keycloak import KeycloakAdmin
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-
 class KeycloakService:
-    """Wrapper tương tác Keycloak Admin REST API quản trị tài khoản người dùng."""
-
     def __init__(self):
-        self.server_url = settings.KEYCLOAK_SERVER_URL
-        self.realm_name = getattr(settings, "KEYCLOAK_REALM", "idp")
+        # Chuẩn hóa server url
+        base_url = settings.KEYCLOAK_SERVER_URL.rstrip('/')
+        if not base_url.endswith('/auth'):
+            base_url += '/auth'
+        self.server_url = base_url
+
+        self.target_realm = settings.KEYCLOAK_REALM or 'idp'
         self.admin_user = settings.KEYCLOAK_ADMIN_USER
         self.admin_pass = settings.KEYCLOAK_ADMIN_PASS
-        self.client_id = getattr(settings, "KEYCLOAK_CLIENT_ID", "admin-cli")
+        self._admin_client: Optional[KeycloakAdmin] = None
 
     def _get_admin_client(self) -> KeycloakAdmin:
-        """Khởi tạo đối tượng KeycloakAdmin kết nối tới server."""
-        # Chuẩn hóa server_url (đảm bảo có /auth nếu cần)
-        url = self.server_url.rstrip("/")
-        if not url.endswith("/auth") and "pythaverse" in url:
-            url += "/auth/"
-        else:
-            url += "/"
+        """Lấy hoặc làm mới kết nối Keycloak REST API"""
+        if not self._admin_client:
+            self._admin_client = KeycloakAdmin(
+                server_url=self.server_url,
+                username=self.admin_user,
+                password=self.admin_pass,
+                realm_name="master",
+                user_realm_name=self.target_realm,
+                auto_refresh_token=['get', 'post', 'put', 'delete'],
+                verify=True
+            )
+            self._admin_client.realm_name = self.target_realm
+        return self._admin_client
 
-        return KeycloakAdmin(
-            server_url=url,
-            username=self.admin_user,
-            password=self.admin_pass,
-            realm_name=self.realm_name,
-            user_realm_name="master",
-            client_id=self.client_id,
-            verify=True,
-            auto_refresh_token_seconds=60
-        )
+    def find_user_exact(self, identifier: str) -> Optional[Dict[str, Any]]:
+        """Tìm user chính xác, loại bỏ nhầm lẫn giữa mail thường và mail có prefix 'st.'"""
+        client = self._get_admin_client()
+        clean_id = identifier.strip().lower()
 
-    def _find_user_id(self, keycloak_admin: KeycloakAdmin, identifier: str) -> Optional[str]:
-        """Tìm user_id trong Keycloak dựa theo email hoặc username."""
-        # Thử tìm theo email trước
-        users = keycloak_admin.get_users(query={"email": identifier, "exact": True})
+        # 1. Tìm theo Email
+        users = client.get_users(query={"email": clean_id, "exact": True})
         if users:
-            return users[0]["id"]
-        
-        # Thử tìm theo username
-        users = keycloak_admin.get_users(query={"username": identifier, "exact": True})
-        if users:
-            return users[0]["id"]
-            
+            for u in users:
+                if (u.get('email') or '').strip().lower() == clean_id:
+                    return u
+
+        # 2. Tìm theo Username
+        users_by_uname = client.get_users(query={"username": clean_id, "exact": True})
+        if users_by_uname:
+            for u in users_by_uname:
+                if (u.get('username') or '').strip().lower() == clean_id:
+                    return u
+
+        # 3. Fallback tìm kiếm chung
+        fallback = client.get_users(query={"search": clean_id})
+        for u in fallback:
+            if (u.get('email') or '').strip().lower() == clean_id or (u.get('username') or '').strip().lower() == clean_id:
+                return u
+
         return None
 
-    async def execute_account_action(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Thực thi hành động quản trị tài khoản Keycloak sau khi Admin bấm Approve."""
-        action = payload.get("action", "reset_password")
-        target_email = payload.get("target_email") or payload.get("email") or payload.get("username")
-        temp_pass = payload.get("temp_pass", "Ptv@2026")
-        
-        if not target_email:
-            return {
-                "status": "failed",
-                "error": "Thiếu thông tin email hoặc username mục tiêu trong payload."
-            }
+    def execute_bulk_operations(
+        self,
+        identifiers: List[str],
+        action_type: str,                   # 'bulk_reset_pass' | 'bulk_verify' | 'bulk_both' | 'bulk_set_status'
+        target_status: Optional[str] = None, # 'enabled' | 'disabled' | None (Gán trạng thái tuyệt đối)
+        password_option: str = "email_lowercase", # 'email_lowercase' | 'default_secure' | 'custom'
+        custom_password: Optional[str] = None,
+        temporary: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Xử lý Bulk chính xác 100%:
+        - Không đảo toggle mà gán trực tiếp trạng thái mong muốn (Enabled hoặc Disabled).
+        - Đổi mật khẩu về lowercase email hoặc Pythaverse@2026.
+        """
+        client = self._get_admin_client()
+        results = []
+        success_count = 0
+        failed_count = 0
 
-        # Nếu chưa cấu hình mật khẩu Admin Keycloak trong .env -> Chạy chế độ mô phỏng an toàn
-        if not self.admin_pass or self.admin_pass == "your-keycloak-admin-password":
-            logger.warning("Keycloak credentials chưa được cấu hình, chạy ở chế độ Safe Simulation.")
-            return {
-                "status": "simulated",
-                "message": f"[Mô phỏng] Đã thực hiện '{action}' cho tài khoản '{target_email}' với mật khẩu tạm '{temp_pass}' (Realm: {self.realm_name})",
-                "target": target_email
-            }
+        # Xác định rõ trạng thái boolean mong muốn (Không phụ thuộc trạng thái cũ)
+        desired_enabled: Optional[bool] = None
+        if target_status == "enabled":
+            desired_enabled = True
+        elif target_status == "disabled":
+            desired_enabled = False
 
-        try:
-            admin_client = self._get_admin_client()
-            user_id = self._find_user_id(admin_client, target_email)
+        for raw_id in identifiers:
+            ident = raw_id.strip()
+            if not ident:
+                continue
 
-            if not user_id:
-                return {
+            user = self.find_user_exact(ident)
+            if not user:
+                failed_count += 1
+                results.append({
+                    "identifier": ident,
                     "status": "failed",
-                    "error": f"Không tìm thấy người dùng với email/username '{target_email}' trong Realm '{self.realm_name}'"
-                }
-
-            # 1. Đặt lại mật khẩu (Reset Password)
-            if action in ["reset_password", "change_password"]:
-                is_temporary = payload.get("temporary", False)
-                admin_client.set_user_password(
-                    user_id=user_id,
-                    password=temp_pass,
-                    temporary=is_temporary
-                )
-                logger.info(f"✅ Đã reset mật khẩu cho {target_email} thành công.")
-                return {
-                    "status": "success",
-                    "message": f"Đã đặt lại mật khẩu mới cho '{target_email}' thành công!",
-                    "action": action,
-                    "target_email": target_email
-                }
-
-            # 2. Khóa tài khoản (Disable User)
-            elif action == "disable_user":
-                admin_client.update_user(user_id=user_id, payload={"enabled": False})
-                return {
-                    "status": "success",
-                    "message": f"Đã vô hiệu hóa (disable) tài khoản '{target_email}' thành công.",
-                    "action": action
-                }
-
-            # 3. Mở khóa tài khoản (Enable User)
-            elif action == "enable_user":
-                admin_client.update_user(user_id=user_id, payload={"enabled": True})
-                return {
-                    "status": "success",
-                    "message": f"Đã kích hoạt lại (enable) tài khoản '{target_email}' thành công.",
-                    "action": action
-                }
-
-            # 4. Xác thực email (Verify Email)
-            elif action == "verify_email":
-                admin_client.update_user(user_id=user_id, payload={"emailVerified": True})
-                return {
-                    "status": "success",
-                    "message": f"Đã đánh dấu đã xác thực email (emailVerified=True) cho '{target_email}'.",
-                    "action": action
-                }
-
-            # 5. Đổi tên hiển thị (Change Name)
-            elif action == "change_display_name":
-                first_name = payload.get("first_name", "")
-                last_name = payload.get("last_name", "")
-                admin_client.update_user(user_id=user_id, payload={
-                    "firstName": first_name,
-                    "lastName": last_name
+                    "message": "Không tìm thấy tài khoản chính xác trên Keycloak"
                 })
-                return {
+                continue
+
+            user_id = user["id"]
+            user_email = (user.get("email") or ident).strip().lower()
+            logs = []
+
+            try:
+                # 1. CẬP NHẬT TRẠNG THÁI (ENABLED/DISABLED & EMAIL VERIFIED)
+                user_payload = {}
+                
+                # Gán thẳng giá trị tuyệt đối (Dù 8e - 2d thì tất cả đều về desired_enabled)
+                if desired_enabled is not None:
+                    user_payload["enabled"] = desired_enabled
+                    logs.append(f"Gán trạng thái tuyệt đối: Enabled = {desired_enabled}")
+
+                if action_type in ["bulk_verify", "bulk_both"]:
+                    user_payload["emailVerified"] = True
+                    logs.append("Xác thực EmailVerified = True")
+
+                if user_payload:
+                    client.update_user(user_id=user_id, payload=user_payload)
+
+                # 2. ĐỔI MẬT KHẨU
+                if action_type in ["bulk_reset_pass", "bulk_both"]:
+                    if password_option == "email_lowercase":
+                        pass_val = user_email  # Mật khẩu chính là email chữ thường
+                    elif password_option == "default_secure":
+                        pass_val = "Pythaverse@2026"
+                    else:
+                        pass_val = custom_password or user_email
+
+                    client.set_user_password(
+                        user_id=user_id,
+                        password=pass_val,
+                        temporary=temporary
+                    )
+                    logs.append(f"Đã đặt lại mật khẩu ({password_option}) - Temporary={temporary}")
+
+                success_count += 1
+                results.append({
+                    "identifier": ident,
+                    "user_id": user_id,
                     "status": "success",
-                    "message": f"Đã cập nhật họ tên thành '{last_name} {first_name}' cho '{target_email}'.",
-                    "action": action
-                }
+                    "logs": " | ".join(logs)
+                })
 
-            else:
-                return {
+            except Exception as e:
+                failed_count += 1
+                logger.error(f"Lỗi Keycloak bulk cho {ident}: {str(e)}")
+                results.append({
+                    "identifier": ident,
                     "status": "failed",
-                    "error": f"Hành động '{action}' chưa được hỗ trợ trên Keycloak Service."
-                }
+                    "message": str(e)
+                })
 
-        except Exception as e:
-            logger.error(f"❌ Lỗi Keycloak Admin API: {str(e)}")
-            return {
-                "status": "failed",
-                "error": f"Lỗi Keycloak REST API: {str(e)}"
-            }
-
-
-keycloak_service = KeycloakService()
+        return {
+            "total": len(identifiers),
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "details": results
+        }
