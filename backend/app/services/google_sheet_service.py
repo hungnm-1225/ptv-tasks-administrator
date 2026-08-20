@@ -3,6 +3,7 @@ import os
 import json
 import logging
 from datetime import datetime
+from typing import Optional, Dict, Any, List
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from app.core.supabase import get_supabase_client
@@ -120,7 +121,7 @@ async def poll_form_feedbacks():
         logger.error(f"❌ Lỗi khi quét và lưu Google Sheet: {e}")
 
 # =========================================================================
-# 2. HÀM ĐỒNG BỘ NGƯỢC: CẬP NHẬT SHEET KHI ANH BẤM DUYỆT TRÊN WEB / TELEGRAM
+# 2. HÀM ĐỒNG BỘ NGƯỢC: CẬP NHẬT SHEET KHI BẤM DUYỆT TRÊN WEB / TELEGRAM
 # =========================================================================
 async def update_feedback_row(sheet_name: str, row_index: int, category: str, status: str = "To Implement"):
     """Cập nhật Cột L (Category), Cột M (Assigned Checkbox = TRUE), Cột P (Status) trên Google Sheet"""
@@ -152,3 +153,10 @@ async def update_feedback_row(sheet_name: str, row_index: int, category: str, st
         logger.info(f"✅ Đã đồng bộ ngược Google Sheet dòng {row_index}: Category={category}, Assigned=TRUE, Status={status}")
     except Exception as e:
         logger.error(f"⚠️ Lỗi khi đồng bộ ngược về Google Sheet: {e}")
+
+
+class GoogleSheetManager:
+    """Class wrapper để tương thích khi được gọi qua instance manager"""
+    def update_feedback_row(self, sheet_name: str, row_index: int, category: str, status: str = "To Implement"):
+        import asyncio
+        return asyncio.create_task(update_feedback_row(sheet_name, row_index, category, status))

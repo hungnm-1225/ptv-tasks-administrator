@@ -11,6 +11,14 @@ logger = logging.getLogger(__name__)
 SECRET_KEY = getattr(settings, "VAULT_SECRET_KEY", Fernet.generate_key())
 cipher_suite = Fernet(SECRET_KEY if isinstance(SECRET_KEY, bytes) else SECRET_KEY.encode())
 
+# Cấu hình ánh xạ Quốc gia <-> Master Distributor
+COUNTRY_DISTRIBUTOR_MAP = {
+    "Vietnam": {"code": "2", "name": "Vì Người Việt", "folder": "4. Vietnam"},
+    "Malaysia": {"code": "42", "name": "Matlamat Wawasan Sdn Bhd", "folder": "1. Malaysia"},
+    "Indonesia": {"code": "10", "name": "PT Asaba", "folder": "2. Indonesia"},
+    "Philippines": {"code": "6", "name": "Digital Hub Ph Corp", "folder": "3. Philippines"}
+}
+
 def decrypt_password(encrypted_pass: str) -> str:
     """Giải mã mật khẩu an toàn khi Playwright cần đăng nhập."""
     if not encrypted_pass:
@@ -25,10 +33,10 @@ class WorkspaceLineageService:
     """Service tự động truy vết phả hệ Distributor -> Partner -> School."""
 
     @staticmethod
-    def resolve_by_school(school_identifier: str) -> Optional[Dict[str, Any]]:
+    def resolve_by_school(school_identifier: str, country_hint: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Nhập tên trường hoặc mã trường (VD: 'SCH_10266' hoặc 'Amsterdam') 
-        -> Trả về đầy đủ thông tin tài khoản của Trường, Partner và Distributor.
+        -> Trả về đầy đủ thông tin tài khoản của Trường, Partner, Distributor và Thư mục Quốc gia.
         """
         supabase = get_supabase_client()
         
@@ -93,7 +101,25 @@ class WorkspaceLineageService:
                             "password": decrypt_password(d_creds.get("encrypted_password", ""))
                         }
 
+        # 4. Tự động suy luận Quốc gia & Thư mục Drive tương ứng từ Distributor
+        country_info = {"name": "Vietnam", "folder": "4. Vietnam", "code": "2"} # Mặc định
+        
+        # Nếu có hint từ ticket (VD: country='Malaysia')
+        if country_hint and country_hint in COUNTRY_DISTRIBUTOR_MAP:
+            country_info = {
+                "name": country_hint,
+                **COUNTRY_DISTRIBUTOR_MAP[country_hint]
+            }
+        elif distributor_data:
+            # Tra cứu ngược từ Distributor Name hoặc Code
+            for c_name, c_meta in COUNTRY_DISTRIBUTOR_MAP.items():
+                if (c_meta["name"].lower() in distributor_data["name"].lower() or 
+                    str(c_meta["code"]) == str(distributor_data["code"])):
+                    country_info = {"name": c_name, **c_meta}
+                    break
+
         return {
+            "country": country_info,
             "school": {
                 "id": school["id"],
                 "code": school["code"],
