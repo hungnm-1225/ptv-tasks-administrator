@@ -239,7 +239,7 @@ export const ProfileSettingsPage: React.FC = () => {
     }
 
     return (
-        <div className="max-w-5xl mx-auto p-6 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-400">
+        <div className="mx-auto p-6 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-400">
 
             {/* Header Bar */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white/70 dark:bg-slate-900/70 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800/80 backdrop-blur-md shadow-xs">
