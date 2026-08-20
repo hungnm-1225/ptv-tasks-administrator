@@ -85,7 +85,7 @@ const stripHtmlTags = (htmlString: string | null | undefined): string => {
 };
 
 // 🎯 HÀM CHUẨN HÓA NGÀY GIỜ CHI TIẾT (HH:mm - DD/MM/YYYY)
-const formatDateTime = (dateStr?: string): string => {
+const formatDateTime = (dateStr?: string | null): string => {
   if (!dateStr) return '';
   try {
     const d = new Date(dateStr);
