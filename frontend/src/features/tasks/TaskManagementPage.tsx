@@ -289,71 +289,74 @@ export const TaskManagementPage: React.FC = () => {
         </div>
       ) : (
         <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 overflow-hidden shadow-xs">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="border-b border-slate-200/80 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 font-semibold">
-                <th className="p-3.5 pl-5">Mã Tác Vụ</th>
-                <th className="p-3.5">Ticket Gốc / Nguồn</th>
-                <th className="p-3.5">Bot Type</th>
-                <th className="p-3.5">Trạng Thái</th>
-                <th className="p-3.5">Thời Gian</th>
-                <th className="p-3.5 pr-5 text-right">Thao Tác</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50 text-slate-800 dark:text-slate-200">
-              {tasks.map((task) => {
-                // 🎯 XỬ LÝ AN TOÀN TUYỆT ĐỐI CHO TICKET ID VÀ SOURCE
-                const taskIdDisplay = task.id ? `#${task.id.slice(0, 8)}` : '#TASK';
-                const ticketTitle = task.inbox_tickets?.subject ||
-                  (task.ticket_id ? `Ticket #${task.ticket_id.slice(0, 8)}` : null);
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse min-w-[640px]">
+              <thead>
+                <tr className="border-b border-slate-200/80 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 font-semibold">
+                  <th className="p-3.5 pl-5">Mã Tác Vụ</th>
+                  <th className="p-3.5">Ticket Gốc / Nguồn</th>
+                  <th className="p-3.5">Bot Type</th>
+                  <th className="p-3.5">Trạng Thái</th>
+                  <th className="p-3.5">Thời Gian</th>
+                  <th className="p-3.5 pr-5 text-right">Thao Tác</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50 text-slate-800 dark:text-slate-200">
+                {tasks.map((task) => {
+                  // 🎯 XỬ LÝ AN TOÀN TUYỆT ĐỐI CHO TICKET ID VÀ SOURCE
+                  const taskIdDisplay = task.id ? `#${task.id.slice(0, 8)}` : '#TASK';
+                  const ticketTitle =
+                    task.inbox_tickets?.subject ||
+                    (task.ticket_id ? `Ticket #${task.ticket_id.slice(0, 8)}` : null);
 
-                return (
-                  <tr key={task.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/40 transition">
-                    <td className="p-3.5 pl-5 font-mono text-[11px] text-violet-700 dark:text-violet-300 font-medium">
-                      {taskIdDisplay}
-                    </td>
-                    <td className="p-3.5 font-medium max-w-xs truncate text-slate-900 dark:text-slate-100">
-                      {ticketTitle ? (
-                        <span>{ticketTitle}</span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300 text-[10px] font-semibold">
-                          <Zap className="w-3 h-3 text-violet-500" /> Tác vụ Direct (Studio)
-                        </span>
-                      )}
-                    </td>
-                    <td className="p-3.5 font-mono text-[11px] text-slate-600 dark:text-slate-300">
-                      {task.bot_type}
-                    </td>
-                    <td className="p-3.5">
-                      {renderStatusBadge(task.approval_status, task.execution_status)}
-                    </td>
-                    <td className="p-3.5 text-slate-400 dark:text-slate-500 text-[11px]">
-                      {task.created_at ? new Date(task.created_at).toLocaleString('vi-VN') : '---'}
-                    </td>
-                    <td className="p-3.5 pr-5 text-right space-x-2">
-                      {task.approval_status === 'pending' ? (
-                        <button
-                          onClick={() => handleOpenReview(task)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded-xl text-xs font-semibold transition shadow-2xs cursor-pointer"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                          <span>Duyệt & Chạy</span>
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => setViewLogTask(task)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-[11px] font-medium transition cursor-pointer"
-                        >
-                          <Terminal className="w-3 h-3 text-violet-500" />
-                          <span>Xem Logs</span>
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                  return (
+                    <tr key={task.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/40 transition">
+                      <td className="p-3.5 pl-5 font-mono text-[11px] text-violet-700 dark:text-violet-300 font-medium whitespace-nowrap">
+                        {taskIdDisplay}
+                      </td>
+                      <td className="p-3.5 font-medium max-w-xs truncate text-slate-900 dark:text-slate-100">
+                        {ticketTitle ? (
+                          <span className="truncate block">{ticketTitle}</span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300 text-[10px] font-semibold">
+                            <Zap className="w-3 h-3 text-violet-500" /> Tác vụ Direct (Studio)
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-3.5 font-mono text-[11px] text-slate-600 dark:text-slate-300 whitespace-nowrap">
+                        {task.bot_type}
+                      </td>
+                      <td className="p-3.5 whitespace-nowrap">
+                        {renderStatusBadge(task.approval_status, task.execution_status)}
+                      </td>
+                      <td className="p-3.5 text-slate-400 dark:text-slate-500 text-[11px] whitespace-nowrap">
+                        {task.created_at ? new Date(task.created_at).toLocaleString('vi-VN') : '---'}
+                      </td>
+                      <td className="p-3.5 pr-5 text-right space-x-2 whitespace-nowrap">
+                        {task.approval_status === 'pending' ? (
+                          <button
+                            onClick={() => handleOpenReview(task)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded-xl text-xs font-semibold transition shadow-2xs cursor-pointer"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            <span>Duyệt & Chạy</span>
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => setViewLogTask(task)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-[11px] font-medium transition cursor-pointer"
+                          >
+                            <Terminal className="w-3 h-3 text-violet-500" />
+                            <span>Xem Logs</span>
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

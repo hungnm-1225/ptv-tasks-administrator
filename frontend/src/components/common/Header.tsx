@@ -1,12 +1,29 @@
 // frontend/src/components/common/Header.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { User, LogOut, Settings, Loader2, Sun, Moon, ChevronDown, Sparkles } from 'lucide-react';
+import {
+  User,
+  LogOut,
+  Settings,
+  Loader2,
+  Sun,
+  Moon,
+  ChevronDown,
+  Sparkles,
+  Menu,
+  X,
+  Zap,
+} from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { toast } from 'sonner';
 
-export const Header: React.FC = () => {
+interface HeaderProps {
+  onToggleMobileNav?: () => void;
+  isMobileNavOpen?: boolean;
+}
+
+export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav, isMobileNavOpen = false }) => {
   const { user, signOut } = useAuth();
   const { theme, toggleTheme } = useTheme();
 
@@ -54,19 +71,38 @@ export const Header: React.FC = () => {
         </div>
       )}
 
-      <header className="h-16 border-b border-slate-200/80 dark:border-slate-800/80 bg-white/85 dark:bg-slate-900/85 backdrop-blur-md px-6 flex items-center justify-between sticky top-0 z-20 transition-colors duration-200">
-        {/* Left Branding / Quick Context */}
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2 px-2.5 py-1 bg-violet-50 dark:bg-violet-950/40 border border-violet-200/60 dark:border-violet-800/40 rounded-xl">
-            <Sparkles className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
-            <span className="text-xs font-semibold text-violet-700 dark:text-violet-300">
+      <header className="h-16 border-b border-slate-200/80 dark:border-slate-800/80 bg-white/85 dark:bg-slate-900/85 backdrop-blur-md px-4 sm:px-6 flex items-center justify-between sticky top-0 z-20 transition-colors duration-200">
+        {/* Left Side: Mobile Hamburger & Quick Context */}
+        <div className="flex items-center gap-3">
+          {/* Mobile Hamburger Button */}
+          <button
+            onClick={onToggleMobileNav}
+            aria-label="Toggle mobile menu"
+            className="lg:hidden p-2 rounded-xl bg-slate-100 hover:bg-slate-200/80 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
+          >
+            {isMobileNavOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
+
+          {/* Quick Context Badge */}
+          <div className="flex items-center gap-2 px-2.5 py-1 bg-violet-50 dark:bg-violet-950/40 border border-violet-200/60 dark:border-violet-800/40 rounded-xl shadow-2xs">
+            <Sparkles className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400 shrink-0" />
+            <span className="text-xs font-semibold text-violet-700 dark:text-violet-300 truncate max-w-[150px] sm:max-w-none">
               Pythaverse Automation Center
             </span>
           </div>
         </div>
 
         {/* Right Controls */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Quick Link to Studio */}
+          <Link
+            to="/studio"
+            className="hidden md:flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-semibold rounded-xl transition shadow-xs cursor-pointer"
+          >
+            <Zap className="w-3.5 h-3.5" />
+            <span>Studio</span>
+          </Link>
+
           {/* Theme Toggle */}
           <button
             onClick={toggleTheme}
@@ -84,10 +120,11 @@ export const Header: React.FC = () => {
           <div className="relative" ref={dropdownRef}>
             <button
               onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-              className={`flex items-center gap-3 pl-2 pr-1 py-1 rounded-xl transition-all duration-200 border border-transparent cursor-pointer ${isDropdownOpen
-                ? 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700'
-                : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
-                }`}
+              className={`flex items-center gap-2 sm:gap-3 pl-2 pr-1.5 py-1 rounded-xl transition-all duration-200 border border-transparent cursor-pointer ${
+                isDropdownOpen
+                  ? 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700'
+                  : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
+              }`}
             >
               {userAvatar ? (
                 <img
@@ -111,13 +148,19 @@ export const Header: React.FC = () => {
               </div>
 
               <ChevronDown
-                className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-300 ${isDropdownOpen ? 'rotate-180' : ''
-                  }`}
+                className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-300 ${
+                  isDropdownOpen ? 'rotate-180' : ''
+                }`}
               />
             </button>
 
             {isDropdownOpen && (
               <div className="absolute right-0 mt-2 w-60 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl py-2 z-30 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-800 sm:hidden">
+                  <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">{userName}</p>
+                  <p className="text-[10px] text-slate-400 truncate">{userEmail}</p>
+                </div>
+
                 <Link
                   to="/profile"
                   className="flex items-center gap-3 px-4 py-2.5 text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-violet-600 dark:hover:text-violet-400 transition-colors"

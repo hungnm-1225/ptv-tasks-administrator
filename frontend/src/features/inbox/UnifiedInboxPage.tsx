@@ -1432,31 +1432,54 @@ export const UnifiedInboxPage: React.FC = () => {
                   />
                 </div>
 
-                {/* 3 Thẻ Toggle Độc Lập */}
-                <div className="space-y-2.5 pt-1">
+                {/* 3 Thẻ Toggle Độc Lập Custom UI */}
+                <div className="space-y-3 pt-1">
                   {/* Card 1: Reset Mật Khẩu */}
-                  <div className={`p-3 rounded-xl border transition-all ${kcEnableResetPass ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs' : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-80'}`}>
+                  <div
+                    className={`p-3.5 rounded-2xl border transition-all ${
+                      kcEnableResetPass
+                        ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
+                        : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
+                    }`}
+                  >
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <KeyRound className={`w-4 h-4 ${kcEnableResetPass ? 'text-amber-600' : 'text-slate-400'}`} />
-                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200">1. Đổi Mật Khẩu Tạm Thời</span>
+                      <div className="flex items-center gap-2.5">
+                        <div
+                          className={`p-2 rounded-xl ${
+                            kcEnableResetPass
+                              ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300'
+                              : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
+                          }`}
+                        >
+                          <KeyRound className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                            1. Đổi Mật Khẩu Tạm Thời
+                          </div>
+                          <div className="text-[10px] text-slate-400">Gán mật khẩu khởi tạo an toàn</div>
+                        </div>
                       </div>
-                      <input
-                        type="checkbox"
-                        checked={kcEnableResetPass}
-                        onChange={(e) => {
-                          const val = e.target.checked;
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const val = !kcEnableResetPass;
                           setKcEnableResetPass(val);
                           generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, val, kcTempPass, kcForceChange, kcEnableVerify, kcVerifyAction, kcEnableStatus, kcStatusAction);
                         }}
-                        className="w-4 h-4 accent-amber-600 cursor-pointer"
-                      />
+                        className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${
+                          kcEnableResetPass ? 'bg-amber-500 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
+                        }`}
+                      >
+                        <span className="w-4 h-4 bg-white rounded-full shadow-md" />
+                      </button>
                     </div>
 
                     {kcEnableResetPass && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2.5 mt-2 border-t border-slate-100 dark:border-slate-700">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 mt-3 border-t border-slate-100 dark:border-slate-700">
                         <div>
-                          <label className="text-[10px] font-semibold text-slate-500">Mật khẩu mới:</label>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase">Mật khẩu mới:</label>
                           <input
                             type="text"
                             value={kcTempPass}
@@ -1464,123 +1487,188 @@ export const UnifiedInboxPage: React.FC = () => {
                               setKcTempPass(e.target.value);
                               generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, true, e.target.value, kcForceChange, kcEnableVerify, kcVerifyAction, kcEnableStatus, kcStatusAction);
                             }}
-                            className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 rounded-lg p-1.5 text-xs font-mono font-bold"
+                            className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-mono font-bold outline-none"
                           />
                         </div>
                         <div className="flex items-center gap-2 pt-4">
-                          <input
-                            type="checkbox"
-                            checked={kcForceChange}
-                            onChange={(e) => {
-                              setKcForceChange(e.target.checked);
-                              generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, true, kcTempPass, e.target.checked, kcEnableVerify, kcVerifyAction, kcEnableStatus, kcStatusAction);
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const val = !kcForceChange;
+                              setKcForceChange(val);
+                              generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, true, kcTempPass, val, kcEnableVerify, kcVerifyAction, kcEnableStatus, kcStatusAction);
                             }}
-                            className="w-3.5 h-3.5 accent-amber-600 cursor-pointer"
-                          />
-                          <label className="text-[11px] font-medium text-slate-600 dark:text-slate-300">Bắt buộc đổi lại khi đăng nhập</label>
+                            className={`w-4 h-4 rounded border flex items-center justify-center cursor-pointer transition ${
+                              kcForceChange
+                                ? 'bg-amber-500 border-amber-500 text-white'
+                                : 'border-slate-300 dark:border-slate-600'
+                            }`}
+                          >
+                            {kcForceChange && <Check className="w-3 h-3" />}
+                          </button>
+                          <label
+                            onClick={() => {
+                              const val = !kcForceChange;
+                              setKcForceChange(val);
+                              generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, true, kcTempPass, val, kcEnableVerify, kcVerifyAction, kcEnableStatus, kcStatusAction);
+                            }}
+                            className="text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer"
+                          >
+                            Bắt buộc đổi khi đăng nhập
+                          </label>
                         </div>
                       </div>
                     )}
                   </div>
 
                   {/* Card 2: Xác thực Email */}
-                  <div className={`p-3 rounded-xl border transition-all ${kcEnableVerify ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs' : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-80'}`}>
+                  <div
+                    className={`p-3.5 rounded-2xl border transition-all ${
+                      kcEnableVerify
+                        ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
+                        : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
+                    }`}
+                  >
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <ShieldCheck className={`w-4 h-4 ${kcEnableVerify ? 'text-emerald-600' : 'text-slate-400'}`} />
-                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200">2. Xác Thực Email (Email Verified)</span>
+                      <div className="flex items-center gap-2.5">
+                        <div
+                          className={`p-2 rounded-xl ${
+                            kcEnableVerify
+                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300'
+                              : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
+                          }`}
+                        >
+                          <ShieldCheck className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                            2. Xác Thực Email (Email Verified)
+                          </div>
+                          <div className="text-[10px] text-slate-400">Gỡ lỗi tài khoản chưa xác thực email</div>
+                        </div>
                       </div>
-                      <input
-                        type="checkbox"
-                        checked={kcEnableVerify}
-                        onChange={(e) => {
-                          const val = e.target.checked;
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const val = !kcEnableVerify;
                           setKcEnableVerify(val);
                           generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, kcEnableResetPass, kcTempPass, kcForceChange, val, kcVerifyAction, kcEnableStatus, kcStatusAction);
                         }}
-                        className="w-4 h-4 accent-amber-600 cursor-pointer"
-                      />
+                        className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${
+                          kcEnableVerify ? 'bg-amber-500 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
+                        }`}
+                      >
+                        <span className="w-4 h-4 bg-white rounded-full shadow-md" />
+                      </button>
                     </div>
 
                     {kcEnableVerify && (
-                      <div className="flex items-center gap-4 pt-2.5 mt-2 border-t border-slate-100 dark:border-slate-700 text-xs">
-                        <label className="flex items-center gap-1.5 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="verify_radio"
-                            checked={kcVerifyAction === 'verify'}
-                            onChange={() => {
-                              setKcVerifyAction('verify');
-                              generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, kcEnableResetPass, kcTempPass, kcForceChange, true, 'verify', kcEnableStatus, kcStatusAction);
-                            }}
-                            className="accent-emerald-600"
-                          />
-                          <span className="text-emerald-700 dark:text-emerald-300 font-semibold">Đánh dấu ĐÃ Xác Thực (Verified)</span>
-                        </label>
-                        <label className="flex items-center gap-1.5 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="verify_radio"
-                            checked={kcVerifyAction === 'unverify'}
-                            onChange={() => {
-                              setKcVerifyAction('unverify');
-                              generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, kcEnableResetPass, kcTempPass, kcForceChange, true, 'unverify', kcEnableStatus, kcStatusAction);
-                            }}
-                            className="accent-rose-600"
-                          />
-                          <span className="text-rose-700 dark:text-rose-300 font-semibold">Gỡ Xác Thực (Unverified)</span>
-                        </label>
+                      <div className="flex items-center gap-3 pt-3 mt-3 border-t border-slate-100 dark:border-slate-700 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setKcVerifyAction('verify');
+                            generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, kcEnableResetPass, kcTempPass, kcForceChange, true, 'verify', kcEnableStatus, kcStatusAction);
+                          }}
+                          className={`flex-1 py-1.5 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${
+                            kcVerifyAction === 'verify'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
+                              : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                          }`}
+                        >
+                          ✓ Đã Xác Thực (Verified)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setKcVerifyAction('unverify');
+                            generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, kcEnableResetPass, kcTempPass, kcForceChange, true, 'unverify', kcEnableStatus, kcStatusAction);
+                          }}
+                          className={`flex-1 py-1.5 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${
+                            kcVerifyAction === 'unverify'
+                              ? 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
+                              : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                          }`}
+                        >
+                          ✗ Gỡ Xác Thực
+                        </button>
                       </div>
                     )}
                   </div>
 
                   {/* Card 3: Khóa / Mở Khóa */}
-                  <div className={`p-3 rounded-xl border transition-all ${kcEnableStatus ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs' : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-80'}`}>
+                  <div
+                    className={`p-3.5 rounded-2xl border transition-all ${
+                      kcEnableStatus
+                        ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
+                        : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
+                    }`}
+                  >
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <UserX className={`w-4 h-4 ${kcEnableStatus ? 'text-rose-600' : 'text-slate-400'}`} />
-                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200">3. Trạng Thái Hoạt Động (Account Status)</span>
+                      <div className="flex items-center gap-2.5">
+                        <div
+                          className={`p-2 rounded-xl ${
+                            kcEnableStatus
+                              ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-300'
+                              : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
+                          }`}
+                        >
+                          <UserX className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                            3. Trạng Thái Hoạt Động (Account Status)
+                          </div>
+                          <div className="text-[10px] text-slate-400">Khóa hoặc kích hoạt lại người dùng</div>
+                        </div>
                       </div>
-                      <input
-                        type="checkbox"
-                        checked={kcEnableStatus}
-                        onChange={(e) => {
-                          const val = e.target.checked;
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const val = !kcEnableStatus;
                           setKcEnableStatus(val);
                           generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, kcEnableResetPass, kcTempPass, kcForceChange, kcEnableVerify, kcVerifyAction, val, kcStatusAction);
                         }}
-                        className="w-4 h-4 accent-amber-600 cursor-pointer"
-                      />
+                        className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${
+                          kcEnableStatus ? 'bg-amber-500 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
+                        }`}
+                      >
+                        <span className="w-4 h-4 bg-white rounded-full shadow-md" />
+                      </button>
                     </div>
 
                     {kcEnableStatus && (
-                      <div className="flex items-center gap-4 pt-2.5 mt-2 border-t border-slate-100 dark:border-slate-700 text-xs">
-                        <label className="flex items-center gap-1.5 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="status_radio"
-                            checked={kcStatusAction === 'enable'}
-                            onChange={() => {
-                              setKcStatusAction('enable');
-                              generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, kcEnableResetPass, kcTempPass, kcForceChange, kcEnableVerify, kcVerifyAction, true, 'enable');
-                            }}
-                            className="accent-emerald-600"
-                          />
-                          <span className="text-emerald-700 dark:text-emerald-300 font-semibold">Kích Hoạt Tài Khoản (Enable)</span>
-                        </label>
-                        <label className="flex items-center gap-1.5 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="status_radio"
-                            checked={kcStatusAction === 'disable'}
-                            onChange={() => {
-                              setKcStatusAction('disable');
-                              generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, kcEnableResetPass, kcTempPass, kcForceChange, kcEnableVerify, kcVerifyAction, true, 'disable');
-                            }}
-                            className="accent-rose-600"
-                          />
-                          <span className="text-rose-700 dark:text-rose-300 font-semibold">Vô Hiệu Hóa (Disable)</span>
-                        </label>
+                      <div className="flex items-center gap-3 pt-3 mt-3 border-t border-slate-100 dark:border-slate-700 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setKcStatusAction('enable');
+                            generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, kcEnableResetPass, kcTempPass, kcForceChange, kcEnableVerify, kcVerifyAction, true, 'enable');
+                          }}
+                          className={`flex-1 py-1.5 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${
+                            kcStatusAction === 'enable'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
+                              : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                          }`}
+                        >
+                          ✓ Kích Hoạt (Enable)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setKcStatusAction('disable');
+                            generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, kcEnableResetPass, kcTempPass, kcForceChange, kcEnableVerify, kcVerifyAction, true, 'disable');
+                          }}
+                          className={`flex-1 py-1.5 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${
+                            kcStatusAction === 'disable'
+                              ? 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
+                              : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                          }`}
+                        >
+                          ✗ Vô Hiệu Hóa (Disable)
+                        </button>
                       </div>
                     )}
                   </div>

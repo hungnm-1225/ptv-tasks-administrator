@@ -55,6 +55,15 @@ Khi phân tích, sửa code hoặc tư vấn giải pháp, AI phải luôn nắm
 - Dựng chuỗi thư mục phân tầng tự động: `Root` ➔ `{Năm}` ➔ `{Quốc gia}` ➔ `[Distributor] {Tên}` ➔ `[Partner] {Tên}` ➔ `[School] {Tên}`.
 - Tải file kết quả COF lên đúng thư mục trường học và trả về `web_view_link`.
 
+### 2.6. Điều Phối Tác Vụ Độc Lập Automation Studio (`AutomationStudioPage.tsx` / `/studio`)
+- Cho phép Quản trị viên chủ động khởi tạo và điều phối các tác vụ Bot RPA/API mà không cần gắn với một ticket hòm thư đầu vào (`ticket_id = null`, `is_manual_dispatch = true`).
+- Tích hợp 4 Dispatcher Engines: Keycloak Identity (3 Safe Toggles), Workspace License Phả Hệ (480 trường), LMS Moodle & Git Provisioning, Google Feedback Doc Triage.
+
+### 2.7. Giám Sát Sức Khỏe Hệ Sinh Thái Đa Tầng 3-Tabs (`SiteMonitorPage.tsx`)
+- **Tab 1 (Public Uptime):** Giám sát Live 10 Website Pythaverse, Live Uptime Bar 24 giờ và Uptime Bars 45 ngày phong cách UptimeRobot.
+- **Tab 2 (Auth Matrix):** Kiểm thử tự động đăng nhập Keycloak SSO & quyền truy cập route nội bộ cho 16 tài khoản test 7 vai trò (`Admin`, `Sales Admin`, `Distributor`, `Partner`, `School`, `Teacher`, `Student`) giải mã Fernet từ bảng `site_monitor_credentials`.
+- **Tab 3 (CI/CD Pipelines):** Kết nối Vercel REST API và Render REST API, theo dõi trạng thái builds và hiển thị live terminal logs.
+
 ---
 
 ## 3. BỐN NGUYÊN TẮC BẤT DI BẤT DỊCH (ABSOLUTE RULES)
