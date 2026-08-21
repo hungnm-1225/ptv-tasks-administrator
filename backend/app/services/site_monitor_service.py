@@ -63,6 +63,7 @@ def decrypt_secret(encrypted_text: str) -> str:
         return ""
 
 def extract_keycloak_form_action(html_content: str) -> Optional[str]:
+    """Bóc tách action URL từ form login của Keycloak"""
     m = re.search(r'<form[^>]*id=["\']kc-form-login["\'][^>]*action=["\']([^"\']+)["\']', html_content, re.IGNORECASE)
     if m:
         return html.unescape(m.group(1))
@@ -71,16 +72,24 @@ def extract_keycloak_form_action(html_content: str) -> Optional[str]:
         return html.unescape(m2.group(1))
     return None
 
-def extract_oidc_form_post(html_content: str) -> tuple[Optional[str], Dict[str, str]]:
-    """Xử lý response_mode=form_post từ Keycloak về Moodle LMS hoặc Client"""
-    form_match = re.search(r'<form[^>]*action=["\']([^"\']+)["\']', html_content, re.IGNORECASE)
-    if not form_match:
-        return None, {}
-    action_url = html.unescape(form_match.group(1))
-    inputs = {}
-    for inp in re.finditer(r'<input[^>]*name=["\']([^"\']+)["\'][^>]*value=["\']([^"\']*)["\']', html_content, re.IGNORECASE):
-        inputs[inp.group(1)] = html.unescape(inp.group(2))
-    return action_url, inputs
+def handle_any_auto_form_post(html_text: str) -> tuple[Optional[str], Dict[str, str]]:
+    """
+    Bóc tách form chuyển tiếp ẩn (OIDC Response Mode: form_post)
+    dùng cho Moodle LMS (learn, learn-s) và Digital Twin
+    """
+    for form_m in re.finditer(r'<form[^>]*action=["\']([^"\']+)["\'][^>]*>(.*?)</form>', html_text, re.DOTALL | re.IGNORECASE):
+        action = html.unescape(form_m.group(1))
+        content = form_m.group(2)
+        # Bỏ qua form login của Keycloak, chỉ bắt form gửi về client app
+        if "/login-actions/" not in action:
+            inputs = {}
+            for inp_m in re.finditer(r'<input[^>]*name=["\']([^"\']+)["\'][^>]*value=["\']([^"\']*)["\']', content, re.IGNORECASE):
+                inputs[inp_m.group(1)] = html.unescape(inp_m.group(2))
+            for inp_m2 in re.finditer(r'<input[^>]*value=["\']([^"\']*)["\'][^>]*name=["\']([^"\']+)["\']', content, re.IGNORECASE):
+                if inp_m2.group(2) not in inputs:
+                    inputs[inp_m2.group(2)] = html.unescape(inp_m2.group(1))
+            return action, inputs
+    return None, {}
 
 # ---------------------------------------------------------------------------
 # CẤU HÌNH CÁC WEBSITE THEO DÕI
@@ -91,7 +100,7 @@ DEFAULT_MONITORED_SITES = [
     {"id": "avatar",           "name": "Avatar 3D Generator",       "url": "https://avatar.pythaverse.space",           "auth_entry": "https://avatar.pythaverse.space/",                            "category": "satellite", "enabled": True,  "show_live_alert": True},
     {"id": "note",             "name": "Jupyter Hub Note",          "url": "https://note.pythaverse.space",             "auth_entry": "https://note.pythaverse.space/hub/oauth_login?next=%2Fhub%2F","category": "satellite", "enabled": True,  "show_live_alert": True},
     {"id": "git",              "name": "Pythaverse Git Repos",      "url": "https://git.pythaverse.space",              "auth_entry": "https://git.pythaverse.space/signin/oidc",                  "category": "satellite", "enabled": True,  "show_live_alert": True},
-    {"id": "contest",          "name": "Contest & Competitions",    "url": "https://contest.pythaverse.space",          "auth_entry": "https://contest.pythaverse.space/login",                     "category": "satellite", "enabled": True,  "show_live_alert": True},
+    {"id": "contest",          "name": "Contest & Competitions",    "url": "https://contest.pythaverse.space",          "auth_entry": "https://contest.pythaverse.space/events",                    "category": "satellite", "enabled": True,  "show_live_alert": True},
     {"id": "digitaltwin",      "name": "Digital Twin Simulation",   "url": "https://digitaltwin.pythaverse.space",      "auth_entry": "https://digitaltwin.pythaverse.space/",                       "category": "satellite", "enabled": True,  "show_live_alert": True},
     {"id": "learn",            "name": "LMS Learn Portal",          "url": "https://learn.pythaverse.space",            "auth_entry": "https://learn.pythaverse.space/my/",                          "category": "satellite", "enabled": True,  "show_live_alert": True},
     {"id": "learn_s",          "name": "LMS Learn Staging",         "url": "https://learn-s.pythaverse.space",          "auth_entry": "https://learn-s.pythaverse.space/my/",                        "category": "satellite", "enabled": True,  "show_live_alert": False},
@@ -119,10 +128,6 @@ _sites_cache: list[dict] = [_make_initial_state(s) for s in DEFAULT_MONITORED_SI
 # HOURLY UPTIME BARS (24 GIỜ GẦN NHẤT — MỖI CỤC LÀ 1 GIỜ)
 # ---------------------------------------------------------------------------
 def get_hourly_uptime_history(site_id: str, hours: int = 24) -> list[dict]:
-    """
-    Trả về 24 blocks tương ứng 24 giờ gần nhất (mỗi block là 1 giờ).
-    { hour_label: '14:00', status: 'UP'|'DOWN'|'DEGRADED', latency_ms: 180 }
-    """
     result = []
     now = now_vn()
     db = get_supabase()
@@ -264,10 +269,12 @@ class SiteMonitorService:
         }
 
         try:
-            async with httpx.AsyncClient(verify=False, timeout=20.0, follow_redirects=True, headers=headers) as client:
-                # 1. Khởi tạo phiên OIDC
+            # Tăng timeout lên 30s để Moodle và Digital Twin hoàn tất OIDC token exchange
+            async with httpx.AsyncClient(verify=False, timeout=30.0, follow_redirects=True, headers=headers) as client:
+                # 1. Truy cập Entrypoint
                 init_resp = await client.get(auth_entry_url)
 
+                # Nếu site không cần login mà vào thẳng
                 if "eid.pythaverse.space" not in str(init_resp.url):
                     if 200 <= init_resp.status_code < 400:
                         result["status"] = "PASS"
@@ -278,7 +285,7 @@ class SiteMonitorService:
                 # 2. Bóc tách Action form Keycloak
                 action_url = extract_keycloak_form_action(init_resp.text) or str(init_resp.url)
 
-                # 3. Gửi User/Password lên Keycloak
+                # 3. Gửi thông tin đăng nhập lên Keycloak
                 login_payload = {
                     "username": username,
                     "password": password,
@@ -291,16 +298,16 @@ class SiteMonitorService:
                 }
                 login_resp = await client.post(action_url, data=login_payload, headers=post_headers)
 
-                # 4. Xử lý trường hợp Form Post OIDC (Moodle LMS / Digital Twin)
-                if "code=" in login_resp.text and "<form" in login_resp.text:
-                    post_action, post_inputs = extract_oidc_form_post(login_resp.text)
-                    if post_action and post_inputs:
-                        login_resp = await client.post(post_action, data=post_inputs)
+                # 4. TỰ ĐỘNG CHUYỂN TIẾP FORM POST ẨN (Dành riêng cho Moodle LMS & Digital Twin)
+                post_action, post_inputs = handle_any_auto_form_post(login_resp.text)
+                if post_action and post_inputs:
+                    # Gửi code & state về Moodle /auth/oidc/ hoặc Digital Twin
+                    login_resp = await client.post(post_action, data=post_inputs)
 
                 final_url = str(login_resp.url)
 
-                # 5. Kiểm tra nếu sai Pass
-                if "login-actions/authenticate" in final_url and any(err in login_resp.text for err in ["Invalid username or password", "alert-error"]):
+                # 5. Kiểm tra lỗi sai Password
+                if "login-actions/authenticate" in final_url and any(err in login_resp.text for err in ["Invalid username or password", "alert-error", "kc-feedback-text"]):
                     result["status"] = "FAIL"
                     result["latency_ms"] = int((time.time() - start_time) * 1000)
                     result["details"] = "Sai tên đăng nhập hoặc mật khẩu"
@@ -314,6 +321,7 @@ class SiteMonitorService:
                 else:
                     target_check_url = f"{root_origin}/{expected_path.lstrip('/')}"
 
+                # Nếu chưa ở đúng target route, request thêm 1 lần với Session Cookies đã có
                 if expected_path not in ("/", "") and target_check_url.rstrip("/") != final_url.rstrip("/"):
                     route_resp = await client.get(target_check_url)
                     check_status = route_resp.status_code
@@ -325,6 +333,7 @@ class SiteMonitorService:
                 total_latency = int((time.time() - start_time) * 1000)
                 result["latency_ms"] = total_latency
 
+                # Điều kiện Pass: HTTP 200..399 và không bị kẹt lại ở Keycloak
                 if (200 <= check_status < 400) and "eid.pythaverse.space" not in check_url:
                     result["status"] = "PASS"
                     result["route_accessible"] = True
@@ -336,11 +345,15 @@ class SiteMonitorService:
                     result["status"] = "FAIL"
                     result["details"] = f"Lỗi truy cập Route: HTTP {check_status}"
 
+        except httpx.TimeoutException:
+            result["latency_ms"] = 30000
+            result["status"] = "FAIL"
+            result["details"] = "Quá thời gian xác thực (Timeout > 30s)"
         except Exception as e:
             result["status"] = "FAIL"
             result["details"] = f"Lỗi: {str(e)[:80]}"
 
-        # Cập nhật kết quả vào Supabase để lưu lâu dài
+        # Lưu kết quả bền vững vào Supabase
         db = get_supabase()
         if db and cred.get("id"):
             try:
@@ -368,10 +381,9 @@ class SiteMonitorService:
         except Exception:
             return []
 
-    # ================= TAB 3: CI/CD CONFIGS (RENDER & VERCEL) =================
+    # ================= TAB 3: CI/CD DEPLOY MONITOR =================
     @classmethod
     async def _get_deploy_config(cls, provider: str) -> tuple[str, str]:
-        # Ưu tiên đọc từ biến môi trường Render/Local nếu có
         if provider == "vercel":
             token = os.getenv("VERCEL_ACCESS_TOKEN", "")
             prj_id = os.getenv("VERCEL_PROJECT_ID", "")
@@ -383,7 +395,6 @@ class SiteMonitorService:
             if api_key and srv_id:
                 return api_key, srv_id
 
-        # Fallback đọc từ database Supabase
         db = get_supabase()
         if db:
             try:
@@ -503,10 +514,8 @@ class SiteMonitorService:
         }
 
 # ---------------------------------------------------------------------------
-# CRON JOB LẬP LỊCH TỰ ĐỘNG CHẠY 30 PHÚT/LẦN
+# CRON JOB LẬP LỊCH TỰ ĐỘNG (APScheduler)
 # ---------------------------------------------------------------------------
 async def poll_site_uptime_cron():
-    logger.info("⏰ [APScheduler] Bắt đầu tự động quét Uptime và Auth Matrix định kỳ...")
     await SiteMonitorService.check_all_sites()
     await SiteMonitorService.get_and_check_auth_matrix()
-    logger.info("✅ [APScheduler] Hoàn tất quét định kỳ và lưu Supabase.")
