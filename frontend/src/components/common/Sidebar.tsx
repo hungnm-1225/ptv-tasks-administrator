@@ -1,15 +1,15 @@
+// frontend/src/components/common/Sidebar.tsx
 import React from 'react';
 import { NavLink, Link } from 'react-router-dom';
 import {
   LayoutDashboard,
   Inbox,
+  Zap,
   CheckSquare,
   Github,
   Bot,
   FileSpreadsheet,
   Send,
-  Zap,
-  Home,
   Activity,
 } from 'lucide-react';
 
@@ -17,6 +17,7 @@ export const Sidebar: React.FC = () => {
   const menuItems = [
     { to: '/dashboard', label: 'Executive Dashboard', icon: LayoutDashboard },
     { to: '/inbox', label: 'Unified Inbox Feed', icon: Inbox },
+    { to: '/studio', label: 'Automation Studio', icon: Zap }, // ⚡ MODULE TỰ ĐỘNG HÓA TRỰC TIẾP MỚI
     { to: '/tasks', label: 'Task & Approval Hub', icon: CheckSquare },
     { to: '/github', label: 'GitHub Dispatcher', icon: Github },
     { to: '/bots', label: 'Bot Execution Center', icon: Bot },
@@ -33,7 +34,7 @@ export const Sidebar: React.FC = () => {
           to="/"
           className="h-16 px-5 flex items-center gap-3 border-b border-slate-200/80 dark:border-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors"
         >
-          <img src="/logo.png" alt="Pythaverse Logo" className="w-8 h-8 rounded-xl" />
+          <img src="/logo.png" alt="Pythaverse Logo" className="w-8 h-8 rounded-xl shadow-2xs" />
           <div>
             <h1 className="font-bold text-slate-900 dark:text-slate-100 text-sm tracking-tight">Pythaverse Admin</h1>
             <p className="text-[10px] text-violet-600 dark:text-violet-400 font-semibold tracking-wider uppercase">Automation Hub</p>
@@ -42,7 +43,6 @@ export const Sidebar: React.FC = () => {
 
         {/* Navigation Menu */}
         <nav className="p-3.5 space-y-1">
-
           <div className="text-[10px] font-semibold text-slate-400 dark:text-slate-400 uppercase px-3 pt-2 pb-1.5 tracking-wider">
             Admin Modules
           </div>
@@ -55,14 +55,14 @@ export const Sidebar: React.FC = () => {
                 to={item.to}
                 className={({ isActive }) =>
                   `w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${isActive
-                    ? 'bg-violet-50 text-violet-700 border border-violet-200/80 dark:bg-violet-500/15 dark:text-violet-300 dark:border-violet-500/30 font-semibold shadow-xs'
+                    ? 'bg-violet-50 text-violet-700 border border-violet-200/80 dark:bg-violet-500/15 dark:text-violet-300 dark:border-violet-500/30 font-semibold shadow-2xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800/50 border border-transparent'
                   }`
                 }
               >
                 {({ isActive }) => (
                   <>
-                    <Icon className={`w-4 h-4 transition-colors ${isActive ? 'text-violet-600 dark:text-violet-300' : 'text-slate-400 dark:text-slate-400'}`} />
+                    <Icon className={`w-4 h-4 transition-colors ${isActive ? 'text-violet-600 dark:text-violet-300' : 'text-slate-400'}`} />
                     <span>{item.label}</span>
                   </>
                 )}
@@ -78,7 +78,7 @@ export const Sidebar: React.FC = () => {
           <span className="font-medium text-slate-700 dark:text-slate-300">PTV Admin</span>
           <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] text-slate-600 dark:text-slate-400 font-mono">v1.0.0</span>
         </div>
-        <div className="text-[10px] text-slate-400 dark:text-slate-400 mt-1">Enterprise Automation SaaS</div>
+        <div className="text-[10px] text-slate-400 mt-1">Enterprise Automation SaaS</div>
       </div>
     </aside>
   );
