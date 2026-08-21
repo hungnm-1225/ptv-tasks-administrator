@@ -18,11 +18,9 @@ router = APIRouter()
 VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
 
 def get_vn_time_str() -> str:
-    """Trả về chuỗi thời gian định dạng YYYY-MM-DD HH:MM:SS theo giờ Việt Nam."""
     return datetime.now(VN_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 def get_vn_iso() -> str:
-    """Trả về chuỗi thời gian ISO theo giờ Việt Nam."""
     return datetime.now(VN_TZ).isoformat()
 
 class ApproveTaskRequest(BaseModel):
@@ -40,20 +38,18 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
     
     # 1. Bổ sung thông tin Credentials phả hệ nếu là Workspace RPA
     if bot_type == "workspace_rpa":
-        action = payload.get("action", "")
-        if action in ["school_create_order", "partner_approve_order", "full_lineage_pipeline", "bulk_account_creation"]:
-            school_ident = payload.get("school_name") or payload.get("school_id")
-            if school_ident:
-                lineage = workspace_lineage_service.resolve_by_school(school_ident)
-                if lineage:
-                    payload["school_credentials"] = lineage["school"]
-                    payload["partner_credentials"] = lineage["partner"]
-                    payload["distributor_credentials"] = lineage["distributor"]
-                    payload["admin_credentials"] = {
-                        "username": settings.TEST_ADMIN_USER,
-                        "password": settings.TEST_ADMIN_PASS
-                    }
-                    payload["country_info"] = lineage.get("country", {})
+        school_ident = payload.get("school_name") or payload.get("school_id")
+        if school_ident:
+            lineage = workspace_lineage_service.resolve_by_school(school_ident)
+            if lineage:
+                payload["school_credentials"] = lineage["school"]
+                payload["partner_credentials"] = lineage["partner"]
+                payload["distributor_credentials"] = lineage["distributor"]
+                payload["admin_credentials"] = {
+                    "username": settings.TEST_ADMIN_USER,
+                    "password": settings.TEST_ADMIN_PASS
+                }
+                payload["country_info"] = lineage.get("country", {})
 
     # 2. Cập nhật task sang 'running'
     log_trail = f"[{time_str}] [APPROVAL] Approved by Admin. Dispatching worker '{bot_type}'...\n"
@@ -62,12 +58,15 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
         "execution_logs": log_trail
     }).eq("id", task_id).execute()
 
-    # 3. KÍCH HOẠT WORKER THỰC THI THẬT (ASYNC CHUẨN)
+    # 3. KÍCH HOẠT WORKER THỰC THI THẬT
     try:
         execution_result = await execute_approved_bot_task(bot_type, payload)
         end_time_str = get_vn_time_str()
         
-        # Nhận diện thành công linh hoạt (status success hoặc success_count > 0)
+        # BẢO VỆ TUYỆT ĐỐI KHÔNG BỊ NONETYPE
+        if execution_result is None:
+            execution_result = {"status": "failed", "error": f"Bot executor trả về None cho bot_type '{bot_type}'"}
+
         is_success = (
             execution_result.get("status") in ["success", "simulated", "submitted", "completed"] 
             or execution_result.get("success_count", 0) > 0
@@ -77,11 +76,10 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
             success_msg = execution_result.get("message") or execution_result.get("issue_url") or "Thực thi tác vụ thành công!"
             log_trail += f"[{end_time_str}] [SUCCESS] [{bot_type}]: {success_msg}\n"
             
-            # Ghi log chi tiết từng tài khoản (nếu Keycloak hoặc Bot trả về)
             if "execution_logs" in execution_result:
                 log_trail += f"\n{execution_result['execution_logs']}\n"
             elif "logs" in execution_result:
-                log_trail += f"\n--- CHI TIẾT TIẾN TRÌNH ---\n{execution_result['logs']}\n"
+                log_trail += f"\n--- CHI TIẾT TIẾN TRÌNH RPA ---\n{execution_result['logs']}\n"
 
             supabase.table("bot_automation_tasks").update({
                 "execution_status": "success",
@@ -89,7 +87,6 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
                 "executed_at": get_vn_iso()
             }).eq("id", task_id).execute()
 
-            # Cập nhật ticket gốc sang 'completed'
             if ticket_id:
                 supabase.table("inbox_tickets").update({
                     "status": "completed",
@@ -111,7 +108,7 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
     except Exception as e:
         end_time_str = get_vn_time_str()
         err_log = f"{log_trail}[{end_time_str}] [CRITICAL ERROR] [{bot_type}]: {str(e)}\n"
-        logger.error(f"❌ Lỗi thực thi Task #{task_id}: {e}")
+        logger.error(f"❌ Lỗi thực thi Task #{task_id}: {e}", exc_info=True)
         supabase.table("bot_automation_tasks").update({
             "execution_status": "failed",
             "execution_logs": err_log,
@@ -126,7 +123,6 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
 @router.get("", response_model=List[Dict[str, Any]])
 @router.get("/", response_model=List[Dict[str, Any]])
 async def list_tasks(approval_status: Optional[str] = None):
-    """Lấy danh sách bot_automation_tasks THẬT từ Supabase kèm thông tin Ticket gốc."""
     try:
         supabase = get_supabase_client()
         query = supabase.table("bot_automation_tasks").select("*, inbox_tickets(*)").order("created_at", desc=True)
@@ -144,7 +140,6 @@ async def list_tasks(approval_status: Optional[str] = None):
 @router.post("", response_model=Dict[str, Any])
 @router.post("/", response_model=Dict[str, Any])
 async def create_task(payload: Dict[str, Any]):
-    """Tạo tác vụ phê duyệt bot mới từ Unified Inbox (Ghi nhận giờ VN GMT+7)."""
     ticket_id = payload.get("ticket_id")
     bot_type = payload.get("bot_type", "keycloak_api")
     payload_data = payload.get("payload_data", {"action": "auto_triage", "ticket_id": ticket_id})
@@ -172,7 +167,6 @@ async def create_task(payload: Dict[str, Any]):
 
 @router.put("/{task_id}/approve")
 async def approve_task(task_id: str, req: ApproveTaskRequest, background_tasks: BackgroundTasks):
-    """Phê duyệt và đẩy vào Background Task để chạy Worker THẬT (Playwright/Keycloak/GitHub)."""
     supabase = get_supabase_client()
     time_str = get_vn_time_str()
     now_iso = get_vn_iso()
@@ -187,7 +181,6 @@ async def approve_task(task_id: str, req: ApproveTaskRequest, background_tasks: 
     payload = req.edited_payload if req.edited_payload is not None else (task.get("payload_data") or {})
     ticket_id = ticket.get("id") or task.get("ticket_id")
 
-    # 1. Cập nhật ngay trạng thái duyệt trong Database
     supabase.table("bot_automation_tasks").update({
         "payload_data": payload,
         "approval_status": "approved",
@@ -196,7 +189,6 @@ async def approve_task(task_id: str, req: ApproveTaskRequest, background_tasks: 
         "executed_at": now_iso
     }).eq("id", task_id).execute()
 
-    # 2. Đẩy Worker thật vào Background Task chạy ngầm
     background_tasks.add_task(run_approved_task_worker, task_id, bot_type, payload, ticket_id)
 
     logger.info(f"✅ Đã phê duyệt và điều phối Worker thật cho Task #{task_id[:8]} ({bot_type})")
