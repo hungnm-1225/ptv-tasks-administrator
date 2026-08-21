@@ -1,10 +1,29 @@
 import logging
 import re
+from email.utils import parseaddr
 from typing import List, Dict, Any, Optional
 from keycloak import KeycloakAdmin
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+def clean_email_identifier(raw: Any) -> str:
+    """Tự động bóc tách email sạch từ chuỗi 'Họ Tên <email@dtt.vn>' hoặc 'email@dtt.vn'"""
+    if not raw or not isinstance(raw, str):
+        return ""
+    
+    # 1. Dùng parseaddr bóc tách nếu có dạng "Name" <email>
+    _, parsed_email = parseaddr(raw)
+    if parsed_email and "@" in parsed_email:
+        return parsed_email.strip().lower()
+    
+    # 2. Dùng regex tìm kiếm email
+    match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', raw)
+    if match:
+        return match.group(0).strip().lower()
+        
+    return raw.strip().lower()
+
 
 class KeycloakService:
     def __init__(self):
@@ -20,7 +39,6 @@ class KeycloakService:
         self._admin_client: Optional[KeycloakAdmin] = None
 
     def _get_admin_client(self) -> KeycloakAdmin:
-        """Lấy hoặc làm mới kết nối Keycloak REST API qua OpenID Connect"""
         if not self._admin_client:
             self._admin_client = KeycloakAdmin(
                 server_url=self.server_url,
@@ -34,49 +52,28 @@ class KeycloakService:
             self._admin_client.realm_name = self.target_realm
         return self._admin_client
 
-    @staticmethod
-    def extract_clean_email(raw_input: Optional[str]) -> str:
-        """
-        Bóc tách email sạch từ chuỗi phức tạp
-        Ví dụ: '"Hùng Nguyễn Mạnh" <htdttemd@pythaverse.net>' -> 'htdttemd@pythaverse.net'
-        """
-        if not raw_input:
-            return ""
-        
-        raw_str = str(raw_input).strip()
-        # Tìm email bên trong dấu <...>
-        match = re.search(r'<([^>]+)>', raw_str)
-        if match:
-            return match.group(1).strip().lower()
-        
-        # Nếu là chuỗi thông thường
-        return raw_str.strip().lower()
-
-    def find_user_exact(self, identifier: Optional[str]) -> Optional[Dict[str, Any]]:
-        """
-        Tìm kiếm người dùng chính xác (Exact Match)
-        """
-        clean_id = self.extract_clean_email(identifier)
+    def find_user_exact(self, raw_identifier: str) -> Optional[Dict[str, Any]]:
+        clean_id = clean_email_identifier(raw_identifier)
         if not clean_id:
             return None
 
         client = self._get_admin_client()
 
-        # 1. Tìm theo Email chính xác
+        # 1. Tìm theo Email
         users = client.get_users(query={"email": clean_id, "exact": True})
         if users:
             for u in users:
                 if (u.get('email') or '').strip().lower() == clean_id:
                     return u
 
-        # 2. Tìm theo Username chính xác
+        # 2. Tìm theo Username
         users_by_uname = client.get_users(query={"username": clean_id, "exact": True})
         if users_by_uname:
             for u in users_by_uname:
                 if (u.get('username') or '').strip().lower() == clean_id:
                     return u
 
-        # 3. Fallback tìm kiếm chung và duyệt lọc chính xác
+        # 3. Fallback tìm kiếm chung
         fallback = client.get_users(query={"search": clean_id})
         for u in fallback:
             u_email = (u.get('email') or '').strip().lower()
@@ -89,13 +86,12 @@ class KeycloakService:
     def execute_bulk_operations(
         self,
         identifiers: List[str],
-        action_type: str,
+        action_type: str = "bulk_both",
         target_status: Optional[str] = None,
         password_option: str = "email_lowercase",
         custom_password: Optional[str] = None,
         temporary: bool = False
     ) -> Dict[str, Any]:
-        """Xử lý Bulk chính xác tuyệt đối"""
         client = self._get_admin_client()
         results = []
         success_count = 0
@@ -108,7 +104,7 @@ class KeycloakService:
             desired_enabled = False
 
         for raw_id in identifiers:
-            clean_id = self.extract_clean_email(raw_id)
+            clean_id = clean_email_identifier(raw_id)
             if not clean_id:
                 continue
 
@@ -127,6 +123,7 @@ class KeycloakService:
             logs = []
 
             try:
+                # Cập nhật Enabled & Verified
                 user_payload = {}
                 if desired_enabled is not None:
                     user_payload["enabled"] = desired_enabled
@@ -139,7 +136,8 @@ class KeycloakService:
                 if user_payload:
                     client.update_user(user_id=user_id, payload=user_payload)
 
-                if action_type in ["bulk_reset_pass", "bulk_both"]:
+                # Đặt lại mật khẩu
+                if action_type in ["bulk_reset_pass", "bulk_both", "reset_password"]:
                     if password_option == "email_lowercase":
                         pass_val = user_email
                     elif password_option == "default_secure":
@@ -179,74 +177,46 @@ class KeycloakService:
         }
 
     def execute_account_action(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Tiếp nhận linh hoạt mọi biến thể Payload từ AI / UI / Manual Edit
-        """
-        # 1. Nhận diện danh sách Bulk nếu có
-        identifiers = payload.get("identifiers") or payload.get("emails") or payload.get("users")
-        if identifiers and isinstance(identifiers, list):
-            return self.execute_bulk_operations(
-                identifiers=identifiers,
-                action_type=payload.get("action_type", "bulk_both"),
-                target_status=payload.get("target_status"),
-                password_option=payload.get("password_option", "email_lowercase"),
-                custom_password=payload.get("new_password") or payload.get("temp_pass"),
-                temporary=payload.get("temporary", False)
-            )
+        """Tự động gom mọi định dạng payload (Single hoặc Bulk) về hàm xử lý an toàn"""
+        # 1. Trích xuất danh sách identifiers
+        raw_list = payload.get("identifiers") or payload.get("emails") or payload.get("users") or []
+        if isinstance(raw_list, str):
+            raw_list = [raw_list]
 
-        # 2. Bóc tách thông tin cho tác vụ đơn lẻ (Đón đầu tất cả các key AI có thể sinh)
-        raw_ident = (
-            payload.get("target_email") or 
-            payload.get("identifier") or 
-            payload.get("email") or 
-            payload.get("username") or
-            payload.get("user")
-        )
-        
-        clean_ident = self.extract_clean_email(raw_ident)
-        if not clean_ident:
-            return {
-                "status": "failed", 
-                "message": "Không tìm thấy trường email/username hợp lệ trong Payload (target_email, email, identifier...)"
-            }
+        # Nếu không có mảng, tìm trong các key đơn lẻ
+        if not raw_list:
+            single = payload.get("identifier") or payload.get("target_email") or payload.get("email") or payload.get("username")
+            if single:
+                raw_list = [single]
 
-        action = payload.get("action", "reset_password")
-        # Đón đầu cả new_password và temp_pass
-        new_pass = payload.get("new_password") or payload.get("temp_pass") or payload.get("password")
-        temporary = payload.get("temporary", False) or bool(payload.get("temp_pass"))
-        
-        user = self.find_user_exact(clean_ident)
-        if not user:
-            return {"status": "failed", "message": f"Không tìm thấy tài khoản trên Keycloak: {clean_ident}"}
+        if not raw_list:
+            return {"status": "failed", "message": "Không tìm thấy thông tin email/username trong payload"}
 
-        user_id = user["id"]
-        client = self._get_admin_client()
-
-        try:
-            if action in ["reset_password", "change_password"]:
-                pass_to_set = new_pass or (user.get("email") or clean_ident).strip().lower()
-                client.set_user_password(user_id=user_id, password=pass_to_set, temporary=temporary)
-                return {
-                    "status": "success", 
-                    "message": f"Đã reset mật khẩu cho {clean_ident} thành công (Pass: {pass_to_set}, Temporary={temporary})"
-                }
-
+        # 2. Bóc tách các tham số cấu hình
+        action = payload.get("action") or payload.get("action_type") or "bulk_both"
+        target_status = payload.get("target_status")
+        if not target_status:
+            if action == "enable_user":
+                target_status = "enabled"
             elif action == "disable_user":
-                client.update_user(user_id=user_id, payload={"enabled": False})
-                return {"status": "success", "message": f"Đã vô hiệu hóa tài khoản {clean_ident}"}
+                target_status = "disabled"
 
-            elif action == "enable_user":
-                client.update_user(user_id=user_id, payload={"enabled": True})
-                return {"status": "success", "message": f"Đã kích hoạt tài khoản {clean_ident}"}
+        password_option = payload.get("password_option") or "email_lowercase"
+        custom_pass = payload.get("new_password") or payload.get("temp_pass")
+        if custom_pass and password_option == "email_lowercase" and custom_pass != "email_lowercase":
+            # Nếu truyền pass cụ thể (như Ptv@2026) thì nhận custom
+            password_option = "custom"
 
-            elif action == "verify_email":
-                client.update_user(user_id=user_id, payload={"emailVerified": True})
-                return {"status": "success", "message": f"Đã xác thực email cho {clean_ident}"}
+        temporary = payload.get("temporary", False)
 
-            return {"status": "failed", "message": f"Action không hợp lệ: {action}"}
-        except Exception as e:
-            return {"status": "failed", "message": str(e)}
+        return self.execute_bulk_operations(
+            identifiers=raw_list,
+            action_type=action,
+            target_status=target_status,
+            password_option=password_option,
+            custom_password=custom_pass,
+            temporary=temporary
+        )
 
 
-# 📌 Khởi tạo Singleton Instance
 keycloak_service = KeycloakService()

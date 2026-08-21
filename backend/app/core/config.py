@@ -1,6 +1,8 @@
 # backend/app/core/config.py
 from typing import Optional, List
 from pydantic_settings import BaseSettings
+import pytz
+from datetime import datetime
 
 
 class Settings(BaseSettings):
@@ -67,6 +69,18 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         extra = "ignore"
+        
+
+    # --- TIMEZONE CONFIGURATION ---
+    VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
+
+    def get_vn_now() -> datetime:
+        """Trả về đối tượng datetime theo giờ Việt Nam."""
+        return datetime.now(VN_TZ)
+
+    def get_vn_time_str(fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
+        """Trả về chuỗi thời gian định dạng giờ Việt Nam GMT+7 (VD: '2026-08-20 19:11:59')."""
+        return datetime.now(VN_TZ).strftime(fmt)
 
 
 settings = Settings()
