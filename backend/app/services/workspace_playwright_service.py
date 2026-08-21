@@ -138,50 +138,53 @@ class WorkspacePlaywrightService:
                         await page.click("div[role='dialog'] button:has-text('Add Course')")
                         await page.wait_for_timeout(1000)
 
-                    # A. BẤM TRỰC TIẾP VÀO Ô SELECT CỦA 'License Category' (Ghim chính xác)
-                    cat_select = page.locator(f"(//div[@role='dialog']//div[contains(@class, 'MuiFormControl-root')][.//label[contains(., 'License Category')]]//div[@role='combobox'])[{idx+1}]")
+                    # Định vị Container Course card thứ idx (chứa class MuiGrid-container)
+                    course_card = page.locator("div[role='dialog'] .MuiBox-root:has(> .MuiGrid-container)").nth(idx)
+
+                    # A. BẤM VÀO Ô SELECT 'License Category' (Trỏ chính xác trong Grid Item)
+                    cat_select = course_card.locator(".MuiGrid-item:has(label:has-text('License Category')) div[role='combobox'], .MuiGrid-item:has(label:has-text('License Category')) .MuiSelect-select").first
                     await cat_select.wait_for(state="visible", timeout=10000)
                     await cat_select.click()
                     await page.wait_for_timeout(500)
 
                     # Chọn Option Category (VD: SWRP, ASP, IR...)
                     category_val = c.get("category", "SWRP")
-                    cat_option = page.locator(f"ul[role='listbox'] li[role='option']:has-text('{category_val}'), .MuiPopover-root li:has-text('{category_val}')").first
+                    cat_option = page.locator(f"li[role='option']:has-text('{category_val}'), .MuiMenu-list li:has-text('{category_val}')").first
                     await cat_option.wait_for(state="visible", timeout=5000)
                     await cat_option.click()
                     logger.info(f"✅ [Course {idx+1}] Đã chọn License Category: '{category_val}'")
-                    await page.wait_for_timeout(1200)
+                    await page.wait_for_timeout(1000)
 
-                    # B. CHỌN COURSE NAME
-                    course_select = page.locator(f"(//div[@role='dialog']//div[contains(@class, 'MuiFormControl-root')][.//label[contains(., 'Course') and not(contains(., 'Category'))]]//div[@role='combobox'])[{idx+1}]")
+                    # B. CHỌN COURSE NAME (Sau khi Category kích hoạt xong)
+                    course_select = course_card.locator(".MuiGrid-item:has(label:has-text('Course')) div[role='combobox'], .MuiGrid-item:has(label:has-text('Course')) .MuiSelect-select").first
                     await course_select.wait_for(state="visible", timeout=10000)
                     await course_select.click()
                     await page.wait_for_timeout(500)
                     
                     course_name_val = c.get("course_name")
                     if course_name_val:
-                        target_opt = page.locator(f"ul[role='listbox'] li[role='option']:has-text('{course_name_val}'), .MuiPopover-root li:has-text('{course_name_val}')").first
+                        target_opt = page.locator(f"li[role='option']:has-text('{course_name_val}'), .MuiMenu-list li:has-text('{course_name_val}')").first
                         if await target_opt.count() > 0:
                             await target_opt.click()
                         else:
-                            await page.locator("ul[role='listbox'] li[role='option']").first.click()
+                            await page.locator("li[role='option']").first.click()
                     else:
-                        await page.locator("ul[role='listbox'] li[role='option']").first.click()
+                        await page.locator("li[role='option']").first.click()
                     
                     logger.info(f"✅ [Course {idx+1}] Đã chọn Course Name!")
                     await page.wait_for_timeout(500)
 
                     # C. ĐIỀN SỐ LƯỢNG LICENSES
                     licenses_count = str(c.get("licenses", 1))
-                    lic_input = page.locator(f"(//div[@role='dialog']//div[contains(@class, 'MuiFormControl-root')][.//label[contains(., 'License')]]//input[@type='number'])[{idx+1}]")
+                    lic_input = course_card.locator(".MuiGrid-item:has(label:has-text('License')) input[type='number']").first
                     await lic_input.fill(licenses_count)
 
                     # D. ĐIỀN START DATE & END DATE
                     start_date_val = c.get("start_date")
                     end_date_val = c.get("end_date")
                     
-                    start_input = page.locator(f"(//div[@role='dialog']//div[contains(@class, 'MuiFormControl-root')][.//label[contains(., 'Start Date')]]//input)[{idx+1}]")
-                    end_input = page.locator(f"(//div[@role='dialog']//div[contains(@class, 'MuiFormControl-root')][.//label[contains(., 'End Date')]]//input)[{idx+1}]")
+                    start_input = course_card.locator(".MuiGrid-item:has(label:has-text('Start Date')) input").first
+                    end_input = course_card.locator(".MuiGrid-item:has(label:has-text('End Date')) input").first
                     
                     if start_date_val:
                         await start_input.fill(start_date_val)
@@ -267,7 +270,7 @@ class WorkspacePlaywrightService:
                 await action_btn.click()
                 logger.info("📋 Đã bấm icon 3 gạch, chờ Popover Menu hiện...")
                 
-                # BẮT BUỘC: Bấm tiếp chữ 'View' trong Popover Menu
+                # BẤM TIẾP CHỮ 'View' TRONG POPOVER MENU
                 view_menu_item = page.locator("li[role='menuitem']:has-text('View'), .MuiMenu-list li:has-text('View'), text=View").first
                 await view_menu_item.wait_for(state="visible", timeout=5000)
                 await view_menu_item.click()
@@ -276,15 +279,9 @@ class WorkspacePlaywrightService:
                 # Đợi Modal 'Order Details' hiển thị
                 await page.wait_for_selector("div[role='dialog']:has-text('Order Details')", timeout=15000)
 
-                # 3. Ghim đúng các ô chọn 'Pool License' theo nhãn label
-                pool_selects = page.locator("//div[@role='dialog']//div[contains(@class, 'MuiFormControl-root')][.//label[contains(., 'Pool License')]]//div[@role='combobox']")
+                # 3. Lặp qua tất cả các ô chọn Pool License trong Modal
+                pool_selects = page.locator("div[role='dialog'] div[role='combobox']:has-text('Pool License'), div[role='dialog'] .MuiSelect-select")
                 select_count = await pool_selects.count()
-                
-                # Fallback nếu modal hiển thị cấu trúc khác
-                if select_count == 0:
-                    pool_selects = page.locator("div[role='dialog'] div[role='combobox']:has-text('Pool License'), div[role='dialog'] .MuiSelect-select")
-                    select_count = await pool_selects.count()
-
                 logger.info(f"🔄 Tìm thấy {select_count} mục cần chọn Pool License...")
 
                 for i in range(select_count):
@@ -293,16 +290,16 @@ class WorkspacePlaywrightService:
                     await page.wait_for_timeout(500)
 
                     # Ưu tiên chọn Category License
-                    option = page.locator("ul[role='listbox'] li[role='option']:has-text('Category License'), .MuiPopover-root li:has-text('Category License'), li:has-text('Available')").first
+                    option = page.locator("li[role='option']:has-text('Category License'), li[role='option']:has-text('Available')").first
                     if await option.count() > 0:
                         await option.click()
                     else:
-                        first_opt = page.locator("ul[role='listbox'] li[role='option'], .MuiPopover-root li").first
+                        first_opt = page.locator("li[role='option']").first
                         if await first_opt.count() > 0:
                             await first_opt.click()
                     await page.wait_for_timeout(800)
 
-                # 4. Kiểm tra điều kiện đủ License
+                # 4. Kiểm tra xem có xuất hiện thông báo xanh 'Order can be approved' hay không
                 approve_btn = page.locator("div[role='dialog'] button:has-text('Approve Order')")
 
                 if await approve_btn.count() > 0 and await approve_btn.is_visible():
@@ -331,7 +328,7 @@ class WorkspacePlaywrightService:
                 await browser.close()
 
     # =========================================================================
-    # 2B. PARTNER WORKSPACE: TẠO CONTRACT XIN DISTRIBUTOR CẤP LICENSE (PRT-...)
+    # 2B. PARTNER WORKSPACE: TẠO CONTRACT XIN DISTRIBUTOR CẤP LICENSE
     # =========================================================================
     async def partner_create_contract(
         self,
@@ -350,14 +347,12 @@ class WorkspacePlaywrightService:
                 await page.goto(f"{BASE_WORKSPACE_URL}/partner-workspace/contract-po/create", wait_until="networkidle", timeout=45000)
                 await page.wait_for_selector("text=Create Contract/PO", timeout=15000)
 
-                # 1. BẮT BUỘC: Ghim chọn Contract Type = 'License'
-                type_select = page.locator("//div[contains(@class, 'MuiFormControl-root')][.//label[contains(., 'Contract Type')]]//div[@role='combobox']").first
-                await type_select.wait_for(state="visible", timeout=10000)
+                # 1. BẮT BUỘC: Chọn Contract Type = 'License'
+                type_select = page.locator("div[role='combobox']").first
                 await type_select.click()
-                await page.wait_for_selector("ul[role='listbox'] li[role='option']:has-text('License'), .MuiPopover-root li:has-text('License')", timeout=5000)
-                await page.locator("ul[role='listbox'] li[role='option']:has-text('License'), .MuiPopover-root li:has-text('License')").first.click()
+                await page.wait_for_selector("li[role='option']:has-text('License')", timeout=5000)
+                await page.locator("li[role='option']:has-text('License')").first.click()
                 await page.wait_for_timeout(1000)
-                logger.info("✅ Đã chọn Contract Type = 'License'")
 
                 # 2. Điền Contract Notes
                 notes = contract_data.get("notes", "Auto-requested by PTV Automation Hub to fulfill School Order")
@@ -371,35 +366,30 @@ class WorkspacePlaywrightService:
                         await page.click("button:has-text('Add Course')")
                         await page.wait_for_timeout(1000)
 
-                    # A. Ghim License Category
-                    cat_select = page.locator(f"(//div[contains(@class, 'MuiCard-root')][.//label[contains(., 'License Category')]]//div[@role='combobox'])[{idx+1}]")
-                    await cat_select.wait_for(state="visible", timeout=10000)
-                    await cat_select.click()
-                    
-                    cat_val = c.get("category", "SWRP")
-                    cat_opt = page.locator(f"ul[role='listbox'] li[role='option']:has-text('{cat_val}'), .MuiPopover-root li:has-text('{cat_val}')").first
-                    await cat_opt.wait_for(state="visible", timeout=5000)
-                    await cat_opt.click()
-                    await page.wait_for_timeout(1200)
+                    course_card = page.locator(".MuiCard-root:has-text('License Category')").nth(idx)
 
-                    # B. Ghim Course Name
-                    course_select = page.locator(f"(//div[contains(@class, 'MuiCard-root')][.//label[contains(., 'Course') and not(contains(., 'Category'))]]//div[@role='combobox'])[{idx+1}]")
-                    await course_select.wait_for(state="visible", timeout=10000)
-                    await course_select.click()
-                    
+                    # A. Chọn License Category trước
+                    cat_val = c.get("category", "SWRP")
+                    cat_dropdown = course_card.locator("div[role='combobox']").first
+                    await cat_dropdown.click()
+                    await page.wait_for_selector(f"li[role='option']:has-text('{cat_val}')", timeout=5000)
+                    await page.locator(f"li[role='option']:has-text('{cat_val}')").first.click()
+                    await page.wait_for_timeout(800)
+
+                    # B. Chọn Course Name
                     course_name_val = c.get("course_name")
-                    if course_name_val:
-                        target_opt = page.locator(f"ul[role='listbox'] li[role='option']:has-text('{course_name_val}'), .MuiPopover-root li:has-text('{course_name_val}')").first
-                        if await target_opt.count() > 0:
-                            await target_opt.click()
-                        else:
-                            await page.locator("ul[role='listbox'] li[role='option']").first.click()
+                    course_dropdown = course_card.locator("div[role='combobox']").nth(1)
+                    await course_dropdown.click()
+                    
+                    target_opt = page.locator(f"li[role='option']:has-text('{course_name_val}')").first
+                    if await target_opt.count() > 0:
+                        await target_opt.click()
                     else:
-                        await page.locator("ul[role='listbox'] li[role='option']").first.click()
+                        await page.locator("li[role='option']").first.click()
                     await page.wait_for_timeout(500)
 
                     # C. Điền số lượng Licenses
-                    lic_input = page.locator(f"(//div[contains(@class, 'MuiCard-root')][.//label[contains(., 'License')]]//input[@type='number'])[{idx+1}]")
+                    lic_input = course_card.locator("input[type='number']").first
                     await lic_input.fill(str(c.get("licenses", 50)))
 
                 # 4. Bấm nút '💾 Create Contract/PO'
@@ -472,7 +462,7 @@ class WorkspacePlaywrightService:
                 # Đợi Modal 'Partner Order Details' hiển thị
                 await page.wait_for_selector("div[role='dialog']:has-text('Partner Order Details')", timeout=15000)
 
-                # 3. Kiểm tra nút Approve xanh lá
+                # 3. Kiểm tra trạng thái kho của Distributor
                 approve_btn = page.locator("div[role='dialog'] button:has-text('Approve Order')")
 
                 if await approve_btn.count() > 0 and await approve_btn.is_visible():
@@ -520,12 +510,11 @@ class WorkspacePlaywrightService:
                 await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/contract-po/create", wait_until="networkidle", timeout=45000)
                 await page.wait_for_selector("text=Create Contract/PO", timeout=15000)
 
-                # 1. BẮT BUỘC: Ghim chọn Contract Type = 'License'
-                type_select = page.locator("//div[contains(@class, 'MuiFormControl-root')][.//label[contains(., 'Contract Type')]]//div[@role='combobox']").first
-                await type_select.wait_for(state="visible", timeout=10000)
+                # 1. BẮT BUỘC: Chọn Contract Type = 'License'
+                type_select = page.locator("div[role='combobox']").first
                 await type_select.click()
-                await page.wait_for_selector("ul[role='listbox'] li[role='option']:has-text('License'), .MuiPopover-root li:has-text('License')", timeout=5000)
-                await page.locator("ul[role='listbox'] li[role='option']:has-text('License'), .MuiPopover-root li:has-text('License')").first.click()
+                await page.wait_for_selector("li[role='option']:has-text('License')", timeout=5000)
+                await page.locator("li[role='option']:has-text('License')").first.click()
                 await page.wait_for_timeout(1000)
 
                 # 2. Điền Contract Notes
@@ -540,35 +529,27 @@ class WorkspacePlaywrightService:
                         await page.click("button:has-text('Add Course')")
                         await page.wait_for_timeout(1000)
 
-                    # A. Ghim License Category
-                    cat_select = page.locator(f"(//div[contains(@class, 'MuiCard-root')][.//label[contains(., 'License Category')]]//div[@role='combobox'])[{idx+1}]")
-                    await cat_select.wait_for(state="visible", timeout=10000)
-                    await cat_select.click()
-                    
-                    cat_val = c.get("category", "SWRP")
-                    cat_opt = page.locator(f"ul[role='listbox'] li[role='option']:has-text('{cat_val}'), .MuiPopover-root li:has-text('{cat_val}')").first
-                    await cat_opt.wait_for(state="visible", timeout=5000)
-                    await cat_opt.click()
-                    await page.wait_for_timeout(1200)
+                    course_card = page.locator(".MuiCard-root:has-text('License Category')").nth(idx)
 
-                    # B. Ghim Course Name
-                    course_select = page.locator(f"(//div[contains(@class, 'MuiCard-root')][.//label[contains(., 'Course') and not(contains(., 'Category'))]]//div[@role='combobox'])[{idx+1}]")
-                    await course_select.wait_for(state="visible", timeout=10000)
-                    await course_select.click()
-                    
+                    cat_val = c.get("category", "SWRP")
+                    cat_dropdown = course_card.locator("div[role='combobox']").first
+                    await cat_dropdown.click()
+                    await page.wait_for_selector(f"li[role='option']:has-text('{cat_val}')", timeout=5000)
+                    await page.locator(f"li[role='option']:has-text('{cat_val}')").first.click()
+                    await page.wait_for_timeout(800)
+
                     course_name_val = c.get("course_name")
-                    if course_name_val:
-                        target_opt = page.locator(f"ul[role='listbox'] li[role='option']:has-text('{course_name_val}'), .MuiPopover-root li:has-text('{course_name_val}')").first
-                        if await target_opt.count() > 0:
-                            await target_opt.click()
-                        else:
-                            await page.locator("ul[role='listbox'] li[role='option']").first.click()
+                    course_dropdown = course_card.locator("div[role='combobox']").nth(1)
+                    await course_dropdown.click()
+                    
+                    target_opt = page.locator(f"li[role='option']:has-text('{course_name_val}')").first
+                    if await target_opt.count() > 0:
+                        await target_opt.click()
                     else:
-                        await page.locator("ul[role='listbox'] li[role='option']").first.click()
+                        await page.locator("li[role='option']").first.click()
                     await page.wait_for_timeout(500)
 
-                    # C. Điền số lượng Licenses
-                    lic_input = page.locator(f"(//div[contains(@class, 'MuiCard-root')][.//label[contains(., 'License')]]//input[@type='number'])[{idx+1}]")
+                    lic_input = course_card.locator("input[type='number']").first
                     await lic_input.fill(str(c.get("licenses", 100)))
 
                 # 4. Bấm nút '💾 Create Contract/PO'
@@ -635,8 +616,8 @@ class WorkspacePlaywrightService:
                 if await target_row.count() == 0:
                     return {"status": "failed", "error": f"Không tìm thấy Contract ({contract_identifier}) Pending trên Dashboard"}
 
-                # 2. Click icon Con Mắt ở cột Actions để mở trang chi tiết
-                eye_btn = target_row.locator("button[aria-label='View Details'], [data-field='actions'] button, button:has(svg[data-testid='VisibilityIcon'])").first
+                # 2. Click icon Con Mắt ở cột Actions
+                eye_btn = target_row.locator("button[aria-label='View Details'], [data-field='actions'] button").first
                 await eye_btn.click()
 
                 # Đợi trang chi tiết Contract load xong
