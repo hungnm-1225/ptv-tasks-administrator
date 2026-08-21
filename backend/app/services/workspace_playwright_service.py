@@ -275,9 +275,16 @@ class WorkspacePlaywrightService:
                 action_btn = target_row.locator("[data-field=' '] button, button:has(.lucide-menu)").first
                 await action_btn.click()
                 
-                view_menu_item = page.locator("li[role='menuitem']:has-text('View'), .MuiMenu-list li:has-text('View'), text=View").first
-                await view_menu_item.wait_for(state="visible", timeout=5000)
+                # Click nút Action (icon Menu 3 gạch) để mở Popover Menu
+                action_btn = target_row.locator("[data-field=' '] button, button:has(.lucide-menu)").first
+                await action_btn.click()
+                logger.info("📋 Đã bấm icon 3 gạch, chờ Popover Menu hiện...")
+                
+                # BẤM CHỮ 'View' TRONG POPOVER MENU (Cú pháp chuẩn Playwright)
+                view_menu_item = page.locator("li[role='menuitem']:has-text('View'), .MuiMenuItem-root:has-text('View'), li:has-text('View')").first
+                await view_menu_item.wait_for(state="visible", timeout=7000)
                 await view_menu_item.click()
+                logger.info("✨ Đã click 'View'! Đang mở Modal Order Details...")
 
                 await page.wait_for_selector("div[role='dialog']:has-text('Order Details')", timeout=15000)
 
