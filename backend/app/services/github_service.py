@@ -1,8 +1,9 @@
 # backend/app/services/github_service.py
 import logging
 import httpx
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from app.core.config import settings
+from app.core.supabase import get_supabase_client
 
 logger = logging.getLogger(__name__)
 
@@ -11,9 +12,30 @@ class GitHubDispatcherService:
     """Dịch vụ gửi GitHub Issue trực tiếp vào Private Repository qua GitHub REST API."""
 
     def __init__(self):
-        self.pat = settings.GITHUB_PAT
+        self.pat = getattr(settings, "GITHUB_PAT", None)
         self.default_owner = getattr(settings, "GITHUB_DEFAULT_OWNER", "PTV-TechHub")
         self.default_repo = getattr(settings, "GITHUB_DEFAULT_REPO", "Pythaverse2026")
+
+    async def _resolve_ticket_info(self, ticket_id: Optional[str]) -> Dict[str, str]:
+        """Tự động tra cứu thông tin Ticket từ Supabase nếu Payload thiếu Title/Body."""
+        if not ticket_id:
+            return {}
+        try:
+            supabase = get_supabase_client()
+            res = supabase.table("inbox_tickets").select("title, snippet, summary, sender, source").eq("id", ticket_id).execute()
+            if res.data and len(res.data) > 0:
+                ticket = res.data[0]
+                return {
+                    "title": ticket.get("title") or f"[Ticket #{ticket_id[:8]}] Yêu cầu hỗ trợ từ {ticket.get('sender', 'User')}",
+                    "body": f"### 📌 Thông tin Ticket gốc ({ticket.get('source', 'System').upper()})\n\n"
+                            f"- **Người gửi:** `{ticket.get('sender', 'N/A')}`\n"
+                            f"- **Nội dung:**\n> {ticket.get('snippet') or ticket.get('summary') or 'Không có nội dung chi tiết.'}\n\n"
+                            f"- **Ticket ID:** `{ticket_id}`\n\n"
+                            f"*(Tác vụ được tạo tự động bởi Pythaverse Central Admin Hub)*"
+                }
+        except Exception as ex:
+            logger.warning(f"Không thể tra cứu ticket_id {ticket_id} từ Supabase: {ex}")
+        return {}
 
     async def create_issue(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Tạo Issue trên GitHub với Title, Body Markdown, Assignees và Labels."""
@@ -25,10 +47,26 @@ class GitHubDispatcherService:
             owner = self.default_owner
             repo = repo_full
 
-        title = payload.get("title", "").strip()
-        body = payload.get("body", "").strip()
-        labels = payload.get("labels", ["bug"])
-        assignees = payload.get("assignees", [])
+        ticket_id = payload.get("ticket_id")
+        title = (payload.get("title") or "").strip()
+        body = (payload.get("body") or "").strip()
+        labels = payload.get("labels") or ["bug"]
+        assignees = payload.get("assignees") or []
+
+        # 🛡️ CƠ CHẾ BẢO VỆ 1: Nếu Title rỗng, tự động lấy Title từ Ticket DB
+        if not title and ticket_id:
+            ticket_info = await self._resolve_ticket_info(ticket_id)
+            title = ticket_info.get("title", f"[Bug Report] Ticket #{ticket_id[:8]}")
+            if not body:
+                body = ticket_info.get("body", "")
+
+        # 🛡️ CƠ CHẾ BẢO VỆ 2: Nếu vẫn rỗng (tác vụ tự do), gán Title mặc định an toàn
+        if not title:
+            sender = payload.get("sender_email") or payload.get("sender") or "Admin"
+            title = f"[Auto-Created] Yêu cầu xử lý từ {sender}"
+
+        if not body:
+            body = f"Tác vụ được điều phối từ Pythaverse Automation Center.\nPayload: `{payload}`"
 
         if not self.pat:
             logger.warning("GITHUB_PAT chưa được cấu hình, trả về mock URL.")
@@ -60,11 +98,13 @@ class GitHubDispatcherService:
                     return {
                         "status": "success",
                         "issue_url": data.get("html_url"),
-                        "issue_number": data.get("number")
+                        "issue_number": data.get("number"),
+                        "message": f"Đã tạo GitHub Issue #{data.get('number')} thành công: {data.get('html_url')}"
                     }
                 else:
-                    logger.error(f"GitHub API Error: {res.status_code} - {res.text}")
-                    return {"status": "error", "error": res.text, "status_code": res.status_code}
+                    err_text = res.text
+                    logger.error(f"GitHub API Error: {res.status_code} - {err_text}")
+                    return {"status": "error", "error": f"HTTP {res.status_code}: {err_text}", "status_code": res.status_code}
             except Exception as e:
                 logger.exception(f"Lỗi khi kết nối GitHub API: {str(e)}")
                 return {"status": "error", "error": str(e)}

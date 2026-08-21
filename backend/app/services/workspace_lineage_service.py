@@ -71,8 +71,15 @@ class WorkspaceLineageService:
             return None
 
         school = school_res.data[0]
-        school_vault = school.get("workspace_credentials_vault", [{}])
-        school_creds = school_vault[0] if school_vault else {}
+        
+        # Bọc an toàn chống NoneType nếu vault trả về None hoặc Dict thay vì List
+        raw_school_vault = school.get("workspace_credentials_vault")
+        if isinstance(raw_school_vault, list) and len(raw_school_vault) > 0:
+            school_creds = raw_school_vault[0]
+        elif isinstance(raw_school_vault, dict):
+            school_creds = raw_school_vault
+        else:
+            school_creds = {}
 
         partner_id = school.get("parent_id")
         partner_data = None
@@ -84,15 +91,20 @@ class WorkspaceLineageService:
                 .select("*, workspace_credentials_vault(*)")\
                 .eq("id", partner_id)\
                 .execute()
-            if partner_res.data:
+            if partner_res.data and len(partner_res.data) > 0:
                 partner = partner_res.data[0]
-                p_vault = partner.get("workspace_credentials_vault", [{}])
-                p_creds = p_vault[0] if p_vault else {}
+                raw_p_vault = partner.get("workspace_credentials_vault")
+                if isinstance(raw_p_vault, list) and len(raw_p_vault) > 0:
+                    p_creds = raw_p_vault[0]
+                elif isinstance(raw_p_vault, dict):
+                    p_creds = raw_p_vault
+                else:
+                    p_creds = {}
                 
                 partner_data = {
-                    "id": partner["id"],
-                    "code": partner["code"],
-                    "name": partner["name"],
+                    "id": partner.get("id"),
+                    "code": partner.get("code"),
+                    "name": partner.get("name"),
                     "username": p_creds.get("username", ""),
                     "password": decrypt_password(p_creds.get("encrypted_password", ""))
                 }
@@ -104,15 +116,20 @@ class WorkspaceLineageService:
                         .select("*, workspace_credentials_vault(*)")\
                         .eq("id", dist_id)\
                         .execute()
-                    if dist_res.data:
+                    if dist_res.data and len(dist_res.data) > 0:
                         dist = dist_res.data[0]
-                        d_vault = dist.get("workspace_credentials_vault", [{}])
-                        d_creds = d_vault[0] if d_vault else {}
+                        raw_d_vault = dist.get("workspace_credentials_vault")
+                        if isinstance(raw_d_vault, list) and len(raw_d_vault) > 0:
+                            d_creds = raw_d_vault[0]
+                        elif isinstance(raw_d_vault, dict):
+                            d_creds = raw_d_vault
+                        else:
+                            d_creds = {}
                         
                         distributor_data = {
-                            "id": dist["id"],
-                            "code": dist["code"],
-                            "name": dist["name"],
+                            "id": dist.get("id"),
+                            "code": dist.get("code"),
+                            "name": dist.get("name"),
                             "username": d_creds.get("username", ""),
                             "password": decrypt_password(d_creds.get("encrypted_password", ""))
                         }

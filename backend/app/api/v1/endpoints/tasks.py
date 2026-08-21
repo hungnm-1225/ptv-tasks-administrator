@@ -1,5 +1,6 @@
 # backend/app/api/v1/endpoints/tasks.py
 import logging
+import traceback
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 import pytz
@@ -29,43 +30,51 @@ class ApproveTaskRequest(BaseModel):
 
 
 # =============================================================================
-# HÀM CHẠY WORKER THẬT NGẦM DƯỚI NỀN (BACKGROUND WORKER)
+# HÀM CHẠY WORKER THẬT NGẦM DƯỚI NỀN (BỌC THÉP TOÀN DIỆN)
 # =============================================================================
 async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, ticket_id: Optional[str]):
-    """Thực thi Worker thật, ghi log GMT+7 và cập nhật trạng thái vào Supabase."""
+    """Thực thi Worker thật, ghi log GMT+7 và bắt 100% lỗi vào Supabase Terminal."""
     supabase = get_supabase_client()
     time_str = get_vn_time_str()
+    log_trail = f"[{time_str}] [APPROVAL] Approved by Admin. Dispatching worker '{bot_type}'...\n"
     
-    # 1. Bổ sung thông tin Credentials phả hệ nếu là Workspace RPA
-    if bot_type == "workspace_rpa":
-        school_ident = payload.get("school_name") or payload.get("school_id")
-        if school_ident:
-            lineage = workspace_lineage_service.resolve_by_school(school_ident)
-            if lineage:
-                payload["school_credentials"] = lineage["school"]
-                payload["partner_credentials"] = lineage["partner"]
-                payload["distributor_credentials"] = lineage["distributor"]
+    # BỌC TOÀN BỘ HÀM TRONG TRY...EXCEPT ĐỂ KHÔNG BAO GIỜ BỊ TREO NGẦM
+    try:
+        # 1. Cập nhật task sang 'running' ngay lập tức
+        supabase.table("bot_automation_tasks").update({
+            "execution_status": "running",
+            "execution_logs": log_trail
+        }).eq("id", task_id).execute()
+
+        # 2. Bổ sung thông tin Credentials phả hệ nếu là Workspace RPA
+        if bot_type == "workspace_rpa":
+            school_ident = payload.get("school_name") or payload.get("school_id")
+            if school_ident:
+                try:
+                    lineage = workspace_lineage_service.resolve_by_school(school_ident)
+                    if lineage:
+                        payload["school_credentials"] = lineage.get("school", {})
+                        payload["partner_credentials"] = lineage.get("partner", {})
+                        payload["distributor_credentials"] = lineage.get("distributor", {})
+                        payload["country_info"] = lineage.get("country", {})
+                    else:
+                        log_trail += f"[{get_vn_time_str()}] [WARNING] [Lineage]: Không tìm thấy phả hệ trường '{school_ident}', dùng credentials mặc định trong payload.\n"
+                except Exception as lineage_err:
+                    log_trail += f"[{get_vn_time_str()}] [WARNING] [Lineage]: Lỗi đọc phả hệ ({lineage_err}), tiếp tục chạy với payload gốc.\n"
+
+            # Đảm bảo có thông tin admin
+            if not payload.get("admin_credentials"):
                 payload["admin_credentials"] = {
                     "username": settings.TEST_ADMIN_USER,
                     "password": settings.TEST_ADMIN_PASS
                 }
-                payload["country_info"] = lineage.get("country", {})
 
-    # 2. Cập nhật task sang 'running'
-    log_trail = f"[{time_str}] [APPROVAL] Approved by Admin. Dispatching worker '{bot_type}'...\n"
-    supabase.table("bot_automation_tasks").update({
-        "execution_status": "running",
-        "execution_logs": log_trail
-    }).eq("id", task_id).execute()
-
-    # 3. KÍCH HOẠT WORKER THỰC THI THẬT
-    try:
+        # 3. KÍCH HOẠT WORKER THỰC THI THẬT
         execution_result = await execute_approved_bot_task(bot_type, payload)
         end_time_str = get_vn_time_str()
         
-        # BẢO VỆ TUYỆT ĐỐI KHÔNG BỊ NONETYPE
         if execution_result is None:
-            execution_result = {"status": "failed", "error": f"Bot executor trả về None cho bot_type '{bot_type}'"}
+            execution_result = {"status": "failed", "error": f"Worker '{bot_type}' kết thúc mà không trả về dữ liệu."}
 
         is_success = (
             execution_result.get("status") in ["success", "simulated", "submitted", "completed"] 
@@ -93,11 +102,13 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
                     "updated_at": get_vn_iso()
                 }).eq("id", ticket_id).execute()
         else:
-            err_msg = execution_result.get("error") or execution_result.get("message") or "Lỗi không xác định trong quá trình thực thi."
+            err_msg = execution_result.get("error") or execution_result.get("message") or "Thất bại không rõ nguyên nhân."
             log_trail += f"[{end_time_str}] [ERROR] [{bot_type}]: {err_msg}\n"
             
             if "execution_logs" in execution_result:
                 log_trail += f"\n{execution_result['execution_logs']}\n"
+            elif "logs" in execution_result:
+                log_trail += f"\n{execution_result['logs']}\n"
 
             supabase.table("bot_automation_tasks").update({
                 "execution_status": "failed",
@@ -107,8 +118,9 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
 
     except Exception as e:
         end_time_str = get_vn_time_str()
-        err_log = f"{log_trail}[{end_time_str}] [CRITICAL ERROR] [{bot_type}]: {str(e)}\n"
-        logger.error(f"❌ Lỗi thực thi Task #{task_id}: {e}", exc_info=True)
+        full_trace = traceback.format_exc()
+        err_log = f"{log_trail}[{end_time_str}] [CRITICAL ERROR] [{bot_type}]: {str(e)}\n\n[TRACEBACK]:\n{full_trace}"
+        logger.error(f"❌ Lỗi thực thi Task #{task_id}: {e}\n{full_trace}")
         supabase.table("bot_automation_tasks").update({
             "execution_status": "failed",
             "execution_logs": err_log,
