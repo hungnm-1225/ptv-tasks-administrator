@@ -42,7 +42,6 @@ async def poll_workspace_long_tasks():
     now_utc = datetime.now(timezone.utc)
     now_iso = now_utc.isoformat()
 
-    # Tìm các task workspace_rpa đang ở trạng thái 'waiting_poll' và đã đến giờ check
     res = supabase.table("bot_automation_tasks")\
         .select("*, inbox_tickets(*)")\
         .eq("bot_type", "workspace_rpa")\
@@ -73,7 +72,6 @@ async def poll_workspace_long_tasks():
             cof_input_path = payload.get("cof_file_path")
             output_cof_path = f"/tmp/ptv_results/COMPLETED_{os.path.basename(cof_input_path or 'result.xlsx')}"
 
-            # Ghi ngược vào COF
             if cof_input_path and os.path.exists(cof_input_path):
                 COFExcelService.write_results_back_to_cof(
                     original_cof_path=cof_input_path,
@@ -87,19 +85,16 @@ async def poll_workspace_long_tasks():
 
             new_log = f"\n[{now_vn}] [SUCCESS] [workspace_rpa]: Hoàn thành tạo tài khoản (Request #{request_id}). Đã đồng bộ kết quả vào COF."
 
-            # Cập nhật hoàn thành Task
             supabase.table("bot_automation_tasks").update({
                 "execution_status": "success",
                 "execution_logs": (task.get("execution_logs") or "") + new_log,
                 "executed_at": now_iso
             }).eq("id", task_id).execute()
 
-            # Đổi ticket gốc thành 'completed'
             if task.get("ticket_id"):
                 supabase.table("inbox_tickets").update({"status": "completed"}).eq("id", task["ticket_id"]).execute()
 
         elif status == "still_processing":
-            # Hẹn lại 5 phút sau
             next_5m = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
             payload["next_check_at"] = next_5m
             new_log = f"\n[{now_vn}] [INFO] [workspace_rpa]: Request #{request_id} vẫn đang xử lý ({check_res.get('current_status')}). Sẽ kiểm tra lại sau 5 phút."
@@ -113,7 +108,7 @@ async def poll_workspace_long_tasks():
 async def lifespan(app: FastAPI):
     logger.info("🔥 Đang kích hoạt APScheduler 24/7...")
     
-    # 1. Quét Gmail mỗi 3 phút
+    # 1. Quét Gmail mỗi 5 phút
     scheduler.add_job(safe_job_wrapper, 'interval', minutes=5, args=[poll_unread_gmails, "Quét Gmail"], id='gmail_cron')
     
     # 2. Quét OS Ticket mỗi 5 phút
@@ -122,16 +117,10 @@ async def lifespan(app: FastAPI):
     # 3. Quét Form Feedback mỗi 5 phút
     scheduler.add_job(safe_job_wrapper, 'interval', minutes=5, args=[poll_form_feedbacks, "Quét Form Feedback"], id='sheet_cron')
 
-    # 4. Quét Live Uptime Website mỗi 1 giờ
-    scheduler.add_job(
-    safe_job_wrapper(poll_site_uptime_cron, "Site Uptime & Auth Matrix Cron"),
-    "interval",
-    minutes=30,      # <-- Tự động check định kỳ 30 phút/lần
-    id="site_uptime_cron",
-    replace_existing=True
-)
+    # 4. Quét Live Uptime & Auth Matrix định kỳ mỗi 30 phút (Đã sửa chuẩn cú pháp)
+    scheduler.add_job(safe_job_wrapper, 'interval', minutes=30, args=[poll_site_uptime_cron, "Quét Site Uptime & Auth Matrix"], id='site_uptime_cron', replace_existing=True)
 
-    # 5. [MỚI] Quét kiểm tra tiến độ tạo tài khoản Workspace mỗi 5 phút
+    # 5. Quét Task Workspace Long-Running mỗi 5 phút
     scheduler.add_job(safe_job_wrapper, 'interval', minutes=5, args=[poll_workspace_long_tasks, "Quét Task Workspace Long-Running"], id='workspace_long_tasks_cron')
     
     scheduler.start()
