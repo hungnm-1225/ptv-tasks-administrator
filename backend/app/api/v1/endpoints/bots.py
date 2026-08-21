@@ -19,7 +19,7 @@ def is_valid_uuid(val: str) -> bool:
 
 @router.get("/status")
 async def get_bot_workers_status() -> Dict[str, str]:
-    """Kiểm tra trạng thái Real-time của 6 Cloud Workers."""
+    """Kiểm tra trạng thái Real-time dựa trên TASK MỚI NHẤT của từng Worker."""
     supabase = get_supabase_client()
     
     status_map = {
@@ -32,26 +32,34 @@ async def get_bot_workers_status() -> Dict[str, str]:
     }
     
     try:
+        # Lấy 30 task gần nhất để tìm task mới nhất cho từng worker
         recent_tasks = supabase.table("bot_automation_tasks")\
-            .select("bot_type, execution_status")\
+            .select("bot_type, execution_status, created_at")\
             .order("created_at", desc=True)\
-            .limit(20)\
+            .limit(30)\
             .execute()
             
+        checked_types = set()
+        
         for task in (recent_tasks.data or []):
             b_type = task.get("bot_type")
             e_status = task.get("execution_status")
             
-            if b_type == "keycloak_api" and e_status == "failed":
-                status_map["keycloak_api_worker"] = "degraded"
-            elif b_type in ["workspace_rpa"] and e_status == "failed":
-                status_map["workspace_license_worker"] = "degraded"
-            elif b_type in ["lms_playwright", "lms_git_provisioning"] and e_status == "failed":
-                status_map["lms_git_worker"] = "degraded"
-            elif b_type in ["google_doc_comment", "feedback_doc_triage"] and e_status == "failed":
-                status_map["google_doc_triage"] = "degraded"
-            elif b_type == "github_issue_creator" and e_status == "failed":
-                status_map["github_dispatcher"] = "degraded"
+            # Chỉ xét trạng thái của lần chạy GẦN ĐÂY NHẤT của mỗi loại Worker
+            if b_type not in checked_types:
+                checked_types.add(b_type)
+                
+                if b_type == "keycloak_api":
+                    status_map["keycloak_api_worker"] = "degraded" if e_status == "failed" else "active"
+                elif b_type in ["workspace_rpa"]:
+                    status_map["workspace_license_worker"] = "degraded" if e_status == "failed" else "active"
+                elif b_type in ["lms_playwright", "lms_git_provisioning"]:
+                    status_map["lms_git_worker"] = "degraded" if e_status == "failed" else "active"
+                elif b_type in ["google_doc_comment", "feedback_doc_triage"]:
+                    status_map["google_doc_triage"] = "degraded" if e_status == "failed" else "active"
+                elif b_type == "github_issue_creator":
+                    status_map["github_dispatcher"] = "degraded" if e_status == "failed" else "active"
+                    
     except Exception as e:
         print(f"Error checking worker status: {e}")
         
@@ -60,7 +68,7 @@ async def get_bot_workers_status() -> Dict[str, str]:
 
 @router.get("/logs")
 async def get_bot_terminal_logs() -> List[Dict[str, Any]]:
-    """Lấy danh sách log thực thi thật từ database và cron listener."""
+    """Lấy danh sách log thực thi thật từ database."""
     supabase = get_supabase_client()
     logs_output = []
     
@@ -125,30 +133,17 @@ async def get_bot_terminal_logs() -> List[Dict[str, Any]]:
             "raw_line": f"[{now_str}] [ERROR] [System]: {str(e)}"
         })
 
-    if not logs_output:
-        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        logs_output = [
-            {"timestamp": now_str, "level": "CRON", "worker": "GmailSync", "message": "Listening for unread emails from @dtt.vn...", "raw_line": f"[{now_str}] [CRON] [GmailSync]: Listening for unread emails..."},
-            {"timestamp": now_str, "level": "INFO", "worker": "GeminiEngine", "message": "Multi-model fallback engine ready.", "raw_line": f"[{now_str}] [INFO] [GeminiEngine]: Engine initialized."},
-            {"timestamp": now_str, "level": "INFO", "worker": "Dispatcher", "message": "All 6 Workers standing by for approvals.", "raw_line": f"[{now_str}] [INFO] [Dispatcher]: Standing by for approvals."}
-        ]
-
     return logs_output
 
 
 @router.post("/{task_id}/retry")
 async def retry_bot_task(task_id: str, background_tasks: BackgroundTasks):
-    """
-    Kích hoạt chạy lại cho một Task cụ thể (UUID) hoặc gửi tín hiệu Restart/Trigger cho Worker.
-    """
+    """Kích hoạt chạy lại cho một Task hoặc Restart Worker."""
     supabase = get_supabase_client()
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
-    # 1. Trường hợp: Bấm nút Restart Worker từ Card (task_id KHÔNG phải là UUID)
     if not is_valid_uuid(task_id):
         worker_key = task_id
-        
-        # Kích hoạt quét ngầm tương ứng theo từng Worker
         if worker_key == "gmail_sync_worker":
             try:
                 from app.services.gmail_service import poll_unread_gmails
@@ -169,7 +164,6 @@ async def retry_bot_task(task_id: str, background_tasks: BackgroundTasks):
             "timestamp": now_str
         }
 
-    # 2. Trường hợp: Retry một Task ID cụ thể (task_id là UUID hợp lệ)
     try:
         task_res = supabase.table("bot_automation_tasks").select("*").eq("id", task_id).execute()
         if not task_res.data:

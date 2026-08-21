@@ -21,7 +21,12 @@ import {
   Sparkles,
   Copy,
   Sliders,
+  RefreshCw,
+  Clock,
   ExternalLink,
+  HelpCircle,
+  FileCheck,
+  Crown
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { BotType } from '../../types';
@@ -32,7 +37,9 @@ interface HierarchySchoolItem {
   school_code: string;
   school_name: string;
   partner_name: string;
+  partner_code?: string;
   distributor_name: string;
+  distributor_code?: string;
   full_lineage: string;
 }
 
@@ -53,13 +60,36 @@ interface OrderCourseSelection {
   end_date: string;
 }
 
+interface ScrapedPendingItem {
+  data_id?: string;
+  order_code?: string;
+  contract_code?: string;
+  school_name?: string;
+  created_at?: string;
+  date?: string;
+  type?: string;
+  status?: string;
+  total_amount?: string;
+}
+
 export const AutomationStudioPage: React.FC = () => {
   const navigate = useNavigate();
 
   const [selectedBotType, setSelectedBotType] = useState<BotType>('workspace_rpa');
   const [workspaceSubFlow, setWorkspaceSubFlow] = useState<
-    'end_to_end' | 'order_contract' | 'bulk_accounts' | 'lms_enroll'
+    'end_to_end' | 'approve_school_order' | 'approve_partner_contract' | 'admin_approve_contract' | 'bulk_accounts' | 'lms_enroll'
   >('end_to_end');
+
+  // Specific Order / Contract identifiers for subflows
+  const [targetOrderCode, setTargetOrderCode] = useState<string>('SCH-10266-20260821-1347');
+  const [targetContractCode, setTargetContractCode] = useState<string>('PRT-20260603-444');
+  const [adminJustification, setAdminJustification] = useState<string>(
+    'Afiq requests and approves the requests, Hung QA processes the contract via Automation Hub'
+  );
+
+  // Live Scraper State
+  const [isScrapingLive, setIsScrapingLive] = useState<boolean>(false);
+  const [scrapedPendingList, setScrapedPendingList] = useState<ScrapedPendingItem[]>([]);
 
   // Keycloak Safe Controls
   const [kcTargetEmail, setKcTargetEmail] = useState<string>('teacher.demo@pythaverse.space');
@@ -139,6 +169,57 @@ export const AutomationStudioPage: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Live Scraper Handler
+  const handleLiveScrapePending = async () => {
+    setIsScrapingLive(true);
+    setScrapedPendingList([]);
+    try {
+      if (workspaceSubFlow === 'approve_school_order') {
+        const res = await fetchApi<any>(
+          `/workspace/pending-school-orders?school_identifier=${encodeURIComponent(
+            selectedSchool?.school_name || ''
+          )}`
+        );
+        const orders = res?.orders || [];
+        setScrapedPendingList(orders);
+        if (orders.length > 0) {
+          setTargetOrderCode(orders[0].order_code);
+          toast.success(`Tìm thấy ${orders.length} School Order đang chờ Partner duyệt!`);
+        } else {
+          toast.info('Không có School Order nào đang ở trạng thái Awaiting Partner.');
+        }
+      } else if (workspaceSubFlow === 'approve_partner_contract') {
+        const res = await fetchApi<any>(
+          `/workspace/pending-partner-contracts?distributor_code=${encodeURIComponent(
+            selectedSchool?.distributor_name || ''
+          )}`
+        );
+        const contracts = res?.contracts || [];
+        setScrapedPendingList(contracts);
+        if (contracts.length > 0) {
+          setTargetContractCode(contracts[0].contract_code);
+          toast.success(`Tìm thấy ${contracts.length} Partner Contract đang chờ Distributor duyệt!`);
+        } else {
+          toast.info('Không có Partner Contract nào chờ duyệt.');
+        }
+      } else if (workspaceSubFlow === 'admin_approve_contract') {
+        const res = await fetchApi<any>('/workspace/pending-distributor-contracts');
+        const contracts = res?.contracts || [];
+        setScrapedPendingList(contracts);
+        if (contracts.length > 0) {
+          setTargetContractCode(contracts[0].contract_code);
+          toast.success(`Tìm thấy ${contracts.length} DST Contract chờ Sales Admin duyệt!`);
+        } else {
+          toast.info('Không có DST Contract nào đang Pending.');
+        }
+      }
+    } catch (err) {
+      toast.error('Lỗi quét dữ liệu Live Playwright: ' + (err as Error).message);
+    } finally {
+      setIsScrapingLive(false);
+    }
+  };
+
   // Đồng bộ payload JSON
   useEffect(() => {
     let payload: Record<string, any> = {
@@ -147,31 +228,78 @@ export const AutomationStudioPage: React.FC = () => {
     };
 
     if (selectedBotType === 'workspace_rpa') {
-      payload = {
-        action:
-          workspaceSubFlow === 'end_to_end'
-            ? 'pipeline_end_to_end'
-            : workspaceSubFlow === 'order_contract'
-            ? 'create_order_and_contracts'
-            : workspaceSubFlow === 'bulk_accounts'
-            ? 'bulk_account_creation'
-            : 'school_enroll_users',
-        school_name: selectedSchool?.school_name || 'Pythaverse School Demo',
-        hierarchy: {
+      if (workspaceSubFlow === 'end_to_end') {
+        payload = {
+          action: 'pipeline_end_to_end',
+          school_name: selectedSchool?.school_name || 'Pythaverse School Demo',
+          hierarchy: {
+            school_name: selectedSchool?.school_name,
+            school_code: selectedSchool?.school_code,
+            partner_name: selectedSchool?.partner_name,
+            distributor_name: selectedSchool?.distributor_name,
+          },
+          courses: selectedCourses.map((c) => ({
+            category: c.category,
+            course_id: c.course_id,
+            course_name: c.course_name,
+            licenses: c.licenses,
+            start_date: c.start_date,
+            end_date: c.end_date,
+          })),
+        };
+      } else if (workspaceSubFlow === 'approve_school_order') {
+        payload = {
+          action: 'approve_school_order_standalone',
+          order_code: targetOrderCode,
           school_name: selectedSchool?.school_name,
-          school_code: selectedSchool?.school_code,
+          hierarchy: {
+            school_name: selectedSchool?.school_name,
+            partner_name: selectedSchool?.partner_name,
+            distributor_name: selectedSchool?.distributor_name,
+          },
+          courses: selectedCourses.map((c) => ({
+            category: c.category,
+            course_id: c.course_id,
+            course_name: c.course_name,
+            licenses: c.licenses,
+          })),
+        };
+      } else if (workspaceSubFlow === 'approve_partner_contract') {
+        payload = {
+          action: 'approve_partner_contract_standalone',
+          contract_code: targetContractCode,
           partner_name: selectedSchool?.partner_name,
-          distributor_name: selectedSchool?.distributor_name,
-        },
-        courses: selectedCourses.map((c) => ({
-          category: c.category,
-          course_id: c.course_id,
-          course_name: c.course_name,
-          licenses: c.licenses,
-          start_date: c.start_date,
-          end_date: c.end_date,
-        })),
-      };
+          hierarchy: {
+            partner_name: selectedSchool?.partner_name,
+            distributor_name: selectedSchool?.distributor_name,
+          },
+          courses: selectedCourses.map((c) => ({
+            category: c.category,
+            licenses: c.licenses,
+          })),
+        };
+      } else if (workspaceSubFlow === 'admin_approve_contract') {
+        payload = {
+          action: 'admin_approve_contract',
+          contract_code: targetContractCode,
+          justification: adminJustification,
+        };
+      } else if (workspaceSubFlow === 'bulk_accounts') {
+        payload = {
+          action: 'bulk_account_creation',
+          school_name: selectedSchool?.school_name,
+          record_count: 50,
+        };
+      } else if (workspaceSubFlow === 'lms_enroll') {
+        payload = {
+          action: 'school_enroll_users',
+          school_name: selectedSchool?.school_name,
+          course_name: selectedCourses[0]?.course_name || '',
+          start_date: selectedCourses[0]?.start_date || '01-09-2026',
+          end_date: selectedCourses[0]?.end_date || '31-05-2027',
+          group_name_raw: 'Class A',
+        };
+      }
     } else if (selectedBotType === 'keycloak_api') {
       const actions: string[] = [];
       const conf: Record<string, any> = { target_email: kcTargetEmail };
@@ -206,6 +334,9 @@ export const AutomationStudioPage: React.FC = () => {
     workspaceSubFlow,
     selectedSchool,
     selectedCourses,
+    targetOrderCode,
+    targetContractCode,
+    adminJustification,
     kcTargetEmail,
     kcEnableResetPass,
     kcTempPass,
@@ -359,11 +490,10 @@ export const AutomationStudioPage: React.FC = () => {
                     key={tab.id}
                     type="button"
                     onClick={() => setSelectedBotType(tab.id as any)}
-                    className={`flex flex-col items-start gap-1 p-3.5 rounded-2xl border text-left transition-all duration-150 cursor-pointer ${
-                      isSel
-                        ? 'bg-gradient-to-br from-violet-600 to-indigo-600 text-white border-transparent shadow-md shadow-violet-500/25'
-                        : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700/80 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                    }`}
+                    className={`flex flex-col items-start gap-1 p-3.5 rounded-2xl border text-left transition-all duration-150 cursor-pointer ${isSel
+                      ? 'bg-gradient-to-br from-violet-600 to-indigo-600 text-white border-transparent shadow-md shadow-violet-500/25'
+                      : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700/80 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
                   >
                     <Icon className={`w-4 h-4 ${isSel ? 'text-white' : 'text-violet-600 dark:text-violet-400'}`} />
                     <span className="text-xs font-bold mt-1">{tab.label}</span>
@@ -379,28 +509,32 @@ export const AutomationStudioPage: React.FC = () => {
           {/* Step 2: Sub Configuration per Bot Engine */}
           {selectedBotType === 'workspace_rpa' && (
             <div className="space-y-5 p-5 rounded-2xl bg-violet-50/50 dark:bg-violet-950/20 border border-violet-200/70 dark:border-violet-800/40">
-              {/* 4 Chế độ phụ */}
+              {/* Phân luồng nghiệp vụ 6 chế độ */}
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-violet-900 dark:text-violet-300 flex items-center gap-1.5">
                   <Sliders className="w-3.5 h-3.5 text-violet-600" />
-                  <span>Chọn Phân Luồng Nghiệp Vụ:</span>
+                  <span>Chọn Phân Luồng Nghiệp Vụ Chuyên Biệt:</span>
                 </label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-violet-100/60 dark:bg-violet-900/40 p-1.5 rounded-xl text-xs font-medium">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 bg-violet-100/60 dark:bg-violet-900/40 p-1.5 rounded-xl text-xs font-medium">
                   {[
-                    { id: 'end_to_end', label: 'Trọn Gói 3-in-1' },
-                    { id: 'order_contract', label: 'Tạo Order & Contract' },
-                    { id: 'bulk_accounts', label: 'Tạo Tài Khoản' },
-                    { id: 'lms_enroll', label: 'Ghi Danh LMS' },
+                    { id: 'end_to_end', label: '⚡ Trọn Gói 3-in-1 (E2E)' },
+                    { id: 'approve_school_order', label: '🏫 Duyệt School Order (Partner)' },
+                    { id: 'approve_partner_contract', label: '🤝 Duyệt Contract Đối Tác (Distributor)' },
+                    { id: 'admin_approve_contract', label: '👑 Duyệt Contract Sales Admin' },
+                    { id: 'bulk_accounts', label: '👥 Tạo Tài Khoản' },
+                    { id: 'lms_enroll', label: '🎓 Ghi Danh LMS' },
                   ].map((sub) => (
                     <button
                       key={sub.id}
                       type="button"
-                      onClick={() => setWorkspaceSubFlow(sub.id as any)}
-                      className={`py-2 px-2.5 rounded-lg text-center transition-all cursor-pointer ${
-                        workspaceSubFlow === sub.id
-                          ? 'bg-white dark:bg-slate-800 font-bold text-violet-700 dark:text-violet-300 shadow-2xs'
-                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                      }`}
+                      onClick={() => {
+                        setWorkspaceSubFlow(sub.id as any);
+                        setScrapedPendingList([]);
+                      }}
+                      className={`py-2 px-2.5 rounded-lg text-center transition-all cursor-pointer text-[11px] ${workspaceSubFlow === sub.id
+                        ? 'bg-white dark:bg-slate-800 font-bold text-violet-700 dark:text-violet-300 shadow-2xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                        }`}
                     >
                       {sub.label}
                     </button>
@@ -408,217 +542,343 @@ export const AutomationStudioPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Trường Học Selector */}
-              <div className="space-y-1.5 relative" ref={schoolDropdownRef}>
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <Building2 className="w-3.5 h-3.5 text-violet-600" />
-                    <span>Trường Học Áp Dụng (Trong 480 Trường Phả Hệ):</span>
-                  </span>
-                  <span className="text-[10px] text-violet-600 font-semibold font-mono">
-                    {selectedSchool?.school_code || ''}
-                  </span>
-                </label>
-
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    value={schoolSearchQuery}
-                    onFocus={() => setIsSchoolDropdownOpen(true)}
-                    onChange={(e) => {
-                      setSchoolSearchQuery(e.target.value);
-                      setIsSchoolDropdownOpen(true);
-                    }}
-                    placeholder="Tìm theo tên hoặc mã SCH_..."
-                    className="w-full pl-9 pr-4 bg-white dark:bg-slate-800 border border-violet-200 dark:border-violet-700/80 rounded-xl p-2.5 text-xs text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition shadow-2xs"
-                  />
-                </div>
-
-                {isSchoolDropdownOpen && (
-                  <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl max-h-56 overflow-y-auto p-1.5 space-y-1">
-                    {schoolsList
-                      .filter((s) => s.school_name.toLowerCase().includes(schoolSearchQuery.toLowerCase()))
-                      .slice(0, 25)
-                      .map((s) => (
-                        <button
-                          key={s.school_code}
-                          type="button"
-                          onClick={() => {
-                            setSelectedSchool(s);
-                            setSchoolSearchQuery(`${s.school_name} (${s.school_code})`);
-                            setIsSchoolDropdownOpen(false);
-                          }}
-                          className="w-full text-left p-2.5 rounded-xl text-xs hover:bg-violet-50 dark:hover:bg-slate-700/60 flex items-center justify-between cursor-pointer transition"
-                        >
-                          <div>
-                            <div className="font-semibold text-slate-800 dark:text-slate-200">{s.school_name}</div>
-                            <div className="text-[10px] text-slate-400 font-mono">
-                              Mã: {s.school_code} | Partner: {s.partner_name}
-                            </div>
-                          </div>
-                          {selectedSchool?.school_code === s.school_code && (
-                            <Check className="w-4 h-4 text-violet-600" />
-                          )}
-                        </button>
-                      ))}
-                  </div>
-                )}
-
-                {selectedSchool && (
-                  <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/90 border border-violet-200/80 dark:border-violet-800/50 text-[11px] font-mono text-violet-700 dark:text-violet-300 flex items-center gap-2 shadow-2xs">
-                    <Layers className="w-3.5 h-3.5 text-violet-500 shrink-0" />
-                    <span className="truncate">{selectedSchool.full_lineage}</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Danh Sách Khóa Học */}
-              <div className="space-y-3 pt-3 border-t border-violet-200/60 dark:border-violet-800/40">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-violet-900 dark:text-violet-300 flex items-center gap-1.5">
-                    <BookOpen className="w-3.5 h-3.5 text-sky-600" />
-                    <span>Danh Sách Khóa Học Cấp Phép ({selectedCourses.length} Môn):</span>
+              {/* Trường Học Selector (Áp dụng cho các luồng liên quan đến School/Partner/Distributor) */}
+              {workspaceSubFlow !== 'admin_approve_contract' && (
+                <div className="space-y-1.5 relative" ref={schoolDropdownRef}>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Building2 className="w-3.5 h-3.5 text-violet-600" />
+                      <span>Trường Học & Đối Tác Áp Dụng (480 Trường Phả Hệ):</span>
+                    </span>
+                    <span className="text-[10px] text-violet-600 font-semibold font-mono">
+                      {selectedSchool?.school_code || ''}
+                    </span>
                   </label>
 
-                  <button
-                    type="button"
-                    onClick={handleAddCourseRow}
-                    className="flex items-center gap-1 text-[11px] px-3 py-1.5 bg-sky-50 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800/60 rounded-xl font-bold hover:bg-sky-100 cursor-pointer shadow-2xs transition"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Thêm Môn Học</span>
-                  </button>
-                </div>
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={schoolSearchQuery}
+                      onFocus={() => setIsSchoolDropdownOpen(true)}
+                      onChange={(e) => {
+                        setSchoolSearchQuery(e.target.value);
+                        setIsSchoolDropdownOpen(true);
+                      }}
+                      placeholder="Tìm theo tên hoặc mã SCH_..."
+                      className="w-full pl-9 pr-4 bg-white dark:bg-slate-800 border border-violet-200 dark:border-violet-700/80 rounded-xl p-2.5 text-xs text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition shadow-2xs"
+                    />
+                  </div>
 
-                {selectedCourses.map((cRow, idx) => {
-                  const filteredCoursesForCategory = coursesList.filter((c) => c.category === cRow.category);
-                  return (
-                    <div
-                      key={idx}
-                      className="p-4 bg-white dark:bg-slate-800/90 rounded-2xl border border-violet-200/80 dark:border-slate-700 space-y-3 relative shadow-2xs"
-                    >
-                      <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
-                        <span>Khóa học #{idx + 1}</span>
-                        {selectedCourses.length > 1 && (
+                  {isSchoolDropdownOpen && (
+                    <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl max-h-56 overflow-y-auto p-1.5 space-y-1">
+                      {schoolsList
+                        .filter((s) => s.school_name.toLowerCase().includes(schoolSearchQuery.toLowerCase()))
+                        .slice(0, 25)
+                        .map((s) => (
                           <button
+                            key={s.school_code}
                             type="button"
-                            onClick={() => handleRemoveCourseRow(idx)}
-                            className="text-rose-500 hover:text-rose-700 p-1 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 uppercase">Phân loại:</label>
-                          <select
-                            value={cRow.category}
-                            onChange={(e) => {
-                              const cat = e.target.value;
-                              const match = coursesList.filter((c) => c.category === cat);
-                              const first = match[0] || coursesList[0];
-                              const updated = [...selectedCourses];
-                              updated[idx] = {
-                                ...updated[idx],
-                                category: cat,
-                                course_id: first.course_id,
-                                course_name: first.course_name,
-                                lms_url: first.lms_url,
-                              };
-                              setSelectedCourses(updated);
+                            onClick={() => {
+                              setSelectedSchool(s);
+                              setSchoolSearchQuery(`${s.school_name} (${s.school_code})`);
+                              setIsSchoolDropdownOpen(false);
                             }}
-                            className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-semibold cursor-pointer outline-none"
+                            className="w-full text-left p-2.5 rounded-xl text-xs hover:bg-violet-50 dark:hover:bg-slate-700/60 flex items-center justify-between cursor-pointer transition"
                           >
-                            {categoriesList.map((cat) => (
-                              <option key={cat} value={cat}>
-                                {cat}
-                              </option>
-                            ))}
-                          </select>
+                            <div>
+                              <div className="font-semibold text-slate-800 dark:text-slate-200">{s.school_name}</div>
+                              <div className="text-[10px] text-slate-400 font-mono">
+                                Mã: {s.school_code} | Partner: {s.partner_name}
+                              </div>
+                            </div>
+                            {selectedSchool?.school_code === s.school_code && (
+                              <Check className="w-4 h-4 text-violet-600" />
+                            )}
+                          </button>
+                        ))}
+                    </div>
+                  )}
+
+                  {selectedSchool && (
+                    <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/90 border border-violet-200/80 dark:border-violet-800/50 text-[11px] font-mono text-violet-700 dark:text-violet-300 flex items-center gap-2 shadow-2xs">
+                      <Layers className="w-3.5 h-3.5 text-violet-500 shrink-0" />
+                      <span className="truncate">{selectedSchool.full_lineage}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* KHU VỰC LIVE INSPECTOR & NHẬP MÃ RIÊNG CHO TỪNG SUBFLOW */}
+              {['approve_school_order', 'approve_partner_contract', 'admin_approve_contract'].includes(
+                workspaceSubFlow
+              ) && (
+                  <div className="p-4 bg-white dark:bg-slate-800/90 rounded-2xl border border-violet-200 dark:border-slate-700 space-y-3 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-violet-900 dark:text-violet-200 flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-violet-600" />
+                        <span>
+                          {workspaceSubFlow === 'approve_school_order'
+                            ? 'Mã School Order Cần Phê Duyệt:'
+                            : workspaceSubFlow === 'approve_partner_contract'
+                              ? 'Mã Partner Contract Cần Duyệt (PRT-...):'
+                              : 'Mã DST Contract Cần Duyệt (DST-...):'}
+                        </span>
+                      </label>
+
+                      <button
+                        type="button"
+                        disabled={isScrapingLive}
+                        onClick={handleLiveScrapePending}
+                        className="flex items-center gap-1.5 text-[11px] px-3 py-1 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-bold transition shadow-2xs cursor-pointer disabled:opacity-50"
+                      >
+                        {isScrapingLive ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <RefreshCw className="w-3 h-3" />
+                        )}
+                        <span>Quét Danh Sách Pending (Live)</span>
+                      </button>
+                    </div>
+
+                    {/* Input nhập mã Order/Contract */}
+                    <div>
+                      {workspaceSubFlow === 'approve_school_order' ? (
+                        <input
+                          type="text"
+                          value={targetOrderCode}
+                          onChange={(e) => setTargetOrderCode(e.target.value)}
+                          placeholder="VD: SCH-10266-20260821-1347 hoặc ID số"
+                          className="w-full bg-slate-50 dark:bg-slate-900 border border-violet-300 dark:border-violet-700 rounded-xl p-2.5 text-xs font-mono font-bold outline-none"
+                        />
+                      ) : (
+                        <input
+                          type="text"
+                          value={targetContractCode}
+                          onChange={(e) => setTargetContractCode(e.target.value)}
+                          placeholder={
+                            workspaceSubFlow === 'approve_partner_contract'
+                              ? 'VD: PRT-20260603-444'
+                              : 'VD: DST-20260603-102'
+                          }
+                          className="w-full bg-slate-50 dark:bg-slate-900 border border-violet-300 dark:border-violet-700 rounded-xl p-2.5 text-xs font-mono font-bold outline-none"
+                        />
+                      )}
+                    </div>
+
+                    {/* Sales Admin Justification Note */}
+                    {workspaceSubFlow === 'admin_approve_contract' && (
+                      <div className="space-y-1.5 pt-1">
+                        <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                          <span>Justification Note (Bắt buộc {'>='} 15 ký tự):</span>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {adminJustification.length} ký tự
+                          </span>
+                        </label>
+                        <textarea
+                          rows={2}
+                          value={adminJustification}
+                          onChange={(e) => setAdminJustification(e.target.value)}
+                          className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs outline-none"
+                        />
+                      </div>
+                    )}
+
+                    {/* Hiển thị kết quả Scrape Live */}
+                    {scrapedPendingList.length > 0 && (
+                      <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-700">
+                        <div className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1">
+                          <span>Chọn nhanh từ danh sách đang chờ duyệt ({scrapedPendingList.length}):</span>
+                        </div>
+                        <div className="max-h-40 overflow-y-auto space-y-1 p-1 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800">
+                          {scrapedPendingList.map((item, pIdx) => {
+                            const itemCode = item.order_code || item.contract_code || item.data_id;
+                            const isCurrent =
+                              targetOrderCode === itemCode || targetContractCode === itemCode;
+                            return (
+                              <button
+                                key={pIdx}
+                                type="button"
+                                onClick={() => {
+                                  if (workspaceSubFlow === 'approve_school_order') {
+                                    setTargetOrderCode(itemCode || '');
+                                  } else {
+                                    setTargetContractCode(itemCode || '');
+                                  }
+                                  toast.success(`Đã chọn mã: ${itemCode}`);
+                                }}
+                                className={`w-full text-left p-2 rounded-lg text-xs flex items-center justify-between cursor-pointer transition ${isCurrent
+                                  ? 'bg-violet-100 dark:bg-violet-950/70 border border-violet-300 text-violet-800 dark:text-violet-200 font-bold'
+                                  : 'hover:bg-slate-200/60 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                                  }`}
+                              >
+                                <div>
+                                  <div className="font-mono">{itemCode}</div>
+                                  <div className="text-[10px] text-slate-400">
+                                    {item.school_name ? `${item.school_name} | ` : ''}
+                                    {item.created_at || item.date || ''}
+                                  </div>
+                                </div>
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-bold">
+                                  {item.status || 'Pending'}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+              {/* Danh Sách Khóa Học (Áp dụng cho E2E và School Order) */}
+              {['end_to_end', 'approve_school_order'].includes(workspaceSubFlow) && (
+                <div className="space-y-3 pt-3 border-t border-violet-200/60 dark:border-violet-800/40">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-violet-900 dark:text-violet-300 flex items-center gap-1.5">
+                      <BookOpen className="w-3.5 h-3.5 text-sky-600" />
+                      <span>Danh Sách Khóa Học Cấp Phép ({selectedCourses.length} Môn):</span>
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={handleAddCourseRow}
+                      className="flex items-center gap-1 text-[11px] px-3 py-1.5 bg-sky-50 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800/60 rounded-xl font-bold hover:bg-sky-100 cursor-pointer shadow-2xs transition"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Thêm Môn Học</span>
+                    </button>
+                  </div>
+
+                  {selectedCourses.map((cRow, idx) => {
+                    const filteredCoursesForCategory = coursesList.filter((c) => c.category === cRow.category);
+                    return (
+                      <div
+                        key={idx}
+                        className="p-4 bg-white dark:bg-slate-800/90 rounded-2xl border border-violet-200/80 dark:border-slate-700 space-y-3 relative shadow-2xs"
+                      >
+                        <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
+                          <span>Khóa học #{idx + 1}</span>
+                          {selectedCourses.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveCourseRow(idx)}
+                              className="text-rose-500 hover:text-rose-700 p-1 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
 
-                        <div className="sm:col-span-2">
-                          <label className="text-[10px] font-bold text-slate-500 uppercase">
-                            Chọn môn học ({filteredCoursesForCategory.length} môn):
-                          </label>
-                          <select
-                            value={cRow.course_id}
-                            onChange={(e) => {
-                              const cId = parseInt(e.target.value);
-                              const target = coursesList.find((c) => c.course_id === cId);
-                              if (target) {
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">Phân loại:</label>
+                            <select
+                              value={cRow.category}
+                              onChange={(e) => {
+                                const cat = e.target.value;
+                                const match = coursesList.filter((c) => c.category === cat);
+                                const first = match[0] || coursesList[0];
                                 const updated = [...selectedCourses];
                                 updated[idx] = {
                                   ...updated[idx],
-                                  course_id: target.course_id,
-                                  course_name: target.course_name,
-                                  lms_url: target.lms_url,
+                                  category: cat,
+                                  course_id: first.course_id,
+                                  course_name: first.course_name,
+                                  lms_url: first.lms_url,
                                 };
                                 setSelectedCourses(updated);
-                              }
-                            }}
-                            className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-semibold cursor-pointer outline-none truncate"
-                          >
-                            {filteredCoursesForCategory.map((c) => (
-                              <option key={c.course_id} value={c.course_id}>
-                                {c.course_name} (ID: {c.course_id})
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
+                              }}
+                              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-semibold cursor-pointer outline-none"
+                            >
+                              {categoriesList.map((cat) => (
+                                <option key={cat} value={cat}>
+                                  {cat}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 uppercase">Licenses:</label>
-                          <input
-                            type="number"
-                            value={cRow.licenses}
-                            min={1}
-                            onChange={(e) => {
-                              const updated = [...selectedCourses];
-                              updated[idx].licenses = parseInt(e.target.value) || 1;
-                              setSelectedCourses(updated);
-                            }}
-                            className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-bold outline-none"
-                          />
+                          <div className="sm:col-span-2">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">
+                              Chọn môn học ({filteredCoursesForCategory.length} môn):
+                            </label>
+                            <select
+                              value={cRow.course_id}
+                              onChange={(e) => {
+                                const cId = parseInt(e.target.value);
+                                const target = coursesList.find((c) => c.course_id === cId);
+                                if (target) {
+                                  const updated = [...selectedCourses];
+                                  updated[idx] = {
+                                    ...updated[idx],
+                                    course_id: target.course_id,
+                                    course_name: target.course_name,
+                                    lms_url: target.lms_url,
+                                  };
+                                  setSelectedCourses(updated);
+                                }
+                              }}
+                              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-semibold cursor-pointer outline-none truncate"
+                            >
+                              {filteredCoursesForCategory.map((c) => (
+                                <option key={c.course_id} value={c.course_id}>
+                                  {c.course_name} (ID: {c.course_id})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
                         </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 uppercase">Start Date:</label>
-                          <input
-                            type="text"
-                            value={cRow.start_date}
-                            placeholder="dd-mm-yyyy"
-                            onChange={(e) => {
-                              const updated = [...selectedCourses];
-                              updated[idx].start_date = e.target.value;
-                              setSelectedCourses(updated);
-                            }}
-                            className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-mono outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 uppercase">End Date:</label>
-                          <input
-                            type="text"
-                            value={cRow.end_date}
-                            placeholder="dd-mm-yyyy"
-                            onChange={(e) => {
-                              const updated = [...selectedCourses];
-                              updated[idx].end_date = e.target.value;
-                              setSelectedCourses(updated);
-                            }}
-                            className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-mono outline-none"
-                          />
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">Licenses:</label>
+                            <input
+                              type="number"
+                              value={cRow.licenses}
+                              min={1}
+                              onChange={(e) => {
+                                const updated = [...selectedCourses];
+                                updated[idx].licenses = parseInt(e.target.value) || 1;
+                                setSelectedCourses(updated);
+                              }}
+                              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-bold outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">Start Date:</label>
+                            <input
+                              type="text"
+                              value={cRow.start_date}
+                              placeholder="dd-mm-yyyy"
+                              onChange={(e) => {
+                                const updated = [...selectedCourses];
+                                updated[idx].start_date = e.target.value;
+                                setSelectedCourses(updated);
+                              }}
+                              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-mono outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">End Date:</label>
+                            <input
+                              type="text"
+                              value={cRow.end_date}
+                              placeholder="dd-mm-yyyy"
+                              onChange={(e) => {
+                                const updated = [...selectedCourses];
+                                updated[idx].end_date = e.target.value;
+                                setSelectedCourses(updated);
+                              }}
+                              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-mono outline-none"
+                            />
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -648,24 +908,21 @@ export const AutomationStudioPage: React.FC = () => {
                 />
               </div>
 
-              {/* 3 Custom Styled Interactive Toggle Cards */}
               <div className="space-y-3 pt-1">
                 {/* 1. Reset Pass */}
                 <div
-                  className={`p-4 rounded-2xl border transition-all ${
-                    kcEnableResetPass
-                      ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
-                      : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
-                  }`}
+                  className={`p-4 rounded-2xl border transition-all ${kcEnableResetPass
+                    ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
+                    : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
+                    }`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div
-                        className={`p-2 rounded-xl ${
-                          kcEnableResetPass
-                            ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300'
-                            : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
-                        }`}
+                        className={`p-2 rounded-xl ${kcEnableResetPass
+                          ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300'
+                          : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
+                          }`}
                       >
                         <KeyRound className="w-4 h-4" />
                       </div>
@@ -680,9 +937,8 @@ export const AutomationStudioPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => setKcEnableResetPass(!kcEnableResetPass)}
-                      className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${
-                        kcEnableResetPass ? 'bg-amber-500 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
-                      }`}
+                      className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${kcEnableResetPass ? 'bg-amber-500 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
+                        }`}
                     >
                       <span className="w-4 h-4 bg-white rounded-full shadow-md" />
                     </button>
@@ -703,11 +959,10 @@ export const AutomationStudioPage: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => setKcForceChange(!kcForceChange)}
-                          className={`w-4 h-4 rounded border flex items-center justify-center cursor-pointer transition ${
-                            kcForceChange
-                              ? 'bg-amber-500 border-amber-500 text-white'
-                              : 'border-slate-300 dark:border-slate-600'
-                          }`}
+                          className={`w-4 h-4 rounded border flex items-center justify-center cursor-pointer transition ${kcForceChange
+                            ? 'bg-amber-500 border-amber-500 text-white'
+                            : 'border-slate-300 dark:border-slate-600'
+                            }`}
                         >
                           {kcForceChange && <Check className="w-3 h-3" />}
                         </button>
@@ -724,20 +979,18 @@ export const AutomationStudioPage: React.FC = () => {
 
                 {/* 2. Email Verified */}
                 <div
-                  className={`p-4 rounded-2xl border transition-all ${
-                    kcEnableVerify
-                      ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
-                      : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
-                  }`}
+                  className={`p-4 rounded-2xl border transition-all ${kcEnableVerify
+                    ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
+                    : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
+                    }`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div
-                        className={`p-2 rounded-xl ${
-                          kcEnableVerify
-                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300'
-                            : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
-                        }`}
+                        className={`p-2 rounded-xl ${kcEnableVerify
+                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300'
+                          : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
+                          }`}
                       >
                         <ShieldCheck className="w-4 h-4" />
                       </div>
@@ -752,9 +1005,8 @@ export const AutomationStudioPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => setKcEnableVerify(!kcEnableVerify)}
-                      className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${
-                        kcEnableVerify ? 'bg-amber-500 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
-                      }`}
+                      className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${kcEnableVerify ? 'bg-amber-500 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
+                        }`}
                     >
                       <span className="w-4 h-4 bg-white rounded-full shadow-md" />
                     </button>
@@ -765,22 +1017,20 @@ export const AutomationStudioPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => setKcVerifyAction('verify')}
-                        className={`flex-1 py-1.5 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${
-                          kcVerifyAction === 'verify'
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
-                            : 'border-slate-200 dark:border-slate-700 text-slate-500'
-                        }`}
+                        className={`flex-1 py-1.5 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcVerifyAction === 'verify'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
+                          : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                          }`}
                       >
                         ✓ Đã Xác Thực (Verified)
                       </button>
                       <button
                         type="button"
                         onClick={() => setKcVerifyAction('unverify')}
-                        className={`flex-1 py-1.5 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${
-                          kcVerifyAction === 'unverify'
-                            ? 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
-                            : 'border-slate-200 dark:border-slate-700 text-slate-500'
-                        }`}
+                        className={`flex-1 py-1.5 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcVerifyAction === 'unverify'
+                          ? 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
+                          : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                          }`}
                       >
                         ✗ Gỡ Xác Thực
                       </button>
@@ -790,20 +1040,18 @@ export const AutomationStudioPage: React.FC = () => {
 
                 {/* 3. Account Status */}
                 <div
-                  className={`p-4 rounded-2xl border transition-all ${
-                    kcEnableStatus
-                      ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
-                      : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
-                  }`}
+                  className={`p-4 rounded-2xl border transition-all ${kcEnableStatus
+                    ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
+                    : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
+                    }`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div
-                        className={`p-2 rounded-xl ${
-                          kcEnableStatus
-                            ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-300'
-                            : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
-                        }`}
+                        className={`p-2 rounded-xl ${kcEnableStatus
+                          ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-300'
+                          : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
+                          }`}
                       >
                         <UserX className="w-4 h-4" />
                       </div>
@@ -818,9 +1066,8 @@ export const AutomationStudioPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => setKcEnableStatus(!kcEnableStatus)}
-                      className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${
-                        kcEnableStatus ? 'bg-amber-500 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
-                      }`}
+                      className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${kcEnableStatus ? 'bg-amber-500 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
+                        }`}
                     >
                       <span className="w-4 h-4 bg-white rounded-full shadow-md" />
                     </button>
@@ -831,22 +1078,20 @@ export const AutomationStudioPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => setKcStatusAction('enable')}
-                        className={`flex-1 py-1.5 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${
-                          kcStatusAction === 'enable'
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
-                            : 'border-slate-200 dark:border-slate-700 text-slate-500'
-                        }`}
+                        className={`flex-1 py-1.5 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcStatusAction === 'enable'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
+                          : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                          }`}
                       >
                         ✓ Kích Hoạt (Enable)
                       </button>
                       <button
                         type="button"
                         onClick={() => setKcStatusAction('disable')}
-                        className={`flex-1 py-1.5 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${
-                          kcStatusAction === 'disable'
-                            ? 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
-                            : 'border-slate-200 dark:border-slate-700 text-slate-500'
-                        }`}
+                        className={`flex-1 py-1.5 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcStatusAction === 'disable'
+                          ? 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
+                          : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                          }`}
                       >
                         ✗ Vô Hiệu Hóa (Disable)
                       </button>
@@ -930,7 +1175,7 @@ export const AutomationStudioPage: React.FC = () => {
             </div>
 
             <textarea
-              rows={14}
+              rows={16}
               value={payloadText}
               onChange={(e) => setPayloadText(e.target.value)}
               className="w-full bg-slate-950 text-violet-300 font-mono text-xs p-4 rounded-2xl outline-none leading-relaxed border border-slate-800 focus:border-violet-500 shadow-inner"

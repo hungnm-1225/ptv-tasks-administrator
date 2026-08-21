@@ -13,13 +13,13 @@ logger = logging.getLogger(__name__)
 BASE_WORKSPACE_URL = "https://pythaverse.space"
 
 
-def normalize_date_iso(date_str: Optional[str]) -> Optional[str]:
+def normalize_date_iso(date_str: Optional[str]) -> str:
     """
     Tự động chuẩn hóa mọi định dạng ngày (DD-MM-YYYY, DD/MM/YYYY, MM/DD/YYYY...) 
     về định dạng chuẩn HTML5 <input type='date'>: YYYY-MM-DD.
     """
     if not date_str:
-        return None
+        return "2026-09-01"
     
     date_str = str(date_str).strip()
     
@@ -38,12 +38,12 @@ def normalize_date_iso(date_str: Optional[str]) -> Optional[str]:
     # 3. Phân tách theo dấu gạch nếu có
     parts = re.split(r"[-/\.]", date_str)
     if len(parts) == 3:
-        if len(parts[0]) == 4: # YYYY-MM-DD
+        if len(parts[0]) == 4:  # YYYY-MM-DD
             return f"{parts[0]:0>4}-{int(parts[1]):02d}-{int(parts[2]):02d}"
-        elif len(parts[2]) == 4: # DD-MM-YYYY
+        elif len(parts[2]) == 4:  # DD-MM-YYYY
             return f"{parts[2]:0>4}-{int(parts[1]):02d}-{int(parts[0]):02d}"
             
-    return date_str
+    return "2026-09-01"
 
 
 class WorkspacePlaywrightService:
@@ -55,12 +55,19 @@ class WorkspacePlaywrightService:
     async def _create_context(self, p) -> tuple:
         browser = await p.chromium.launch(
             headless=self.headless,
-            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--no-zygote",
+                "--single-process"
+            ]
         )
         context = await browser.new_context(
             viewport={"width": 1440, "height": 900},
             accept_downloads=True,
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         )
         page = await context.new_page()
         return browser, context, page
@@ -82,7 +89,7 @@ class WorkspacePlaywrightService:
 
             await page.fill("input[name='username'], input[name='email'], #username", username)
             await page.fill("input[name='password'], #password", password)
-            await page.click("button[type='submit'], input[type='submit'], button:has-text('Log In'), button:has-text('Đăng nhập')")
+            await page.click("button[type='submit'], input[type='submit'], button:has-text('Log In'), button:has-text('Đăng nhập')", force=True)
             await page.wait_for_timeout(3500)
 
             kc_error_locator = page.locator(".alert-error, #input-error, span.kc-feedback-text, .alert.alert-warning, p.instruction")
@@ -112,7 +119,201 @@ class WorkspacePlaywrightService:
             return False, err
 
     # =========================================================================
-    # 1. SCHOOL WORKSPACE: TẠO ORDER MỚI & BẮT MÃ ORDER ID
+    # 🔍 LIVE SCRAPERS: CÀO DANH SÁCH ORDERS / CONTRACTS PENDING THỜI GIAN THỰC
+    # =========================================================================
+    async def fetch_partner_pending_school_orders(self, credentials: Dict[str, str]) -> Dict[str, Any]:
+        """Partner cào danh sách các Order của Trường đang ở trạng thái 'Awaiting Partner'."""
+        async with async_playwright() as p:
+            browser, context, page = await self._create_context(p)
+            try:
+                is_ok, login_err = await self.login_role(page, credentials.get("username", ""), credentials.get("password", ""), "Partner")
+                if not is_ok:
+                    return {"status": "failed", "error": login_err, "orders": []}
+
+                logger.info("🔍 Partner đang quét danh sách Order tại /partner-workspace/order-management...")
+                await page.goto(f"{BASE_WORKSPACE_URL}/partner-workspace/order-management", wait_until="networkidle", timeout=45000)
+                await page.wait_for_selector(".MuiDataGrid-root", timeout=25000)
+                await page.wait_for_timeout(1500)
+
+                rows = page.locator(".MuiDataGrid-row:has([data-field='status_name']:has-text('Awaiting Partner'))")
+                count = await rows.count()
+                pending_orders = []
+
+                for i in range(count):
+                    row = rows.nth(i)
+                    order_id_elem = row.locator("[data-field='school_order_id'] span, [data-field='school_order_id']").first
+                    school_elem = row.locator("[data-field='school_name'] .MuiDataGrid-cellContent, [data-field='school_name']").first
+                    date_elem = row.locator("[data-field='created_at'] .MuiDataGrid-cellContent, [data-field='created_at']").first
+                    type_elem = row.locator("[data-field='type'] .MuiChip-label, [data-field='type']").first
+                    status_elem = row.locator("[data-field='status_name'] .MuiDataGrid-cellContent, [data-field='status_name']").first
+                    
+                    data_id = await row.get_attribute("data-id")
+                    order_code = (await order_id_elem.inner_text()).strip() if await order_id_elem.count() > 0 else (data_id or "")
+                    school_name = (await school_elem.inner_text()).strip() if await school_elem.count() > 0 else ""
+                    created_at = (await date_elem.inner_text()).strip() if await date_elem.count() > 0 else ""
+                    order_type = (await type_elem.inner_text()).strip() if await type_elem.count() > 0 else "Course"
+                    status_name = (await status_elem.inner_text()).strip() if await status_elem.count() > 0 else "Awaiting Partner"
+
+                    if order_code:
+                        pending_orders.append({
+                            "data_id": data_id,
+                            "order_code": order_code,
+                            "school_name": school_name,
+                            "created_at": created_at,
+                            "type": order_type,
+                            "status": status_name
+                        })
+
+                logger.info(f"✅ Quét thành công: Tìm thấy {len(pending_orders)} School Orders đang chờ Partner duyệt.")
+                return {"status": "success", "orders": pending_orders, "total": len(pending_orders)}
+
+            except Exception as e:
+                logger.error(f"❌ Lỗi quét School Orders Pending: {e}")
+                return {"status": "failed", "error": str(e), "orders": []}
+            finally:
+                await browser.close()
+
+    async def fetch_partner_contracts(self, credentials: Dict[str, str], filter_pending: bool = False) -> Dict[str, Any]:
+        """Partner xem danh sách Contract/PO gửi lên Distributor."""
+        async with async_playwright() as p:
+            browser, context, page = await self._create_context(p)
+            try:
+                is_ok, login_err = await self.login_role(page, credentials.get("username", ""), credentials.get("password", ""), "Partner")
+                if not is_ok:
+                    return {"status": "failed", "error": login_err, "contracts": []}
+
+                logger.info("🔍 Partner đang quét danh sách Contract tại /partner-workspace/contract-po...")
+                await page.goto(f"{BASE_WORKSPACE_URL}/partner-workspace/contract-po", wait_until="networkidle", timeout=45000)
+                await page.wait_for_selector(".MuiDataGrid-root", timeout=25000)
+                await page.wait_for_timeout(1500)
+
+                row_selector = ".MuiDataGrid-row:has([data-field='status']:has-text('Pending Distributor Review'))" if filter_pending else ".MuiDataGrid-row"
+                rows = page.locator(row_selector)
+                count = await rows.count()
+                contracts = []
+
+                for i in range(count):
+                    row = rows.nth(i)
+                    code_elem = row.locator("[data-field='order_code'] .MuiBox-root, [data-field='order_code']").first
+                    type_elem = row.locator("[data-field='order_type'] .MuiChip-label, [data-field='order_type']").first
+                    date_elem = row.locator("[data-field='order_date']").first
+                    status_elem = row.locator("[data-field='status'] .MuiChip-label, [data-field='status']").first
+                    amount_elem = row.locator("[data-field='total_amount'] .MuiBox-root, [data-field='total_amount']").first
+                    data_id = await row.get_attribute("data-id")
+
+                    contract_code = (await code_elem.inner_text()).strip() if await code_elem.count() > 0 else (data_id or "")
+                    contract_type = (await type_elem.inner_text()).strip() if await type_elem.count() > 0 else "License"
+                    order_date = (await date_elem.inner_text()).strip() if await date_elem.count() > 0 else ""
+                    status_text = (await status_elem.inner_text()).strip() if await status_elem.count() > 0 else ""
+                    total_amount = (await amount_elem.inner_text()).strip() if await amount_elem.count() > 0 else "$0.00"
+
+                    if contract_code:
+                        contracts.append({
+                            "data_id": data_id,
+                            "contract_code": contract_code,
+                            "contract_type": contract_type,
+                            "order_date": order_date,
+                            "status": status_text,
+                            "total_amount": total_amount
+                        })
+
+                return {"status": "success", "contracts": contracts, "total": len(contracts)}
+
+            except Exception as e:
+                logger.error(f"❌ Lỗi quét Partner Contracts: {e}")
+                return {"status": "failed", "error": str(e), "contracts": []}
+            finally:
+                await browser.close()
+
+    async def fetch_distributor_pending_contracts(self, credentials: Dict[str, str]) -> Dict[str, Any]:
+        """Distributor quét danh sách Partner Contracts (PRT-...) đang chờ duyệt."""
+        async with async_playwright() as p:
+            browser, context, page = await self._create_context(p)
+            try:
+                is_ok, login_err = await self.login_role(page, credentials.get("username", ""), credentials.get("password", ""), "Distributor")
+                if not is_ok:
+                    return {"status": "failed", "error": login_err, "contracts": []}
+
+                logger.info("🔍 Distributor quét Partner Contracts: /distributor-workspace/partner-contract-po...")
+                await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/partner-contract-po", wait_until="networkidle", timeout=45000)
+                await page.wait_for_selector(".MuiDataGrid-root", timeout=25000)
+                await page.wait_for_timeout(1500)
+
+                rows = page.locator(".MuiDataGrid-row:has([data-field='status']:has-text('Pending'))")
+                count = await rows.count()
+                pending_list = []
+
+                for i in range(count):
+                    row = rows.nth(i)
+                    code_elem = row.locator("[data-field='order_code'] .MuiBox-root, [data-field='order_code']").first
+                    status_elem = row.locator("[data-field='status']").first
+                    date_elem = row.locator("[data-field='order_date'], [data-field='created_at']").first
+                    data_id = await row.get_attribute("data-id")
+                    
+                    code = (await code_elem.inner_text()).strip() if await code_elem.count() > 0 else (data_id or "")
+                    status = (await status_elem.inner_text()).strip() if await status_elem.count() > 0 else "Pending"
+                    date = (await date_elem.inner_text()).strip() if await date_elem.count() > 0 else ""
+
+                    if code:
+                        pending_list.append({
+                            "data_id": data_id,
+                            "contract_code": code,
+                            "status": status,
+                            "date": date
+                        })
+
+                return {"status": "success", "contracts": pending_list, "total": len(pending_list)}
+
+            except Exception as e:
+                logger.error(f"❌ Lỗi quét Distributor Pending Contracts: {e}")
+                return {"status": "failed", "error": str(e), "contracts": []}
+            finally:
+                await browser.close()
+
+    async def fetch_sales_admin_pending_contracts(self, credentials: Dict[str, str]) -> Dict[str, Any]:
+        """Sales Admin quét danh sách DST Contracts (DST-...) đang chờ duyệt trên Dashboard."""
+        async with async_playwright() as p:
+            browser, context, page = await self._create_context(p)
+            try:
+                is_ok, login_err = await self.login_role(page, credentials.get("username", ""), credentials.get("password", ""), "Sales Admin")
+                if not is_ok:
+                    return {"status": "failed", "error": login_err, "contracts": []}
+
+                logger.info("🔍 Sales Admin quét DST Contracts: /sales-admin-workspace/dashboard...")
+                await page.goto(f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard", wait_until="networkidle", timeout=45000)
+                await page.wait_for_selector(".MuiDataGrid-root", timeout=25000)
+                await page.wait_for_timeout(1500)
+
+                rows = page.locator(".MuiDataGrid-row:has([data-field='status']:has-text('Pending'))")
+                count = await rows.count()
+                pending_list = []
+
+                for i in range(count):
+                    row = rows.nth(i)
+                    code_elem = row.locator("[data-field='order_code'] .MuiBox-root, [data-field='order_code']").first
+                    status_elem = row.locator("[data-field='status']").first
+                    data_id = await row.get_attribute("data-id")
+                    
+                    code = (await code_elem.inner_text()).strip() if await code_elem.count() > 0 else (data_id or "")
+                    status = (await status_elem.inner_text()).strip() if await status_elem.count() > 0 else "Pending"
+
+                    if code:
+                        pending_list.append({
+                            "data_id": data_id,
+                            "contract_code": code,
+                            "status": status
+                        })
+
+                return {"status": "success", "contracts": pending_list, "total": len(pending_list)}
+
+            except Exception as e:
+                logger.error(f"❌ Lỗi quét Sales Admin Pending Contracts: {e}")
+                return {"status": "failed", "error": str(e), "contracts": []}
+            finally:
+                await browser.close()
+
+    # =========================================================================
+    # 1. SCHOOL WORKSPACE: TẠO ORDER MỚI
     # =========================================================================
     async def school_create_order(
         self, 
@@ -131,13 +332,13 @@ class WorkspacePlaywrightService:
 
                 create_order_btn = page.locator("button:has-text('Create Order')").first
                 await create_order_btn.wait_for(state="visible", timeout=15000)
-                await create_order_btn.click()
+                await create_order_btn.click(force=True)
 
                 await page.wait_for_selector("div[role='dialog']:has-text('Create New Order')", timeout=15000)
                 logger.info("📋 Đã mở Modal Create New Order thành công!")
 
                 contact_info = order_data.get("contact_info", "Admin Automation Hub (operation@pythaverse.space)")
-                contact_input = page.locator("div[role='dialog'] input[placeholder*='contact information']").first
+                contact_input = page.locator("div[role='dialog'] input[placeholder*='contact information'], div[role='dialog'] input[type='text']").first
                 await contact_input.fill(contact_info)
 
                 courses = order_data.get("courses", [])
@@ -152,49 +353,49 @@ class WorkspacePlaywrightService:
 
                 for idx, c in enumerate(courses):
                     if idx > 0:
-                        await page.click("div[role='dialog'] button:has-text('Add Course')")
+                        await page.click("div[role='dialog'] button:has-text('Add Course')", force=True)
                         await page.wait_for_timeout(1000)
 
                     course_card = page.locator("div[role='dialog'] .MuiBox-root:has(> .MuiGrid-container)").nth(idx)
 
-                    # A. Bấm chọn License Category
+                    # A. License Category
                     cat_select = course_card.locator(".MuiGrid-item:has(label:has-text('License Category')) div[role='combobox'], .MuiGrid-item:has(label:has-text('License Category')) .MuiSelect-select").first
                     await cat_select.wait_for(state="visible", timeout=10000)
-                    await cat_select.click()
+                    await cat_select.click(force=True)
                     await page.wait_for_timeout(500)
 
                     category_val = c.get("category", "SWRP")
                     cat_option = page.locator(f"li[role='option']:has-text('{category_val}'), .MuiMenu-list li:has-text('{category_val}')").first
                     await cat_option.wait_for(state="visible", timeout=5000)
-                    await cat_option.click()
-                    logger.info(f"✅ [Course {idx+1}] Đã chọn License Category: '{category_val}'")
+                    await cat_option.click(force=True)
+                    logger.info(f"✅ [Course {idx+1}] Đã chọn Category: '{category_val}'")
                     await page.wait_for_timeout(1000)
 
-                    # B. Bấm chọn Course Name
+                    # B. Course Name
                     course_select = course_card.locator(".MuiGrid-item:has(label:has-text('Course')) div[role='combobox'], .MuiGrid-item:has(label:has-text('Course')) .MuiSelect-select").first
                     await course_select.wait_for(state="visible", timeout=10000)
-                    await course_select.click()
+                    await course_select.click(force=True)
                     await page.wait_for_timeout(500)
                     
                     course_name_val = c.get("course_name")
                     if course_name_val:
                         target_opt = page.locator(f"li[role='option']:has-text('{course_name_val}'), .MuiMenu-list li:has-text('{course_name_val}')").first
                         if await target_opt.count() > 0:
-                            await target_opt.click()
+                            await target_opt.click(force=True)
                         else:
-                            await page.locator("li[role='option']").first.click()
+                            await page.locator("li[role='option']").first.click(force=True)
                     else:
-                        await page.locator("li[role='option']").first.click()
+                        await page.locator("li[role='option']").first.click(force=True)
                     
                     logger.info(f"✅ [Course {idx+1}] Đã chọn Course Name!")
                     await page.wait_for_timeout(500)
 
-                    # C. Điền số lượng Licenses
+                    # C. Licenses
                     licenses_count = str(c.get("licenses", 1))
                     lic_input = course_card.locator(".MuiGrid-item:has(label:has-text('License')) input[type='number']").first
                     await lic_input.fill(licenses_count)
 
-                    # D. Chuẩn hóa và điền Start Date / End Date dạng YYYY-MM-DD
+                    # D. Dates (Chuẩn hóa YYYY-MM-DD)
                     start_date_val = normalize_date_iso(c.get("start_date"))
                     end_date_val = normalize_date_iso(c.get("end_date"))
                     
@@ -207,12 +408,12 @@ class WorkspacePlaywrightService:
                         await end_input.fill(end_date_val)
 
                 if order_data.get("additional_notes"):
-                    notes_textarea = page.locator("div[role='dialog'] textarea[placeholder*='notes'], div[role='dialog'] textarea").first
+                    notes_textarea = page.locator("div[role='dialog'] textarea").first
                     await notes_textarea.fill(order_data["additional_notes"])
 
                 submit_dialog_btn = page.locator("div[role='dialog'] button:has-text('Create Order')").last
-                await submit_dialog_btn.click()
-                logger.info("🚀 Đã bấm Submit Order! Đang đợi trang danh sách cập nhật...")
+                await submit_dialog_btn.click(force=True)
+                logger.info("🚀 Đã bấm Submit Order! Đang đợi bảng cập nhật...")
 
                 await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=20000)
                 await page.wait_for_selector(".MuiDataGrid-row", timeout=20000)
@@ -221,10 +422,10 @@ class WorkspacePlaywrightService:
                 first_row = page.locator(".MuiDataGrid-row").first
                 order_num_id = await first_row.get_attribute("data-id")
                 
-                order_code_elem = first_row.locator("[data-field='school_order_id'] a, [data-field='school_order_id']").first
-                order_full_code = (await order_code_elem.inner_text()).strip() if await order_code_elem.count() > 0 else order_num_id
+                order_code_elem = first_row.locator("[data-field='school_order_id'] span, [data-field='school_order_id']").first
+                order_full_code = (await order_code_elem.inner_text()).strip() if await order_code_elem.count() > 0 else (order_num_id or "")
 
-                logger.info(f"🎉 TẠO ORDER THÀNH CÔNG! Mã Order: [{order_full_code}] | ID: [{order_num_id}]")
+                logger.info(f"🎉 TẠO ORDER THÀNH CÔNG! Mã: [{order_full_code}] | ID: [{order_num_id}]")
 
                 return {
                     "status": "success",
@@ -241,13 +442,17 @@ class WorkspacePlaywrightService:
                 await browser.close()
 
     # =========================================================================
-    # 2. PARTNER WORKSPACE: DUYỆT ORDER VÀ CHỌN POOL LICENSE
+    # 2. PARTNER WORKSPACE: DUYỆT SCHOOL ORDER (ĐÃ FIX CHUẨN DOM THỰC TẾ)
     # =========================================================================
     async def partner_approve_school_order(
         self, 
         credentials: Dict[str, str], 
         order_identifier: Optional[str] = None
     ) -> Dict[str, Any]:
+        """
+        Partner mở Order Details, chọn License Pool cho từng môn, kiểm tra nếu đủ License thì bấm Approve.
+        Nếu thiếu -> Trả về 'insufficient_pool' kèm thông tin số lượng/môn để tạo Contract bù.
+        """
         async with async_playwright() as p:
             browser, context, page = await self._create_context(p)
             try:
@@ -258,6 +463,7 @@ class WorkspacePlaywrightService:
                 logger.info("🤝 Partner đang mở /partner-workspace/order-management...")
                 await page.goto(f"{BASE_WORKSPACE_URL}/partner-workspace/order-management", wait_until="networkidle", timeout=45000)
                 await page.wait_for_selector(".MuiDataGrid-row", timeout=25000)
+                await page.wait_for_timeout(1000)
 
                 target_row = None
                 if order_identifier:
@@ -272,56 +478,73 @@ class WorkspacePlaywrightService:
                 if await target_row.count() == 0:
                     return {"status": "failed", "error": f"Không tìm thấy Order phù hợp ({order_identifier}) ở trạng thái 'Awaiting Partner'"}
 
+                # Click icon menu 3 gạch ở cột Action (force=True)
                 action_btn = target_row.locator("[data-field=' '] button, button:has(.lucide-menu)").first
-                await action_btn.click()
+                await action_btn.click(force=True)
+                logger.info("📋 Đã bấm icon 3 gạch, chờ Popover Menu 'View'...")
                 
-                # Click nút Action (icon Menu 3 gạch) để mở Popover Menu
-                action_btn = target_row.locator("[data-field=' '] button, button:has(.lucide-menu)").first
-                await action_btn.click()
-                logger.info("📋 Đã bấm icon 3 gạch, chờ Popover Menu hiện...")
-                
-                # BẤM CHỮ 'View' TRONG POPOVER MENU (Cú pháp chuẩn Playwright)
-                view_menu_item = page.locator("li[role='menuitem']:has-text('View'), .MuiMenuItem-root:has-text('View'), li:has-text('View')").first
+                # Bấm chữ 'View' trong Menu Popover
+                view_menu_item = page.locator("li[role='menuitem']:has-text('View'), .MuiMenuItem-root:has-text('View')").first
                 await view_menu_item.wait_for(state="visible", timeout=7000)
-                await view_menu_item.click()
+                await view_menu_item.click(force=True)
                 logger.info("✨ Đã click 'View'! Đang mở Modal Order Details...")
 
                 await page.wait_for_selector("div[role='dialog']:has-text('Order Details')", timeout=15000)
 
-                pool_selects = page.locator("div[role='dialog'] div[role='combobox']:has-text('Pool License'), div[role='dialog'] .MuiSelect-select")
-                select_count = await pool_selects.count()
+                # Chọn Pool License cho tất cả các môn trong Modal
+                pool_dropdowns = page.locator("div[role='dialog'] div:has-text('Pool License Selection') .MuiSelect-select, div[role='dialog'] div:has-text('Pool License Selection') div[role='combobox']")
+                pool_count = await pool_dropdowns.count()
 
-                for i in range(select_count):
-                    current_select = pool_selects.nth(i)
-                    await current_select.click()
+                if pool_count == 0:
+                    pool_dropdowns = page.locator("div[role='dialog'] .MuiSelect-select")
+                    pool_count = await pool_dropdowns.count()
+
+                logger.info(f"🔄 Tìm thấy {pool_count} ô chọn Pool License...")
+
+                for i in range(pool_count):
+                    current_dd = pool_dropdowns.nth(i)
+                    await current_dd.click(force=True)
                     await page.wait_for_timeout(500)
 
-                    option = page.locator("li[role='option']:has-text('Category License'), li[role='option']:has-text('Available')").first
-                    if await option.count() > 0:
-                        await option.click()
+                    # Ưu tiên chọn option có chứa "Category License" hoặc "Available"
+                    options = page.locator("ul[role='listbox'] li[role='option'], .MuiMenu-list li")
+                    best_opt = options.locator(":has-text('Category License'), :has-text('Available')").first
+                    
+                    if await best_opt.count() > 0:
+                        await best_opt.click(force=True)
                     else:
-                        first_opt = page.locator("li[role='option']").first
-                        if await first_opt.count() > 0:
-                            await first_opt.click()
+                        first_valid = options.locator(":not([data-value=''])").first
+                        if await first_valid.count() > 0:
+                            await first_valid.click(force=True)
+                        elif await options.count() > 0:
+                            await options.first.click(force=True)
+
                     await page.wait_for_timeout(800)
 
+                # Kiểm tra nút "Approve Order"
                 approve_btn = page.locator("div[role='dialog'] button:has-text('Approve Order')")
 
                 if await approve_btn.count() > 0 and await approve_btn.is_visible():
-                    logger.info("✨ Kho đủ License! Bấm nút 'Approve Order'...")
-                    await approve_btn.click()
-                    await page.wait_for_timeout(3000)
+                    logger.info("🎉 Kho License đủ! Đang bấm nút 'Approve Order'...")
+                    await approve_btn.click(force=True)
+                    await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=15000)
+                    await page.wait_for_timeout(2000)
                     
                     return {
                         "status": "success",
                         "order_identifier": order_identifier,
-                        "message": "Partner đã duyệt School Order thành công"
+                        "message": f"Partner đã duyệt thành công School Order: {order_identifier}"
                     }
                 else:
+                    logger.warning(f"⚠️ Không đủ License trong kho của Partner cho Order {order_identifier}!")
+                    close_btn = page.locator("div[role='dialog'] button:has-text('Close')").first
+                    if await close_btn.count() > 0:
+                        await close_btn.click(force=True)
+
                     return {
                         "status": "insufficient_pool",
                         "order_identifier": order_identifier,
-                        "message": "Kho Partner không đủ License, cần tạo Contract xin Distributor cấp thêm."
+                        "message": "Kho Partner không đủ License, cần tạo Contract xin Distributor cấp bù."
                     }
 
             except Exception as e:
@@ -331,7 +554,7 @@ class WorkspacePlaywrightService:
                 await browser.close()
 
     # =========================================================================
-    # 2B. PARTNER WORKSPACE: TẠO CONTRACT XIN DISTRIBUTOR CẤP LICENSE
+    # 2B. PARTNER WORKSPACE: TẠO CONTRACT GỬI DISTRIBUTOR
     # =========================================================================
     async def partner_create_contract(
         self,
@@ -345,62 +568,93 @@ class WorkspacePlaywrightService:
                 if not is_ok:
                     return {"status": "failed", "error": login_err}
 
-                logger.info("📝 Partner mở trang tạo Contract: /partner-workspace/contract-po/create...")
+                logger.info("📝 Partner mở trang: /partner-workspace/contract-po/create...")
                 await page.goto(f"{BASE_WORKSPACE_URL}/partner-workspace/contract-po/create", wait_until="networkidle", timeout=45000)
-                await page.wait_for_selector("text=Create Contract/PO", timeout=15000)
+                await page.wait_for_selector("h4:has-text('Create Contract/PO')", timeout=15000)
 
-                type_select = page.locator("div[role='combobox']").first
-                await type_select.click()
-                await page.wait_for_selector("li[role='option']:has-text('License')", timeout=5000)
-                await page.locator("li[role='option']:has-text('License')").first.click()
+                # 1. Bấm chọn Contract Type = 'License'
+                type_select = page.locator(".MuiGrid-item:has(label:has-text('Contract Type')) .MuiSelect-select, .MuiGrid-item:has(label:has-text('Contract Type')) div[role='combobox']").first
+                await type_select.wait_for(state="visible", timeout=10000)
+                await type_select.click(force=True)
+                await page.wait_for_timeout(500)
+
+                license_type_opt = page.locator("ul[role='listbox'] li[data-value='License'], ul[role='listbox'] li:has-text('License')").first
+                await license_type_opt.wait_for(state="visible", timeout=5000)
+                await license_type_opt.click(force=True)
+                logger.info("✅ Đã chọn Contract Type = 'License'")
                 await page.wait_for_timeout(1000)
 
+                # 2. Điền Contract Notes
                 notes = contract_data.get("notes", "Auto-requested by PTV Automation Hub to fulfill School Order")
-                notes_input = page.locator("textarea").first
-                await notes_input.fill(notes)
+                notes_input = page.locator("div:has(label:has-text('Contract Notes')) textarea").first
+                if await notes_input.count() > 0:
+                    await notes_input.fill(notes)
 
+                # 3. Điền các Courses
                 courses = contract_data.get("courses", [])
+                if not courses:
+                    courses = [{"category": "SWRP", "course_name": None, "licenses": 50}]
+
                 for idx, c in enumerate(courses):
                     if idx > 0:
-                        await page.click("button:has-text('Add Course')")
+                        add_btn = page.locator("button:has-text('Add Course')").first
+                        await add_btn.click(force=True)
                         await page.wait_for_timeout(1000)
 
-                    course_card = page.locator(".MuiCard-root:has-text('License Category')").nth(idx)
+                    course_card = page.locator(".MuiCard-root:has(label:has-text('License Category'))").nth(idx)
 
+                    # A. Chọn License Category
                     cat_val = c.get("category", "SWRP")
-                    cat_dropdown = course_card.locator("div[role='combobox']").first
-                    await cat_dropdown.click()
-                    await page.wait_for_selector(f"li[role='option']:has-text('{cat_val}')", timeout=5000)
-                    await page.locator(f"li[role='option']:has-text('{cat_val}')").first.click()
-                    await page.wait_for_timeout(800)
-
-                    course_name_val = c.get("course_name")
-                    course_dropdown = course_card.locator("div[role='combobox']").nth(1)
-                    await course_dropdown.click()
-                    
-                    target_opt = page.locator(f"li[role='option']:has-text('{course_name_val}')").first
-                    if await target_opt.count() > 0:
-                        await target_opt.click()
-                    else:
-                        await page.locator("li[role='option']").first.click()
+                    cat_select = course_card.locator("div:has(label:has-text('License Category')) .MuiSelect-select, div:has(label:has-text('License Category')) div[role='combobox']").first
+                    await cat_select.click(force=True)
                     await page.wait_for_timeout(500)
 
-                    lic_input = course_card.locator("input[type='number']").first
-                    await lic_input.fill(str(c.get("licenses", 50)))
+                    cat_opt = page.locator(f"ul[role='listbox'] li[data-value='{cat_val}'], ul[role='listbox'] li:has-text('{cat_val}')").first
+                    if await cat_opt.count() > 0:
+                        await cat_opt.click(force=True)
+                    else:
+                        await page.locator("ul[role='listbox'] li:not([data-value=''])").first.click(force=True)
 
+                    logger.info(f"✅ [Course {idx+1}] Đã chọn Category: {cat_val}")
+                    await page.wait_for_timeout(1000)
+
+                    # B. Chọn Course Name
+                    course_name_val = c.get("course_name")
+                    course_select = course_card.locator("div:has(label:has-text('Course')) .MuiSelect-select, div:has(label:has-text('Course')) div[role='combobox']").first
+                    await course_select.click(force=True)
+                    await page.wait_for_timeout(500)
+
+                    if course_name_val:
+                        target_opt = page.locator(f"ul[role='listbox'] li:has-text('{course_name_val}')").first
+                        if await target_opt.count() > 0:
+                            await target_opt.click(force=True)
+                        else:
+                            await page.locator("ul[role='listbox'] li").first.click(force=True)
+                    else:
+                        await page.locator("ul[role='listbox'] li").first.click(force=True)
+
+                    await page.wait_for_timeout(500)
+
+                    # C. Điền số lượng Licenses
+                    lic_qty = str(c.get("licenses", 50))
+                    lic_input = course_card.locator("div:has(label:has-text('License(s)')) input[type='number'], input[type='number']").first
+                    await lic_input.fill(lic_qty)
+
+                # 4. Bấm nút Create Contract/PO
                 submit_btn = page.locator("button:has-text('Create Contract/PO')").last
-                await submit_btn.click()
+                await submit_btn.click(force=True)
+                logger.info("🚀 Đã nộp Contract PRT-...! Đang chờ chuyển trang...")
 
-                await page.wait_for_selector(".MuiDataGrid-row", timeout=25000)
+                await page.wait_for_selector(".MuiDataGrid-row", timeout=30000)
                 await page.wait_for_timeout(2000)
 
                 first_row = page.locator(".MuiDataGrid-row").first
                 contract_num_id = await first_row.get_attribute("data-id")
                 
-                code_elem = first_row.locator("[data-field='order_code']").first
-                contract_full_code = (await code_elem.inner_text()).strip() if await code_elem.count() > 0 else contract_num_id
+                code_elem = first_row.locator("[data-field='order_code'] .MuiBox-root, [data-field='order_code']").first
+                contract_full_code = (await code_elem.inner_text()).strip() if await code_elem.count() > 0 else (contract_num_id or "")
 
-                logger.info(f"🎉 TẠO CONTRACT THÀNH CÔNG! Mã: [{contract_full_code}] | ID: [{contract_num_id}]")
+                logger.info(f"🎉 TẠO PARTNER CONTRACT THÀNH CÔNG: [{contract_full_code}] (ID: {contract_num_id})")
 
                 return {
                     "status": "success",
@@ -433,6 +687,7 @@ class WorkspacePlaywrightService:
                 logger.info("🏢 Distributor đang mở /distributor-workspace/partner-contract-po...")
                 await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/partner-contract-po", wait_until="networkidle", timeout=45000)
                 await page.wait_for_selector(".MuiDataGrid-row", timeout=25000)
+                await page.wait_for_timeout(1000)
 
                 target_row = None
                 if contract_identifier:
@@ -442,22 +697,28 @@ class WorkspacePlaywrightService:
                     ).first
                 
                 if not target_row or await target_row.count() == 0:
-                    target_row = page.locator(".MuiDataGrid-row:has([data-field='status']:has-text('Pending Distributor Review'))").first
+                    target_row = page.locator(".MuiDataGrid-row:has([data-field='status']:has-text('Pending'))").first
 
                 if await target_row.count() == 0:
                     return {"status": "failed", "error": f"Không tìm thấy Contract ({contract_identifier}) ở trạng thái chờ duyệt"}
 
-                info_btn = target_row.locator("button[aria-label='View Details'], [data-field='actions'] button").first
-                await info_btn.click()
+                info_btn = target_row.locator("button[aria-label='View Details'], [data-field='actions'] button, [data-field=' '] button, button:has(.lucide-menu)").first
+                await info_btn.click(force=True)
+                await page.wait_for_timeout(500)
 
-                await page.wait_for_selector("div[role='dialog']:has-text('Partner Order Details')", timeout=15000)
+                view_item = page.locator("li[role='menuitem']:has-text('View'), .MuiMenuItem-root:has-text('View')")
+                if await view_item.count() > 0 and await view_item.is_visible():
+                    await view_item.click(force=True)
 
-                approve_btn = page.locator("div[role='dialog'] button:has-text('Approve Order')")
+                await page.wait_for_selector("div[role='dialog']", timeout=15000)
+
+                approve_btn = page.locator("div[role='dialog'] button:has-text('Approve Order'), div[role='dialog'] button:has-text('Approve')")
 
                 if await approve_btn.count() > 0 and await approve_btn.is_visible():
                     logger.info("✨ Kho Distributor đủ License! Bấm nút 'Approve Order'...")
-                    await approve_btn.click()
-                    await page.wait_for_timeout(3000)
+                    await approve_btn.click(force=True)
+                    await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=15000)
+                    await page.wait_for_timeout(2000)
                     
                     return {
                         "status": "success",
@@ -465,6 +726,10 @@ class WorkspacePlaywrightService:
                         "message": "Distributor đã duyệt Partner Contract thành công"
                     }
                 else:
+                    close_btn = page.locator("div[role='dialog'] button:has-text('Close')").first
+                    if await close_btn.count() > 0:
+                        await close_btn.click(force=True)
+
                     return {
                         "status": "insufficient_pool",
                         "contract_identifier": contract_identifier,
@@ -478,7 +743,7 @@ class WorkspacePlaywrightService:
                 await browser.close()
 
     # =========================================================================
-    # 3B. DISTRIBUTOR WORKSPACE: TẠO CONTRACT XIN SALES ADMIN CẤP LICENSE (DST-...)
+    # 3B. DISTRIBUTOR WORKSPACE: TẠO CONTRACT XIN SALES ADMIN (DST-...)
     # =========================================================================
     async def distributor_create_contract(
         self,
@@ -492,62 +757,81 @@ class WorkspacePlaywrightService:
                 if not is_ok:
                     return {"status": "failed", "error": login_err}
 
-                logger.info("📝 Distributor mở trang tạo Contract: /distributor-workspace/contract-po/create...")
+                logger.info("📝 Distributor mở: /distributor-workspace/contract-po/create...")
                 await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/contract-po/create", wait_until="networkidle", timeout=45000)
-                await page.wait_for_selector("text=Create Contract/PO", timeout=15000)
+                await page.wait_for_selector("h4:has-text('Create Contract/PO'), text=Create Contract/PO", timeout=15000)
 
-                type_select = page.locator("div[role='combobox']").first
-                await type_select.click()
-                await page.wait_for_selector("li[role='option']:has-text('License')", timeout=5000)
-                await page.locator("li[role='option']:has-text('License')").first.click()
+                # Chọn Contract Type = License
+                type_select = page.locator(".MuiGrid-item:has(label:has-text('Contract Type')) .MuiSelect-select, .MuiGrid-item:has(label:has-text('Contract Type')) div[role='combobox']").first
+                await type_select.click(force=True)
+                await page.wait_for_timeout(500)
+
+                license_opt = page.locator("ul[role='listbox'] li[data-value='License'], ul[role='listbox'] li:has-text('License')").first
+                await license_opt.click(force=True)
                 await page.wait_for_timeout(1000)
 
+                # Notes
                 notes = contract_data.get("notes", "Auto-requested by PTV Automation Hub to fulfill Partner Contract")
-                notes_input = page.locator("textarea").first
-                await notes_input.fill(notes)
+                notes_input = page.locator("div:has(label:has-text('Contract Notes')) textarea").first
+                if await notes_input.count() > 0:
+                    await notes_input.fill(notes)
 
                 courses = contract_data.get("courses", [])
+                if not courses:
+                    courses = [{"category": "SWRP", "course_name": None, "licenses": 100}]
+
                 for idx, c in enumerate(courses):
                     if idx > 0:
-                        await page.click("button:has-text('Add Course')")
+                        await page.click("button:has-text('Add Course')", force=True)
                         await page.wait_for_timeout(1000)
 
-                    course_card = page.locator(".MuiCard-root:has-text('License Category')").nth(idx)
+                    course_card = page.locator(".MuiCard-root:has(label:has-text('License Category'))").nth(idx)
 
                     cat_val = c.get("category", "SWRP")
-                    cat_dropdown = course_card.locator("div[role='combobox']").first
-                    await cat_dropdown.click()
-                    await page.wait_for_selector(f"li[role='option']:has-text('{cat_val}')", timeout=5000)
-                    await page.locator(f"li[role='option']:has-text('{cat_val}')").first.click()
-                    await page.wait_for_timeout(800)
-
-                    course_name_val = c.get("course_name")
-                    course_dropdown = course_card.locator("div[role='combobox']").nth(1)
-                    await course_dropdown.click()
-                    
-                    target_opt = page.locator(f"li[role='option']:has-text('{course_name_val}')").first
-                    if await target_opt.count() > 0:
-                        await target_opt.click()
-                    else:
-                        await page.locator("li[role='option']").first.click()
+                    cat_dropdown = course_card.locator("div:has(label:has-text('License Category')) .MuiSelect-select, div:has(label:has-text('License Category')) div[role='combobox']").first
+                    await cat_dropdown.click(force=True)
                     await page.wait_for_timeout(500)
 
-                    lic_input = course_card.locator("input[type='number']").first
+                    cat_opt = page.locator(f"ul[role='listbox'] li[data-value='{cat_val}'], ul[role='listbox'] li:has-text('{cat_val}')").first
+                    if await cat_opt.count() > 0:
+                        await cat_opt.click(force=True)
+                    else:
+                        await page.locator("ul[role='listbox'] li:not([data-value=''])").first.click(force=True)
+
+                    await page.wait_for_timeout(1000)
+
+                    course_name_val = c.get("course_name")
+                    course_dropdown = course_card.locator("div:has(label:has-text('Course')) .MuiSelect-select, div:has(label:has-text('Course')) div[role='combobox']").first
+                    await course_dropdown.click(force=True)
+                    await page.wait_for_timeout(500)
+
+                    if course_name_val:
+                        target_opt = page.locator(f"ul[role='listbox'] li:has-text('{course_name_val}')").first
+                        if await target_opt.count() > 0:
+                            await target_opt.click(force=True)
+                        else:
+                            await page.locator("ul[role='listbox'] li").first.click(force=True)
+                    else:
+                        await page.locator("ul[role='listbox'] li").first.click(force=True)
+
+                    await page.wait_for_timeout(500)
+
+                    lic_input = course_card.locator("div:has(label:has-text('License(s)')) input[type='number'], input[type='number']").first
                     await lic_input.fill(str(c.get("licenses", 100)))
 
                 submit_btn = page.locator("button:has-text('Create Contract/PO')").last
-                await submit_btn.click()
+                await submit_btn.click(force=True)
 
-                await page.wait_for_selector(".MuiDataGrid-row", timeout=25000)
+                await page.wait_for_selector(".MuiDataGrid-row", timeout=30000)
                 await page.wait_for_timeout(2000)
 
                 first_row = page.locator(".MuiDataGrid-row").first
                 contract_num_id = await first_row.get_attribute("data-id")
                 
-                code_elem = first_row.locator("[data-field='order_code']").first
-                contract_full_code = (await code_elem.inner_text()).strip() if await code_elem.count() > 0 else contract_num_id
+                code_elem = first_row.locator("[data-field='order_code'] .MuiBox-root, [data-field='order_code']").first
+                contract_full_code = (await code_elem.inner_text()).strip() if await code_elem.count() > 0 else (contract_num_id or "")
 
-                logger.info(f"🎉 TẠO DST CONTRACT THÀNH CÔNG! Mã: [{contract_full_code}] | ID: [{contract_num_id}]")
+                logger.info(f"🎉 TẠO DST CONTRACT THÀNH CÔNG: [{contract_full_code}] (ID: {contract_num_id})")
 
                 return {
                     "status": "success",
@@ -578,9 +862,10 @@ class WorkspacePlaywrightService:
                 if not is_ok:
                     return {"status": "failed", "error": login_err}
 
-                logger.info("👑 Đang chuyển hướng Sales Admin tới /sales-admin-workspace/dashboard...")
+                logger.info("👑 Đang mở /sales-admin-workspace/dashboard...")
                 await page.goto(f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard", wait_until="networkidle", timeout=45000)
                 await page.wait_for_selector(".MuiDataGrid-row", timeout=25000)
+                await page.wait_for_timeout(1000)
 
                 target_row = None
                 if contract_identifier:
@@ -595,15 +880,15 @@ class WorkspacePlaywrightService:
                 if await target_row.count() == 0:
                     return {"status": "failed", "error": f"Không tìm thấy Contract ({contract_identifier}) Pending trên Dashboard"}
 
-                eye_btn = target_row.locator("button[aria-label='View Details'], [data-field='actions'] button").first
-                await eye_btn.click()
+                eye_btn = target_row.locator("button[aria-label='View Details'], [data-field='actions'] button, [data-field=' '] button").first
+                await eye_btn.click(force=True)
 
                 await page.wait_for_selector("button:has-text('Approve')", timeout=15000)
 
                 approve_btn = page.locator("button:has-text('Approve')").first
-                await approve_btn.click()
+                await approve_btn.click(force=True)
 
-                await page.wait_for_selector("div[role='dialog']:has-text('Confirm Order Approval')", timeout=10000)
+                await page.wait_for_selector("div[role='dialog']:has-text('Confirm Order Approval'), div[role='dialog']", timeout=10000)
 
                 default_note = "Afiq requests and approves the requests, Hung QA processes the contract via Automation Hub"
                 valid_justification = justification if (justification and len(justification.strip()) >= 15) else default_note
@@ -612,11 +897,12 @@ class WorkspacePlaywrightService:
                 await textarea.fill(valid_justification)
                 await page.wait_for_timeout(800)
 
-                confirm_btn = page.locator("div[role='dialog'] button:has-text('Confirm Approval')").first
-                await confirm_btn.click()
-                await page.wait_for_timeout(3000)
+                confirm_btn = page.locator("div[role='dialog'] button:has-text('Confirm Approval'), div[role='dialog'] button:has-text('Confirm')").first
+                await confirm_btn.click(force=True)
+                await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=15000)
+                await page.wait_for_timeout(2000)
 
-                logger.info(f"🎉 Sales Admin đã phê duyệt Contract {contract_identifier or ''} thành công!")
+                logger.info(f"🎉 Sales Admin đã phê duyệt DST Contract {contract_identifier or ''} thành công!")
                 return {
                     "status": "success",
                     "contract_identifier": contract_identifier,
@@ -774,7 +1060,130 @@ class WorkspacePlaywrightService:
         }
 
     # =========================================================================
-    # 6. SCHOOL WORKSPACE: GHI DANH HỌC VIÊN & TẠO GROUP LỚP TRONG KHÓA HỌC
+    # 6. STANDALONE SUB-FLOW: DUYỆT ĐƠN LẺ SCHOOL ORDER CÓ SẴN
+    # =========================================================================
+    async def execute_approve_school_order_standalone(
+        self,
+        order_identifier: str,
+        partner_creds: Dict[str, str],
+        distributor_creds: Dict[str, str],
+        sales_admin_creds: Dict[str, str],
+        courses_needed: Optional[List[Dict[str, Any]]] = None
+    ) -> Dict[str, Any]:
+        logs = []
+        def log_step(msg: str):
+            logger.info(msg)
+            logs.append(msg)
+
+        log_step(f"🚀 [SUB-FLOW] Bắt đầu duyệt School Order đơn lẻ: [{order_identifier}]")
+
+        # 1. Thử duyệt tại Partner
+        partner_res = await self.partner_approve_school_order(partner_creds, order_identifier)
+        if partner_res.get("status") == "success":
+            log_step(f"✅ Partner đã duyệt thành công School Order [{order_identifier}]!")
+            return {"status": "success", "order_code": order_identifier, "logs": "\n".join(logs)}
+
+        if partner_res.get("status") != "insufficient_pool":
+            err = partner_res.get("error", "Lỗi duyệt Order tại Partner")
+            log_step(f"❌ {err}")
+            return {"status": "failed", "error": err, "logs": "\n".join(logs)}
+
+        # 2. Xử lý thiếu kho
+        log_step("⚠️ Kho Partner không đủ License! Đang tạo PRT Contract gửi Distributor...")
+        prt_contract = await self.partner_create_contract(partner_creds, {
+            "notes": f"Auto-topup to approve School Order {order_identifier}",
+            "courses": courses_needed or [{"category": "SWRP", "course_name": None, "licenses": 50}]
+        })
+        if prt_contract.get("status") != "success":
+            err = prt_contract.get("error")
+            log_step(f"❌ Lỗi Partner tạo Contract: {err}")
+            return {"status": "failed", "error": err, "logs": "\n".join(logs)}
+
+        prt_code = prt_contract.get("contract_code")
+        log_step(f"✅ Đã tạo Contract PRT: [{prt_code}]")
+
+        # 3. Distributor duyệt PRT Contract
+        dist_res = await self.distributor_approve_partner_contract(distributor_creds, prt_code)
+        if dist_res.get("status") == "insufficient_pool":
+            log_step("⚠️ Kho Distributor cũng thiếu! Đang tạo DST Contract gửi Sales Admin...")
+            dst_contract = await self.distributor_create_contract(distributor_creds, {
+                "notes": f"Topup for PRT Contract {prt_code}",
+                "courses": courses_needed or [{"category": "SWRP", "course_name": None, "licenses": 100}]
+            })
+            if dst_contract.get("status") != "success":
+                return {"status": "failed", "error": dst_contract.get("error"), "logs": "\n".join(logs)}
+
+            dst_code = dst_contract.get("contract_code")
+            log_step(f"✅ Đã tạo DST Contract: [{dst_code}]. Đang chuyển Sales Admin duyệt...")
+
+            admin_res = await self.admin_approve_distributor_contract(sales_admin_creds, dst_code)
+            if admin_res.get("status") != "success":
+                return {"status": "failed", "error": admin_res.get("error"), "logs": "\n".join(logs)}
+
+            log_step(f"🎉 Sales Admin đã duyệt [{dst_code}]. Distributor duyệt lại [{prt_code}]...")
+            await self.distributor_approve_partner_contract(distributor_creds, prt_code)
+
+        # 4. Partner quay lại duyệt School Order ban đầu
+        log_step(f"🤝 Partner duyệt lại School Order [{order_identifier}] lần cuối...")
+        final_res = await self.partner_approve_school_order(partner_creds, order_identifier)
+        if final_res.get("status") != "success":
+            return {"status": "failed", "error": final_res.get("error"), "logs": "\n".join(logs)}
+
+        log_step(f"🏁 ĐÃ DUYỆT THÀNH CÔNG SCHOOL ORDER: [{order_identifier}]!")
+        return {"status": "success", "order_code": order_identifier, "logs": "\n".join(logs)}
+
+    # =========================================================================
+    # 7. STANDALONE SUB-FLOW: DUYỆT ĐƠN LẺ PARTNER CONTRACT CÓ SẴN (PRT-...)
+    # =========================================================================
+    async def execute_approve_partner_contract_standalone(
+        self,
+        contract_identifier: str,
+        distributor_creds: Dict[str, str],
+        sales_admin_creds: Dict[str, str],
+        courses_needed: Optional[List[Dict[str, Any]]] = None
+    ) -> Dict[str, Any]:
+        logs = []
+        def log_step(msg: str):
+            logger.info(msg)
+            logs.append(msg)
+
+        log_step(f"🚀 [SUB-FLOW] Bắt đầu duyệt Partner Contract đơn lẻ: [{contract_identifier}]")
+
+        dist_res = await self.distributor_approve_partner_contract(distributor_creds, contract_identifier)
+        if dist_res.get("status") == "success":
+            log_step(f"✅ Distributor đã duyệt thành công Contract [{contract_identifier}]!")
+            return {"status": "success", "contract_code": contract_identifier, "logs": "\n".join(logs)}
+
+        if dist_res.get("status") != "insufficient_pool":
+            err = dist_res.get("error", "Lỗi duyệt Partner Contract")
+            log_step(f"❌ {err}")
+            return {"status": "failed", "error": err, "logs": "\n".join(logs)}
+
+        log_step("⚠️ Distributor thiếu License! Đang tạo DST Contract lên Sales Admin...")
+        dst_contract = await self.distributor_create_contract(distributor_creds, {
+            "notes": f"Auto-topup to approve PRT Contract {contract_identifier}",
+            "courses": courses_needed or [{"category": "SWRP", "course_name": None, "licenses": 100}]
+        })
+        if dst_contract.get("status") != "success":
+            return {"status": "failed", "error": dst_contract.get("error"), "logs": "\n".join(logs)}
+
+        dst_code = dst_contract.get("contract_code")
+        log_step(f"✅ Đã tạo DST Contract: [{dst_code}]. Đang chuyển Sales Admin duyệt...")
+
+        admin_res = await self.admin_approve_distributor_contract(sales_admin_creds, dst_code)
+        if admin_res.get("status") != "success":
+            return {"status": "failed", "error": admin_res.get("error"), "logs": "\n".join(logs)}
+
+        log_step(f"🎉 Sales Admin đã duyệt [{dst_code}]. Distributor duyệt lại Partner Contract [{contract_identifier}]...")
+        final_res = await self.distributor_approve_partner_contract(distributor_creds, contract_identifier)
+        if final_res.get("status") != "success":
+            return {"status": "failed", "error": final_res.get("error"), "logs": "\n".join(logs)}
+
+        log_step(f"🏁 ĐÃ DUYỆT THÀNH CÔNG PARTNER CONTRACT: [{contract_identifier}]!")
+        return {"status": "success", "contract_code": contract_identifier, "logs": "\n".join(logs)}
+
+    # =========================================================================
+    # 8. SCHOOL ENROLLMENT & BULK ACCOUNT CREATION
     # =========================================================================
     async def school_enroll_users_and_groups(
         self,
@@ -801,49 +1210,49 @@ class WorkspacePlaywrightService:
                 if await course_row.count() == 0:
                     course_row = page.locator(f"//tr[contains(., '{course_name}')]").first
 
-                await course_row.locator("a, button, text=" + course_name).first.click()
+                await course_row.locator("a, button, text=" + course_name).first.click(force=True)
                 await page.wait_for_selector("text=Enrolled Users", timeout=15000)
 
-                await page.click("button:has-text('Enroll Users')")
+                await page.click("button:has-text('Enroll Users')", force=True)
                 await page.wait_for_selector("text=User Enrollment", timeout=10000)
 
-                await page.click("text=GROUP MANAGEMENT")
+                await page.click("text=GROUP MANAGEMENT", force=True)
                 await page.wait_for_timeout(1000)
 
                 formatted_group_name = f"{school_name} {group_name_raw} {start_date[:5]}".strip()
                 await page.fill("input[placeholder*='Group Name'], input[name='group_name']", formatted_group_name)
-                await page.click("button:has-text('Create Group')")
+                await page.click("button:has-text('Create Group')", force=True)
                 await page.wait_for_timeout(2000)
 
-                await page.click("text=BULK IMPORT")
+                await page.click("text=BULK IMPORT", force=True)
                 await page.wait_for_timeout(1000)
 
                 group_dropdown = page.locator("//div[contains(., 'Groups') and contains(@class, 'select')] | //select").first
-                await group_dropdown.click()
-                await page.locator(f"text={formatted_group_name}").first.click()
+                await group_dropdown.click(force=True)
+                await page.locator(f"text={formatted_group_name}").first.click(force=True)
                 await page.wait_for_timeout(500)
 
                 if student_emails:
                     role_dropdown = page.locator("//div[contains(., 'Assign Role') and contains(@class, 'select')] | //select").last
-                    await role_dropdown.click()
-                    await page.locator("text=Student").last.click()
+                    await role_dropdown.click(force=True)
+                    await page.locator("text=Student").last.click(force=True)
 
                     students_text = "\n".join(student_emails)
                     await page.fill("textarea[placeholder*='Paste user data'], textarea", students_text)
-                    await page.click("button:has-text('Import and Enroll Users')")
+                    await page.click("button:has-text('Import and Enroll Users')", force=True)
                     await page.wait_for_timeout(4000)
 
                 if teacher_emails:
                     role_dropdown = page.locator("//div[contains(., 'Assign Role') and contains(@class, 'select')] | //select").last
-                    await role_dropdown.click()
-                    await page.locator("text=Teacher").last.click()
+                    await role_dropdown.click(force=True)
+                    await page.locator("text=Teacher").last.click(force=True)
 
                     teachers_text = "\n".join(teacher_emails)
                     await page.fill("textarea[placeholder*='Paste user data'], textarea", teachers_text)
-                    await page.click("button:has-text('Import and Enroll Users')")
+                    await page.click("button:has-text('Import and Enroll Users')", force=True)
                     await page.wait_for_timeout(3000)
 
-                await page.click("button:has-text('Close')")
+                await page.click("button:has-text('Close')", force=True)
                 await page.wait_for_timeout(1000)
 
                 return {
@@ -859,9 +1268,6 @@ class WorkspacePlaywrightService:
             finally:
                 await browser.close()
 
-    # =========================================================================
-    # 7. BULK ACCOUNT CREATION (TẠO TÀI KHOẢN HỌC SINH/GV HÀNG LOẠT)
-    # =========================================================================
     async def submit_account_creation_batch(
         self,
         credentials: Dict[str, str],
@@ -886,7 +1292,7 @@ class WorkspacePlaywrightService:
 
                 upload_btn = page.locator("//button[normalize-space()='Upload']")
                 await upload_btn.wait_for(state="visible", timeout=10000)
-                await upload_btn.click()
+                await upload_btn.click(force=True)
                 logger.info("🚀 Đã bấm nút Upload thành công! Đang chờ chuyển trang...")
 
                 try:
@@ -950,12 +1356,12 @@ class WorkspacePlaywrightService:
                     logger.info(f"🎉 Request #{request_id} đã Done! Đang bấm Menu Actions để tải file...")
                     
                     action_btn = target_row.locator("[data-field='actions'] button").first
-                    await action_btn.click()
+                    await action_btn.click(force=True)
                     await page.wait_for_timeout(1000)
 
                     async with page.expect_download() as download_info:
                         export_item = page.locator("text=Export, li:has-text('Export')").first
-                        await export_item.click()
+                        await export_item.click(force=True)
 
                     download = await download_info.value
                     download_file_path = os.path.join(download_dir, f"RESULT_{request_id}_{download.suggested_filename}")

@@ -1,15 +1,23 @@
 # backend/app/api/v1/endpoints/workspace.py
 import re
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, BackgroundTasks
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from app.core.supabase import get_supabase_client
+from app.core.config import settings
+from app.services.workspace_lineage_service import workspace_lineage_service
+from app.services.workspace_playwright_service import workspace_playwright_service
 
 router = APIRouter()
+
 
 class ExtractCOFRequest(BaseModel):
     cof_text: str
 
+
+# =============================================================================
+# 1. PHẢ HỆ VÀ DANH MỤC KHÓA HỌC
+# =============================================================================
 @router.get("/hierarchy-schools")
 async def get_hierarchy_schools(search: str = Query("", description="Tìm kiếm tên trường hoặc mã trường")):
     """Lấy danh sách 480 trường học kèm chuỗi liên thông Partner và Distributor."""
@@ -82,30 +90,102 @@ async def get_workspace_courses(category: Optional[str] = Query(None)):
         return []
 
 
+# =============================================================================
+# 2. LIVE SCRAPERS: QUÉT DANH SÁCH ORDERS / CONTRACTS PENDING
+# =============================================================================
+@router.get("/pending-school-orders")
+async def get_pending_school_orders(
+    partner_code: Optional[str] = Query(None, description="Mã Partner (VD: 'test' hoặc 'PAR_102')"),
+    school_identifier: Optional[str] = Query(None, description="Tên trường hoặc mã trường để suy vết Partner")
+):
+    """
+    Quét trực tiếp danh sách các School Order đang ở trạng thái 'Awaiting Partner' 
+    tại /partner-workspace/order-management bằng Playwright.
+    """
+    identifier = school_identifier or partner_code or "000 SCHOOL FOR TESTING PURPOSE"
+    lineage = workspace_lineage_service.resolve_by_school(identifier)
+    
+    if not lineage or not lineage.get("partner", {}).get("username"):
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy tài khoản Partner của '{identifier}' trong két sắt.")
+    
+    partner_creds = lineage["partner"]
+    result = await workspace_playwright_service.fetch_partner_pending_school_orders(partner_creds)
+    
+    if result.get("status") != "success":
+        raise HTTPException(status_code=500, detail=result.get("error", "Lỗi quét danh sách School Orders"))
+        
+    return {
+        "partner_name": partner_creds.get("name"),
+        "partner_code": partner_creds.get("code"),
+        **result
+    }
+
+
+@router.get("/partner-contracts")
+async def get_partner_contracts(
+    partner_code: Optional[str] = Query(None),
+    pending_only: bool = Query(False)
+):
+    """Lấy danh sách các Contract/PO mà Partner đã tạo gửi lên Distributor."""
+    identifier = partner_code or "000 SCHOOL FOR TESTING PURPOSE"
+    lineage = workspace_lineage_service.resolve_by_school(identifier)
+    
+    if not lineage or not lineage.get("partner", {}).get("username"):
+        raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản Partner.")
+        
+    partner_creds = lineage["partner"]
+    result = await workspace_playwright_service.fetch_partner_contracts(partner_creds, filter_pending=pending_only)
+    return result
+
+
+@router.get("/pending-partner-contracts")
+async def get_pending_partner_contracts(
+    distributor_code: Optional[str] = Query(None, description="Mã Distributor (VD: '2', 'DST_01')")
+):
+    """
+    Distributor quét danh sách Partner Contracts (PRT-...) đang chờ duyệt 
+    tại /distributor-workspace/partner-contract-po.
+    """
+    identifier = distributor_code or "000 SCHOOL FOR TESTING PURPOSE"
+    lineage = workspace_lineage_service.resolve_by_school(identifier)
+    
+    if not lineage or not lineage.get("distributor", {}).get("username"):
+        raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản Distributor.")
+        
+    dist_creds = lineage["distributor"]
+    result = await workspace_playwright_service.fetch_distributor_pending_contracts(dist_creds)
+    return result
+
+
+@router.get("/pending-distributor-contracts")
+async def get_pending_distributor_contracts():
+    """Sales Admin quét danh sách DST Contracts (DST-...) đang chờ duyệt trên Dashboard."""
+    admin_creds = {
+        "username": getattr(settings, "TEST_ADMIN_USER", "salesadmin@dtt.vn"),
+        "password": getattr(settings, "TEST_ADMIN_PASS", "Pythaverse@2026")
+    }
+    result = await workspace_playwright_service.fetch_sales_admin_pending_contracts(admin_creds)
+    return result
+
+
+# =============================================================================
+# 3. BÓC TÁCH COF TEXT
+# =============================================================================
 @router.post("/extract-cof")
 async def extract_cof_content(req: ExtractCOFRequest):
-    """
-    Bóc tách nội dung file COF:
-    1. Trích xuất Tên trường & Số học sinh.
-    2. Lấy Course ID từ các dòng có ngày/số lượng học sinh.
-    3. Soi vào bảng `workspace_courses` trong Database để lấy Category và Tên môn chuẩn 100%!
-    """
+    """Bóc tách nội dung COF và map với Database."""
     supabase = get_supabase_client()
     text = req.cof_text
     
-    # 1. Trích xuất Tên Trường
     school_match = re.search(r"School Name:\s*\(\*\)[,:\s]*\"?([^,\n\r]+)", text, re.IGNORECASE)
     school_name = school_match.group(1).strip() if school_match else "San Beda College Alabang"
 
-    # 2. Trích xuất Tổng số học sinh
     student_match = re.search(r"Total No\. Student:\s*\(\*\)[,:\s]*(\d+)", text, re.IGNORECASE)
     total_students = int(student_match.group(1)) if student_match else 50
 
-    # 3. Nạp danh mục khóa học từ Database để tra cứu
     db_courses_res = supabase.table("workspace_courses").select("*").execute()
     db_courses_map = {c["course_id"]: c for c in (db_courses_res.data or [])}
 
-    # 4. Quét từng dòng khóa học trong file COF
     extracted_courses = []
     lines = text.split("\n")
     
@@ -116,18 +196,14 @@ async def extract_cof_content(req: ExtractCOFRequest):
                 course_id = int(id_match.group(1))
                 parts = [p.strip().replace('"', '') for p in line.split(",")]
                 
-                # Tìm các giá trị ngày tháng dd-mm-yyyy hoặc yyyy-mm-dd
                 dates = re.findall(r"\b\d{2}[-/]\d{2}[-/]\d{4}\b", line)
-                # Tìm số lượng học sinh được điền
                 numbers = [int(p) for p in parts if p.isdigit() and int(p) > 0 and int(p) != course_id]
                 
-                # Nếu dòng này có điền ngày tháng hoặc số lượng học sinh (dòng đang active)
                 if dates or numbers:
                     start_date = dates[0] if len(dates) >= 1 else "22-06-2026"
                     end_date = dates[1] if len(dates) >= 2 else "30-05-2027"
                     licenses = numbers[-1] if numbers else total_students
                     
-                    # 🎯 SOI VÀO DATABASE ĐỂ LẤY CATEGORY VÀ TÊN CHUẨN
                     db_course = db_courses_map.get(course_id)
                     if db_course:
                         category = db_course.get("category", "SWRP")
@@ -148,7 +224,6 @@ async def extract_cof_content(req: ExtractCOFRequest):
                         "end_date": end_date
                     })
 
-    # Nếu không bóc được dòng cụ thể, fallback lấy môn SWRP 9 (ID 654) từ DB
     if not extracted_courses:
         fallback_course = db_courses_map.get(654, {
             "category": "SWRP",
