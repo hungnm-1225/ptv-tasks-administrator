@@ -82,26 +82,10 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav, isMobileNavOp
           >
             {isMobileNavOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
-
-          {/* Quick Context Badge */}
-          <div className="flex items-center gap-2 px-2.5 py-1 bg-violet-50 dark:bg-violet-950/40 border border-violet-200/60 dark:border-violet-800/40 rounded-xl shadow-2xs">
-            <Sparkles className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400 shrink-0" />
-            <span className="text-xs font-semibold text-violet-700 dark:text-violet-300 truncate max-w-[150px] sm:max-w-none">
-              Pythaverse Automation Center
-            </span>
-          </div>
         </div>
 
         {/* Right Controls */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Quick Link to Studio */}
-          <Link
-            to="/studio"
-            className="hidden md:flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-semibold rounded-xl transition shadow-xs cursor-pointer"
-          >
-            <Zap className="w-3.5 h-3.5" />
-            <span>Studio</span>
-          </Link>
 
           {/* Theme Toggle */}
           <button
@@ -120,11 +104,10 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav, isMobileNavOp
           <div className="relative" ref={dropdownRef}>
             <button
               onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-              className={`flex items-center gap-2 sm:gap-3 pl-2 pr-1.5 py-1 rounded-xl transition-all duration-200 border border-transparent cursor-pointer ${
-                isDropdownOpen
-                  ? 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700'
-                  : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
-              }`}
+              className={`flex items-center gap-2 sm:gap-3 pl-2 pr-1.5 py-1 rounded-xl transition-all duration-200 border border-transparent cursor-pointer ${isDropdownOpen
+                ? 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700'
+                : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                }`}
             >
               {userAvatar ? (
                 <img
@@ -148,9 +131,8 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav, isMobileNavOp
               </div>
 
               <ChevronDown
-                className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-300 ${
-                  isDropdownOpen ? 'rotate-180' : ''
-                }`}
+                className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-300 ${isDropdownOpen ? 'rotate-180' : ''
+                  }`}
               />
             </button>
 
