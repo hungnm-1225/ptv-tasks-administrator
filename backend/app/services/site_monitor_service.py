@@ -25,7 +25,7 @@ def now_vn_str() -> str:
     return format_vn(now_vn())
 
 # ---------------------------------------------------------------------------
-# SUPABASE & FERNET CIPHER INITIALIZER
+# SUPABASE & FERNET INITIALIZER
 # ---------------------------------------------------------------------------
 _supabase_client = None
 
@@ -63,17 +63,24 @@ def decrypt_secret(encrypted_text: str) -> str:
         return ""
 
 def extract_keycloak_form_action(html_content: str) -> Optional[str]:
-    """Bóc tách action URL từ form #kc-form-login của Keycloak HTML"""
-    # 1. Tìm action của form id kc-form-login
     m = re.search(r'<form[^>]*id=["\']kc-form-login["\'][^>]*action=["\']([^"\']+)["\']', html_content, re.IGNORECASE)
     if m:
         return html.unescape(m.group(1))
-    
-    # 2. Fallback: tìm bất kỳ form action nào có chứa login-actions/authenticate
     m2 = re.search(r'action=["\'](https?://[^"\']*/login-actions/authenticate[^"\']*)["\']', html_content, re.IGNORECASE)
     if m2:
         return html.unescape(m2.group(1))
     return None
+
+def extract_oidc_form_post(html_content: str) -> tuple[Optional[str], Dict[str, str]]:
+    """Xử lý response_mode=form_post từ Keycloak về Moodle LMS hoặc Client"""
+    form_match = re.search(r'<form[^>]*action=["\']([^"\']+)["\']', html_content, re.IGNORECASE)
+    if not form_match:
+        return None, {}
+    action_url = html.unescape(form_match.group(1))
+    inputs = {}
+    for inp in re.finditer(r'<input[^>]*name=["\']([^"\']+)["\'][^>]*value=["\']([^"\']*)["\']', html_content, re.IGNORECASE):
+        inputs[inp.group(1)] = html.unescape(inp.group(2))
+    return action_url, inputs
 
 # ---------------------------------------------------------------------------
 # CẤU HÌNH CÁC WEBSITE THEO DÕI
@@ -84,7 +91,7 @@ DEFAULT_MONITORED_SITES = [
     {"id": "avatar",           "name": "Avatar 3D Generator",       "url": "https://avatar.pythaverse.space",           "auth_entry": "https://avatar.pythaverse.space/",                            "category": "satellite", "enabled": True,  "show_live_alert": True},
     {"id": "note",             "name": "Jupyter Hub Note",          "url": "https://note.pythaverse.space",             "auth_entry": "https://note.pythaverse.space/hub/oauth_login?next=%2Fhub%2F","category": "satellite", "enabled": True,  "show_live_alert": True},
     {"id": "git",              "name": "Pythaverse Git Repos",      "url": "https://git.pythaverse.space",              "auth_entry": "https://git.pythaverse.space/signin/oidc",                  "category": "satellite", "enabled": True,  "show_live_alert": True},
-    {"id": "contest",          "name": "Contest & Competitions",    "url": "https://contest.pythaverse.space",          "auth_entry": "https://contest.pythaverse.space/profile",                    "category": "satellite", "enabled": True,  "show_live_alert": True},
+    {"id": "contest",          "name": "Contest & Competitions",    "url": "https://contest.pythaverse.space",          "auth_entry": "https://contest.pythaverse.space/login",                     "category": "satellite", "enabled": True,  "show_live_alert": True},
     {"id": "digitaltwin",      "name": "Digital Twin Simulation",   "url": "https://digitaltwin.pythaverse.space",      "auth_entry": "https://digitaltwin.pythaverse.space/",                       "category": "satellite", "enabled": True,  "show_live_alert": True},
     {"id": "learn",            "name": "LMS Learn Portal",          "url": "https://learn.pythaverse.space",            "auth_entry": "https://learn.pythaverse.space/my/",                          "category": "satellite", "enabled": True,  "show_live_alert": True},
     {"id": "learn_s",          "name": "LMS Learn Staging",         "url": "https://learn-s.pythaverse.space",          "auth_entry": "https://learn-s.pythaverse.space/my/",                        "category": "satellite", "enabled": True,  "show_live_alert": False},
@@ -98,7 +105,7 @@ def _make_initial_state(site: dict) -> dict:
         "http_code":         200,
         "response_time_ms":  0,
         "last_checked_at":   None,
-        "details":          "Chưa kiểm tra lần nào",
+        "details":          "Đang chờ kiểm tra định kỳ",
         "uptime_pct_24h":   100.0,
         "uptime_pct_7d":    100.0,
         "uptime_pct_30d":   100.0,
@@ -109,64 +116,33 @@ def _make_initial_state(site: dict) -> dict:
 _sites_cache: list[dict] = [_make_initial_state(s) for s in DEFAULT_MONITORED_SITES]
 
 # ---------------------------------------------------------------------------
-# DOWNTIME PERSISTENCE — Supabase
+# HOURLY UPTIME BARS (24 GIỜ GẦN NHẤT — MỖI CỤC LÀ 1 GIỜ)
 # ---------------------------------------------------------------------------
-def _persist_downtime_start(site: dict, http_code: int, error_msg: str):
-    if site.get("is_down_since"):
-        return
-    db = get_supabase()
-    if not db:
-        return
-    try:
-        db.table("site_downtime_events").insert({
-            "site_id":    site["id"],
-            "site_name":  site["name"],
-            "started_at": now_vn().isoformat(),
-            "http_code":  http_code,
-            "error_msg":  error_msg[:500] if error_msg else None,
-            "is_ongoing": True,
-        }).execute()
-        site["is_down_since"] = now_vn().isoformat()
-    except Exception as e:
-        logger.error(f"Lỗi ghi downtime start: {e}")
-
-def _persist_downtime_end(site: dict):
-    if not site.get("is_down_since"):
-        return
-    db = get_supabase()
-    if not db:
-        site["is_down_since"] = None
-        return
-    try:
-        started = datetime.fromisoformat(site["is_down_since"])
-        ended = now_vn()
-        duration_s = int((ended - started).total_seconds())
-        db.table("site_downtime_events").update({
-            "ended_at":   ended.isoformat(),
-            "duration_s": duration_s,
-            "is_ongoing": False,
-        }).eq("site_id", site["id"]).eq("is_ongoing", True).execute()
-        site["is_down_since"] = None
-    except Exception as e:
-        logger.error(f"Lỗi ghi downtime end: {e}")
-        site["is_down_since"] = None
-
-def get_uptime_history(site_id: str, days: int = 45) -> list[dict]:
-    db = get_supabase()
+def get_hourly_uptime_history(site_id: str, hours: int = 24) -> list[dict]:
+    """
+    Trả về 24 blocks tương ứng 24 giờ gần nhất (mỗi block là 1 giờ).
+    { hour_label: '14:00', status: 'UP'|'DOWN'|'DEGRADED', latency_ms: 180 }
+    """
     result = []
-    today = now_vn().date()
-    for i in range(days - 1, -1, -1):
-        day = today - timedelta(days=i)
+    now = now_vn()
+    db = get_supabase()
+
+    for i in range(hours - 1, -1, -1):
+        target_time = now - timedelta(hours=i)
+        hour_str = target_time.strftime("%H:00")
+        date_str = target_time.strftime("%d/%m")
         result.append({
-            "date":        day.isoformat(),
-            "status":      "UP",
-            "incidents":   0,
-            "downtime_s":  0,
+            "hour": f"{hour_str} {date_str}",
+            "status": "UP",
+            "incidents": 0,
+            "latency_ms": 180,
         })
+
     if not db:
         return result
+
     try:
-        since = (today - timedelta(days=days)).isoformat()
+        since = (now - timedelta(hours=hours)).isoformat()
         resp = db.table("site_downtime_events")\
             .select("started_at, ended_at, duration_s, is_ongoing")\
             .eq("site_id", site_id)\
@@ -174,24 +150,15 @@ def get_uptime_history(site_id: str, days: int = 45) -> list[dict]:
             .execute()
         events = resp.data or []
         for event in events:
-            try:
-                started = datetime.fromisoformat(event["started_at"])
-                day_key = started.astimezone(VN_TZ).date().isoformat()
-                for entry in result:
-                    if entry["date"] == day_key:
-                        entry["incidents"] += 1
-                        ds = event.get("duration_s") or 0
-                        entry["downtime_s"] += ds
-                        pct = entry["downtime_s"] / 86400
-                        if pct > 0.30:
-                            entry["status"] = "DOWN"
-                        elif entry["downtime_s"] > 600 or entry["incidents"] > 0:
-                            entry["status"] = "DEGRADED"
-                        break
-            except Exception:
-                continue
+            started = datetime.fromisoformat(event["started_at"]).astimezone(VN_TZ)
+            target_hour_str = started.strftime("%H:00 %d/%m")
+            for entry in result:
+                if entry["hour"] == target_hour_str:
+                    entry["status"] = "DOWN"
+                    entry["incidents"] += 1
     except Exception as e:
-        logger.error(f"Lỗi lấy uptime history: {e}")
+        logger.error(f"Lỗi lấy hourly history: {e}")
+
     return result
 
 def get_incident_log(limit: int = 50) -> list[dict]:
@@ -205,34 +172,14 @@ def get_incident_log(limit: int = 50) -> list[dict]:
         logger.error(f"Lỗi lấy incident log: {e}")
         return []
 
-def compute_uptime_pct(history: list[dict]) -> float:
-    if not history:
-        return 100.0
-    total_s = len(history) * 86400
-    down_s = sum(h.get("downtime_s", 0) for h in history)
-    if total_s == 0:
-        return 100.0
-    return round(max(0.0, (total_s - down_s) / total_s * 100), 3)
-
 # ---------------------------------------------------------------------------
-# CORE MONITORING SERVICE (Tab 1, Tab 2 & Tab 3)
+# CORE SERVICE: TỰ ĐỘNG CHẠY & XÁC THỰC OIDC
 # ---------------------------------------------------------------------------
 class SiteMonitorService:
 
-    # ================= TAB 1: PUBLIC SHADOW PING =================
     @staticmethod
     def get_all_sites() -> list:
         return _sites_cache
-
-    @staticmethod
-    def update_site(site_id: str, updates: dict) -> Optional[dict]:
-        for s in _sites_cache:
-            if s["id"] == site_id:
-                for field in ("enabled", "show_live_alert", "name", "url"):
-                    if field in updates and updates[field] is not None:
-                        s[field] = updates[field]
-                return s
-        return None
 
     @staticmethod
     async def check_single_site(site: dict) -> dict:
@@ -243,7 +190,6 @@ class SiteMonitorService:
 
         url = site["url"]
         start = time.time()
-        prev_status = site.get("last_status", "UP")
 
         try:
             async with httpx.AsyncClient(verify=False, timeout=15.0, follow_redirects=True) as client:
@@ -254,61 +200,34 @@ class SiteMonitorService:
                 site["last_checked_at"] = now_vn_str()
 
                 if response.status_code in (200, 201, 301, 302, 307, 308):
-                    new_status = "UP"
+                    site["last_status"] = "UP"
                     site["details"] = f"Phản hồi tốt ({latency}ms) — HTTP {response.status_code}"
                 elif response.status_code in (401, 403):
-                    new_status = "UP"
-                    site["details"] = f"Yêu cầu xác thực SSO ({response.status_code}) — Server hoạt động"
+                    site["last_status"] = "UP"
+                    site["details"] = f"Yêu cầu SSO ({response.status_code}) — Server hoạt động"
                 elif response.status_code >= 500:
-                    new_status = "DOWN"
+                    site["last_status"] = "DOWN"
                     site["details"] = f"Server Error: HTTP {response.status_code}"
                 else:
-                    new_status = "WARNING"
+                    site["last_status"] = "WARNING"
                     site["details"] = f"Mã phản hồi: {response.status_code}"
-
-        except httpx.TimeoutException:
-            site["response_time_ms"] = 15000
-            site["http_code"] = 504
-            site["last_checked_at"] = now_vn_str()
-            new_status = "DOWN"
-            site["details"] = "Quá thời gian phản hồi (Timeout > 15s)"
 
         except Exception as e:
             site["http_code"] = 0
             site["last_checked_at"] = now_vn_str()
-            new_status = "DOWN"
+            site["last_status"] = "DOWN"
             site["details"] = f"Lỗi kết nối: {str(e)[:80]}"
 
-        if new_status == "DOWN" and prev_status != "DOWN":
-            _persist_downtime_start(site, site.get("http_code", 0), site.get("details", ""))
-        elif new_status in ("UP", "WARNING") and prev_status == "DOWN":
-            _persist_downtime_end(site)
-
-        site["last_status"] = new_status
         return site
 
     @classmethod
     async def check_all_sites(cls) -> list:
-        logger.info("🔍 Quét kiểm tra tình trạng Live Public của tất cả website...")
         tasks = [cls.check_single_site(site) for site in _sites_cache]
-        results = await asyncio.gather(*tasks)
-        for site in results:
-            try:
-                h45 = get_uptime_history(site["id"], days=45)
-                site["uptime_pct_30d"] = compute_uptime_pct(h45[-30:])
-                site["uptime_pct_7d"]  = compute_uptime_pct(h45[-7:])
-                site["uptime_pct_24h"] = compute_uptime_pct(h45[-1:])
-                site["total_incidents"] = sum(d["incidents"] for d in h45)
-            except Exception:
-                pass
-        return results
+        return await asyncio.gather(*tasks)
 
-    # ================= TAB 2: AUTHENTICATED SYNTHETIC CHECKS (OIDC BROWSER EMULATION) =================
+    # ================= TAB 2: AUTHENTICATED SYNTHETIC CHECKS =================
     @staticmethod
     async def execute_role_auth_check(cred: dict) -> dict:
-        """
-        Mô phỏng OpenID Connect qua Keycloak Form HTML với URL Join chuẩn xác.
-        """
         password = decrypt_secret(cred.get("encrypted_password", ""))
         username = cred.get("username", "")
         role_label = cred.get("role_label", "")
@@ -337,7 +256,6 @@ class SiteMonitorService:
         raw_url = site_obj.get("url", "https://pythaverse.space") if site_obj else "https://pythaverse.space"
         parsed = urlparse(raw_url)
         root_origin = f"{parsed.scheme}://{parsed.netloc}"
-
         auth_entry_url = site_obj.get("auth_entry") if site_obj else f"{root_origin}/student-workspace/"
 
         start_time = time.time()
@@ -347,28 +265,20 @@ class SiteMonitorService:
 
         try:
             async with httpx.AsyncClient(verify=False, timeout=20.0, follow_redirects=True, headers=headers) as client:
-                # 1. Truy cập Entry URL
+                # 1. Khởi tạo phiên OIDC
                 init_resp = await client.get(auth_entry_url)
-                
-                # 2. Kiểm tra nếu đã vào thẳng trang đích (không cần login)
+
                 if "eid.pythaverse.space" not in str(init_resp.url):
                     if 200 <= init_resp.status_code < 400:
                         result["status"] = "PASS"
                         result["latency_ms"] = int((time.time() - start_time) * 1000)
                         result["details"] = f"Phiên hoạt động sẵn sàng — HTTP {init_resp.status_code}"
                         return result
-                    else:
-                        result["status"] = "FAIL"
-                        result["latency_ms"] = int((time.time() - start_time) * 1000)
-                        result["details"] = f"Server lỗi phản hồi — HTTP {init_resp.status_code}"
-                        return result
 
-                # 3. Bóc tách Action form Keycloak
-                action_url = extract_keycloak_form_action(init_resp.text)
-                if not action_url:
-                    action_url = str(init_resp.url)
+                # 2. Bóc tách Action form Keycloak
+                action_url = extract_keycloak_form_action(init_resp.text) or str(init_resp.url)
 
-                # 4. Submit Credentials
+                # 3. Gửi User/Password lên Keycloak
                 login_payload = {
                     "username": username,
                     "password": password,
@@ -379,26 +289,31 @@ class SiteMonitorService:
                     "Referer": str(init_resp.url),
                     "Content-Type": "application/x-www-form-urlencoded"
                 }
-
                 login_resp = await client.post(action_url, data=login_payload, headers=post_headers)
+
+                # 4. Xử lý trường hợp Form Post OIDC (Moodle LMS / Digital Twin)
+                if "code=" in login_resp.text and "<form" in login_resp.text:
+                    post_action, post_inputs = extract_oidc_form_post(login_resp.text)
+                    if post_action and post_inputs:
+                        login_resp = await client.post(post_action, data=post_inputs)
+
                 final_url = str(login_resp.url)
 
-                # 5. Kiểm tra lỗi sai User/Pass
-                if "login-actions/authenticate" in final_url and any(err in login_resp.text for err in ["Invalid username or password", "alert-error", "kc-feedback-text"]):
-                    result["latency_ms"] = int((time.time() - start_time) * 1000)
+                # 5. Kiểm tra nếu sai Pass
+                if "login-actions/authenticate" in final_url and any(err in login_resp.text for err in ["Invalid username or password", "alert-error"]):
                     result["status"] = "FAIL"
-                    result["details"] = "Sai tên đăng nhập hoặc mật khẩu Keycloak"
+                    result["latency_ms"] = int((time.time() - start_time) * 1000)
+                    result["details"] = "Sai tên đăng nhập hoặc mật khẩu"
                     return result
 
                 result["token_acquired"] = True
 
-                # 6. Chuẩn hóa target_check_url (Tránh double path /my/my/)
+                # 6. Kiểm tra Route đích
                 if expected_path.startswith("http"):
                     target_check_url = expected_path
                 else:
                     target_check_url = f"{root_origin}/{expected_path.lstrip('/')}"
 
-                # 7. Truy cập Route kiểm tra
                 if expected_path not in ("/", "") and target_check_url.rstrip("/") != final_url.rstrip("/"):
                     route_resp = await client.get(target_check_url)
                     check_status = route_resp.status_code
@@ -421,15 +336,11 @@ class SiteMonitorService:
                     result["status"] = "FAIL"
                     result["details"] = f"Lỗi truy cập Route: HTTP {check_status}"
 
-        except httpx.TimeoutException:
-            result["latency_ms"] = 20000
-            result["status"] = "FAIL"
-            result["details"] = "Timeout > 20s"
         except Exception as e:
             result["status"] = "FAIL"
             result["details"] = f"Lỗi: {str(e)[:80]}"
 
-        # Cập nhật kết quả vào Supabase
+        # Cập nhật kết quả vào Supabase để lưu lâu dài
         db = get_supabase()
         if db and cred.get("id"):
             try:
@@ -439,11 +350,10 @@ class SiteMonitorService:
                     "last_checked_at": now_vn().isoformat(),
                     "details": result["details"]
                 }).eq("id", cred["id"]).execute()
-            except Exception as e:
-                logger.error(f"Lỗi update DB: {e}")
+            except Exception:
+                pass
 
         return result
-
 
     @classmethod
     async def get_and_check_auth_matrix(cls) -> List[Dict[str, Any]]:
@@ -453,43 +363,35 @@ class SiteMonitorService:
         try:
             resp = db.table("site_monitor_credentials").select("*").eq("is_active", True).execute()
             creds = resp.data or []
-            if not creds:
-                return []
             tasks = [cls.execute_role_auth_check(c) for c in creds]
             return await asyncio.gather(*tasks)
-        except Exception as e:
-            logger.error(f"Lỗi kiểm tra Auth Matrix: {e}")
+        except Exception:
             return []
 
-    # ================= TAB 3: VERCEL & RENDER CI/CD LOGS =================
+    # ================= TAB 3: CI/CD CONFIGS (RENDER & VERCEL) =================
     @classmethod
     async def _get_deploy_config(cls, provider: str) -> tuple[str, str]:
-        """
-        Lấy (token, target_id) cho provider ('vercel' hoặc 'render').
-        Ưu tiên đọc từ Supabase site_deploy_configs, nếu không có thì đọc từ os.getenv().
-        """
+        # Ưu tiên đọc từ biến môi trường Render/Local nếu có
+        if provider == "vercel":
+            token = os.getenv("VERCEL_ACCESS_TOKEN", "")
+            prj_id = os.getenv("VERCEL_PROJECT_ID", "")
+            if token and prj_id:
+                return token, prj_id
+        elif provider == "render":
+            api_key = os.getenv("RENDER_API_KEY", "")
+            srv_id = os.getenv("RENDER_SERVICE_ID", "")
+            if api_key and srv_id:
+                return api_key, srv_id
+
+        # Fallback đọc từ database Supabase
         db = get_supabase()
         if db:
             try:
-                resp = db.table("site_deploy_configs")\
-                    .select("target_id, encrypted_api_token")\
-                    .eq("provider", provider)\
-                    .eq("is_active", True)\
-                    .execute()
-                if resp.data and len(resp.data) > 0:
-                    target_id = resp.data[0].get("target_id", "")
-                    enc_token = resp.data[0].get("encrypted_api_token", "")
-                    token = decrypt_secret(enc_token)
-                    if token and target_id:
-                        return token, target_id
-            except Exception as e:
-                logger.warning(f"Không thể đọc site_deploy_configs từ Supabase: {e}")
-
-        # Fallback từ .env nếu bảng Supabase chưa có
-        if provider == "vercel":
-            return os.getenv("VERCEL_ACCESS_TOKEN", ""), os.getenv("VERCEL_PROJECT_ID", "")
-        elif provider == "render":
-            return os.getenv("RENDER_API_KEY", ""), os.getenv("RENDER_SERVICE_ID", "")
+                resp = db.table("site_deploy_configs").select("target_id, encrypted_api_token").eq("provider", provider).eq("is_active", True).execute()
+                if resp.data:
+                    return decrypt_secret(resp.data[0].get("encrypted_api_token", "")), resp.data[0].get("target_id", "")
+            except Exception:
+                pass
         return "", ""
 
     @classmethod
@@ -497,11 +399,7 @@ class SiteMonitorService:
         token, project_id = await cls._get_deploy_config("vercel")
         if not token:
             return []
-
-        url = f"https://api.vercel.com/v6/deployments?limit={limit}"
-        if project_id:
-            url += f"&projectId={project_id}"
-
+        url = f"https://api.vercel.com/v6/deployments?limit={limit}" + (f"&projectId={project_id}" if project_id else "")
         headers = {"Authorization": f"Bearer {token}"}
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
@@ -510,7 +408,7 @@ class SiteMonitorService:
                     deployments = resp.json().get("deployments", [])
                     return [{
                         "id": d.get("uid"),
-                        "name": d.get("name", "ptv-tasks-administrator"),
+                        "name": d.get("name", "Frontend SPA"),
                         "url": d.get("url"),
                         "state": d.get("state") or d.get("readyState", "READY"),
                         "created_at": d.get("created"),
@@ -518,41 +416,15 @@ class SiteMonitorService:
                         "commit_author": d.get("meta", {}).get("githubCommitAuthorName", "Developer"),
                         "provider": "vercel"
                     } for d in deployments]
-                else:
-                    logger.error(f"Vercel API trả về lỗi: HTTP {resp.status_code} - {resp.text}")
-        except Exception as e:
-            logger.error(f"Lỗi gọi Vercel API: {e}")
+        except Exception:
+            pass
         return []
-
-    @classmethod
-    async def get_vercel_logs(cls, deployment_id: str) -> str:
-        token, _ = await cls._get_deploy_config("vercel")
-        if not token:
-            return "Chưa cấu hình Vercel Access Token trong Supabase hoặc .env"
-
-        url = f"https://api.vercel.com/v2/deployments/{deployment_id}/events"
-        headers = {"Authorization": f"Bearer {token}"}
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.get(url, headers=headers)
-                if resp.status_code == 200:
-                    events = resp.json()
-                    lines = []
-                    for e in events:
-                        text = e.get("text") or (e.get("payload", {}).get("text") if isinstance(e.get("payload"), dict) else None)
-                        if text:
-                            lines.append(text)
-                    return "\n".join(lines) if lines else "Không có event log chi tiết."
-                return f"Lỗi tải logs từ Vercel: HTTP {resp.status_code}\n{resp.text}"
-        except Exception as e:
-            return f"Lỗi ngoại lệ khi lấy logs Vercel: {e}"
 
     @classmethod
     async def get_render_deployments(cls, limit: int = 5) -> List[Dict[str, Any]]:
         api_key, service_id = await cls._get_deploy_config("render")
         if not api_key or not service_id:
             return []
-
         url = f"https://api.render.com/v1/services/{service_id}/deploys?limit={limit}"
         headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
         try:
@@ -562,25 +434,22 @@ class SiteMonitorService:
                     deploys = resp.json()
                     return [{
                         "id": d.get("deploy", {}).get("id") or d.get("id"),
-                        "name": "ptv-tasks-backend",
+                        "name": "Backend FastAPI Docker",
                         "status": d.get("deploy", {}).get("status") or d.get("status", "live"),
                         "created_at": d.get("deploy", {}).get("createdAt") or d.get("createdAt"),
-                        "commit_msg": d.get("deploy", {}).get("commit", {}).get("message") or "Triggered Deploy",
+                        "commit_msg": d.get("deploy", {}).get("commit", {}).get("message") or "Deploy update",
                         "commit_author": "Deploy Bot",
                         "provider": "render"
                     } for d in deploys]
-                else:
-                    logger.error(f"Render API trả về lỗi: HTTP {resp.status_code} - {resp.text}")
-        except Exception as e:
-            logger.error(f"Lỗi gọi Render API: {e}")
+        except Exception:
+            pass
         return []
 
     @classmethod
     async def get_render_logs(cls, deploy_id: str) -> str:
         api_key, service_id = await cls._get_deploy_config("render")
         if not api_key or not service_id:
-            return "Chưa cấu hình Render API Key hoặc Service ID trong Supabase hoặc .env"
-
+            return "Chưa cấu hình RENDER_API_KEY hoặc RENDER_SERVICE_ID"
         url = f"https://api.render.com/v1/services/{service_id}/deploys/{deploy_id}/logs"
         headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
         try:
@@ -591,14 +460,53 @@ class SiteMonitorService:
                     if isinstance(logs_data, list):
                         return "\n".join([f"[{l.get('timestamp', '')}] {l.get('message', '')}" for l in logs_data])
                     return str(logs_data)
-                return f"Lỗi tải Render logs: HTTP {resp.status_code}\n{resp.text}"
+                return f"Lỗi tải Render logs: HTTP {resp.status_code}"
         except Exception as e:
-            return f"Lỗi ngoại lệ khi lấy Render logs: {e}"
+            return f"Lỗi ngoại lệ: {e}"
 
+    @classmethod
+    async def get_vercel_logs(cls, deployment_id: str) -> str:
+        token, _ = await cls._get_deploy_config("vercel")
+        if not token:
+            return "Chưa cấu hình VERCEL_ACCESS_TOKEN"
+        url = f"https://api.vercel.com/v2/deployments/{deployment_id}/events"
+        headers = {"Authorization": f"Bearer {token}"}
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(url, headers=headers)
+                if resp.status_code == 200:
+                    events = resp.json()
+                    lines = [e.get("text", "") for e in events if "text" in e]
+                    return "\n".join(lines) if lines else "Không có event log."
+                return f"Lỗi tải logs: HTTP {resp.status_code}"
+        except Exception as e:
+            return f"Lỗi: {e}"
+
+    @classmethod
+    def get_summary_stats(cls) -> dict:
+        enabled = [s for s in _sites_cache if s.get("enabled", True)]
+        up_count = sum(1 for s in enabled if s.get("last_status") == "UP")
+        down_count = sum(1 for s in enabled if s.get("last_status") == "DOWN")
+        warning_count = sum(1 for s in enabled if s.get("last_status") == "WARNING")
+        paused_count = sum(1 for s in _sites_cache if not s.get("enabled", True))
+        valid_latencies = [s["response_time_ms"] for s in enabled if s.get("response_time_ms", 0) > 0 and s.get("last_status") == "UP"]
+        avg_latency = int(sum(valid_latencies) / len(valid_latencies)) if valid_latencies else 0
+        return {
+            "total_sites": len(_sites_cache),
+            "enabled_sites": len(enabled),
+            "up_count": up_count,
+            "down_count": down_count,
+            "warning_count": warning_count,
+            "paused_count": paused_count,
+            "avg_latency_ms": avg_latency,
+            "last_checked_at": now_vn_str(),
+        }
 
 # ---------------------------------------------------------------------------
-# CRON JOB LẬP LỊCH TỰ ĐỘNG
+# CRON JOB LẬP LỊCH TỰ ĐỘNG CHẠY 30 PHÚT/LẦN
 # ---------------------------------------------------------------------------
 async def poll_site_uptime_cron():
+    logger.info("⏰ [APScheduler] Bắt đầu tự động quét Uptime và Auth Matrix định kỳ...")
     await SiteMonitorService.check_all_sites()
     await SiteMonitorService.get_and_check_auth_matrix()
+    logger.info("✅ [APScheduler] Hoàn tất quét định kỳ và lưu Supabase.")

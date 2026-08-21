@@ -114,7 +114,7 @@ async def lifespan(app: FastAPI):
     logger.info("🔥 Đang kích hoạt APScheduler 24/7...")
     
     # 1. Quét Gmail mỗi 3 phút
-    scheduler.add_job(safe_job_wrapper, 'interval', minutes=3, args=[poll_unread_gmails, "Quét Gmail"], id='gmail_cron')
+    scheduler.add_job(safe_job_wrapper, 'interval', minutes=5, args=[poll_unread_gmails, "Quét Gmail"], id='gmail_cron')
     
     # 2. Quét OS Ticket mỗi 5 phút
     scheduler.add_job(safe_job_wrapper, 'interval', minutes=5, args=[poll_open_ostickets, "Quét OS Ticket"], id='osticket_cron')
@@ -123,7 +123,13 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(safe_job_wrapper, 'interval', minutes=5, args=[poll_form_feedbacks, "Quét Form Feedback"], id='sheet_cron')
 
     # 4. Quét Live Uptime Website mỗi 1 giờ
-    scheduler.add_job(safe_job_wrapper, 'interval', hours=1, args=[poll_site_uptime_cron, "Quét Live Uptime Website"], id='site_uptime_cron')
+    scheduler.add_job(
+    safe_job_wrapper(poll_site_uptime_cron, "Site Uptime & Auth Matrix Cron"),
+    "interval",
+    minutes=30,      # <-- Tự động check định kỳ 30 phút/lần
+    id="site_uptime_cron",
+    replace_existing=True
+)
 
     # 5. [MỚI] Quét kiểm tra tiến độ tạo tài khoản Workspace mỗi 5 phút
     scheduler.add_job(safe_job_wrapper, 'interval', minutes=5, args=[poll_workspace_long_tasks, "Quét Task Workspace Long-Running"], id='workspace_long_tasks_cron')

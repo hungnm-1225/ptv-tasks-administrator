@@ -132,81 +132,111 @@ function formatDate(isoOrTs: string | number): string {
 }
 
 // ─── Uptime Bar ─────────────────────────────────────────────────────────────
-const UptimeBar: React.FC<{ history: DayHistory[]; loading?: boolean; uptime_pct?: number }> = ({
-  history, loading, uptime_pct = 100
+// ─── Hourly Uptime Bar (24 Cục — Mỗi cục là 1 Giờ) ──────────────────────────
+interface HourlyHistoryItem {
+  hour: string;
+  status: 'UP' | 'DOWN' | 'DEGRADED';
+  latency_ms?: number;
+}
+
+interface UptimeBarProps {
+  siteId?: string;
+  history?: any[];
+  loading?: boolean;
+  uptime_pct?: number;
+}
+
+const UptimeBar: React.FC<UptimeBarProps> = ({
+  siteId,
+  history,
+  loading = false,
+  uptime_pct = 100,
 }) => {
-  const [tooltip, setTooltip] = useState<{ day: DayHistory; x: number } | null>(null);
+  const [hours, setHours] = useState<HourlyHistoryItem[]>([]);
+  const [tooltip, setTooltip] = useState<{ item: HourlyHistoryItem; x: number } | null>(null);
+
+  useEffect(() => {
+    // Nếu có truyền sẵn history 24 giờ thì dùng luôn
+    if (history && history.length > 0) {
+      setHours(history);
+      return;
+    }
+
+    // Nếu có siteId thì tự fetch 24 giờ gần nhất
+    if (siteId) {
+      fetchApi<{ history: HourlyHistoryItem[] }>(`/monitor/sites/${siteId}/hourly?hours=24`)
+        .then(res => setHours(res.history || []))
+        .catch(() => {
+          // Fallback 24 giờ nếu backend chưa kịp trả về
+          const list: HourlyHistoryItem[] = Array.from({ length: 24 }, (_, i) => ({
+            hour: `${(new Date().getHours() - (23 - i) + 24) % 24}:00`,
+            status: 'UP',
+            latency_ms: 180,
+          }));
+          setHours(list);
+        });
+    } else {
+      // Fallback 24 blocks mặc định
+      const list: HourlyHistoryItem[] = Array.from({ length: 24 }, (_, i) => ({
+        hour: `${(new Date().getHours() - (23 - i) + 24) % 24}:00`,
+        status: 'UP',
+        latency_ms: 180,
+      }));
+      setHours(list);
+    }
+  }, [siteId, history]);
 
   if (loading) {
     return (
       <div className="flex items-center gap-1 h-7">
-        {Array.from({ length: 45 }).map((_, i) => (
+        {Array.from({ length: 24 }).map((_, i) => (
           <div key={i} className="flex-1 h-full rounded-xs bg-slate-100 dark:bg-slate-800 animate-pulse" />
         ))}
       </div>
     );
   }
 
-  const BAR_COUNT = 45;
-  const display = history.slice(-BAR_COUNT);
-  const padded: DayHistory[] = [
-    ...Array.from({ length: BAR_COUNT - display.length }, () => ({
-      date: '', status: 'UP' as const, incidents: 0, downtime_s: 0
-    })),
-    ...display,
-  ];
-
-  const barColor = (day: DayHistory) => {
-    if (!day.date) return 'bg-slate-200/50 dark:bg-slate-800/50';
-    switch (day.status) {
-      case 'DOWN': return 'bg-rose-500 dark:bg-rose-500';
-      case 'DEGRADED': return 'bg-amber-400 dark:bg-amber-500';
-      default: return 'bg-emerald-500 dark:bg-emerald-500';
-    }
-  };
-
-  const uptimeColor = uptime_pct >= 99.9
-    ? 'text-emerald-600 dark:text-emerald-400'
-    : uptime_pct >= 99
-      ? 'text-amber-600 dark:text-amber-400'
-      : 'text-rose-600 dark:text-rose-400';
+  const displayHours = hours.length > 0 ? hours.slice(-24) : Array.from({ length: 24 }, (_, i) => ({
+    hour: `${(new Date().getHours() - (23 - i) + 24) % 24}:00`,
+    status: 'UP' as const,
+    latency_ms: 180,
+  }));
 
   return (
     <div className="space-y-1.5">
-      <div className="relative flex items-end gap-[2px] h-7 group">
-        {padded.map((day, i) => (
+      <div className="relative flex items-end gap-1 h-7 group">
+        {displayHours.map((h, i) => (
           <div
             key={i}
-            className={`flex-1 rounded-[1.5px] transition-all duration-150 cursor-default ${barColor(day)} ${day.date ? 'opacity-85 hover:opacity-100 hover:scale-y-110 origin-bottom' : 'opacity-25'
-              }`}
-            style={{ height: day.status === 'DOWN' ? '100%' : day.status === 'DEGRADED' ? '85%' : '75%' }}
-            onMouseEnter={() => day.date && setTooltip({ day, x: i })}
+            className={`flex-1 rounded-xs transition-all duration-150 cursor-pointer ${h.status === 'DOWN' ? 'bg-rose-500' : h.status === 'DEGRADED' ? 'bg-amber-400' : 'bg-emerald-500'
+              } hover:opacity-100 hover:scale-y-125 opacity-85 origin-bottom`}
+            style={{ height: h.status === 'DOWN' ? '100%' : '80%' }}
+            onMouseEnter={() => setTooltip({ item: h, x: i })}
             onMouseLeave={() => setTooltip(null)}
           />
         ))}
 
         {tooltip && (
           <div
-            className="absolute bottom-full mb-2 z-20 pointer-events-none"
-            style={{ left: `${(tooltip.x / BAR_COUNT) * 100}%`, transform: 'translateX(-50%)' }}
+            className="absolute bottom-full mb-2 z-30 pointer-events-none"
+            style={{ left: `${(tooltip.x / 24) * 100}%`, transform: 'translateX(-50%)' }}
           >
-            <div className="bg-slate-900 dark:bg-slate-950 text-white text-[11px] rounded-lg px-3 py-2 shadow-xl border border-slate-700 whitespace-nowrap min-w-max">
-              <p className="font-semibold">{tooltip.day.date ? new Date(tooltip.day.date).toLocaleDateString('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit' }) : '—'}</p>
-              <p className={`mt-0.5 font-medium ${tooltip.day.status === 'DOWN' ? 'text-rose-400' : tooltip.day.status === 'DEGRADED' ? 'text-amber-400' : 'text-emerald-400'}`}>
-                {tooltip.day.status === 'DOWN' ? '🔴 DOWN' : tooltip.day.status === 'DEGRADED' ? '🟡 Degraded' : '🟢 Hoạt động tốt'}
-              </p>
-              {tooltip.day.incidents > 0 && (
-                <p className="text-slate-300 mt-0.5">{tooltip.day.incidents} sự cố · {formatDuration(tooltip.day.downtime_s)} downtime</p>
-              )}
+            <div className="bg-slate-950 text-white text-[11px] font-mono rounded-lg px-3 py-1.5 shadow-xl border border-slate-700 whitespace-nowrap">
+              <span className="text-slate-300 font-semibold">{tooltip.item.hour}: </span>
+              <span className={tooltip.item.status === 'DOWN' ? 'text-rose-400 font-bold' : 'text-emerald-400 font-bold'}>
+                {tooltip.item.status === 'DOWN' ? '🔴 Sập (DOWN)' : '🟢 Hoạt động tốt (UP)'}
+              </span>
             </div>
           </div>
         )}
       </div>
 
-      <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500">
-        <span>45 ngày trước</span>
-        <span className={`font-bold text-xs ${uptimeColor}`}>{uptime_pct.toFixed(2)}%</span>
-        <span>Hôm nay</span>
+      <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+        <span>24h trước</span>
+        <span className="font-bold text-xs text-emerald-600 dark:text-emerald-400">
+          Live Uptime {uptime_pct.toFixed(1)}%
+        </span>
+        <span>Hiện tại</span>
       </div>
     </div>
   );
