@@ -7,7 +7,7 @@ import logging
 import asyncio
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse
 import pytz
 import httpx
 from cryptography.fernet import Fernet
@@ -63,7 +63,6 @@ def decrypt_secret(encrypted_text: str) -> str:
         return ""
 
 def extract_keycloak_form_action(html_content: str) -> Optional[str]:
-    """Bóc tách action URL từ form login của Keycloak"""
     m = re.search(r'<form[^>]*id=["\']kc-form-login["\'][^>]*action=["\']([^"\']+)["\']', html_content, re.IGNORECASE)
     if m:
         return html.unescape(m.group(1))
@@ -73,14 +72,9 @@ def extract_keycloak_form_action(html_content: str) -> Optional[str]:
     return None
 
 def handle_any_auto_form_post(html_text: str) -> tuple[Optional[str], Dict[str, str]]:
-    """
-    Bóc tách form chuyển tiếp ẩn (OIDC Response Mode: form_post)
-    dùng cho Moodle LMS (learn, learn-s) và Digital Twin
-    """
     for form_m in re.finditer(r'<form[^>]*action=["\']([^"\']+)["\'][^>]*>(.*?)</form>', html_text, re.DOTALL | re.IGNORECASE):
         action = html.unescape(form_m.group(1))
         content = form_m.group(2)
-        # Bỏ qua form login của Keycloak, chỉ bắt form gửi về client app
         if "/login-actions/" not in action:
             inputs = {}
             for inp_m in re.finditer(r'<input[^>]*name=["\']([^"\']+)["\'][^>]*value=["\']([^"\']*)["\']', content, re.IGNORECASE):
@@ -125,45 +119,52 @@ def _make_initial_state(site: dict) -> dict:
 _sites_cache: list[dict] = [_make_initial_state(s) for s in DEFAULT_MONITORED_SITES]
 
 # ---------------------------------------------------------------------------
-# HOURLY UPTIME BARS (24 GIỜ GẦN NHẤT — MỖI CỤC LÀ 1 GIỜ)
+# UPTIME HISTORY (CẢ 45 NGÀY VÀ 24 GIỜ)
 # ---------------------------------------------------------------------------
+def get_uptime_history(site_id: str, days: int = 45) -> list[dict]:
+    """Trả về lịch sử theo ngày (phục vụ tương thích 45 ngày)"""
+    result = []
+    today = now_vn().date()
+    db = get_supabase()
+    for i in range(days - 1, -1, -1):
+        day = today - timedelta(days=i)
+        result.append({"date": day.isoformat(), "status": "UP", "incidents": 0, "downtime_s": 0})
+    if not db:
+        return result
+    try:
+        since = (today - timedelta(days=days)).isoformat()
+        resp = db.table("site_downtime_events").select("started_at, ended_at, duration_s, is_ongoing").eq("site_id", site_id).gte("started_at", since).execute()
+        for event in resp.data or []:
+            started = datetime.fromisoformat(event["started_at"]).astimezone(VN_TZ).date().isoformat()
+            for entry in result:
+                if entry["date"] == started:
+                    entry["incidents"] += 1
+                    entry["status"] = "DOWN"
+    except Exception as e:
+        logger.error(f"Lỗi get_uptime_history: {e}")
+    return result
+
 def get_hourly_uptime_history(site_id: str, hours: int = 24) -> list[dict]:
+    """Trả về 24 blocks (mỗi block là 1 giờ gần nhất)"""
     result = []
     now = now_vn()
     db = get_supabase()
-
     for i in range(hours - 1, -1, -1):
         target_time = now - timedelta(hours=i)
-        hour_str = target_time.strftime("%H:00")
-        date_str = target_time.strftime("%d/%m")
-        result.append({
-            "hour": f"{hour_str} {date_str}",
-            "status": "UP",
-            "incidents": 0,
-            "latency_ms": 180,
-        })
-
+        result.append({"hour": target_time.strftime("%H:00 %d/%m"), "status": "UP", "incidents": 0, "latency_ms": 180})
     if not db:
         return result
-
     try:
         since = (now - timedelta(hours=hours)).isoformat()
-        resp = db.table("site_downtime_events")\
-            .select("started_at, ended_at, duration_s, is_ongoing")\
-            .eq("site_id", site_id)\
-            .gte("started_at", since)\
-            .execute()
-        events = resp.data or []
-        for event in events:
-            started = datetime.fromisoformat(event["started_at"]).astimezone(VN_TZ)
-            target_hour_str = started.strftime("%H:00 %d/%m")
+        resp = db.table("site_downtime_events").select("started_at, ended_at, duration_s, is_ongoing").eq("site_id", site_id).gte("started_at", since).execute()
+        for event in resp.data or []:
+            target_hour = datetime.fromisoformat(event["started_at"]).astimezone(VN_TZ).strftime("%H:00 %d/%m")
             for entry in result:
-                if entry["hour"] == target_hour_str:
+                if entry["hour"] == target_hour:
                     entry["status"] = "DOWN"
                     entry["incidents"] += 1
     except Exception as e:
-        logger.error(f"Lỗi lấy hourly history: {e}")
-
+        logger.error(f"Lỗi get_hourly_uptime_history: {e}")
     return result
 
 def get_incident_log(limit: int = 50) -> list[dict]:
@@ -178,7 +179,7 @@ def get_incident_log(limit: int = 50) -> list[dict]:
         return []
 
 # ---------------------------------------------------------------------------
-# CORE SERVICE: TỰ ĐỘNG CHẠY & XÁC THỰC OIDC
+# CORE MONITOR SERVICE
 # ---------------------------------------------------------------------------
 class SiteMonitorService:
 
@@ -190,12 +191,11 @@ class SiteMonitorService:
     async def check_single_site(site: dict) -> dict:
         if not site.get("enabled", True):
             site["last_status"] = "PAUSED"
-            site["details"] = "Đã tạm dừng kiểm tra theo cấu hình"
+            site["details"] = "Đã tạm dừng theo cấu hình"
             return site
 
         url = site["url"]
         start = time.time()
-
         try:
             async with httpx.AsyncClient(verify=False, timeout=15.0, follow_redirects=True) as client:
                 response = await client.get(url)
@@ -216,13 +216,11 @@ class SiteMonitorService:
                 else:
                     site["last_status"] = "WARNING"
                     site["details"] = f"Mã phản hồi: {response.status_code}"
-
         except Exception as e:
             site["http_code"] = 0
             site["last_checked_at"] = now_vn_str()
             site["last_status"] = "DOWN"
             site["details"] = f"Lỗi kết nối: {str(e)[:80]}"
-
         return site
 
     @classmethod
@@ -264,63 +262,43 @@ class SiteMonitorService:
         auth_entry_url = site_obj.get("auth_entry") if site_obj else f"{root_origin}/student-workspace/"
 
         start_time = time.time()
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-        }
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"}
 
         try:
             async with httpx.AsyncClient(verify=False, timeout=25.0, follow_redirects=True, headers=headers) as client:
-                # BƯỚC 1: Truy cập Entrypoint
                 init_resp = await client.get(auth_entry_url)
 
-                # Nếu trang đích mở sẵn (không cần login)
                 if "eid.pythaverse.space" not in str(init_resp.url):
                     if 200 <= init_resp.status_code < 400:
                         result["status"] = "PASS"
                         result["route_accessible"] = True
                         result["latency_ms"] = int((time.time() - start_time) * 1000)
                         result["details"] = f"Phiên hoạt động sẵn sàng — HTTP {init_resp.status_code}"
-                        # Lưu DB ngay
                         SiteMonitorService._save_cred_result_to_db(cred.get("id"), result)
                         return result
 
-                # BƯỚC 2: Lấy Action URL của Keycloak
                 action_url = extract_keycloak_form_action(init_resp.text) or str(init_resp.url)
 
-                # BƯỚC 3: Submit User/Password
-                login_payload = {
-                    "username": username,
-                    "password": password,
-                    "credentialId": "",
-                    "login": "Login"
-                }
-                post_headers = {
-                    "Referer": str(init_resp.url),
-                    "Content-Type": "application/x-www-form-urlencoded"
-                }
+                login_payload = {"username": username, "password": password, "credentialId": "", "login": "Login"}
+                post_headers = {"Referer": str(init_resp.url), "Content-Type": "application/x-www-form-urlencoded"}
                 login_resp = await client.post(action_url, data=login_payload, headers=post_headers)
 
-                # BƯỚC 4: Tự động chuyển tiếp Form Post OIDC (Moodle LMS & Digital Twin)
+                # Chuyển tiếp Form Post OIDC (Moodle LMS & Digital Twin)
                 post_action, post_inputs = handle_any_auto_form_post(login_resp.text)
                 if post_action and post_inputs:
                     login_resp = await client.post(post_action, data=post_inputs)
 
                 final_url = str(login_resp.url)
 
-                # BƯỚC 5: KIỂM TRA NẾU BỊ KẸT LẠI TRANG LOGIN KEYCLOAK (Sai mật khẩu / Tài khoản bị khóa)
                 if "eid.pythaverse.space" in final_url or "kc-form-login" in login_resp.text:
                     result["latency_ms"] = int((time.time() - start_time) * 1000)
                     result["status"] = "FAIL"
-                    if "Invalid username or password" in login_resp.text or "alert-error" in login_resp.text:
-                        result["details"] = "Sai tên đăng nhập hoặc mật khẩu"
-                    else:
-                        result["details"] = "Keycloak từ chối xác thực (Kẹt trang login)"
+                    result["details"] = "Keycloak từ chối đăng nhập (Sai pass / Chưa kích hoạt)"
                     SiteMonitorService._save_cred_result_to_db(cred.get("id"), result)
                     return result
 
                 result["token_acquired"] = True
 
-                # BƯỚC 6: Kiểm tra Route đích sau khi đã có Session
                 if expected_path.startswith("http"):
                     target_check_url = expected_path
                 else:
@@ -348,21 +326,15 @@ class SiteMonitorService:
                     result["status"] = "FAIL"
                     result["details"] = f"Lỗi truy cập Route: HTTP {check_status}"
 
-        except httpx.TimeoutException:
-            result["latency_ms"] = 25000
-            result["status"] = "FAIL"
-            result["details"] = "Quá thời gian xác thực (Timeout > 25s)"
         except Exception as e:
             result["status"] = "FAIL"
             result["details"] = f"Lỗi: {str(e)[:80]}"
 
-        # BƯỚC 7: LƯU TRỰC TIẾP VÀO SUPABASE (Không bao giờ bị mất)
         SiteMonitorService._save_cred_result_to_db(cred.get("id"), result)
         return result
 
     @staticmethod
     def _save_cred_result_to_db(cred_id: Optional[str], result: dict):
-        """Hàm lưu kết quả chắc chắn vào database Supabase"""
         if not cred_id:
             return
         db = get_supabase()
@@ -375,8 +347,7 @@ class SiteMonitorService:
                     "details": result["details"]
                 }).eq("id", cred_id).execute()
             except Exception as e:
-                logger.error(f"Lỗi lưu Supabase site_monitor_credentials: {e}")
-
+                logger.error(f"Lỗi lưu Supabase: {e}")
 
     @classmethod
     async def get_and_check_auth_matrix(cls) -> List[Dict[str, Any]]:
@@ -524,7 +495,7 @@ class SiteMonitorService:
         }
 
 # ---------------------------------------------------------------------------
-# CRON JOB LẬP LỊCH TỰ ĐỘNG (APScheduler)
+# CRON JOB LẬP LỊCH TỰ ĐỘNG
 # ---------------------------------------------------------------------------
 async def poll_site_uptime_cron():
     await SiteMonitorService.check_all_sites()
