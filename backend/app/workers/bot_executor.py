@@ -61,7 +61,13 @@ async def execute_approved_bot_task(bot_type: str, payload_data: dict) -> dict:
             }
 
             # A. TOÀN TRÌNH PHẢ HỆ 4 CẤP (Master Pipeline)
-            if action in ["full_lineage_pipeline", "full_license_chain", "distribute_license"]:
+            if action in [
+                "create_order_and_contracts",
+                "full_lineage_pipeline", 
+                "full_license_chain", 
+                "distribute_license",
+                "order_and_contracts"
+            ]:
                 cof_path = payload_data.get("upload_file_path")
                 if not cof_path and payload_data.get("attachment_url"):
                     cof_path = await download_file_to_temp(payload_data["attachment_url"])
