@@ -1,4 +1,5 @@
 # backend/app/services/workspace_lineage_service.py
+# backend/app/services/workspace_lineage_service.py
 import logging
 from typing import Dict, Any, Optional
 from cryptography.fernet import Fernet
@@ -6,10 +7,6 @@ from app.core.supabase import get_supabase_client
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
-
-# Key giải mã mật khẩu két sắt
-SECRET_KEY = getattr(settings, "VAULT_SECRET_KEY", Fernet.generate_key())
-cipher_suite = Fernet(SECRET_KEY if isinstance(SECRET_KEY, bytes) else SECRET_KEY.encode())
 
 # Cấu hình ánh xạ Quốc gia <-> Master Distributor
 COUNTRY_DISTRIBUTOR_MAP = {
@@ -19,14 +16,33 @@ COUNTRY_DISTRIBUTOR_MAP = {
     "Philippines": {"code": "6", "name": "Digital Hub Ph Corp", "folder": "3. Philippines"}
 }
 
+def init_cipher_suite() -> Fernet:
+    """Khởi tạo Fernet Cipher an toàn, tự fallback nếu chưa cấu hình VAULT_SECRET_KEY."""
+    raw_key = getattr(settings, "VAULT_SECRET_KEY", None)
+    if raw_key and len(str(raw_key).strip()) > 0:
+        try:
+            key_bytes = raw_key.encode("utf-8") if isinstance(raw_key, str) else raw_key
+            return Fernet(key_bytes)
+        except Exception as e:
+            logger.warning(f"⚠️ VAULT_SECRET_KEY không hợp lệ Fernet, sinh key tạm: {e}")
+    
+    # Tự động sinh key ngẫu nhiên nếu chưa có key trong .env để không bao giờ làm sập app
+    return Fernet(Fernet.generate_key())
+
+cipher_suite = init_cipher_suite()
+
+
 def decrypt_password(encrypted_pass: str) -> str:
     """Giải mã mật khẩu an toàn khi Playwright cần đăng nhập."""
     if not encrypted_pass:
         return ""
     try:
+        # Nếu là mật khẩu chưa mã hóa (plain text) thì trả về nguyên bản
+        if not str(encrypted_pass).startswith("gAAAAA"):
+            return encrypted_pass
         return cipher_suite.decrypt(encrypted_pass.encode("utf-8")).decode("utf-8")
     except Exception as e:
-        logger.error(f"Lỗi giải mã mật khẩu: {e}")
+        logger.warning(f"Không giải mã được mật khẩu (dùng dạng thô): {e}")
         return encrypted_pass
 
 class WorkspaceLineageService:
