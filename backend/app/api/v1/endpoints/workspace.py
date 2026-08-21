@@ -245,3 +245,25 @@ async def extract_cof_content(req: ExtractCOFRequest):
         "total_students": total_students,
         "courses": extracted_courses
     }
+
+
+#(Bổ sung API bóc tách chi tiết môn học của Order được chọn)
+@router.get("/school-order-details")
+async def get_school_order_details(
+    order_code: str = Query(..., description="Mã Order của trường (VD: 'SCH-10266-20260821-1347')"),
+    school_identifier: Optional[str] = Query(None, description="Tên trường hoặc mã trường")
+):
+    """Mở chi tiết Order của trường để đọc chính xác danh sách các môn học, licenses và dates."""
+    identifier = school_identifier or "000 SCHOOL FOR TESTING PURPOSE"
+    lineage = workspace_lineage_service.resolve_by_school(identifier)
+    
+    if not lineage or not lineage.get("partner", {}).get("username"):
+        raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản Partner trong phả hệ.")
+        
+    partner_creds = lineage["partner"]
+    result = await workspace_playwright_service.fetch_school_order_detailed_courses(partner_creds, order_code)
+    
+    if result.get("status") != "success":
+        raise HTTPException(status_code=500, detail=result.get("error", "Lỗi đọc chi tiết khóa học"))
+        
+    return result
