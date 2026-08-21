@@ -40,7 +40,7 @@ Khi phân tích, sửa code hoặc tư vấn giải pháp, AI phải luôn nắm
 - **Tab 3 (`Teacher Information`):** Bóc tách họ tên, email giáo viên, môn học phân công (`course_assign`).
 - **Chuẩn Hóa Ngày Sinh (DOB):** Bắt buộc chuyển đổi về định dạng `D/M/YYYY` (ví dụ: `1/1/1990` hoặc `15/8/2012`), loại bỏ giờ phút và các dị biệt format.
 - **Sinh File Accounts:** Sinh file `accounts.xlsx` 7 cột bắt đầu từ dòng 6 (`No.`, `First Name (*)`, `Last Name (*)`, `Mobile number (Optional)`, `Email (*)`, `Date of Birth (*)`, `Role (*)`).
-- **Ghi Ngược Kết Quả:** Đọc file kết quả `RESULT_accounts.xlsx`, map User/Pass vào cột 12-13, Group LMS vào cột 14, highlight nền màu cam nhạt (`FCE4D6`) và chữ in đậm đỏ (`C00000`).
+- **Ghi Ngược Kết Quả:** Đọc file kết quả `RESULT_accounts.xlsx`, map User/Pass vào cột 12-13, Group LMS vào cột 14, highlight nền màu cam nhạt (`#FCE4D6`) và chữ in đậm đỏ (`#C00000`).
 
 ### 2.3. Quy Trình Két Sắt & Phả Hệ Tổ Chức (Hierarchy & Vault)
 - **Bảng `workspace_organizations`:** Lưu cây quan hệ 3 cấp (`distributor` ➔ `partner` ➔ `school`) qua `parent_id`.
@@ -50,6 +50,10 @@ Khi phân tích, sửa code hoặc tư vấn giải pháp, AI phải luôn nắm
 ### 2.4. Smart Polling Engine (Nộp File Batch Tạo Tài Khoản)
 - **Pha 1 (Submit):** Upload file `accounts.xlsx`, bắt `Request ID` tại dòng đầu của `MuiDataGrid`, đóng trình duyệt Chromium ngay lập tức để giải phóng RAM.
 - **Pha 2 (Polling):** Tạm ngủ `số_bản_ghi * 40` giây. Sau đó định kỳ 5 phút mở kiểm tra trạng thái Request ID. Khi trạng thái là `Done` / `Completed` ➔ Bấm Action Menu ➔ `Export` tải file kết quả `RESULT_accounts.xlsx`.
+
+### 2.5. Cấu Trúc Thư Mục Google Drive Phân Tầng 6 Cấp (`GoogleDriveService`)
+- Dựng chuỗi thư mục phân tầng tự động: `Root` ➔ `{Năm}` ➔ `{Quốc gia}` ➔ `[Distributor] {Tên}` ➔ `[Partner] {Tên}` ➔ `[School] {Tên}`.
+- Tải file kết quả COF lên đúng thư mục trường học và trả về `web_view_link`.
 
 ---
 
