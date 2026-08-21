@@ -722,9 +722,6 @@ export const SiteMonitorPage: React.FC = () => {
                           {item.role_label}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300 font-mono text-[11px] whitespace-nowrap">
-                        {item.username}
-                      </td>
                       <td className="px-4 py-3 font-mono text-slate-700 dark:text-slate-300 max-w-[200px] truncate" title={item.expected_path}>
                         {item.expected_path}
                       </td>
