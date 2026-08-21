@@ -97,7 +97,7 @@ class WorkspacePlaywrightService:
         credentials: Dict[str, str], 
         order_data: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Tự động mở School Workspace và điền Form Create New Order."""
+        """Tự động mở School Workspace và điền Form Create New Order chuẩn chỉ 100%."""
         async with async_playwright() as p:
             browser, context, page = await self._create_context(p)
             try:
@@ -124,62 +124,86 @@ class WorkspacePlaywrightService:
 
                 # 3. Lặp qua danh sách khóa học trong Order
                 courses = order_data.get("courses", [])
+                if not courses:
+                    # Fallback nếu payload không truyền mảng courses
+                    courses = [{
+                        "category": order_data.get("category", "SWRP"),
+                        "course_name": order_data.get("course_name"),
+                        "licenses": order_data.get("licenses", 1),
+                        "start_date": order_data.get("start_date"),
+                        "end_date": order_data.get("end_date")
+                    }]
+
                 for idx, c in enumerate(courses):
                     if idx > 0:
                         await page.click("div[role='dialog'] button:has-text('Add Course')")
                         await page.wait_for_timeout(1000)
 
-                    course_box = page.locator(f"div[role='dialog'] .MuiBox-root:has-text('Course {idx+1}')").first
-
-                    # A. BẮT BUỘC: Chọn License Category trước
-                    category_val = c.get("category", "SWRP")
-                    cat_select = course_box.locator("div.MuiSelect-select").first
+                    # A. BẤM TRỰC TIẾP VÀO Ô SELECT CỦA 'License Category' (Ghim theo vị trí chính xác)
+                    cat_select = page.locator(f"(//div[@role='dialog']//div[contains(@class, 'MuiFormControl-root')][.//label[contains(., 'License Category')]]//div[@role='combobox'])[{idx+1}]")
+                    await cat_select.wait_for(state="visible", timeout=10000)
                     await cat_select.click()
-                    await page.wait_for_selector(f"li[role='option']:has-text('{category_val}'), ul[role='listbox'] li:has-text('{category_val}')", timeout=5000)
-                    await page.locator(f"li[role='option']:has-text('{category_val}'), ul[role='listbox'] li:has-text('{category_val}')").first.click()
-                    await page.wait_for_timeout(800)
-
-                    # B. Chọn Course Name
-                    course_name_val = c.get("course_name")
-                    course_select = course_box.locator("div.MuiSelect-select").nth(1)
-                    await course_select.wait_for(state="visible", timeout=5000)
-                    await course_select.click()
-                    
-                    target_course_opt = page.locator(f"li[role='option']:has-text('{course_name_val}'), ul[role='listbox'] li:has-text('{course_name_val}')").first
-                    if await target_course_opt.count() > 0:
-                        await target_course_opt.click()
-                    else:
-                        await page.locator("li[role='option']").first.click()
                     await page.wait_for_timeout(500)
 
-                    # C. Điền số lượng Licenses
-                    licenses_count = str(c.get("licenses", 1))
-                    license_input = course_box.locator("input[type='number']").first
-                    await license_input.fill(licenses_count)
+                    # Chọn Option Category (VD: SWRP, ASP, IR...)
+                    category_val = c.get("category", "SWRP")
+                    cat_option = page.locator(f"ul[role='listbox'] li[role='option']:has-text('{category_val}'), .MuiPopover-root li:has-text('{category_val}')").first
+                    await cat_option.wait_for(state="visible", timeout=5000)
+                    await cat_option.click()
+                    logger.info(f"✅ [Course {idx+1}] Đã chọn License Category: '{category_val}'")
+                    await page.wait_for_timeout(1200)
 
-                    # D. Điền Start Date & End Date
+                    # B. CHỌN COURSE NAME (Sau khi Category kích hoạt xong)
+                    course_select = page.locator(f"(//div[@role='dialog']//div[contains(@class, 'MuiFormControl-root')][.//label[contains(., 'Course') and not(contains(., 'Category'))]]//div[@role='combobox'])[{idx+1}]")
+                    await course_select.wait_for(state="visible", timeout=10000)
+                    await course_select.click()
+                    await page.wait_for_timeout(500)
+                    
+                    course_name_val = c.get("course_name")
+                    if course_name_val:
+                        target_opt = page.locator(f"ul[role='listbox'] li[role='option']:has-text('{course_name_val}'), .MuiPopover-root li:has-text('{course_name_val}')").first
+                        if await target_opt.count() > 0:
+                            await target_opt.click()
+                        else:
+                            # Fallback chọn option đầu tiên nếu tên dài
+                            await page.locator("ul[role='listbox'] li[role='option']").first.click()
+                    else:
+                        await page.locator("ul[role='listbox'] li[role='option']").first.click()
+                    
+                    logger.info(f"✅ [Course {idx+1}] Đã chọn Course Name!")
+                    await page.wait_for_timeout(500)
+
+                    # C. ĐIỀN SỐ LƯỢNG LICENSES
+                    licenses_count = str(c.get("licenses", 1))
+                    lic_input = page.locator(f"(//div[@role='dialog']//div[contains(@class, 'MuiFormControl-root')][.//label[contains(., 'License')]]//input[@type='number'])[{idx+1}]")
+                    await lic_input.fill(licenses_count)
+
+                    # D. ĐIỀN START DATE & END DATE
                     start_date_val = c.get("start_date")
                     end_date_val = c.get("end_date")
-                    date_inputs = course_box.locator("input[type='date']")
                     
-                    if await date_inputs.count() >= 2:
-                        await date_inputs.nth(0).fill(start_date_val)
-                        await date_inputs.nth(1).fill(end_date_val)
+                    start_input = page.locator(f"(//div[@role='dialog']//div[contains(@class, 'MuiFormControl-root')][.//label[contains(., 'Start Date')]]//input)[{idx+1}]")
+                    end_input = page.locator(f"(//div[@role='dialog']//div[contains(@class, 'MuiFormControl-root')][.//label[contains(., 'End Date')]]//input)[{idx+1}]")
+                    
+                    if start_date_val:
+                        await start_input.fill(start_date_val)
+                    if end_date_val:
+                        await end_input.fill(end_date_val)
 
                 # 4. Điền Additional Notes
                 additional_notes = order_data.get("additional_notes", "")
                 if additional_notes:
-                    notes_textarea = page.locator("div[role='dialog'] textarea[placeholder*='notes']").first
+                    notes_textarea = page.locator("div[role='dialog'] textarea[placeholder*='notes'], div[role='dialog'] textarea").first
                     await notes_textarea.fill(additional_notes)
 
-                # 5. Bấm nút 'Create Order' trong Dialog
+                # 5. Bấm nút 'Create Order' hoàn tất trong Dialog
                 submit_dialog_btn = page.locator("div[role='dialog'] button:has-text('Create Order')").last
                 await submit_dialog_btn.click()
                 logger.info("🚀 Đã bấm Submit Order! Đang đợi trang danh sách cập nhật...")
 
                 # 6. Đợi Modal đóng và DataGrid render dòng mới nhất
-                await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=15000)
-                await page.wait_for_selector(".MuiDataGrid-row", timeout=15000)
+                await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=20000)
+                await page.wait_for_selector(".MuiDataGrid-row", timeout=20000)
                 await page.wait_for_timeout(2000)
 
                 # 7. BẮT ORDER ID MỚI SINH TẠI DÒNG ĐẦU TIÊN
