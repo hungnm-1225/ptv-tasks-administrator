@@ -1,3 +1,4 @@
+// frontend/src/features/tasks/TaskManagementPage.tsx
 import React, { useState, useEffect } from 'react';
 import {
   CheckCircle2,
@@ -17,7 +18,8 @@ import {
   ShieldCheck,
   Lock,
   Sliders,
-  FileText
+  FileText,
+  Zap
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { BotAutomationTask } from '../../types';
@@ -109,7 +111,7 @@ export const TaskManagementPage: React.FC = () => {
 
     // Khởi tạo JSON thô
     setJsonPayload(JSON.stringify(payload, null, 2));
-    setModalMode('form');
+    setModalMode(task.bot_type === 'keycloak_api' ? 'form' : 'json');
   };
 
   // Đồng bộ từ Form sang JSON trước khi Approve
@@ -131,11 +133,10 @@ export const TaskManagementPage: React.FC = () => {
       };
     }
 
-    // Nếu ở tab JSON hoặc bot khác
     try {
       return JSON.parse(jsonPayload);
     } catch {
-      return selectedTask?.payload_data;
+      return selectedTask?.payload_data || {};
     }
   };
 
@@ -145,7 +146,7 @@ export const TaskManagementPage: React.FC = () => {
     try {
       const finalPayload = buildFinalPayload();
 
-      if (selectedTask.bot_type === 'keycloak_api') {
+      if (selectedTask.bot_type === 'keycloak_api' && modalMode === 'form') {
         const identifiers = finalPayload.identifiers || [];
         if (identifiers.length === 0) {
           toast.error('Vui lòng nhập ít nhất 1 email/tài khoản cần xử lý!');
@@ -162,7 +163,8 @@ export const TaskManagementPage: React.FC = () => {
         }),
       });
 
-      toast.success(`Đã phê duyệt và khởi chạy worker #${selectedTask.id.slice(0, 8)} thành công!`);
+      const taskIdShort = selectedTask.id ? selectedTask.id.slice(0, 8) : '';
+      toast.success(`Đã phê duyệt và khởi chạy worker #${taskIdShort} thành công!`);
       setSelectedTask(null);
       await loadTasks();
     } catch (err) {
@@ -176,7 +178,8 @@ export const TaskManagementPage: React.FC = () => {
     setRejecting(true);
     try {
       await fetchApi(`/tasks/${taskId}/reject`, { method: 'PUT' });
-      toast.info(`Đã từ chối tác vụ #${taskId.slice(0, 8)}.`);
+      const taskIdShort = taskId ? taskId.slice(0, 8) : '';
+      toast.info(`Đã từ chối tác vụ #${taskIdShort}.`);
       setSelectedTask(null);
       await loadTasks();
     } catch (err) {
@@ -290,7 +293,7 @@ export const TaskManagementPage: React.FC = () => {
             <thead>
               <tr className="border-b border-slate-200/80 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 font-semibold">
                 <th className="p-3.5 pl-5">Mã Tác Vụ</th>
-                <th className="p-3.5">Ticket Gốc</th>
+                <th className="p-3.5">Ticket Gốc / Nguồn</th>
                 <th className="p-3.5">Bot Type</th>
                 <th className="p-3.5">Trạng Thái</th>
                 <th className="p-3.5">Thời Gian</th>
@@ -298,44 +301,57 @@ export const TaskManagementPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50 text-slate-800 dark:text-slate-200">
-              {tasks.map((task) => (
-                <tr key={task.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/40 transition">
-                  <td className="p-3.5 pl-5 font-mono text-[11px] text-violet-700 dark:text-violet-300 font-medium">
-                    #{task.id.slice(0, 8)}
-                  </td>
-                  <td className="p-3.5 font-medium max-w-xs truncate text-slate-900 dark:text-slate-100">
-                    {task.inbox_tickets?.subject || `Ticket #${task.ticket_id.slice(0, 8)}`}
-                  </td>
-                  <td className="p-3.5 font-mono text-[11px] text-slate-600 dark:text-slate-300">
-                    {task.bot_type}
-                  </td>
-                  <td className="p-3.5">
-                    {renderStatusBadge(task.approval_status, task.execution_status)}
-                  </td>
-                  <td className="p-3.5 text-slate-400 dark:text-slate-500 text-[11px]">
-                    {new Date(task.created_at).toLocaleString('vi-VN')}
-                  </td>
-                  <td className="p-3.5 pr-5 text-right space-x-2">
-                    {task.approval_status === 'pending' ? (
-                      <button
-                        onClick={() => handleOpenReview(task)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded-xl text-xs font-semibold transition shadow-2xs cursor-pointer"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                        <span>Duyệt & Chạy</span>
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => setViewLogTask(task)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-[11px] font-medium transition cursor-pointer"
-                      >
-                        <Terminal className="w-3 h-3 text-violet-500" />
-                        <span>Xem Logs</span>
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {tasks.map((task) => {
+                // 🎯 XỬ LÝ AN TOÀN TUYỆT ĐỐI CHO TICKET ID VÀ SOURCE
+                const taskIdDisplay = task.id ? `#${task.id.slice(0, 8)}` : '#TASK';
+                const ticketTitle = task.inbox_tickets?.subject ||
+                  (task.ticket_id ? `Ticket #${task.ticket_id.slice(0, 8)}` : null);
+
+                return (
+                  <tr key={task.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/40 transition">
+                    <td className="p-3.5 pl-5 font-mono text-[11px] text-violet-700 dark:text-violet-300 font-medium">
+                      {taskIdDisplay}
+                    </td>
+                    <td className="p-3.5 font-medium max-w-xs truncate text-slate-900 dark:text-slate-100">
+                      {ticketTitle ? (
+                        <span>{ticketTitle}</span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300 text-[10px] font-semibold">
+                          <Zap className="w-3 h-3 text-violet-500" /> Tác vụ Direct (Studio)
+                        </span>
+                      )}
+                    </td>
+                    <td className="p-3.5 font-mono text-[11px] text-slate-600 dark:text-slate-300">
+                      {task.bot_type}
+                    </td>
+                    <td className="p-3.5">
+                      {renderStatusBadge(task.approval_status, task.execution_status)}
+                    </td>
+                    <td className="p-3.5 text-slate-400 dark:text-slate-500 text-[11px]">
+                      {task.created_at ? new Date(task.created_at).toLocaleString('vi-VN') : '---'}
+                    </td>
+                    <td className="p-3.5 pr-5 text-right space-x-2">
+                      {task.approval_status === 'pending' ? (
+                        <button
+                          onClick={() => handleOpenReview(task)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded-xl text-xs font-semibold transition shadow-2xs cursor-pointer"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                          <span>Duyệt & Chạy</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => setViewLogTask(task)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-[11px] font-medium transition cursor-pointer"
+                        >
+                          <Terminal className="w-3 h-3 text-violet-500" />
+                          <span>Xem Logs</span>
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -353,7 +369,7 @@ export const TaskManagementPage: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                    Phê Duyệt Tác Vụ #{selectedTask.id.slice(0, 8)} ({selectedTask.bot_type})
+                    Phê Duyệt Tác Vụ #{selectedTask.id ? selectedTask.id.slice(0, 8) : ''} ({selectedTask.bot_type})
                   </h3>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
                     Tùy chỉnh tham số thực thi trước khi bàn giao cho Bot Worker.
@@ -518,7 +534,6 @@ export const TaskManagementPage: React.FC = () => {
 
                   {/* 4. Trạng Thái & Temporary Toggle */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {/* Target Status (Idempotent 100%) */}
                     <div className="space-y-1.5">
                       <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
                         Gán Trạng Thái Tài Khoản:
@@ -544,7 +559,6 @@ export const TaskManagementPage: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Temporary Toggle */}
                     <div className="space-y-1.5">
                       <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
                         Bắt Buộc Đổi Pass Lần Đầu?
@@ -569,7 +583,7 @@ export const TaskManagementPage: React.FC = () => {
                   </div>
                 </div>
               ) : (
-                /* Fallback JSON View */
+                /* JSON View cho Bot khác hoặc khi chuyển tab */
                 <div className="space-y-2">
                   <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                     <FileText className="w-3.5 h-3.5 text-violet-500" />
@@ -633,7 +647,7 @@ export const TaskManagementPage: React.FC = () => {
             <div className="flex items-center justify-between pb-3 border-b border-slate-800 text-slate-200">
               <div className="flex items-center gap-2 text-xs font-semibold">
                 <Terminal className="w-4 h-4 text-violet-400" />
-                <span>Execution Logs: #{viewLogTask.id.slice(0, 8)} ({viewLogTask.bot_type})</span>
+                <span>Execution Logs: #{viewLogTask.id ? viewLogTask.id.slice(0, 8) : ''} ({viewLogTask.bot_type})</span>
               </div>
               <button
                 onClick={() => setViewLogTask(null)}
