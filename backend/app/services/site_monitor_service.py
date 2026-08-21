@@ -455,15 +455,46 @@ class SiteMonitorService:
             return []
 
     # ================= TAB 3: VERCEL & RENDER CI/CD LOGS =================
-    @staticmethod
-    async def get_vercel_deployments(limit: int = 5) -> List[Dict[str, Any]]:
-        token = os.getenv("VERCEL_ACCESS_TOKEN", "")
-        project_id = os.getenv("VERCEL_PROJECT_ID", "")
+    @classmethod
+    async def _get_deploy_config(cls, provider: str) -> tuple[str, str]:
+        """
+        Lấy (token, target_id) cho provider ('vercel' hoặc 'render').
+        Ưu tiên đọc từ Supabase site_deploy_configs, nếu không có thì đọc từ os.getenv().
+        """
+        db = get_supabase()
+        if db:
+            try:
+                resp = db.table("site_deploy_configs")\
+                    .select("target_id, encrypted_api_token")\
+                    .eq("provider", provider)\
+                    .eq("is_active", True)\
+                    .execute()
+                if resp.data and len(resp.data) > 0:
+                    target_id = resp.data[0].get("target_id", "")
+                    enc_token = resp.data[0].get("encrypted_api_token", "")
+                    token = decrypt_secret(enc_token)
+                    if token and target_id:
+                        return token, target_id
+            except Exception as e:
+                logger.warning(f"Không thể đọc site_deploy_configs từ Supabase: {e}")
+
+        # Fallback từ .env nếu bảng Supabase chưa có
+        if provider == "vercel":
+            return os.getenv("VERCEL_ACCESS_TOKEN", ""), os.getenv("VERCEL_PROJECT_ID", "")
+        elif provider == "render":
+            return os.getenv("RENDER_API_KEY", ""), os.getenv("RENDER_SERVICE_ID", "")
+        return "", ""
+
+    @classmethod
+    async def get_vercel_deployments(cls, limit: int = 5) -> List[Dict[str, Any]]:
+        token, project_id = await cls._get_deploy_config("vercel")
         if not token:
             return []
+
         url = f"https://api.vercel.com/v6/deployments?limit={limit}"
         if project_id:
             url += f"&projectId={project_id}"
+
         headers = {"Authorization": f"Bearer {token}"}
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
@@ -472,23 +503,26 @@ class SiteMonitorService:
                     deployments = resp.json().get("deployments", [])
                     return [{
                         "id": d.get("uid"),
-                        "name": d.get("name"),
+                        "name": d.get("name", "ptv-tasks-administrator"),
                         "url": d.get("url"),
-                        "state": d.get("state") or d.get("readyState"),
+                        "state": d.get("state") or d.get("readyState", "READY"),
                         "created_at": d.get("created"),
-                        "commit_msg": d.get("meta", {}).get("githubCommitMessage", "Manual Deploy"),
+                        "commit_msg": d.get("meta", {}).get("githubCommitMessage", "Deploy commit"),
                         "commit_author": d.get("meta", {}).get("githubCommitAuthorName", "Developer"),
                         "provider": "vercel"
                     } for d in deployments]
+                else:
+                    logger.error(f"Vercel API trả về lỗi: HTTP {resp.status_code} - {resp.text}")
         except Exception as e:
-            logger.error(f"Lỗi Vercel API: {e}")
+            logger.error(f"Lỗi gọi Vercel API: {e}")
         return []
 
-    @staticmethod
-    async def get_vercel_logs(deployment_id: str) -> str:
-        token = os.getenv("VERCEL_ACCESS_TOKEN", "")
+    @classmethod
+    async def get_vercel_logs(cls, deployment_id: str) -> str:
+        token, _ = await cls._get_deploy_config("vercel")
         if not token:
-            return "Chưa cấu hình VERCEL_ACCESS_TOKEN"
+            return "Chưa cấu hình Vercel Access Token trong Supabase hoặc .env"
+
         url = f"https://api.vercel.com/v2/deployments/{deployment_id}/events"
         headers = {"Authorization": f"Bearer {token}"}
         try:
@@ -496,18 +530,22 @@ class SiteMonitorService:
                 resp = await client.get(url, headers=headers)
                 if resp.status_code == 200:
                     events = resp.json()
-                    lines = [e.get("text", "") for e in events if "text" in e]
-                    return "\n".join(lines) if lines else "Không có log chi tiết"
-                return f"Lỗi tải logs: HTTP {resp.status_code}"
+                    lines = []
+                    for e in events:
+                        text = e.get("text") or (e.get("payload", {}).get("text") if isinstance(e.get("payload"), dict) else None)
+                        if text:
+                            lines.append(text)
+                    return "\n".join(lines) if lines else "Không có event log chi tiết."
+                return f"Lỗi tải logs từ Vercel: HTTP {resp.status_code}\n{resp.text}"
         except Exception as e:
-            return f"Lỗi ngoại lệ Vercel: {e}"
+            return f"Lỗi ngoại lệ khi lấy logs Vercel: {e}"
 
-    @staticmethod
-    async def get_render_deployments(limit: int = 5) -> List[Dict[str, Any]]:
-        api_key = os.getenv("RENDER_API_KEY", "")
-        service_id = os.getenv("RENDER_SERVICE_ID", "")
+    @classmethod
+    async def get_render_deployments(cls, limit: int = 5) -> List[Dict[str, Any]]:
+        api_key, service_id = await cls._get_deploy_config("render")
         if not api_key or not service_id:
             return []
+
         url = f"https://api.render.com/v1/services/{service_id}/deploys?limit={limit}"
         headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
         try:
@@ -516,24 +554,26 @@ class SiteMonitorService:
                 if resp.status_code == 200:
                     deploys = resp.json()
                     return [{
-                        "id": d.get("deploy", {}).get("id"),
-                        "name": "Backend FastAPI Docker",
-                        "status": d.get("deploy", {}).get("status"),
-                        "created_at": d.get("deploy", {}).get("createdAt"),
-                        "commit_msg": d.get("deploy", {}).get("commit", {}).get("message", "Triggered Deploy"),
+                        "id": d.get("deploy", {}).get("id") or d.get("id"),
+                        "name": "ptv-tasks-backend",
+                        "status": d.get("deploy", {}).get("status") or d.get("status", "live"),
+                        "created_at": d.get("deploy", {}).get("createdAt") or d.get("createdAt"),
+                        "commit_msg": d.get("deploy", {}).get("commit", {}).get("message") or "Triggered Deploy",
                         "commit_author": "Deploy Bot",
                         "provider": "render"
                     } for d in deploys]
+                else:
+                    logger.error(f"Render API trả về lỗi: HTTP {resp.status_code} - {resp.text}")
         except Exception as e:
-            logger.error(f"Lỗi Render API: {e}")
+            logger.error(f"Lỗi gọi Render API: {e}")
         return []
 
-    @staticmethod
-    async def get_render_logs(deploy_id: str) -> str:
-        api_key = os.getenv("RENDER_API_KEY", "")
-        service_id = os.getenv("RENDER_SERVICE_ID", "")
+    @classmethod
+    async def get_render_logs(cls, deploy_id: str) -> str:
+        api_key, service_id = await cls._get_deploy_config("render")
         if not api_key or not service_id:
-            return "Chưa cấu hình RENDER_API_KEY hoặc RENDER_SERVICE_ID"
+            return "Chưa cấu hình Render API Key hoặc Service ID trong Supabase hoặc .env"
+
         url = f"https://api.render.com/v1/services/{service_id}/deploys/{deploy_id}/logs"
         headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
         try:
@@ -542,11 +582,12 @@ class SiteMonitorService:
                 if resp.status_code == 200:
                     logs_data = resp.json()
                     if isinstance(logs_data, list):
-                        return "\n".join([f"[{l.get('timestamp')}] {l.get('message')}" for l in logs_data])
+                        return "\n".join([f"[{l.get('timestamp', '')}] {l.get('message', '')}" for l in logs_data])
                     return str(logs_data)
-                return f"Lỗi tải Render logs: HTTP {resp.status_code}"
+                return f"Lỗi tải Render logs: HTTP {resp.status_code}\n{resp.text}"
         except Exception as e:
-            return f"Lỗi ngoại lệ Render: {e}"
+            return f"Lỗi ngoại lệ khi lấy Render logs: {e}"
+
 
 # ---------------------------------------------------------------------------
 # CRON JOB LẬP LỊCH TỰ ĐỘNG
