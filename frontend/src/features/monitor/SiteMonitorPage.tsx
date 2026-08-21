@@ -646,35 +646,51 @@ export const SiteMonitorPage: React.FC = () => {
           TAB 2: XÁC THỰC & PHÂN QUYỀN (AUTHENTICATED SYNTHETIC MONITOR)
           ══════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'auth_matrix' && (
-        <div className="space-y-4">
-          {/* Filter Bar & Legend */}
+        <div className="space-y-4 max-w-full overflow-hidden">
+          {/* Header Action & Filter Bar */}
           <div className="bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3 shadow-xs">
-            <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4 text-slate-400" />
-              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Lọc theo Site:</span>
-              <select
-                value={authFilterSite}
-                onChange={e => setAuthFilterSite(e.target.value)}
-                className="text-xs bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-700 dark:text-slate-200 focus:outline-none"
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <Filter className="w-4 h-4 text-slate-400" />
+                <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Lọc Site:</span>
+                <select
+                  value={authFilterSite}
+                  onChange={e => setAuthFilterSite(e.target.value)}
+                  className="text-xs bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer"
+                >
+                  <option value="ALL">Tất cả Sites (16 tài khoản)</option>
+                  <option value="pythaverse_main">Pythaverse Main Portal (7 Roles)</option>
+                  <option value="ide">Pythaverse IDE</option>
+                  <option value="avatar">Avatar 3D</option>
+                  <option value="learn">LMS Learn</option>
+                  <option value="learn_s">LMS Learn Staging</option>
+                  <option value="git">Pythaverse Git</option>
+                  <option value="note">Jupyter Note</option>
+                  <option value="contest">Contest & Competitions</option>
+                  <option value="digitaltwin">Digital Twin Simulation</option>
+                  <option value="iot">IoT Pythaverse Hub</option>
+                </select>
+              </div>
+
+              <button
+                onClick={handleRunAuthChecks}
+                disabled={runningAuthCheck || authLoading}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-300 dark:disabled:bg-slate-700 text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer"
               >
-                <option value="ALL">Tất cả Sites (16 tài khoản)</option>
-                <option value="pythaverse_main">Pythaverse Main Portal (7 Roles)</option>
-                <option value="ide">Pythaverse IDE</option>
-                <option value="learn">LMS Learn</option>
-                <option value="git">Pythaverse Git</option>
-                <option value="contest">Contest & Competitions</option>
-              </select>
+                <Key className={`w-3.5 h-3.5 ${runningAuthCheck ? 'animate-spin' : ''}`} />
+                {runningAuthCheck ? 'Đang quét 16 tài khoản...' : '🚀 Chạy Kiểm Tra Xác Thực Ngay'}
+              </button>
             </div>
 
             <div className="flex items-center gap-4 text-xs text-slate-500">
               <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" /> PASS (Token & Route OK)
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" /> PASS
               </span>
               <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" /> WARNING (SSO OK, Route 403)
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" /> WARNING
               </span>
               <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block" /> FAIL (Lỗi đăng nhập/Hỏng Route)
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block" /> FAIL
               </span>
             </div>
           </div>
@@ -682,31 +698,37 @@ export const SiteMonitorPage: React.FC = () => {
           {/* Table Matrix */}
           <div className="bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl overflow-hidden shadow-xs">
             <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200/80 dark:border-slate-700">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-50/90 dark:bg-slate-900/80 border-b border-slate-200/80 dark:border-slate-700">
                   <tr>
-                    {['Site ID', 'Vai Trò', 'Đường Dẫn Kiểm Tra', 'Trạng Thái', 'Độ Trễ', 'Chi Tiết Phản Hồi', 'Thời Điểm Check'].map(h => (
-                      <th key={h} className="px-4 py-3.5 text-left text-[11px] font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider">
-                        {h}
-                      </th>
-                    ))}
+                    <th className="px-4 py-3.5 font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider w-32">Site ID</th>
+                    <th className="px-4 py-3.5 font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider w-28">Vai Trò</th>
+                    <th className="px-4 py-3.5 font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider w-44">Tài Khoản Test</th>
+                    <th className="px-4 py-3.5 font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider">Target Route</th>
+                    <th className="px-4 py-3.5 font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider text-center w-24">Trạng Thái</th>
+                    <th className="px-4 py-3.5 font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider text-center w-20">Độ Trễ</th>
+                    <th className="px-4 py-3.5 font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider">Chi Tiết Phản Hồi</th>
+                    <th className="px-4 py-3.5 font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider w-36 text-right">Thời Điểm Check</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
                   {filteredAuthChecks.map((item, idx) => (
                     <tr key={idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/60 transition">
-                      <td className="px-4 py-3 font-mono font-semibold text-indigo-600 dark:text-indigo-400">
+                      <td className="px-4 py-3 font-mono font-semibold text-indigo-600 dark:text-indigo-400 whitespace-nowrap">
                         {item.site_id}
                       </td>
-                      <td className="px-4 py-3 font-bold text-slate-800 dark:text-slate-100">
-                        <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200/60 dark:border-indigo-500/30 text-indigo-700 dark:text-indigo-300">
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200/60 dark:border-indigo-500/30 text-indigo-700 dark:text-indigo-300 font-bold text-[11px]">
                           {item.role_label}
                         </span>
                       </td>
-                      <td className="px-4 py-3 font-mono text-slate-700 dark:text-slate-300 max-w-xs truncate" title={item.expected_path}>
+                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300 font-mono text-[11px] whitespace-nowrap">
+                        {item.username}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-slate-700 dark:text-slate-300 max-w-[200px] truncate" title={item.expected_path}>
                         {item.expected_path}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 text-center whitespace-nowrap">
                         <span className={`inline-flex items-center gap-1 font-bold text-[10px] px-2 py-0.5 rounded-full border ${item.status === 'PASS'
                           ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30'
                           : item.status === 'WARNING'
@@ -721,13 +743,13 @@ export const SiteMonitorPage: React.FC = () => {
                           {item.status}
                         </span>
                       </td>
-                      <td className="px-4 py-3 font-mono font-semibold text-slate-700 dark:text-slate-300">
+                      <td className="px-4 py-3 font-mono font-semibold text-slate-700 dark:text-slate-300 text-center whitespace-nowrap">
                         {item.latency_ms > 0 ? `${item.latency_ms}ms` : '—'}
                       </td>
-                      <td className="px-4 py-3 text-slate-500 dark:text-slate-400 max-w-xs truncate">
+                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300 max-w-[240px] truncate" title={item.details}>
                         {item.details || '—'}
                       </td>
-                      <td className="px-4 py-3 text-[11px] text-slate-400 dark:text-slate-500 font-mono whitespace-nowrap">
+                      <td className="px-4 py-3 text-[11px] text-slate-400 dark:text-slate-500 font-mono whitespace-nowrap text-right">
                         {item.last_checked_at || 'Chưa check'}
                       </td>
                     </tr>

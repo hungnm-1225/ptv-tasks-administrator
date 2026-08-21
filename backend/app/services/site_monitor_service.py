@@ -269,23 +269,25 @@ class SiteMonitorService:
         }
 
         try:
-            # Tăng timeout lên 30s để Moodle và Digital Twin hoàn tất OIDC token exchange
-            async with httpx.AsyncClient(verify=False, timeout=30.0, follow_redirects=True, headers=headers) as client:
-                # 1. Truy cập Entrypoint
+            async with httpx.AsyncClient(verify=False, timeout=25.0, follow_redirects=True, headers=headers) as client:
+                # BƯỚC 1: Truy cập Entrypoint
                 init_resp = await client.get(auth_entry_url)
 
-                # Nếu site không cần login mà vào thẳng
+                # Nếu trang đích mở sẵn (không cần login)
                 if "eid.pythaverse.space" not in str(init_resp.url):
                     if 200 <= init_resp.status_code < 400:
                         result["status"] = "PASS"
+                        result["route_accessible"] = True
                         result["latency_ms"] = int((time.time() - start_time) * 1000)
                         result["details"] = f"Phiên hoạt động sẵn sàng — HTTP {init_resp.status_code}"
+                        # Lưu DB ngay
+                        SiteMonitorService._save_cred_result_to_db(cred.get("id"), result)
                         return result
 
-                # 2. Bóc tách Action form Keycloak
+                # BƯỚC 2: Lấy Action URL của Keycloak
                 action_url = extract_keycloak_form_action(init_resp.text) or str(init_resp.url)
 
-                # 3. Gửi thông tin đăng nhập lên Keycloak
+                # BƯỚC 3: Submit User/Password
                 login_payload = {
                     "username": username,
                     "password": password,
@@ -298,30 +300,32 @@ class SiteMonitorService:
                 }
                 login_resp = await client.post(action_url, data=login_payload, headers=post_headers)
 
-                # 4. TỰ ĐỘNG CHUYỂN TIẾP FORM POST ẨN (Dành riêng cho Moodle LMS & Digital Twin)
+                # BƯỚC 4: Tự động chuyển tiếp Form Post OIDC (Moodle LMS & Digital Twin)
                 post_action, post_inputs = handle_any_auto_form_post(login_resp.text)
                 if post_action and post_inputs:
-                    # Gửi code & state về Moodle /auth/oidc/ hoặc Digital Twin
                     login_resp = await client.post(post_action, data=post_inputs)
 
                 final_url = str(login_resp.url)
 
-                # 5. Kiểm tra lỗi sai Password
-                if "login-actions/authenticate" in final_url and any(err in login_resp.text for err in ["Invalid username or password", "alert-error", "kc-feedback-text"]):
-                    result["status"] = "FAIL"
+                # BƯỚC 5: KIỂM TRA NẾU BỊ KẸT LẠI TRANG LOGIN KEYCLOAK (Sai mật khẩu / Tài khoản bị khóa)
+                if "eid.pythaverse.space" in final_url or "kc-form-login" in login_resp.text:
                     result["latency_ms"] = int((time.time() - start_time) * 1000)
-                    result["details"] = "Sai tên đăng nhập hoặc mật khẩu"
+                    result["status"] = "FAIL"
+                    if "Invalid username or password" in login_resp.text or "alert-error" in login_resp.text:
+                        result["details"] = "Sai tên đăng nhập hoặc mật khẩu"
+                    else:
+                        result["details"] = "Keycloak từ chối xác thực (Kẹt trang login)"
+                    SiteMonitorService._save_cred_result_to_db(cred.get("id"), result)
                     return result
 
                 result["token_acquired"] = True
 
-                # 6. Kiểm tra Route đích
+                # BƯỚC 6: Kiểm tra Route đích sau khi đã có Session
                 if expected_path.startswith("http"):
                     target_check_url = expected_path
                 else:
                     target_check_url = f"{root_origin}/{expected_path.lstrip('/')}"
 
-                # Nếu chưa ở đúng target route, request thêm 1 lần với Session Cookies đã có
                 if expected_path not in ("/", "") and target_check_url.rstrip("/") != final_url.rstrip("/"):
                     route_resp = await client.get(target_check_url)
                     check_status = route_resp.status_code
@@ -333,7 +337,6 @@ class SiteMonitorService:
                 total_latency = int((time.time() - start_time) * 1000)
                 result["latency_ms"] = total_latency
 
-                # Điều kiện Pass: HTTP 200..399 và không bị kẹt lại ở Keycloak
                 if (200 <= check_status < 400) and "eid.pythaverse.space" not in check_url:
                     result["status"] = "PASS"
                     result["route_accessible"] = True
@@ -346,27 +349,34 @@ class SiteMonitorService:
                     result["details"] = f"Lỗi truy cập Route: HTTP {check_status}"
 
         except httpx.TimeoutException:
-            result["latency_ms"] = 30000
+            result["latency_ms"] = 25000
             result["status"] = "FAIL"
-            result["details"] = "Quá thời gian xác thực (Timeout > 30s)"
+            result["details"] = "Quá thời gian xác thực (Timeout > 25s)"
         except Exception as e:
             result["status"] = "FAIL"
             result["details"] = f"Lỗi: {str(e)[:80]}"
 
-        # Lưu kết quả bền vững vào Supabase
+        # BƯỚC 7: LƯU TRỰC TIẾP VÀO SUPABASE (Không bao giờ bị mất)
+        SiteMonitorService._save_cred_result_to_db(cred.get("id"), result)
+        return result
+
+    @staticmethod
+    def _save_cred_result_to_db(cred_id: Optional[str], result: dict):
+        """Hàm lưu kết quả chắc chắn vào database Supabase"""
+        if not cred_id:
+            return
         db = get_supabase()
-        if db and cred.get("id"):
+        if db:
             try:
                 db.table("site_monitor_credentials").update({
                     "last_status": result["status"],
                     "last_latency_ms": result["latency_ms"],
                     "last_checked_at": now_vn().isoformat(),
                     "details": result["details"]
-                }).eq("id", cred["id"]).execute()
-            except Exception:
-                pass
+                }).eq("id", cred_id).execute()
+            except Exception as e:
+                logger.error(f"Lỗi lưu Supabase site_monitor_credentials: {e}")
 
-        return result
 
     @classmethod
     async def get_and_check_auth_matrix(cls) -> List[Dict[str, Any]]:
