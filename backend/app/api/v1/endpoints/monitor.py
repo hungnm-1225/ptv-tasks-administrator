@@ -1,7 +1,13 @@
 # backend/app/api/v1/endpoints/monitor.py
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException
 from typing import Optional, Dict, Any, List
-from app.services.site_monitor_service import SiteMonitorService, get_uptime_history, get_incident_log, get_supabase
+from app.services.site_monitor_service import (
+    SiteMonitorService,
+    get_uptime_history,
+    get_hourly_uptime_history,
+    get_incident_log,
+    get_supabase
+)
 
 router = APIRouter()
 
@@ -30,6 +36,10 @@ async def check_single_site(site_id: str):
 async def get_site_history(site_id: str, days: int = 45):
     return {"history": get_uptime_history(site_id, days)}
 
+@router.get("/sites/{site_id}/hourly")
+async def get_site_hourly_history(site_id: str, hours: int = 24):
+    return {"history": get_hourly_uptime_history(site_id, hours)}
+
 @router.get("/incidents")
 async def get_incidents(limit: int = 50):
     return {"incidents": get_incident_log(limit)}
@@ -42,7 +52,6 @@ async def get_auth_matrix():
         return {"credentials": []}
     resp = db.table("site_monitor_credentials").select("id, site_id, role_label, username, expected_path, last_status, last_latency_ms, last_checked_at, details").eq("is_active", True).execute()
     data = resp.data or []
-    # Map sang cấu trúc status cho UI
     mapped = [{
         "id": d.get("id"),
         "site_id": d.get("site_id"),
