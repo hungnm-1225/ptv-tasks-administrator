@@ -1,5 +1,5 @@
 // frontend/src/features/inbox/UnifiedInboxPage.tsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Sparkles,
@@ -84,7 +84,7 @@ const stripHtmlTags = (htmlString: string | null | undefined): string => {
     .trim();
 };
 
-// 🎯 HÀM CHUẨN HÓA NGÀY GIỜ CHI TIẾT (HH:mm - DD/MM/YYYY)
+// Chuẩn hóa ngày giờ (HH:mm - DD/MM/YYYY)
 const formatDateTime = (dateStr?: string | null): string => {
   if (!dateStr) return '';
   try {
@@ -101,10 +101,32 @@ const formatDateTime = (dateStr?: string | null): string => {
   }
 };
 
+// Icon nhỏ bổ trợ cho file Excel
+const FileSpreadsheetIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className || 'w-4 h-4'}
+  >
+    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+    <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+    <path d="M8 13h2" />
+    <path d="M14 13h2" />
+    <path d="M8 17h2" />
+    <path d="M14 17h2" />
+  </svg>
+);
+
 export const UnifiedInboxPage: React.FC = () => {
   const navigate = useNavigate();
 
   // State bộ lọc và sắp xếp
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedSource, setSelectedSource] = useState<string>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
@@ -144,13 +166,14 @@ export const UnifiedInboxPage: React.FC = () => {
   const [schoolSearchQuery, setSchoolSearchQuery] = useState<string>('');
   const [isSchoolDropdownOpen, setIsSchoolDropdownOpen] = useState<boolean>(false);
   const schoolDropdownRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-  const SPREADSHEET_ID = "1rZgFBD2PuZWL1jvQefcYZztCQvo99Lhx0GATTKvj1Go";
+  const SPREADSHEET_ID = '1rZgFBD2PuZWL1jvQefcYZztCQvo99Lhx0GATTKvj1Go';
 
   const loadTickets = async () => {
     setLoading(true);
     try {
-      let endpoint = `/tickets?sort=${sortOrder}&status=${selectedStatus}&category=${selectedCategory}&source=${selectedSource}`;
+      const endpoint = `/tickets?sort=${sortOrder}&status=${selectedStatus}&category=${selectedCategory}&source=${selectedSource}`;
       const data = await fetchApi<InboxTicket[]>(endpoint);
       setTickets(data || []);
     } catch (err) {
@@ -194,7 +217,35 @@ export const UnifiedInboxPage: React.FC = () => {
     loadTickets();
   }, [selectedCategory, selectedSource, selectedStatus, sortOrder]);
 
-  // 🎯 HÀM MỞ TRANG GỐC CHUẨN XÁC 100%
+  // 🚀 TÌM KIẾM BẰNG useMemo (Tốc độ tức thì 0ms trên đa trường)
+  const filteredTickets = useMemo(() => {
+    if (!searchQuery.trim()) return tickets;
+    const query = searchQuery.trim().toLowerCase();
+
+    return tickets.filter((t) => {
+      const matchSubject = t.subject?.toLowerCase().includes(query);
+      const matchSender = t.sender_email?.toLowerCase().includes(query);
+      const matchSubmitter = t.submitter_name?.toLowerCase().includes(query);
+      const matchSummary = t.ai_summary?.toLowerCase().includes(query);
+      const matchSourceId = t.source_id?.toLowerCase().includes(query);
+      const matchRaw = t.raw_content?.toLowerCase().includes(query);
+      const matchCountry = t.country?.toLowerCase().includes(query);
+      const matchSchoolMeta = t.metadata?.school_name?.toLowerCase().includes(query);
+
+      return (
+        matchSubject ||
+        matchSender ||
+        matchSubmitter ||
+        matchSummary ||
+        matchSourceId ||
+        matchRaw ||
+        matchCountry ||
+        matchSchoolMeta
+      );
+    });
+  }, [tickets, searchQuery]);
+
+  // Mở trang gốc
   const getDirectSourceUrl = (ticket: InboxTicket) => {
     if (ticket.source === 'gmail') {
       return `https://mail.google.com/mail/u/0/#search/id%3A${ticket.source_id}`;
@@ -268,10 +319,14 @@ export const UnifiedInboxPage: React.FC = () => {
     setTaskModalTicket(ticket);
 
     const fullText = `${ticket.subject || ''} ${ticket.raw_content || ''} ${ticket.submitter_name || ''} ${ticket.metadata?.school_name || ''}`.toLowerCase();
-    const matchedSchool = schoolsList.find(s =>
-      fullText.includes(s.school_name.toLowerCase()) ||
-      fullText.includes(s.school_code.toLowerCase())
-    ) || schoolsList[0] || null;
+    const matchedSchool =
+      schoolsList.find(
+        (s) =>
+          fullText.includes(s.school_name.toLowerCase()) ||
+          fullText.includes(s.school_code.toLowerCase())
+      ) ||
+      schoolsList[0] ||
+      null;
 
     setSelectedSchool(matchedSchool);
     setSchoolSearchQuery(matchedSchool ? `${matchedSchool.school_name} (${matchedSchool.school_code})` : '');
@@ -296,24 +351,24 @@ export const UnifiedInboxPage: React.FC = () => {
       sender_email: ticket.sender_email
     };
 
-    const firstAttachmentUrl = ticket.attachments?.[0]?.url || "";
+    const firstAttachmentUrl = ticket.attachments?.[0]?.url || '';
 
     if (bType === 'workspace_rpa') {
       payload = {
-        action: "bulk_account_creation",
+        action: 'bulk_account_creation',
         ticket_id: ticket.id,
-        school_name: school?.school_name || "Pythaverse School Demo",
+        school_name: school?.school_name || 'Pythaverse School Demo',
         attachment_url: firstAttachmentUrl,
         hierarchy: {
-          school_name: school?.school_name || "Pythaverse School Demo",
-          school_code: school?.school_code || "SCH_10266",
-          partner_name: school?.partner_name || "Partner DTTE test",
-          distributor_name: school?.distributor_name || "PTV Distributor Demo"
+          school_name: school?.school_name || 'Pythaverse School Demo',
+          school_code: school?.school_code || 'SCH_10266',
+          partner_name: school?.partner_name || 'Partner DTTE test',
+          distributor_name: school?.distributor_name || 'PTV Distributor Demo'
         },
         order_details: {
           contact_info: ticket.sender_email,
           additional_notes: `Auto Order from Ticket #${ticket.source_id || ticket.id.slice(0, 8)}`,
-          courses: courses.map(c => ({
+          courses: courses.map((c) => ({
             category: c.category,
             course_id: c.course_id,
             course_name: c.course_name,
@@ -326,17 +381,17 @@ export const UnifiedInboxPage: React.FC = () => {
       };
     } else if (bType === 'keycloak_api') {
       payload = {
-        action: "reset_password",
+        action: 'reset_password',
         target_email: ticket.sender_email,
-        temp_pass: "Ptv@2026",
+        temp_pass: 'Ptv@2026',
         ticket_id: ticket.id
       };
     } else if (bType === 'feedback_doc_triage') {
       payload = {
-        action: "comment_and_assign",
-        doc_url: ticket.doc_url || "",
-        assignee_email: ticket.assigned_email || "hung.nguyenmanh@dtt.vn",
-        category: ticket.category || "other",
+        action: 'comment_and_assign',
+        doc_url: ticket.doc_url || '',
+        assignee_email: ticket.assigned_email || 'hung.nguyenmanh@dtt.vn',
+        category: ticket.category || 'other',
         row_index: ticket.metadata?.row_index || 2,
         ticket_id: ticket.id
       };
@@ -346,7 +401,7 @@ export const UnifiedInboxPage: React.FC = () => {
   };
 
   const handleAddCourseRow = () => {
-    const defaultCourse = coursesList.find(c => c.category === 'SWRP') || coursesList[0] || {
+    const defaultCourse = coursesList.find((c) => c.category === 'SWRP') || coursesList[0] || {
       course_id: 766,
       category: 'SWRP',
       course_name: 'SWRP 1: Exploring the Miniature World with PMinetest (EN)',
@@ -383,7 +438,7 @@ export const UnifiedInboxPage: React.FC = () => {
   const handleCourseRowChange = (index: number, field: keyof OrderCourseSelection, value: any) => {
     const updated = [...selectedCourses];
     if (field === 'category') {
-      const matchingCourses = coursesList.filter(c => c.category === value);
+      const matchingCourses = coursesList.filter((c) => c.category === value);
       const firstCourse = matchingCourses[0] || coursesList[0];
       if (firstCourse) {
         updated[index] = {
@@ -395,7 +450,7 @@ export const UnifiedInboxPage: React.FC = () => {
         };
       }
     } else if (field === 'course_id') {
-      const selectedObj = coursesList.find(c => c.course_id === parseInt(value));
+      const selectedObj = coursesList.find((c) => c.course_id === parseInt(value));
       if (selectedObj) {
         updated[index] = {
           ...updated[index],
@@ -422,9 +477,9 @@ export const UnifiedInboxPage: React.FC = () => {
         body: JSON.stringify({ cof_text: taskModalTicket.raw_content || taskModalTicket.subject })
       });
 
-      const matchedSch = schoolsList.find(s =>
-        s.school_name.toLowerCase().includes(res.school_name.toLowerCase())
-      ) || selectedSchool;
+      const matchedSch =
+        schoolsList.find((s) => s.school_name.toLowerCase().includes(res.school_name?.toLowerCase() || '')) ||
+        selectedSchool;
 
       if (matchedSch) {
         setSelectedSchool(matchedSch);
@@ -464,7 +519,7 @@ export const UnifiedInboxPage: React.FC = () => {
           ticket_id: taskModalTicket.id,
           bot_type: selectedBotType,
           payload_data: parsedPayload
-        }),
+        })
       });
 
       toast.success(
@@ -549,77 +604,116 @@ export const UnifiedInboxPage: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      {/* Header Tiêu đề */}
-      <div>
-        <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">Unified Inbox Feed</h2>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          Hợp nhất yêu cầu từ Gmail Workspace, Google Form và OS Ticket với sự hỗ trợ từ Gemini AI Triage.
-        </p>
-      </div>
-
-      {/* THANH CÔNG CỤ COMPACT: 3 DROPDOWNS + SẮP XẾP */}
-      <div className="bg-white dark:bg-slate-800/90 p-3 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 shadow-xs flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-2.5 flex-wrap flex-1 min-w-0">
-
-          {/* 1. Nguồn */}
-          <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 shadow-2xs">
-            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">Nguồn:</span>
-            <select
-              value={selectedSource}
-              onChange={(e) => setSelectedSource(e.target.value)}
-              className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
-            >
-              <option value="all" className="bg-white dark:bg-slate-800">Tất cả Nguồn</option>
-              <option value="gmail" className="bg-white dark:bg-slate-800">✉️ Gmail</option>
-              <option value="google_form" className="bg-white dark:bg-slate-800">📝 Google Form</option>
-              <option value="osticket" className="bg-white dark:bg-slate-800">🎫 OS Ticket</option>
-            </select>
-          </div>
-
-          {/* 2. Phân loại */}
-          <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 shadow-2xs">
-            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">Phân loại:</span>
-            <select
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
-              className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
-            >
-              <option value="all" className="bg-white dark:bg-slate-800">Tất cả Category</option>
-              <option value="bug" className="bg-white dark:bg-slate-800">🐛 System Bugs</option>
-              <option value="account_keycloak" className="bg-white dark:bg-slate-800">🔑 Keycloak/Account</option>
-              <option value="lms_enroll" className="bg-white dark:bg-slate-800">🎓 LMS Enroll</option>
-              <option value="license" className="bg-white dark:bg-slate-800">📜 License</option>
-              <option value="other" className="bg-white dark:bg-slate-800">📌 Khác</option>
-            </select>
-          </div>
-
-          {/* 3. Trạng thái */}
-          <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 shadow-2xs">
-            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">Trạng thái:</span>
-            <select
-              value={selectedStatus}
-              onChange={(e) => setSelectedStatus(e.target.value)}
-              className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
-            >
-              <option value="all" className="bg-white dark:bg-slate-800">Tất cả Trạng Thái</option>
-              <option value="pending" className="bg-white dark:bg-slate-800">⏳ Chờ Xử Lý</option>
-              <option value="processing" className="bg-white dark:bg-slate-800">🔄 Đang Xử Lý (Bot)</option>
-              <option value="completed" className="bg-white dark:bg-slate-800">✅ Đã Giải Quyết</option>
-              <option value="dismissed" className="bg-white dark:bg-slate-800">🗑️ Đã Bỏ Qua</option>
-            </select>
-          </div>
-
+      {/* Header Tiêu đề & Tổng quan số lượng */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">Unified Inbox Feed</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            Hợp nhất yêu cầu từ Gmail Workspace, Google Form và OS Ticket với sự hỗ trợ từ Gemini AI Triage.
+          </p>
         </div>
 
-        {/* Nút Sắp Xếp */}
-        <button
-          onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-300 shadow-2xs transition shrink-0 cursor-pointer"
-        >
-          <ArrowUpDown className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
-          <span>{sortOrder === 'desc' ? "Mới nhất ➔ Cũ nhất" : "Cũ nhất ➔ Mới nhất"}</span>
-        </button>
+        {/* Badge thống kê nhanh */}
+        <div className="flex items-center gap-2 text-xs font-semibold">
+          <span className="px-3 py-1 bg-violet-50 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300 border border-violet-200/80 dark:border-violet-800/50 rounded-xl shadow-2xs">
+            Tổng cộng: {tickets.length} ticket
+          </span>
+          {searchQuery.trim() && (
+            <span className="px-3 py-1 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/50 rounded-xl shadow-2xs animate-in fade-in">
+              Khớp tìm kiếm: {filteredTickets.length}
+            </span>
+          )}
+        </div>
+      </div>
 
+      {/* THANH CÔNG CỤ TỐI ƯU: THANH TÌM KIẾM NHANH + 3 DROPDOWNS + SẮP XẾP */}
+      <div className="bg-white dark:bg-slate-800/90 p-3.5 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 shadow-xs space-y-3">
+        {/* Hàng 1: Thanh Tìm Kiếm Tức Thì (Instant Search Input) */}
+        <div className="relative w-full">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Tìm nhanh theo tiêu đề, người gửi, tóm tắt AI, mã ID, nội dung, trường học..."
+            className="w-full pl-10 pr-10 py-2.5 bg-slate-50 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-900 dark:text-slate-100 placeholder-slate-400 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 transition-all shadow-2xs"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => {
+                setSearchQuery('');
+                searchInputRef.current?.focus();
+              }}
+              title="Xóa tìm kiếm"
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-md transition cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Hàng 2: Bộ lọc Dropdowns + Nút Đảo Sắp Xếp */}
+        <div className="flex items-center justify-between flex-wrap gap-2.5 pt-1 border-t border-slate-100 dark:border-slate-700/50">
+          <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">
+            {/* 1. Nguồn */}
+            <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 shadow-2xs">
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">Nguồn:</span>
+              <select
+                value={selectedSource}
+                onChange={(e) => setSelectedSource(e.target.value)}
+                className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
+              >
+                <option value="all" className="bg-white dark:bg-slate-800">Tất cả Nguồn</option>
+                <option value="gmail" className="bg-white dark:bg-slate-800">✉️ Gmail</option>
+                <option value="google_form" className="bg-white dark:bg-slate-800">📝 Google Form</option>
+                <option value="osticket" className="bg-white dark:bg-slate-800">🎫 OS Ticket</option>
+              </select>
+            </div>
+
+            {/* 2. Phân loại */}
+            <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 shadow-2xs">
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">Phân loại:</span>
+              <select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
+              >
+                <option value="all" className="bg-white dark:bg-slate-800">Tất cả Category</option>
+                <option value="bug" className="bg-white dark:bg-slate-800">🐛 System Bugs</option>
+                <option value="account_keycloak" className="bg-white dark:bg-slate-800">🔑 Keycloak/Account</option>
+                <option value="lms_enroll" className="bg-white dark:bg-slate-800">🎓 LMS Enroll</option>
+                <option value="license" className="bg-white dark:bg-slate-800">📜 License</option>
+                <option value="other" className="bg-white dark:bg-slate-800">📌 Khác</option>
+              </select>
+            </div>
+
+            {/* 3. Trạng thái */}
+            <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 shadow-2xs">
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">Trạng thái:</span>
+              <select
+                value={selectedStatus}
+                onChange={(e) => setSelectedStatus(e.target.value)}
+                className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
+              >
+                <option value="all" className="bg-white dark:bg-slate-800">Tất cả Trạng Thái</option>
+                <option value="pending" className="bg-white dark:bg-slate-800">⏳ Chờ Xử Lý</option>
+                <option value="processing" className="bg-white dark:bg-slate-800">🔄 Đang Xử Lý (Bot)</option>
+                <option value="completed" className="bg-white dark:bg-slate-800">✅ Đã Giải Quyết</option>
+                <option value="dismissed" className="bg-white dark:bg-slate-800">🗑️ Đã Bỏ Qua</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Nút Đảo Sắp Xếp */}
+          <button
+            onClick={() => setSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'))}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-300 shadow-2xs transition shrink-0 cursor-pointer"
+          >
+            <ArrowUpDown className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
+            <span>{sortOrder === 'desc' ? 'Mới nhất ➔ Cũ nhất' : 'Cũ nhất ➔ Mới nhất'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Ticket List */}
@@ -628,14 +722,26 @@ export const UnifiedInboxPage: React.FC = () => {
           <Loader2 className="w-7 h-7 animate-spin text-violet-600" />
           <span className="text-xs font-medium">Đang nạp danh sách ticket...</span>
         </div>
-      ) : tickets.length === 0 ? (
+      ) : filteredTickets.length === 0 ? (
         <div className="bg-white dark:bg-slate-800 p-12 text-center rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-3">
           <Inbox className="w-10 h-10 mx-auto text-slate-400" />
-          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">Không có ticket nào trong bộ lọc này</h3>
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+            {searchQuery
+              ? `Không tìm thấy ticket nào khớp với từ khóa "${searchQuery}"`
+              : 'Không có ticket nào trong bộ lọc này'}
+          </h3>
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="text-xs font-semibold text-violet-600 hover:underline cursor-pointer"
+            >
+              Xóa bộ lọc tìm kiếm
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-4">
-          {tickets.map((ticket) => {
+          {filteredTickets.map((ticket) => {
             const isExpanded = expandedContent[ticket.id] || false;
             const directUrl = getDirectSourceUrl(ticket);
             const attachments = ticket.attachments || ticket.metadata?.attachments || [];
@@ -645,7 +751,10 @@ export const UnifiedInboxPage: React.FC = () => {
             const displayTime = formatDateTime(ticket.created_at || ticket.ticket_timestamp);
 
             return (
-              <div key={ticket.id} className="bg-white dark:bg-slate-800 p-5 sm:p-6 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 hover:border-slate-300 dark:hover:border-slate-600 space-y-4 shadow-xs transition-all">
+              <div
+                key={ticket.id}
+                className="bg-white dark:bg-slate-800 p-5 sm:p-6 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 hover:border-slate-300 dark:hover:border-slate-600 space-y-4 shadow-xs transition-all"
+              >
                 {/* Card Header */}
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-2 flex-1 min-w-0">
@@ -673,7 +782,7 @@ export const UnifiedInboxPage: React.FC = () => {
                         {ticket.submitter_name || ticket.sender_email}
                       </span>
 
-                      {/* 🎯 HIỂN THỊ ĐẦY ĐỦ NGÀY + GIỜ */}
+                      {/* HIỂN THỊ ĐẦY ĐỦ NGÀY + GIỜ */}
                       <span className="text-xs text-slate-400 flex items-center gap-1">
                         <Calendar className="w-3 h-3" />
                         <span>{displayTime}</span>
@@ -684,12 +793,16 @@ export const UnifiedInboxPage: React.FC = () => {
                       {ticket.subject || 'Không có tiêu đề'}
                     </h3>
 
-                    {/* 🎯 HIỂN THỊ DANH SÁCH FILE ĐÍNH KÈM (XLSX, PNG, PDF...) */}
+                    {/* HIỂN THỊ DANH SÁCH FILE ĐÍNH KÈM */}
                     {attachments.length > 0 && (
                       <div className="flex items-center gap-2 flex-wrap pt-1">
                         {attachments.map((file: any, idx: number) => {
-                          const isExcel = file.filename?.endsWith('.xlsx') || file.filename?.endsWith('.xls');
-                          const isImage = file.filename?.endsWith('.png') || file.filename?.endsWith('.jpg') || file.filename?.endsWith('.jpeg');
+                          const isExcel =
+                            file.filename?.endsWith('.xlsx') || file.filename?.endsWith('.xls');
+                          const isImage =
+                            file.filename?.endsWith('.png') ||
+                            file.filename?.endsWith('.jpg') ||
+                            file.filename?.endsWith('.jpeg');
 
                           return (
                             <button
@@ -732,11 +845,15 @@ export const UnifiedInboxPage: React.FC = () => {
                     <span>Tóm tắt & Đề xuất tự động từ Gemini AI</span>
                   </div>
                   <p className="text-xs text-slate-800 dark:text-slate-200 leading-relaxed font-normal">
-                    {ticket.ai_summary || "Hệ thống đã nhận thông tin và đang chờ Gemini AI phân tích..."}
+                    {ticket.ai_summary || 'Hệ thống đã nhận thông tin và đang chờ Gemini AI phân tích...'}
                   </p>
                   {ticket.assigned_name && (
                     <div className="text-[11px] text-slate-500 pt-2 border-t border-violet-200/60 dark:border-violet-800/40">
-                      👤 Phân công đề xuất: <strong className="text-violet-700 dark:text-violet-300 font-semibold">{ticket.assigned_name}</strong> ({ticket.assigned_email})
+                      👤 Phân công đề xuất:{' '}
+                      <strong className="text-violet-700 dark:text-violet-300 font-semibold">
+                        {ticket.assigned_name}
+                      </strong>{' '}
+                      ({ticket.assigned_email})
                     </div>
                   )}
                 </div>
@@ -744,23 +861,27 @@ export const UnifiedInboxPage: React.FC = () => {
                 {/* Nội dung gốc mở rộng */}
                 {isExpanded && (
                   <div className="p-4 bg-slate-50 dark:bg-slate-900/90 rounded-xl border border-slate-200 dark:border-slate-800 text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap max-h-72 overflow-y-auto font-mono leading-relaxed shadow-inner">
-                    {cleanRawContent || "(Không có nội dung văn bản gốc)"}
+                    {cleanRawContent || '(Không có nội dung văn bản gốc)'}
                   </div>
                 )}
 
                 {/* Footer Buttons */}
                 <div className="flex items-center justify-between pt-1 flex-wrap gap-2">
-
                   <div className="flex items-center gap-3">
-
                     <button
                       type="button"
-                      onClick={() => setExpandedContent(prev => ({ ...prev, [ticket.id]: !prev[ticket.id] }))}
+                      onClick={() =>
+                        setExpandedContent((prev) => ({ ...prev, [ticket.id]: !prev[ticket.id] }))
+                      }
                       className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 font-medium transition cursor-pointer"
                     >
                       <FileCode className="w-3.5 h-3.5 text-slate-400" />
-                      <span>{isExpanded ? "Thu gọn nội dung gốc" : "Xem nội dung gốc"}</span>
-                      {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                      <span>{isExpanded ? 'Thu gọn nội dung gốc' : 'Xem nội dung gốc'}</span>
+                      {isExpanded ? (
+                        <ChevronUp className="w-3.5 h-3.5" />
+                      ) : (
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      )}
                     </button>
                   </div>
 
@@ -771,7 +892,11 @@ export const UnifiedInboxPage: React.FC = () => {
                         disabled={actionLoading === ticket.id}
                         className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium rounded-xl transition shadow-2xs cursor-pointer"
                       >
-                        {actionLoading === ticket.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                        {actionLoading === ticket.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        )}
                         <span>Khôi phục Hòm Thư</span>
                       </button>
                     ) : isCompleted ? (
@@ -790,7 +915,11 @@ export const UnifiedInboxPage: React.FC = () => {
                           disabled={actionLoading === ticket.id}
                           className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/80 text-xs font-medium rounded-xl transition shadow-2xs cursor-pointer"
                         >
-                          {actionLoading === ticket.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
+                          {actionLoading === ticket.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <XCircle className="w-3.5 h-3.5" />
+                          )}
                           <span>Bỏ qua</span>
                         </button>
 
@@ -799,7 +928,11 @@ export const UnifiedInboxPage: React.FC = () => {
                           disabled={actionLoading === ticket.id}
                           className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/80 text-xs font-semibold rounded-xl transition shadow-2xs cursor-pointer"
                         >
-                          {actionLoading === ticket.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCheck className="w-3.5 h-3.5" />}
+                          {actionLoading === ticket.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <CheckCheck className="w-3.5 h-3.5" />
+                          )}
                           <span>Hoàn thành</span>
                         </button>
 
@@ -829,14 +962,16 @@ export const UnifiedInboxPage: React.FC = () => {
         </div>
       )}
 
-      {/* 🎯 MODAL XEM TRƯỚC TỆP ĐÍNH KÈM ĐA NĂNG (IMAGE, PDF, EXCEL) */}
+      {/* MODAL XEM TRƯỚC TỆP ĐÍNH KÈM ĐA NĂNG */}
       {previewFile && (
         <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
               <div className="flex items-center gap-2 truncate">
                 <Paperclip className="w-4 h-4 text-violet-600" />
-                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">{previewFile.filename}</span>
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
+                  {previewFile.filename}
+                </span>
               </div>
               <div className="flex items-center gap-2">
                 <a
@@ -849,7 +984,10 @@ export const UnifiedInboxPage: React.FC = () => {
                   <Download className="w-3.5 h-3.5" />
                   <span>Tải Về Máy</span>
                 </a>
-                <button onClick={() => setPreviewFile(null)} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer">
+                <button
+                  onClick={() => setPreviewFile(null)}
+                  className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+                >
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -857,13 +995,23 @@ export const UnifiedInboxPage: React.FC = () => {
 
             <div className="flex-1 p-4 overflow-auto flex items-center justify-center bg-slate-50 dark:bg-slate-900">
               {previewFile.filename?.match(/\.(png|jpg|jpeg|gif|webp)$/i) ? (
-                <img src={previewFile.url} alt={previewFile.filename} className="max-w-full max-h-[70vh] object-contain rounded-xl shadow-md" />
+                <img
+                  src={previewFile.url}
+                  alt={previewFile.filename}
+                  className="max-w-full max-h-[70vh] object-contain rounded-xl shadow-md"
+                />
               ) : previewFile.filename?.endsWith('.pdf') ? (
-                <iframe src={previewFile.url} title={previewFile.filename} className="w-full h-[70vh] rounded-xl border border-slate-200" />
+                <iframe
+                  src={previewFile.url}
+                  title={previewFile.filename}
+                  className="w-full h-[70vh] rounded-xl border border-slate-200"
+                />
               ) : (
                 <div className="text-center p-8 space-y-3">
                   <FileSpreadsheetIcon className="w-12 h-12 mx-auto text-emerald-600" />
-                  <div className="text-xs font-medium text-slate-700 dark:text-slate-300">File bảng tính Excel (.xlsx): <strong>{previewFile.filename}</strong></div>
+                  <div className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                    File bảng tính Excel (.xlsx): <strong>{previewFile.filename}</strong>
+                  </div>
                   <a
                     href={previewFile.url}
                     download
@@ -879,11 +1027,10 @@ export const UnifiedInboxPage: React.FC = () => {
         </div>
       )}
 
-      {/* Modal Tạo Tác Vụ Bot (Multi-Course & Lineage Selector) */}
+      {/* Modal Tạo Tác Vụ Bot */}
       {taskModalTicket && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden space-y-4 p-6 max-h-[92vh] overflow-y-auto">
-
             {/* Header & Nút AI Bóc Tách COF */}
             <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-700 flex-wrap gap-2">
               <div className="flex items-center gap-2">
@@ -901,12 +1048,19 @@ export const UnifiedInboxPage: React.FC = () => {
                     disabled={extractingCof}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-50 text-violet-700 border border-violet-200/80 text-xs font-semibold rounded-xl transition cursor-pointer shadow-2xs hover:bg-violet-100"
                   >
-                    {extractingCof ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
+                    {extractingCof ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Wand2 className="w-3.5 h-3.5" />
+                    )}
                     <span>AI Tự Động Bóc Tách File COF</span>
                   </button>
                 )}
 
-                <button onClick={() => setTaskModalTicket(null)} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer">
+                <button
+                  onClick={() => setTaskModalTicket(null)}
+                  className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+                >
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -924,7 +1078,9 @@ export const UnifiedInboxPage: React.FC = () => {
 
             {/* Selector Bot Type */}
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Chọn Cỗ Máy Bot Worker</label>
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Chọn Cỗ Máy Bot Worker
+              </label>
               <select
                 value={selectedBotType}
                 onChange={(e) => {
@@ -944,7 +1100,6 @@ export const UnifiedInboxPage: React.FC = () => {
             {/* PHẦN CHỌN PHẢ HỆ VÀ NHIỀU KHÓA HỌC */}
             {selectedBotType === 'workspace_rpa' && (
               <div className="space-y-4 p-4 rounded-2xl bg-violet-50/60 dark:bg-violet-950/20 border border-violet-200/70 dark:border-violet-800/40">
-
                 {/* 1. Searchable School Combobox */}
                 <div className="space-y-1.5 relative" ref={schoolDropdownRef}>
                   <label className="text-xs font-bold text-violet-900 dark:text-violet-300 flex items-center justify-between">
@@ -973,9 +1128,13 @@ export const UnifiedInboxPage: React.FC = () => {
                   {isSchoolDropdownOpen && (
                     <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl max-h-52 overflow-y-auto p-1.5 space-y-1">
                       {schoolsList
-                        .filter(s => s.school_name.toLowerCase().includes(schoolSearchQuery.toLowerCase()) || s.school_code.toLowerCase().includes(schoolSearchQuery.toLowerCase()))
+                        .filter(
+                          (s) =>
+                            s.school_name.toLowerCase().includes(schoolSearchQuery.toLowerCase()) ||
+                            s.school_code.toLowerCase().includes(schoolSearchQuery.toLowerCase())
+                        )
                         .slice(0, 30)
-                        .map(s => (
+                        .map((s) => (
                           <button
                             key={s.school_code}
                             type="button"
@@ -988,10 +1147,16 @@ export const UnifiedInboxPage: React.FC = () => {
                             className="w-full text-left p-2 rounded-xl text-xs hover:bg-violet-50 dark:hover:bg-slate-700 flex items-center justify-between cursor-pointer"
                           >
                             <div>
-                              <div className="font-semibold text-slate-800 dark:text-slate-200">{s.school_name}</div>
-                              <div className="text-[10px] text-slate-400 font-mono">Mã: {s.school_code} | Partner: {s.partner_name}</div>
+                              <div className="font-semibold text-slate-800 dark:text-slate-200">
+                                {s.school_name}
+                              </div>
+                              <div className="text-[10px] text-slate-400 font-mono">
+                                Mã: {s.school_code} | Partner: {s.partner_name}
+                              </div>
                             </div>
-                            {selectedSchool?.school_code === s.school_code && <Check className="w-4 h-4 text-violet-600" />}
+                            {selectedSchool?.school_code === s.school_code && (
+                              <Check className="w-4 h-4 text-violet-600" />
+                            )}
                           </button>
                         ))}
                     </div>
@@ -1024,10 +1189,15 @@ export const UnifiedInboxPage: React.FC = () => {
                   </div>
 
                   {selectedCourses.map((cRow, idx) => {
-                    const filteredCoursesForCategory = coursesList.filter(c => c.category === cRow.category);
+                    const filteredCoursesForCategory = coursesList.filter(
+                      (c) => c.category === cRow.category
+                    );
 
                     return (
-                      <div key={idx} className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-violet-200 dark:border-violet-700 space-y-2 relative shadow-2xs">
+                      <div
+                        key={idx}
+                        className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-violet-200 dark:border-violet-700 space-y-2 relative shadow-2xs"
+                      >
                         <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 dark:text-slate-300">
                           <span>Khóa học #{idx + 1}</span>
                           {selectedCourses.length > 1 && (
@@ -1050,20 +1220,24 @@ export const UnifiedInboxPage: React.FC = () => {
                               onChange={(e) => handleCourseRowChange(idx, 'category', e.target.value)}
                               className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 rounded-lg p-1.5 text-xs font-medium cursor-pointer"
                             >
-                              {categoriesList.map(cat => (
-                                <option key={cat} value={cat}>{cat}</option>
+                              {categoriesList.map((cat) => (
+                                <option key={cat} value={cat}>
+                                  {cat}
+                                </option>
                               ))}
                             </select>
                           </div>
 
                           <div className="sm:col-span-2">
-                            <label className="text-[10px] font-semibold text-slate-500">2. Chọn khóa học ({filteredCoursesForCategory.length} môn):</label>
+                            <label className="text-[10px] font-semibold text-slate-500">
+                              2. Chọn khóa học ({filteredCoursesForCategory.length} môn):
+                            </label>
                             <select
                               value={cRow.course_id}
                               onChange={(e) => handleCourseRowChange(idx, 'course_id', e.target.value)}
                               className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 rounded-lg p-1.5 text-xs font-medium cursor-pointer truncate"
                             >
-                              {filteredCoursesForCategory.map(c => (
+                              {filteredCoursesForCategory.map((c) => (
                                 <option key={c.course_id} value={c.course_id}>
                                   {c.course_name} (ID: {c.course_id})
                                 </option>
@@ -1080,7 +1254,9 @@ export const UnifiedInboxPage: React.FC = () => {
                               type="number"
                               value={cRow.licenses}
                               min={1}
-                              onChange={(e) => handleCourseRowChange(idx, 'licenses', parseInt(e.target.value) || 1)}
+                              onChange={(e) =>
+                                handleCourseRowChange(idx, 'licenses', parseInt(e.target.value) || 1)
+                              }
                               className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 rounded-lg p-1.5 text-xs font-bold"
                             />
                           </div>
@@ -1124,7 +1300,6 @@ export const UnifiedInboxPage: React.FC = () => {
                     );
                   })}
                 </div>
-
               </div>
             )}
 
@@ -1157,35 +1332,17 @@ export const UnifiedInboxPage: React.FC = () => {
                 onClick={handleConfirmCreateTask}
                 className="px-5 py-2.5 bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold rounded-xl transition flex items-center gap-2 shadow-xs cursor-pointer disabled:opacity-50"
               >
-                {creatingTask ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                {creatingTask ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4" />
+                )}
                 <span>Lưu Tác Vụ Vào Hàng Đợi Duyệt</span>
               </button>
             </div>
-
           </div>
         </div>
       )}
     </div>
   );
 };
-
-// Icon nhỏ bổ trợ cho file Excel
-const FileSpreadsheetIcon: React.FC<{ className?: string }> = ({ className }) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className || "w-4 h-4"}
-  >
-    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
-    <path d="M14 2v4a2 2 0 0 0 2 2h4" />
-    <path d="M8 13h2" />
-    <path d="M14 13h2" />
-    <path d="M8 17h2" />
-    <path d="M14 17h2" />
-  </svg>
-);
