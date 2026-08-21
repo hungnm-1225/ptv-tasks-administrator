@@ -7,6 +7,7 @@ import logging
 import asyncio
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
+from urllib.parse import urlparse, urljoin
 import pytz
 import httpx
 from cryptography.fernet import Fernet
@@ -78,16 +79,16 @@ def extract_keycloak_form_action(html_content: str) -> Optional[str]:
 # CẤU HÌNH CÁC WEBSITE THEO DÕI
 # ---------------------------------------------------------------------------
 DEFAULT_MONITORED_SITES = [
-    {"id": "pythaverse_main",  "name": "Pythaverse Main Portal",    "url": "https://pythaverse.space/",                   "auth_entry": "https://pythaverse.space/student-workspace/",                "category": "core",      "enabled": True,  "show_live_alert": True},
-    {"id": "ide",              "name": "Pythaverse IDE",            "url": "https://ide.pythaverse.space/#/",              "auth_entry": "https://ide.pythaverse.space/#/",                             "category": "satellite", "enabled": True,  "show_live_alert": True},
-    {"id": "avatar",           "name": "Avatar 3D Generator",       "url": "https://avatar.pythaverse.space/",             "auth_entry": "https://avatar.pythaverse.space/",                            "category": "satellite", "enabled": True,  "show_live_alert": True},
-    {"id": "note",             "name": "Jupyter Hub Note",          "url": "https://note.pythaverse.space/",               "auth_entry": "https://note.pythaverse.space/hub/oauth_login?next=%2Fhub%2F","category": "satellite", "enabled": True,  "show_live_alert": True},
-    {"id": "git",              "name": "Pythaverse Git Repos",      "url": "https://git.pythaverse.space/dashboard/repos", "auth_entry": "https://git.pythaverse.space/signin/oidc",                  "category": "satellite", "enabled": True,  "show_live_alert": True},
-    {"id": "contest",          "name": "Contest & Competitions",    "url": "https://contest.pythaverse.space/contest",     "auth_entry": "https://contest.pythaverse.space/profile",                    "category": "satellite", "enabled": True,  "show_live_alert": True},
-    {"id": "digitaltwin",      "name": "Digital Twin Simulation",   "url": "https://digitaltwin.pythaverse.space/",        "auth_entry": "https://digitaltwin.pythaverse.space/",                       "category": "satellite", "enabled": True,  "show_live_alert": True},
-    {"id": "learn",            "name": "LMS Learn Portal",          "url": "https://learn.pythaverse.space/my/",           "auth_entry": "https://learn.pythaverse.space/my/",                          "category": "satellite", "enabled": True,  "show_live_alert": True},
-    {"id": "learn_s",          "name": "LMS Learn Staging",         "url": "https://learn-s.pythaverse.space/my/",         "auth_entry": "https://learn-s.pythaverse.space/my/",                        "category": "satellite", "enabled": True,  "show_live_alert": False},
-    {"id": "iot",              "name": "IoT Pythaverse Hub",        "url": "https://iot.pythaverse.space/",                "auth_entry": "https://iot.pythaverse.space/",                               "category": "satellite", "enabled": True,  "show_live_alert": True},
+    {"id": "pythaverse_main",  "name": "Pythaverse Main Portal",    "url": "https://pythaverse.space",                   "auth_entry": "https://pythaverse.space/student-workspace/",                "category": "core",      "enabled": True,  "show_live_alert": True},
+    {"id": "ide",              "name": "Pythaverse IDE",            "url": "https://ide.pythaverse.space",              "auth_entry": "https://ide.pythaverse.space/#/",                             "category": "satellite", "enabled": True,  "show_live_alert": True},
+    {"id": "avatar",           "name": "Avatar 3D Generator",       "url": "https://avatar.pythaverse.space",           "auth_entry": "https://avatar.pythaverse.space/",                            "category": "satellite", "enabled": True,  "show_live_alert": True},
+    {"id": "note",             "name": "Jupyter Hub Note",          "url": "https://note.pythaverse.space",             "auth_entry": "https://note.pythaverse.space/hub/oauth_login?next=%2Fhub%2F","category": "satellite", "enabled": True,  "show_live_alert": True},
+    {"id": "git",              "name": "Pythaverse Git Repos",      "url": "https://git.pythaverse.space",              "auth_entry": "https://git.pythaverse.space/signin/oidc",                  "category": "satellite", "enabled": True,  "show_live_alert": True},
+    {"id": "contest",          "name": "Contest & Competitions",    "url": "https://contest.pythaverse.space",          "auth_entry": "https://contest.pythaverse.space/profile",                    "category": "satellite", "enabled": True,  "show_live_alert": True},
+    {"id": "digitaltwin",      "name": "Digital Twin Simulation",   "url": "https://digitaltwin.pythaverse.space",      "auth_entry": "https://digitaltwin.pythaverse.space/",                       "category": "satellite", "enabled": True,  "show_live_alert": True},
+    {"id": "learn",            "name": "LMS Learn Portal",          "url": "https://learn.pythaverse.space",            "auth_entry": "https://learn.pythaverse.space/my/",                          "category": "satellite", "enabled": True,  "show_live_alert": True},
+    {"id": "learn_s",          "name": "LMS Learn Staging",         "url": "https://learn-s.pythaverse.space",          "auth_entry": "https://learn-s.pythaverse.space/my/",                        "category": "satellite", "enabled": True,  "show_live_alert": False},
+    {"id": "iot",              "name": "IoT Pythaverse Hub",        "url": "https://iot.pythaverse.space",              "auth_entry": "https://iot.pythaverse.space/",                               "category": "satellite", "enabled": True,  "show_live_alert": True},
 ]
 
 def _make_initial_state(site: dict) -> dict:
@@ -306,8 +307,7 @@ class SiteMonitorService:
     @staticmethod
     async def execute_role_auth_check(cred: dict) -> dict:
         """
-        Mô phỏng quy trình đăng nhập OpenID Connect thực thụ qua Keycloak Form HTML.
-        cred: { id, site_id, role_label, username, encrypted_password, expected_path }
+        Mô phỏng OpenID Connect qua Keycloak Form HTML với URL Join chuẩn xác.
         """
         password = decrypt_secret(cred.get("encrypted_password", ""))
         username = cred.get("username", "")
@@ -334,54 +334,57 @@ class SiteMonitorService:
             return result
 
         site_obj = next((s for s in DEFAULT_MONITORED_SITES if s["id"] == site_id), None)
-        auth_entry_url = site_obj.get("auth_entry") if site_obj else "https://pythaverse.space/student-workspace/"
-        base_url = site_obj.get("url", "https://pythaverse.space").rstrip("/") if site_obj else "https://pythaverse.space"
+        raw_url = site_obj.get("url", "https://pythaverse.space") if site_obj else "https://pythaverse.space"
+        parsed = urlparse(raw_url)
+        root_origin = f"{parsed.scheme}://{parsed.netloc}"
+
+        auth_entry_url = site_obj.get("auth_entry") if site_obj else f"{root_origin}/student-workspace/"
 
         start_time = time.time()
-
-        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-        headers = {"User-Agent": user_agent}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        }
 
         try:
-            # Dùng AsyncClient có CookieJar tự lưu trữ cookies theo từng session
             async with httpx.AsyncClient(verify=False, timeout=20.0, follow_redirects=True, headers=headers) as client:
-                
-                # BƯỚC 1: Truy cập URL kích hoạt để Keycloak tạo session và cấp form login
+                # 1. Truy cập Entry URL
                 init_resp = await client.get(auth_entry_url)
                 
-                # BƯỚC 2: Bóc tách action URL từ form Keycloak HTML
-                action_url = extract_keycloak_form_action(init_resp.text)
-                
-                if not action_url:
-                    # Nếu đã vào thẳng trang đích mà không qua login
-                    if "eid.pythaverse.space" not in str(init_resp.url):
+                # 2. Kiểm tra nếu đã vào thẳng trang đích (không cần login)
+                if "eid.pythaverse.space" not in str(init_resp.url):
+                    if 200 <= init_resp.status_code < 400:
                         result["status"] = "PASS"
                         result["latency_ms"] = int((time.time() - start_time) * 1000)
-                        result["details"] = f"- HTTP {init_resp.status_code}"
+                        result["details"] = f"Phiên hoạt động sẵn sàng — HTTP {init_resp.status_code}"
                         return result
                     else:
-                        action_url = str(init_resp.url)
+                        result["status"] = "FAIL"
+                        result["latency_ms"] = int((time.time() - start_time) * 1000)
+                        result["details"] = f"Server lỗi phản hồi — HTTP {init_resp.status_code}"
+                        return result
 
-                # BƯỚC 3: Điền Form #kc-form-login và Submit lên Keycloak
+                # 3. Bóc tách Action form Keycloak
+                action_url = extract_keycloak_form_action(init_resp.text)
+                if not action_url:
+                    action_url = str(init_resp.url)
+
+                # 4. Submit Credentials
                 login_payload = {
                     "username": username,
                     "password": password,
                     "credentialId": "",
                     "login": "Login"
                 }
-                
                 post_headers = {
                     "Referer": str(init_resp.url),
                     "Content-Type": "application/x-www-form-urlencoded"
                 }
 
                 login_resp = await client.post(action_url, data=login_payload, headers=post_headers)
-
-                # BƯỚC 4: Phân tích kết quả sau Submit
                 final_url = str(login_resp.url)
-                
-                # Nếu vẫn bị giữ lại ở trang Keycloak authenticate và có báo lỗi
-                if "login-actions/authenticate" in final_url and ("Invalid username or password" in login_resp.text or "alert-error" in login_resp.text or "kc-feedback-text" in login_resp.text):
+
+                # 5. Kiểm tra lỗi sai User/Pass
+                if "login-actions/authenticate" in final_url and any(err in login_resp.text for err in ["Invalid username or password", "alert-error", "kc-feedback-text"]):
                     result["latency_ms"] = int((time.time() - start_time) * 1000)
                     result["status"] = "FAIL"
                     result["details"] = "Sai tên đăng nhập hoặc mật khẩu Keycloak"
@@ -389,11 +392,14 @@ class SiteMonitorService:
 
                 result["token_acquired"] = True
 
-                # BƯỚC 5: Kiểm tra Target Route (Đặc biệt xử lý Sales Admin URL riêng)
-                target_check_url = expected_path if expected_path.startswith("http") else f"{base_url}{expected_path}"
-                
-                # Nếu trang đích chưa khớp với URL hiện tại, gửi GET tiếp để xác nhận quyền
-                if expected_path != "/" and expected_path not in final_url:
+                # 6. Chuẩn hóa target_check_url (Tránh double path /my/my/)
+                if expected_path.startswith("http"):
+                    target_check_url = expected_path
+                else:
+                    target_check_url = f"{root_origin}/{expected_path.lstrip('/')}"
+
+                # 7. Truy cập Route kiểm tra
+                if expected_path not in ("/", "") and target_check_url.rstrip("/") != final_url.rstrip("/"):
                     route_resp = await client.get(target_check_url)
                     check_status = route_resp.status_code
                     check_url = str(route_resp.url)
@@ -404,7 +410,7 @@ class SiteMonitorService:
                 total_latency = int((time.time() - start_time) * 1000)
                 result["latency_ms"] = total_latency
 
-                if check_status in (200, 201, 301, 302, 307, 308) and "eid.pythaverse.space" not in check_url:
+                if (200 <= check_status < 400) and "eid.pythaverse.space" not in check_url:
                     result["status"] = "PASS"
                     result["route_accessible"] = True
                     result["details"] = f"SSO OK & Đã vào {role_label} ({total_latency}ms)"
@@ -418,7 +424,7 @@ class SiteMonitorService:
         except httpx.TimeoutException:
             result["latency_ms"] = 20000
             result["status"] = "FAIL"
-            result["details"] = "Quá thời gian kết nối (Timeout > 20s)"
+            result["details"] = "Timeout > 20s"
         except Exception as e:
             result["status"] = "FAIL"
             result["details"] = f"Lỗi: {str(e)[:80]}"
@@ -434,9 +440,10 @@ class SiteMonitorService:
                     "details": result["details"]
                 }).eq("id", cred["id"]).execute()
             except Exception as e:
-                logger.error(f"Lỗi cập nhật Supabase: {e}")
+                logger.error(f"Lỗi update DB: {e}")
 
         return result
+
 
     @classmethod
     async def get_and_check_auth_matrix(cls) -> List[Dict[str, Any]]:
