@@ -703,7 +703,6 @@ export const SiteMonitorPage: React.FC = () => {
                   <tr>
                     <th className="px-4 py-3.5 font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider w-32">Site ID</th>
                     <th className="px-4 py-3.5 font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider w-28">Vai Trò</th>
-                    <th className="px-4 py-3.5 font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider w-44">Tài Khoản Test</th>
                     <th className="px-4 py-3.5 font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider">Target Route</th>
                     <th className="px-4 py-3.5 font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider text-center w-24">Trạng Thái</th>
                     <th className="px-4 py-3.5 font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider text-center w-20">Độ Trễ</th>
