@@ -1,7 +1,9 @@
 # backend/app/services/workspace_playwright_service.py
 import os
+import re
 import logging
 import asyncio
+from datetime import datetime
 from typing import Dict, Any, List, Optional
 from playwright.async_api import async_playwright, Page, BrowserContext
 
@@ -11,14 +13,46 @@ logger = logging.getLogger(__name__)
 BASE_WORKSPACE_URL = "https://pythaverse.space"
 
 
+def normalize_date_iso(date_str: Optional[str]) -> Optional[str]:
+    """
+    Tự động chuẩn hóa mọi định dạng ngày (DD-MM-YYYY, DD/MM/YYYY, MM/DD/YYYY...) 
+    về định dạng chuẩn HTML5 <input type='date'>: YYYY-MM-DD.
+    """
+    if not date_str:
+        return None
+    
+    date_str = str(date_str).strip()
+    
+    # 1. Đã là chuẩn YYYY-MM-DD
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
+        return date_str
+    
+    # 2. Thử parse theo các định dạng phổ biến
+    for fmt in ("%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d", "%d.%m.%Y"):
+        try:
+            dt = datetime.strptime(date_str.split("T")[0], fmt)
+            return dt.strftime("%Y-%m-%d")
+        except Exception:
+            continue
+            
+    # 3. Phân tách theo dấu gạch nếu có
+    parts = re.split(r"[-/\.]", date_str)
+    if len(parts) == 3:
+        if len(parts[0]) == 4: # YYYY-MM-DD
+            return f"{parts[0]:0>4}-{int(parts[1]):02d}-{int(parts[2]):02d}"
+        elif len(parts[2]) == 4: # DD-MM-YYYY
+            return f"{parts[2]:0>4}-{int(parts[1]):02d}-{int(parts[0]):02d}"
+            
+    return date_str
+
+
 class WorkspacePlaywrightService:
     """Service RPA tự động hóa 100% các tác vụ Account Creation, Order & Contract trên Pythaverse."""
 
     def __init__(self):
-        self.headless = True  # Đặt False khi anh muốn debug xem bot click trực tiếp trên máy local
+        self.headless = True
 
     async def _create_context(self, p) -> tuple:
-        """Khởi tạo Browser Chromium với Viewport và cấu hình chuẩn."""
         browser = await p.chromium.launch(
             headless=self.headless,
             args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
@@ -32,10 +66,6 @@ class WorkspacePlaywrightService:
         return browser, context, page
 
     async def login_role(self, page: Page, username: str, password: str, role_title: str = "Tài khoản") -> tuple[bool, str]:
-        """
-        Đăng nhập Keycloak SSO với cơ chế chẩn đoán lỗi chi tiết:
-        Trả về: (is_success: bool, error_message: str)
-        """
         if not username or not password:
             err = f"❌ [{role_title}] Thiếu thông tin username/mật khẩu trong Két Sắt Credentials Vault!"
             logger.error(err)
@@ -43,8 +73,6 @@ class WorkspacePlaywrightService:
 
         try:
             logger.info(f"🔑 [{role_title}] Đang đăng nhập tài khoản '{username}'...")
-            
-            # Gửi request mở trang Login kèm bắt lỗi mạng/sập server
             response = await page.goto(f"{BASE_WORKSPACE_URL}/login", wait_until="networkidle", timeout=35000)
             
             if response and response.status >= 500:
@@ -52,25 +80,20 @@ class WorkspacePlaywrightService:
                 logger.error(err)
                 return False, err
 
-            # 1. Điền Form đăng nhập Keycloak SSO
             await page.fill("input[name='username'], input[name='email'], #username", username)
             await page.fill("input[name='password'], #password", password)
-            
-            # 2. Click nút Đăng nhập
             await page.click("button[type='submit'], input[type='submit'], button:has-text('Log In'), button:has-text('Đăng nhập')")
             await page.wait_for_timeout(3500)
 
-            # 3. Bóc tách lỗi hiển thị trên giao diện Keycloak (nếu có)
             kc_error_locator = page.locator(".alert-error, #input-error, span.kc-feedback-text, .alert.alert-warning, p.instruction")
             if await kc_error_locator.count() > 0 and await kc_error_locator.first.is_visible():
                 raw_error_text = (await kc_error_locator.first.inner_text()).strip()
-                err = f"❌ [{role_title} - '{username}'] Đăng nhập thất bại: '{raw_error_text}' (Sai mật khẩu hoặc tài khoản chưa kích hoạt)"
+                err = f"❌ [{role_title} - '{username}'] Đăng nhập thất bại: '{raw_error_text}'"
                 logger.error(err)
                 return False, err
 
-            # 4. Kiểm tra xem URL sau đăng nhập có còn bị kẹt ở trang login không
             if "login" in page.url or "authenticate" in page.url:
-                err = f"⚠️ [{role_title} - '{username}'] Không thể chuyển trang sau đăng nhập (Bị kẹt tại: {page.url})"
+                err = f"⚠️ [{role_title} - '{username}'] Không thể chuyển trang sau đăng nhập (URL: {page.url})"
                 logger.warning(err)
                 return False, err
 
@@ -80,12 +103,11 @@ class WorkspacePlaywrightService:
         except Exception as e:
             err_str = str(e)
             if "Timeout" in err_str:
-                err = f"⏳ [{role_title} - '{username}'] Quá thời gian chờ phản hồi (Timeout khi kết nối tới Cổng SSO)!"
+                err = f"⏳ [{role_title} - '{username}'] Quá thời gian chờ phản hồi (Timeout)!"
             elif "ERR_CONNECTION" in err_str or "ECONNREFUSED" in err_str:
-                err = f"🔌 [{role_title}] Mất kết nối tới máy chủ Pythaverse (Connection Refused)!"
+                err = f"🔌 [{role_title}] Mất kết nối tới máy chủ Pythaverse!"
             else:
-                err = f"💥 [{role_title} - '{username}'] Lỗi bất thường khi đăng nhập: {err_str[:150]}"
-            
+                err = f"💥 [{role_title} - '{username}'] Lỗi đăng nhập: {err_str[:150]}"
             logger.error(err)
             return False, err
 
@@ -97,7 +119,6 @@ class WorkspacePlaywrightService:
         credentials: Dict[str, str], 
         order_data: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Tự động mở School Workspace và điền Form Create New Order chuẩn chỉ 100%."""
         async with async_playwright() as p:
             browser, context, page = await self._create_context(p)
             try:
@@ -108,21 +129,17 @@ class WorkspacePlaywrightService:
                 logger.info("🏫 Mở trang danh sách Order: /school-workspace/orders...")
                 await page.goto(f"{BASE_WORKSPACE_URL}/school-workspace/orders", wait_until="networkidle", timeout=45000)
 
-                # 1. Click nút Create Order màu xanh
                 create_order_btn = page.locator("button:has-text('Create Order')").first
                 await create_order_btn.wait_for(state="visible", timeout=15000)
                 await create_order_btn.click()
 
-                # Đợi Dialog 'Create New Order' xuất hiện
                 await page.wait_for_selector("div[role='dialog']:has-text('Create New Order')", timeout=15000)
                 logger.info("📋 Đã mở Modal Create New Order thành công!")
 
-                # 2. Điền Contact Information
                 contact_info = order_data.get("contact_info", "Admin Automation Hub (operation@pythaverse.space)")
                 contact_input = page.locator("div[role='dialog'] input[placeholder*='contact information']").first
                 await contact_input.fill(contact_info)
 
-                # 3. Lặp qua danh sách khóa học trong Order
                 courses = order_data.get("courses", [])
                 if not courses:
                     courses = [{
@@ -138,16 +155,14 @@ class WorkspacePlaywrightService:
                         await page.click("div[role='dialog'] button:has-text('Add Course')")
                         await page.wait_for_timeout(1000)
 
-                    # Định vị Container Course card thứ idx (chứa class MuiGrid-container)
                     course_card = page.locator("div[role='dialog'] .MuiBox-root:has(> .MuiGrid-container)").nth(idx)
 
-                    # A. BẤM VÀO Ô SELECT 'License Category' (Trỏ chính xác trong Grid Item)
+                    # A. Bấm chọn License Category
                     cat_select = course_card.locator(".MuiGrid-item:has(label:has-text('License Category')) div[role='combobox'], .MuiGrid-item:has(label:has-text('License Category')) .MuiSelect-select").first
                     await cat_select.wait_for(state="visible", timeout=10000)
                     await cat_select.click()
                     await page.wait_for_timeout(500)
 
-                    # Chọn Option Category (VD: SWRP, ASP, IR...)
                     category_val = c.get("category", "SWRP")
                     cat_option = page.locator(f"li[role='option']:has-text('{category_val}'), .MuiMenu-list li:has-text('{category_val}')").first
                     await cat_option.wait_for(state="visible", timeout=5000)
@@ -155,7 +170,7 @@ class WorkspacePlaywrightService:
                     logger.info(f"✅ [Course {idx+1}] Đã chọn License Category: '{category_val}'")
                     await page.wait_for_timeout(1000)
 
-                    # B. CHỌN COURSE NAME (Sau khi Category kích hoạt xong)
+                    # B. Bấm chọn Course Name
                     course_select = course_card.locator(".MuiGrid-item:has(label:has-text('Course')) div[role='combobox'], .MuiGrid-item:has(label:has-text('Course')) .MuiSelect-select").first
                     await course_select.wait_for(state="visible", timeout=10000)
                     await course_select.click()
@@ -174,14 +189,14 @@ class WorkspacePlaywrightService:
                     logger.info(f"✅ [Course {idx+1}] Đã chọn Course Name!")
                     await page.wait_for_timeout(500)
 
-                    # C. ĐIỀN SỐ LƯỢNG LICENSES
+                    # C. Điền số lượng Licenses
                     licenses_count = str(c.get("licenses", 1))
                     lic_input = course_card.locator(".MuiGrid-item:has(label:has-text('License')) input[type='number']").first
                     await lic_input.fill(licenses_count)
 
-                    # D. ĐIỀN START DATE & END DATE
-                    start_date_val = c.get("start_date")
-                    end_date_val = c.get("end_date")
+                    # D. Chuẩn hóa và điền Start Date / End Date dạng YYYY-MM-DD
+                    start_date_val = normalize_date_iso(c.get("start_date"))
+                    end_date_val = normalize_date_iso(c.get("end_date"))
                     
                     start_input = course_card.locator(".MuiGrid-item:has(label:has-text('Start Date')) input").first
                     end_input = course_card.locator(".MuiGrid-item:has(label:has-text('End Date')) input").first
@@ -191,23 +206,18 @@ class WorkspacePlaywrightService:
                     if end_date_val:
                         await end_input.fill(end_date_val)
 
-                # 4. Điền Additional Notes
-                additional_notes = order_data.get("additional_notes", "")
-                if additional_notes:
+                if order_data.get("additional_notes"):
                     notes_textarea = page.locator("div[role='dialog'] textarea[placeholder*='notes'], div[role='dialog'] textarea").first
-                    await notes_textarea.fill(additional_notes)
+                    await notes_textarea.fill(order_data["additional_notes"])
 
-                # 5. Bấm nút 'Create Order' hoàn tất trong Dialog
                 submit_dialog_btn = page.locator("div[role='dialog'] button:has-text('Create Order')").last
                 await submit_dialog_btn.click()
                 logger.info("🚀 Đã bấm Submit Order! Đang đợi trang danh sách cập nhật...")
 
-                # 6. Đợi Modal đóng và DataGrid render dòng mới nhất
                 await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=20000)
                 await page.wait_for_selector(".MuiDataGrid-row", timeout=20000)
                 await page.wait_for_timeout(2000)
 
-                # 7. BẮT ORDER ID MỚI SINH TẠI DÒNG ĐẦU TIÊN
                 first_row = page.locator(".MuiDataGrid-row").first
                 order_num_id = await first_row.get_attribute("data-id")
                 
@@ -238,7 +248,6 @@ class WorkspacePlaywrightService:
         credentials: Dict[str, str], 
         order_identifier: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Partner mở /partner-workspace/order-management, chọn Pool License và duyệt Order."""
         async with async_playwright() as p:
             browser, context, page = await self._create_context(p)
             try:
@@ -250,7 +259,6 @@ class WorkspacePlaywrightService:
                 await page.goto(f"{BASE_WORKSPACE_URL}/partner-workspace/order-management", wait_until="networkidle", timeout=45000)
                 await page.wait_for_selector(".MuiDataGrid-row", timeout=25000)
 
-                # 1. Tìm dòng Order mục tiêu
                 target_row = None
                 if order_identifier:
                     target_row = page.locator(
@@ -258,38 +266,29 @@ class WorkspacePlaywrightService:
                         f".MuiDataGrid-row:has([data-field='school_order_id']:has-text('{order_identifier}'))"
                     ).first
                 
-                # Fallback: Lấy dòng đầu tiên có trạng thái 'Awaiting Partner'
                 if not target_row or await target_row.count() == 0:
                     target_row = page.locator(".MuiDataGrid-row:has([data-field='status_name']:has-text('Awaiting Partner'))").first
 
                 if await target_row.count() == 0:
                     return {"status": "failed", "error": f"Không tìm thấy Order phù hợp ({order_identifier}) ở trạng thái 'Awaiting Partner'"}
 
-                # 2. Click nút Action (icon Menu 3 gạch) để mở Popover Menu
                 action_btn = target_row.locator("[data-field=' '] button, button:has(.lucide-menu)").first
                 await action_btn.click()
-                logger.info("📋 Đã bấm icon 3 gạch, chờ Popover Menu hiện...")
                 
-                # BẤM TIẾP CHỮ 'View' TRONG POPOVER MENU
                 view_menu_item = page.locator("li[role='menuitem']:has-text('View'), .MuiMenu-list li:has-text('View'), text=View").first
                 await view_menu_item.wait_for(state="visible", timeout=5000)
                 await view_menu_item.click()
-                logger.info("✨ Đã click 'View'! Đang mở Modal Order Details...")
 
-                # Đợi Modal 'Order Details' hiển thị
                 await page.wait_for_selector("div[role='dialog']:has-text('Order Details')", timeout=15000)
 
-                # 3. Lặp qua tất cả các ô chọn Pool License trong Modal
                 pool_selects = page.locator("div[role='dialog'] div[role='combobox']:has-text('Pool License'), div[role='dialog'] .MuiSelect-select")
                 select_count = await pool_selects.count()
-                logger.info(f"🔄 Tìm thấy {select_count} mục cần chọn Pool License...")
 
                 for i in range(select_count):
                     current_select = pool_selects.nth(i)
                     await current_select.click()
                     await page.wait_for_timeout(500)
 
-                    # Ưu tiên chọn Category License
                     option = page.locator("li[role='option']:has-text('Category License'), li[role='option']:has-text('Available')").first
                     if await option.count() > 0:
                         await option.click()
@@ -299,7 +298,6 @@ class WorkspacePlaywrightService:
                             await first_opt.click()
                     await page.wait_for_timeout(800)
 
-                # 4. Kiểm tra xem có xuất hiện thông báo xanh 'Order can be approved' hay không
                 approve_btn = page.locator("div[role='dialog'] button:has-text('Approve Order')")
 
                 if await approve_btn.count() > 0 and await approve_btn.is_visible():
@@ -307,14 +305,12 @@ class WorkspacePlaywrightService:
                     await approve_btn.click()
                     await page.wait_for_timeout(3000)
                     
-                    logger.info("🎉 Partner đã duyệt School Order thành công!")
                     return {
                         "status": "success",
                         "order_identifier": order_identifier,
                         "message": "Partner đã duyệt School Order thành công"
                     }
                 else:
-                    logger.warning("⚠️ Kho Partner không đủ License để duyệt trực tiếp!")
                     return {
                         "status": "insufficient_pool",
                         "order_identifier": order_identifier,
@@ -335,7 +331,6 @@ class WorkspacePlaywrightService:
         credentials: Dict[str, str],
         contract_data: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Partner mở /partner-workspace/contract-po/create và tạo Contract PRT-..."""
         async with async_playwright() as p:
             browser, context, page = await self._create_context(p)
             try:
@@ -347,19 +342,16 @@ class WorkspacePlaywrightService:
                 await page.goto(f"{BASE_WORKSPACE_URL}/partner-workspace/contract-po/create", wait_until="networkidle", timeout=45000)
                 await page.wait_for_selector("text=Create Contract/PO", timeout=15000)
 
-                # 1. BẮT BUỘC: Chọn Contract Type = 'License'
                 type_select = page.locator("div[role='combobox']").first
                 await type_select.click()
                 await page.wait_for_selector("li[role='option']:has-text('License')", timeout=5000)
                 await page.locator("li[role='option']:has-text('License')").first.click()
                 await page.wait_for_timeout(1000)
 
-                # 2. Điền Contract Notes
                 notes = contract_data.get("notes", "Auto-requested by PTV Automation Hub to fulfill School Order")
                 notes_input = page.locator("textarea").first
                 await notes_input.fill(notes)
 
-                # 3. Lặp qua các khóa học cần xin thêm License
                 courses = contract_data.get("courses", [])
                 for idx, c in enumerate(courses):
                     if idx > 0:
@@ -368,7 +360,6 @@ class WorkspacePlaywrightService:
 
                     course_card = page.locator(".MuiCard-root:has-text('License Category')").nth(idx)
 
-                    # A. Chọn License Category trước
                     cat_val = c.get("category", "SWRP")
                     cat_dropdown = course_card.locator("div[role='combobox']").first
                     await cat_dropdown.click()
@@ -376,7 +367,6 @@ class WorkspacePlaywrightService:
                     await page.locator(f"li[role='option']:has-text('{cat_val}')").first.click()
                     await page.wait_for_timeout(800)
 
-                    # B. Chọn Course Name
                     course_name_val = c.get("course_name")
                     course_dropdown = course_card.locator("div[role='combobox']").nth(1)
                     await course_dropdown.click()
@@ -388,15 +378,12 @@ class WorkspacePlaywrightService:
                         await page.locator("li[role='option']").first.click()
                     await page.wait_for_timeout(500)
 
-                    # C. Điền số lượng Licenses
                     lic_input = course_card.locator("input[type='number']").first
                     await lic_input.fill(str(c.get("licenses", 50)))
 
-                # 4. Bấm nút '💾 Create Contract/PO'
                 submit_btn = page.locator("button:has-text('Create Contract/PO')").last
                 await submit_btn.click()
 
-                # 5. Đợi về trang danh sách và bắt Contract Code
                 await page.wait_for_selector(".MuiDataGrid-row", timeout=25000)
                 await page.wait_for_timeout(2000)
 
@@ -429,7 +416,6 @@ class WorkspacePlaywrightService:
         credentials: Dict[str, str],
         contract_identifier: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Distributor mở /distributor-workspace/partner-contract-po và duyệt Contract của Partner."""
         async with async_playwright() as p:
             browser, context, page = await self._create_context(p)
             try:
@@ -441,7 +427,6 @@ class WorkspacePlaywrightService:
                 await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/partner-contract-po", wait_until="networkidle", timeout=45000)
                 await page.wait_for_selector(".MuiDataGrid-row", timeout=25000)
 
-                # 1. Tìm đúng dòng Contract PRT-... của Partner
                 target_row = None
                 if contract_identifier:
                     target_row = page.locator(
@@ -455,14 +440,11 @@ class WorkspacePlaywrightService:
                 if await target_row.count() == 0:
                     return {"status": "failed", "error": f"Không tìm thấy Contract ({contract_identifier}) ở trạng thái chờ duyệt"}
 
-                # 2. Click icon Info (View Details) ở cột Actions
                 info_btn = target_row.locator("button[aria-label='View Details'], [data-field='actions'] button").first
                 await info_btn.click()
 
-                # Đợi Modal 'Partner Order Details' hiển thị
                 await page.wait_for_selector("div[role='dialog']:has-text('Partner Order Details')", timeout=15000)
 
-                # 3. Kiểm tra trạng thái kho của Distributor
                 approve_btn = page.locator("div[role='dialog'] button:has-text('Approve Order')")
 
                 if await approve_btn.count() > 0 and await approve_btn.is_visible():
@@ -470,14 +452,12 @@ class WorkspacePlaywrightService:
                     await approve_btn.click()
                     await page.wait_for_timeout(3000)
                     
-                    logger.info(f"🎉 Distributor đã duyệt Partner Contract {contract_identifier} thành công!")
                     return {
                         "status": "success",
                         "contract_identifier": contract_identifier,
                         "message": "Distributor đã duyệt Partner Contract thành công"
                     }
                 else:
-                    logger.warning("⚠️ Kho Distributor không đủ License! Cần tạo Contract DST-... xin Sales Admin.")
                     return {
                         "status": "insufficient_pool",
                         "contract_identifier": contract_identifier,
@@ -498,7 +478,6 @@ class WorkspacePlaywrightService:
         credentials: Dict[str, str],
         contract_data: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Distributor mở /distributor-workspace/contract-po/create và tạo Contract DST-..."""
         async with async_playwright() as p:
             browser, context, page = await self._create_context(p)
             try:
@@ -510,19 +489,16 @@ class WorkspacePlaywrightService:
                 await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/contract-po/create", wait_until="networkidle", timeout=45000)
                 await page.wait_for_selector("text=Create Contract/PO", timeout=15000)
 
-                # 1. BẮT BUỘC: Chọn Contract Type = 'License'
                 type_select = page.locator("div[role='combobox']").first
                 await type_select.click()
                 await page.wait_for_selector("li[role='option']:has-text('License')", timeout=5000)
                 await page.locator("li[role='option']:has-text('License')").first.click()
                 await page.wait_for_timeout(1000)
 
-                # 2. Điền Contract Notes
                 notes = contract_data.get("notes", "Auto-requested by PTV Automation Hub to fulfill Partner Contract")
                 notes_input = page.locator("textarea").first
                 await notes_input.fill(notes)
 
-                # 3. Lặp qua danh sách môn học
                 courses = contract_data.get("courses", [])
                 for idx, c in enumerate(courses):
                     if idx > 0:
@@ -552,11 +528,9 @@ class WorkspacePlaywrightService:
                     lic_input = course_card.locator("input[type='number']").first
                     await lic_input.fill(str(c.get("licenses", 100)))
 
-                # 4. Bấm nút '💾 Create Contract/PO'
                 submit_btn = page.locator("button:has-text('Create Contract/PO')").last
                 await submit_btn.click()
 
-                # 5. Đợi về trang danh sách và bắt Contract Code
                 await page.wait_for_selector(".MuiDataGrid-row", timeout=25000)
                 await page.wait_for_timeout(2000)
 
@@ -590,7 +564,6 @@ class WorkspacePlaywrightService:
         contract_identifier: Optional[str] = None,
         justification: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Sales Admin duyệt Contract DST-... và điền Justification Note."""
         async with async_playwright() as p:
             browser, context, page = await self._create_context(p)
             try:
@@ -602,7 +575,6 @@ class WorkspacePlaywrightService:
                 await page.goto(f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard", wait_until="networkidle", timeout=45000)
                 await page.wait_for_selector(".MuiDataGrid-row", timeout=25000)
 
-                # 1. Tìm dòng Contract DST-... mục tiêu
                 target_row = None
                 if contract_identifier:
                     target_row = page.locator(
@@ -616,21 +588,16 @@ class WorkspacePlaywrightService:
                 if await target_row.count() == 0:
                     return {"status": "failed", "error": f"Không tìm thấy Contract ({contract_identifier}) Pending trên Dashboard"}
 
-                # 2. Click icon Con Mắt ở cột Actions
                 eye_btn = target_row.locator("button[aria-label='View Details'], [data-field='actions'] button").first
                 await eye_btn.click()
 
-                # Đợi trang chi tiết Contract load xong
                 await page.wait_for_selector("button:has-text('Approve')", timeout=15000)
 
-                # 3. Bấm nút 'Approve' màu xanh lá
                 approve_btn = page.locator("button:has-text('Approve')").first
                 await approve_btn.click()
 
-                # Đợi Dialog 'Confirm Order Approval' hiển thị
                 await page.wait_for_selector("div[role='dialog']:has-text('Confirm Order Approval')", timeout=10000)
 
-                # 4. Chuẩn bị Justification Note (Bắt buộc >= 15 ký tự)
                 default_note = "Afiq requests and approves the requests, Hung QA processes the contract via Automation Hub"
                 valid_justification = justification if (justification and len(justification.strip()) >= 15) else default_note
                 
@@ -638,7 +605,6 @@ class WorkspacePlaywrightService:
                 await textarea.fill(valid_justification)
                 await page.wait_for_timeout(800)
 
-                # 5. Bấm nút 'Confirm Approval'
                 confirm_btn = page.locator("div[role='dialog'] button:has-text('Confirm Approval')").first
                 await confirm_btn.click()
                 await page.wait_for_timeout(3000)
@@ -667,17 +633,6 @@ class WorkspacePlaywrightService:
         sales_admin_creds: Dict[str, str],
         cof_file_path: Optional[str] = None
     ) -> Dict[str, Any]:
-        """
-        Luồng tự động hóa trọn gói 4 cấp:
-        1. Giải mã phả hệ (School -> Partner -> Distributor -> Sales Admin).
-        2. Google Drive: Upload file COF vào thư mục chuẩn phân tầng.
-        3. Step 1: School tạo Order (SCH-...).
-        4. Step 2: Partner duyệt Order.
-           - Nếu thiếu: 
-             a) Partner tạo Contract PRT-... gửi Distributor.
-             b) Distributor duyệt PRT-... (nếu Distributor thiếu -> tạo DST-... gửi Sales Admin -> Sales Admin duyệt DST-... -> Distributor duyệt PRT-...).
-             c) Partner quay lại duyệt School Order (SCH-...).
-        """
         from app.services.workspace_lineage_service import workspace_lineage_service
         from app.services.google_drive_service import google_drive_service
         
@@ -688,7 +643,6 @@ class WorkspacePlaywrightService:
 
         log_step(f"🚀 BẮT ĐẦU QUY TRÌNH PHÂN PHỐI LICENSE 4 CẤP CHO TRƯỜNG: '{school_identifier}'")
 
-        # 1. Truy vết phả hệ
         lineage = workspace_lineage_service.resolve_by_school(school_identifier)
         if not lineage:
             err = f"Không tìm thấy phả hệ của trường '{school_identifier}' trong cơ sở dữ liệu!"
@@ -700,7 +654,6 @@ class WorkspacePlaywrightService:
         distributor_creds = lineage["distributor"]
         country_info = lineage.get("country", {})
 
-        # 2. Upload file COF lên Google Drive đúng cây thư mục (nếu có file)
         drive_link = ""
         if cof_file_path and os.path.exists(cof_file_path):
             try:
@@ -722,7 +675,7 @@ class WorkspacePlaywrightService:
             notes = order_details.get("additional_notes", "")
             order_details["additional_notes"] = f"{notes}\nCOF Drive: {drive_link}".strip()
 
-        # 3. BƯỚC 1: School tạo Order
+        # BƯỚC 1: School tạo Order
         log_step(f"🏫 [CẤP 1 - SCHOOL] Đang tạo Order cho trường '{school_creds.get('name')}'...")
         school_res = await self.school_create_order(school_creds, order_details)
         if school_res.get("status") != "success":
@@ -733,7 +686,7 @@ class WorkspacePlaywrightService:
         order_code = school_res.get("order_code")
         log_step(f"✅ [CẤP 1] School đã tạo Order thành công: [{order_code}]")
 
-        # 4. BƯỚC 2: Partner duyệt Order
+        # BƯỚC 2: Partner duyệt Order
         log_step(f"🤝 [CẤP 2 - PARTNER] Đang đăng nhập đối tác '{partner_creds.get('name')}' để duyệt Order [{order_code}]...")
         partner_res = await self.partner_approve_school_order(partner_creds, order_code)
 
@@ -742,11 +695,10 @@ class WorkspacePlaywrightService:
             log_step(f"❌ [LỖI CẤP 2 - PARTNER]: {err_detail}")
             return {"status": "failed", "step": "partner_approve_school_order", "error": err_detail, "logs": "\n".join(logs)}
 
-        # 5. XỬ LÝ NHÁNH THIẾU LICENSE
+        # XỬ LÝ NHÁNH THIẾU LICENSE
         if partner_res.get("status") == "insufficient_pool":
             log_step("⚠️ [CẤP 2] Kho Partner thiếu License! Đang kích hoạt luồng xin cấp bù...")
 
-            # A. Partner tạo Contract PRT-... gửi lên Distributor
             log_step(f"📝 [CẤP 2] Partner đang gửi Contract PRT-... lên Distributor '{distributor_creds.get('name')}'...")
             prt_contract = await self.partner_create_contract(partner_creds, {
                 "notes": f"Fulfill School Order {order_code}",
@@ -760,7 +712,7 @@ class WorkspacePlaywrightService:
             prt_code = prt_contract.get("contract_code")
             log_step(f"✅ [CẤP 2] Đã tạo Contract Partner: [{prt_code}]")
 
-            # B. Distributor duyệt Contract PRT-...
+            # BƯỚC 3: Distributor duyệt
             log_step(f"🏢 [CẤP 3 - DISTRIBUTOR] Đang đăng nhập Tổng Đại Lý '{distributor_creds.get('name')}' để duyệt [{prt_code}]...")
             dist_res = await self.distributor_approve_partner_contract(distributor_creds, prt_code)
 
@@ -769,7 +721,7 @@ class WorkspacePlaywrightService:
                 log_step(f"❌ [LỖI CẤP 3 - DISTRIBUTOR DUYỆT]: {err_detail}")
                 return {"status": "failed", "step": "distributor_approve_partner_contract", "error": err_detail, "logs": "\n".join(logs)}
 
-            # Nếu Distributor cũng thiếu License -> Distributor xin Sales Admin
+            # Nếu Distributor thiếu License -> Xin Sales Admin
             if dist_res.get("status") == "insufficient_pool":
                 log_step("⚠️ [CẤP 3] Kho Distributor cũng thiếu License! Đang gửi Contract DST-... lên Sales Admin...")
                 
@@ -785,7 +737,7 @@ class WorkspacePlaywrightService:
                 dst_code = dst_contract.get("contract_code")
                 log_step(f"✅ [CẤP 3] Đã tạo Contract DST: [{dst_code}]")
 
-                # Sales Admin duyệt Contract DST-...
+                # BƯỚC 4: Sales Admin duyệt
                 log_step(f"👑 [CẤP 4 - SALES ADMIN] Đang đăng nhập Sales Admin để duyệt DST Contract [{dst_code}]...")
                 admin_res = await self.admin_approve_distributor_contract(sales_admin_creds, dst_code)
                 if admin_res.get("status") != "success":
@@ -794,11 +746,11 @@ class WorkspacePlaywrightService:
                     return {"status": "failed", "step": "admin_approve_distributor_contract", "error": err_detail, "logs": "\n".join(logs)}
                 log_step(f"🎉 [CẤP 4] Sales Admin đã Approve thành công Contract [{dst_code}]!")
 
-                # Distributor duyệt lại PRT-... của Partner
+                # Distributor duyệt lại PRT-...
                 log_step(f"🏢 [CẤP 3] Distributor quay lại duyệt Contract [{prt_code}]...")
                 await self.distributor_approve_partner_contract(distributor_creds, prt_code)
 
-            # C. Partner quay lại duyệt School Order lần cuối
+            # Partner duyệt lại School Order
             log_step(f"🤝 [CẤP 2] Partner quay lại duyệt School Order [{order_code}] lần cuối...")
             final_partner_res = await self.partner_approve_school_order(partner_creds, order_code)
             if final_partner_res.get("status") != "success":
@@ -828,7 +780,6 @@ class WorkspacePlaywrightService:
         student_emails: List[str],
         teacher_emails: List[str] = []
     ) -> Dict[str, Any]:
-        """Tự động tạo Group và Ghi danh học sinh/giáo viên vào khóa học."""
         async with async_playwright() as p:
             browser, context, page = await self._create_context(p)
             try:
@@ -849,7 +800,6 @@ class WorkspacePlaywrightService:
                 await page.click("button:has-text('Enroll Users')")
                 await page.wait_for_selector("text=User Enrollment", timeout=10000)
 
-                # Tạo Group
                 await page.click("text=GROUP MANAGEMENT")
                 await page.wait_for_timeout(1000)
 
@@ -858,7 +808,6 @@ class WorkspacePlaywrightService:
                 await page.click("button:has-text('Create Group')")
                 await page.wait_for_timeout(2000)
 
-                # Bulk Import
                 await page.click("text=BULK IMPORT")
                 await page.wait_for_timeout(1000)
 
@@ -867,7 +816,6 @@ class WorkspacePlaywrightService:
                 await page.locator(f"text={formatted_group_name}").first.click()
                 await page.wait_for_timeout(500)
 
-                # Students
                 if student_emails:
                     role_dropdown = page.locator("//div[contains(., 'Assign Role') and contains(@class, 'select')] | //select").last
                     await role_dropdown.click()
@@ -878,7 +826,6 @@ class WorkspacePlaywrightService:
                     await page.click("button:has-text('Import and Enroll Users')")
                     await page.wait_for_timeout(4000)
 
-                # Teachers
                 if teacher_emails:
                     role_dropdown = page.locator("//div[contains(., 'Assign Role') and contains(@class, 'select')] | //select").last
                     await role_dropdown.click()
@@ -914,7 +861,6 @@ class WorkspacePlaywrightService:
         upload_file_path: str,
         record_count: int
     ) -> Dict[str, Any]:
-        """Upload file lên School Workspace, lấy Request ID từ MuiDataGrid và tắt browser."""
         async with async_playwright() as p:
             browser, context, page = await self._create_context(p)
             try:
@@ -976,7 +922,6 @@ class WorkspacePlaywrightService:
         request_id: str,
         download_dir: str
     ) -> Dict[str, Any]:
-        """Vào bảng MuiDataGrid kiểm tra Request ID. Nếu Done thì bấm icon menu và click Export."""
         async with async_playwright() as p:
             browser, context, page = await self._create_context(p)
             try:
