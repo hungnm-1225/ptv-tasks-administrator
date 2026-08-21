@@ -1,8 +1,19 @@
 # backend/app/core/config.py
 from typing import Optional, List
-from pydantic_settings import BaseSettings
 import pytz
 from datetime import datetime
+from pydantic_settings import BaseSettings
+
+# Đặt biến Múi giờ Việt Nam và hàm tiện ích Ở NGOÀI class Settings
+VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
+
+def get_vn_time_str(fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
+    """Trả về chuỗi thời gian định dạng YYYY-MM-DD HH:MM:SS theo giờ Việt Nam."""
+    return datetime.now(VN_TZ).strftime(fmt)
+
+def get_vn_iso() -> str:
+    """Trả về chuỗi thời gian ISO theo giờ Việt Nam."""
+    return datetime.now(VN_TZ).isoformat()
 
 
 class Settings(BaseSettings):
@@ -11,6 +22,7 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     ENV: str = "development"
     ALLOWED_DOMAIN: str = "dtt.vn"
+    VAULT_SECRET_KEY: str = ""
 
     # --- SUPABASE POSTGRESQL & STORAGE ---
     SUPABASE_URL: str = ""
@@ -54,12 +66,13 @@ class Settings(BaseSettings):
     GITHUB_DEFAULT_OWNER: str = ""
     GITHUB_DEFAULT_REPO: str = ""
 
-    # --- GOOGLE WORKSPACE, SHEETS & DOCS ---
+    # --- GOOGLE WORKSPACE, SHEETS & DOCS & DRIVE ---
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
     GMAIL_REFRESH_TOKEN: str = ""
     GOOGLE_CREDENTIALS_JSON: str = ""
     SPREADSHEET_ID: str = "1rZgFBD2PuZWL1jvQefcYZztCQvo99Lhx0GATTKvj1Go"
+    COF_ROOT_FOLDER_ID: str = "1SEh4I9yJRM8JNi_SC9CltpkyDYeG-I--"
 
     # --- LIVE SITE MONITOR & WORKSPACE RPA ---
     KEYCLOAK_URL: str = "https://eid.pythaverse.space/auth"
@@ -69,18 +82,6 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         extra = "ignore"
-        
-
-    # --- TIMEZONE CONFIGURATION ---
-    VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
-
-    def get_vn_now() -> datetime:
-        """Trả về đối tượng datetime theo giờ Việt Nam."""
-        return datetime.now(VN_TZ)
-
-    def get_vn_time_str(fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
-        """Trả về chuỗi thời gian định dạng giờ Việt Nam GMT+7 (VD: '2026-08-20 19:11:59')."""
-        return datetime.now(VN_TZ).strftime(fmt)
 
 
 settings = Settings()
