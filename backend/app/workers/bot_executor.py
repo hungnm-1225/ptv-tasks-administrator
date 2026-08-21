@@ -6,13 +6,6 @@ import tempfile
 import asyncio
 from typing import Dict, Any, Optional
 
-# 🛡️ Khắc phục triệt để lỗi "this event loop is already running" khi chạy Playwright ngầm trên FastAPI
-try:
-    import nest_asyncio
-    nest_asyncio.apply()
-except ImportError:
-    pass
-
 from app.core.config import settings
 from app.services.workspace_playwright_service import workspace_playwright_service
 from app.services.workspace_lineage_service import workspace_lineage_service
