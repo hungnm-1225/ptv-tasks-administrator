@@ -357,7 +357,7 @@ class SiteMonitorService:
                     if "eid.pythaverse.space" not in str(init_resp.url):
                         result["status"] = "PASS"
                         result["latency_ms"] = int((time.time() - start_time) * 1000)
-                        result["details"] = f"Phiên hoạt động sẵn sàng — HTTP {init_resp.status_code}"
+                        result["details"] = f"- HTTP {init_resp.status_code}"
                         return result
                     else:
                         action_url = str(init_resp.url)

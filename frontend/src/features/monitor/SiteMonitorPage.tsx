@@ -655,7 +655,7 @@ export const SiteMonitorPage: React.FC = () => {
               <table className="w-full text-xs">
                 <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200/80 dark:border-slate-700">
                   <tr>
-                    {['Site ID', 'Vai Trò (Role)', 'Tài Khoản Test', 'Đường Dẫn Kiểm Tra (Target Route)', 'Trạng Thái', 'Độ Trễ', 'Chi Tiết Phản Hồi', 'Thời Điểm Check'].map(h => (
+                    {['Site ID', 'Vai Trò', 'Đường Dẫn Kiểm Tra', 'Trạng Thái', 'Độ Trễ', 'Chi Tiết Phản Hồi', 'Thời Điểm Check'].map(h => (
                       <th key={h} className="px-4 py-3.5 text-left text-[11px] font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider">
                         {h}
                       </th>
