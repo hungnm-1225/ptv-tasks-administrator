@@ -38,10 +38,9 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
     supabase = get_supabase_client()
     time_str = get_vn_time_str()
     
-    # 1. Bổ sung thông tin Credentials phả hệ nếu là Workspace RPA mà chưa có
+    # 1. Bổ sung thông tin Credentials phả hệ nếu là Workspace RPA
     if bot_type == "workspace_rpa":
         action = payload.get("action", "")
-        # Nếu là luồng tạo order / contract / lineage toàn trình
         if action in ["school_create_order", "partner_approve_order", "full_lineage_pipeline", "bulk_account_creation"]:
             school_ident = payload.get("school_name") or payload.get("school_id")
             if school_ident:
@@ -63,20 +62,26 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
         "execution_logs": log_trail
     }).eq("id", task_id).execute()
 
-    # 3. KÍCH HOẠT WORKER THỰC THI THẬT
+    # 3. KÍCH HOẠT WORKER THỰC THI THẬT (ASYNC CHUẨN)
     try:
         execution_result = await execute_approved_bot_task(bot_type, payload)
         end_time_str = get_vn_time_str()
         
-        is_success = execution_result.get("status") in ["success", "simulated", "submitted", "completed"]
+        # Nhận diện thành công linh hoạt (status success hoặc success_count > 0)
+        is_success = (
+            execution_result.get("status") in ["success", "simulated", "submitted", "completed"] 
+            or execution_result.get("success_count", 0) > 0
+        )
         
         if is_success:
             success_msg = execution_result.get("message") or execution_result.get("issue_url") or "Thực thi tác vụ thành công!"
             log_trail += f"[{end_time_str}] [SUCCESS] [{bot_type}]: {success_msg}\n"
             
-            # Ghi thêm chi tiết tiến trình nếu có
-            if "logs" in execution_result:
-                log_trail += f"\n--- CHI TIẾT TIẾN TRÌNH RPA ---\n{execution_result['logs']}\n"
+            # Ghi log chi tiết từng tài khoản (nếu Keycloak hoặc Bot trả về)
+            if "execution_logs" in execution_result:
+                log_trail += f"\n{execution_result['execution_logs']}\n"
+            elif "logs" in execution_result:
+                log_trail += f"\n--- CHI TIẾT TIẾN TRÌNH ---\n{execution_result['logs']}\n"
 
             supabase.table("bot_automation_tasks").update({
                 "execution_status": "success",
@@ -91,8 +96,12 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
                     "updated_at": get_vn_iso()
                 }).eq("id", ticket_id).execute()
         else:
-            err_msg = execution_result.get("error", "Lỗi không xác định trong quá trình thực thi.")
+            err_msg = execution_result.get("error") or execution_result.get("message") or "Lỗi không xác định trong quá trình thực thi."
             log_trail += f"[{end_time_str}] [ERROR] [{bot_type}]: {err_msg}\n"
+            
+            if "execution_logs" in execution_result:
+                log_trail += f"\n{execution_result['execution_logs']}\n"
+
             supabase.table("bot_automation_tasks").update({
                 "execution_status": "failed",
                 "execution_logs": log_trail,

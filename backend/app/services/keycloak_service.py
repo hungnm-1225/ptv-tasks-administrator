@@ -16,7 +16,7 @@ BROWSER_HEADERS = {
 }
 
 def clean_email_identifier(raw: Any) -> str:
-    """Bóc tách email sạch từ chuỗi 'Họ Tên <email@dtt.vn>'"""
+    """Bóc tách email sạch từ chuỗi 'Họ Tên <email@dtt.vn>' hoặc 'email@dtt.vn'"""
     if not raw or not isinstance(raw, str):
         return ""
     _, parsed_email = parseaddr(raw)
@@ -41,7 +41,6 @@ class KeycloakService:
     # =========================================================================
     async def _get_admin_token(self, client: httpx.AsyncClient) -> Optional[str]:
         """Lấy Admin Token trực tiếp qua HTTPX kèm Browser User-Agent"""
-        # Thử 2 endpoint: có /auth và không có /auth
         urls_to_try = [
             f"{self.raw_server_url}/auth/realms/master/protocol/openid-connect/token",
             f"{self.raw_server_url}/realms/master/protocol/openid-connect/token"
@@ -79,8 +78,8 @@ class KeycloakService:
         async with httpx.AsyncClient(verify=False, headers=BROWSER_HEADERS) as client:
             token = await self._get_admin_token(client)
             if not token:
-                logger.warning("Không lấy được Token qua REST API (Bị Nginx chặn). Chuyển sang Playwright RPA...")
-                return None  # Kích hoạt Fallback sang Tầng 2
+                logger.warning("Không lấy được Token qua REST API. Chuyển sang Playwright RPA...")
+                return None
 
             auth_headers = {
                 **BROWSER_HEADERS,
@@ -109,7 +108,6 @@ class KeycloakService:
                 users = search_res.json() if search_res.status_code == 200 and isinstance(search_res.json(), list) else []
                 
                 if not users:
-                    # Fallback tìm username
                     search_res = await client.get(f"{base_api}/users?username={clean_id}&exact=true", headers=auth_headers)
                     users = search_res.json() if search_res.status_code == 200 and isinstance(search_res.json(), list) else []
 
@@ -150,7 +148,7 @@ class KeycloakService:
                             json={"type": "password", "value": pass_val, "temporary": temporary},
                             headers=auth_headers
                         )
-                        logs.append(f"Reset pass ({password_option}) - Temporary={temporary}")
+                        logs.append(f"Reset pass ({password_option}) [Temporary={temporary}]")
 
                     success_count += 1
                     results.append({"identifier": clean_id, "status": "success", "logs": " | ".join(logs)})
@@ -166,7 +164,7 @@ class KeycloakService:
             }
 
     # =========================================================================
-    # 🎭 TẦNG 2: PLAYWRIGHT RPA BOT CHÍNH HIỆU (Bypass 100% Mọi WAF/Nginx)
+    # 🎭 TẦNG 2: PLAYWRIGHT RPA BOT CHÍNH HIỆU (Fallback)
     # =========================================================================
     async def execute_via_playwright_rpa(
         self,
@@ -177,7 +175,7 @@ class KeycloakService:
         custom_password: Optional[str],
         temporary: bool
     ) -> Dict[str, Any]:
-        """Chạy Chromium thật để đăng nhập và xử lý trực tiếp trên giao diện Keycloak"""
+        """Chạy Chromium thật để xử lý trên giao diện Keycloak"""
         logger.info("🚀 Kích hoạt Playwright Keycloak RPA Engine...")
         results = []
         success_count = 0
@@ -201,7 +199,6 @@ class KeycloakService:
             page = await context.new_page()
 
             try:
-                # 1. Đăng nhập Keycloak
                 console_url = f"{self.raw_server_url}/auth/admin/master/console/#/realms/{self.target_realm}/users"
                 await page.goto(console_url, wait_until="networkidle", timeout=30000)
 
@@ -218,7 +215,6 @@ class KeycloakService:
 
                     logs = []
                     try:
-                        # 2. Về trang Users & Tìm kiếm
                         await page.goto(console_url, wait_until="networkidle")
                         await page.wait_for_selector('input[data-ng-model="query.search"]', timeout=15000)
 
@@ -227,7 +223,6 @@ class KeycloakService:
                         await page.keyboard.press("Enter")
                         await page.wait_for_timeout(1500)
 
-                        # 3. Khớp chính xác hàng User
                         rows = page.locator('table#user-table tbody tr[ng-repeat="user in users"]')
                         count = await rows.count()
                         target_row = None
@@ -245,11 +240,9 @@ class KeycloakService:
                             results.append({"identifier": clean_id, "status": "failed", "message": "Không tìm thấy User trên bảng UI"})
                             continue
 
-                        # Click Edit
                         await target_row.locator("td.kc-action-cell:has-text('Edit')").click()
                         await page.wait_for_selector('ul.nav-tabs', timeout=10000)
 
-                        # 4. Sửa Status tại Tab Details
                         if desired_enabled is not None:
                             enabled_chk = page.locator("input#userEnabled")
                             if await enabled_chk.is_checked() != desired_enabled:
@@ -258,7 +251,6 @@ class KeycloakService:
                                 await page.wait_for_timeout(1000)
                             logs.append(f"Set enabled={desired_enabled}")
 
-                        # 5. Đổi Mật Khẩu tại Tab Credentials
                         if action_type in ["bulk_reset_pass", "bulk_both", "reset_password"]:
                             if password_option == "email_lowercase":
                                 pass_val = clean_id
@@ -279,7 +271,7 @@ class KeycloakService:
 
                             await page.click('button[data-ng-click="resetPassword(true)"]')
                             await page.wait_for_timeout(1500)
-                            logs.append(f"Reset pass ({password_option}) - Temporary={temporary}")
+                            logs.append(f"Reset pass ({password_option}) [Temporary={temporary}]")
 
                         success_count += 1
                         results.append({"identifier": clean_id, "status": "success", "logs": " | ".join(logs)})
@@ -299,10 +291,10 @@ class KeycloakService:
         }
 
     # =========================================================================
-    # 🎯 ROUTER ĐIỀU PHỐI CHÍNH
+    # 🎯 ROUTER ĐIỀU PHỐI CHÍNH (NATIVE ASYNC 100%)
     # =========================================================================
-    async def execute_account_action_async(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        # Trích xuất danh sách identifiers
+    async def execute_account_action(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Hàm Async chính thức - Định dạng Log Success cực đẹp"""
         raw_list = payload.get("identifiers") or payload.get("emails") or payload.get("users") or []
         if isinstance(raw_list, str):
             raw_list = [raw_list]
@@ -327,7 +319,7 @@ class KeycloakService:
         custom_pass = payload.get("new_password") or payload.get("temp_pass")
         temporary = payload.get("temporary", False)
 
-        # 1. Thử qua REST API với Browser Headers trước
+        # 1. Chạy REST API trước
         res = await self.execute_via_rest_api(
             identifiers=raw_list,
             action_type=action,
@@ -337,7 +329,7 @@ class KeycloakService:
             temporary=temporary
         )
 
-        # 2. Nếu REST API bị WAF chặn HTML bảo trì, kích hoạt ngay Playwright RPA
+        # 2. Fallback sang Playwright nếu cần
         if res is None:
             res = await self.execute_via_playwright_rpa(
                 identifiers=raw_list,
@@ -348,17 +340,28 @@ class KeycloakService:
                 temporary=temporary
             )
 
-        return res
+        # 3. Format Log Thành Công rõ ràng và chi tiết
+        success_count = res.get("success_count", 0)
+        total = res.get("total", len(raw_list))
+        details = res.get("details", [])
 
-    def execute_account_action(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Wrapper đồng bộ để tương thích với luồng cũ"""
-        import asyncio
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        return loop.run_until_complete(self.execute_account_action_async(payload))
+        log_lines = []
+        if success_count > 0:
+            log_lines.append(f"[SUCCESS] Đã xử lý thành công {success_count}/{total} tài khoản Keycloak:")
+            for d in details:
+                if d.get("status") == "success":
+                    log_lines.append(f"  ✓ {d['identifier']}: {d.get('logs', 'OK')}")
+                else:
+                    log_lines.append(f"  ✗ {d['identifier']}: {d.get('message', 'Thất bại')}")
+            res["status"] = "success"
+        else:
+            log_lines.append(f"[ERROR] Thất bại toàn bộ {total} tài khoản:")
+            for d in details:
+                log_lines.append(f"  ✗ {d['identifier']}: {d.get('message')}")
+            res["status"] = "failed"
+
+        res["execution_logs"] = "\n".join(log_lines)
+        return res
 
 
 keycloak_service = KeycloakService()
