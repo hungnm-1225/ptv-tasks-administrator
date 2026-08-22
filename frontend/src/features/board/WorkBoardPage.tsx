@@ -303,7 +303,8 @@ export const WorkBoardPage: React.FC = () => {
                 method: 'PUT',
                 body: JSON.stringify({ background_url: bgUrl })
             });
-            setBoards(prev => prev.map(b => b.id === activeBoardId ? { ...b, background_url: bgUrl } : c as any));
+            // 🟢 Sửa 'c as any' thành 'b' nè anh
+            setBoards(prev => prev.map(b => b.id === activeBoardId ? { ...b, background_url: bgUrl } : b));
             toast.success('Đã đổi hình nền Board thành công!');
             setIsBgSettingsOpen(false);
         } catch (err: any) {
