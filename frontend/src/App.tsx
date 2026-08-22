@@ -17,6 +17,7 @@ import { ProfileSettingsPage } from './features/profile/ProfileSettingsPage';
 import { Loader2 } from 'lucide-react';
 import { AutomationStudioPage } from './features/studio/AutomationStudioPage';
 import { CoursesManagerPage } from './features/courses/CoursesManagerPage';
+import { WorkBoardPage } from './features/board/WorkBoardPage';
 
 const ProtectedRoute: React.FC = () => {
   const { user, loading } = useAuth();
@@ -61,6 +62,7 @@ const AppContent: React.FC = () => {
             <Route path="/tasks" element={<TaskManagementPage />} />
             <Route path="/github" element={<GithubReporterPage />} />
             <Route path="/bots" element={<BotCommanderPage />} />
+            <Route path="/board" element={<WorkBoardPage />} />
             <Route path="/reports" element={<ReportsExportPage />} />
             <Route path="/monitor" element={<SiteMonitorPage />} />
             <Route path="/profile" element={<ProfileSettingsPage />} />

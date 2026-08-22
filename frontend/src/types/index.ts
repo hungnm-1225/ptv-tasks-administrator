@@ -129,3 +129,28 @@ export interface CourseItem {
   lms_url: string;
   created_at?: string;
 }
+
+export interface BoardSubtask {
+  id: string;
+  title: string;
+  completed: boolean;
+}
+
+export interface BoardCard {
+  id: string;
+  title: string;
+  description?: string;
+  column_status: 'backlog' | 'todo' | 'in_progress' | 'review' | 'done';
+  priority: 'urgent' | 'high' | 'normal' | 'low';
+  category: string;
+  assigned_name?: string;
+  assigned_email?: string;
+  due_date?: string;
+  source?: string;
+  source_id?: string;
+  ticket_id?: string;
+  subtasks?: BoardSubtask[];
+  order_index?: number;
+  created_at?: string;
+  updated_at?: string;
+}
