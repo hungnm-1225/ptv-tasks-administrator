@@ -9,7 +9,6 @@ import {
   Github,
   Bot,
   FileSpreadsheet,
-  Send,
   Activity,
   X,
   Sparkles,
@@ -29,7 +28,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
     { to: '/github', label: 'GitHub Dispatcher', icon: Github },
     { to: '/bots', label: 'Bot Execution Center', icon: Bot },
     { to: '/reports', label: 'Analytics & XLSX Export', icon: FileSpreadsheet },
-    { to: '/telegram', label: 'Telegram Mini App', icon: Send },
     { to: '/monitor', label: 'Site Health Monitor', icon: Activity },
   ];
 

@@ -12,7 +12,6 @@ import { TaskManagementPage } from './features/tasks/TaskManagementPage';
 import { GithubReporterPage } from './features/github/GithubReporterPage';
 import { BotCommanderPage } from './features/bots/BotCommanderPage';
 import { ReportsExportPage } from './features/reports/ReportsExportPage';
-import { TelegramAppPage } from './features/telegram/TelegramAppPage';
 import { SiteMonitorPage } from './features/monitor/SiteMonitorPage';
 import { ProfileSettingsPage } from './features/profile/ProfileSettingsPage';
 import { Loader2 } from 'lucide-react';
@@ -62,7 +61,6 @@ const AppContent: React.FC = () => {
             <Route path="/github" element={<GithubReporterPage />} />
             <Route path="/bots" element={<BotCommanderPage />} />
             <Route path="/reports" element={<ReportsExportPage />} />
-            <Route path="/telegram" element={<TelegramAppPage />} />
             <Route path="/monitor" element={<SiteMonitorPage />} />
             <Route path="/profile" element={<ProfileSettingsPage />} />
             <Route path="/studio" element={<AutomationStudioPage />} />

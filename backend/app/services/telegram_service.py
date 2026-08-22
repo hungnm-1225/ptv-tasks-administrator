@@ -25,7 +25,7 @@ class TelegramService:
             f"🔔 *YÊU CẦU PHÊ DUYỆT TỰ ĐỘNG HÓA MỚI*\n\n"
             f"📌 *Tác vụ:* `{bot_type}`\n"
             f"📝 *Mô tả:* {ticket_summary}\n\n"
-            f"Nhấn nút bên dưới hoặc mở Telegram Mini App để phê duyệt:"
+            f"Nhấn nút bên dưới hoặc truy cập Web Portal để phê duyệt:"
         )
 
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"

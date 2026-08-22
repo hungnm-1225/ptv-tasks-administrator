@@ -81,7 +81,7 @@
 ### 1.2. Bốn Triết Lý Vận Hành Hệ Thống (Core Principles)
 - **Hợp Nhất Nguồn Cấp (Unified Single Feed):** Toàn bộ email, biểu mẫu phản hồi và ticket từ mọi nguồn đều được các tiến trình nền tự động thu thập và đồng bộ về bảng duy nhất `inbox_tickets` trên Supabase PostgreSQL.
 - **Phân Loại & Tóm Tắt Tự Động (Gemini AI Multi-Model Triage):** Sử dụng Google Gemini AI Engine với cơ chế tự động Fallback 10 tầng mô hình để tóm tắt 2 câu tiếng Việt, phân loại chuẩn xác 5 danh mục (`bug`, `account_keycloak`, `lms_enroll`, `license`, `other`) và tự động khớp nhân sự phụ trách theo `knowledge_base.json`.
-- **Phê Duyệt Con Người Tuyệt Đối (Human-in-the-Loop Safeguard):** Không có bất kỳ tác vụ can thiệp hệ thống nào (Keycloak API, Playwright RPA, GitHub Issue) được thực thi nếu chưa có trạng thái `approval_status = 'approved'` do Quản trị viên bấm duyệt và chỉnh sửa tham số JSON Payload trên Web SPA hoặc Telegram Mini App.
+- **Phê Duyệt Con Người Tuyệt Đối (Human-in-the-Loop Safeguard):** Không có bất kỳ tác vụ can thiệp hệ thống nào (Keycloak API, Playwright RPA, GitHub Issue) được thực thi nếu chưa có trạng thái `approval_status = 'approved'` do Quản trị viên bấm duyệt và chỉnh sửa tham số JSON Payload trên Web Portal SPA.
 - **Bảo Mật Xác Thực Miền Doanh Nghiệp (@dtt.vn Domain Whitelist):** Kiểm soát nghiêm ngặt tầng Frontend (Supabase Auth Listener) và Backend (JWT Bearer Token verification), từ chối và tự động đăng xuất tất cả các tài khoản không thuộc quyền quản trị viên `hung.nguyenmanh@dtt.vn`.
 
 ---
@@ -137,7 +137,7 @@
                                           ▼
                       ┌───────────────────────────────────────┐
                       │  HUMAN-IN-THE-LOOP CONTROL PORTAL     │
-                      │  (React 19 SPA / Telegram Mini App)   │
+                      │  (React 19 Enterprise SPA)            │
                       │  - Xem tóm tắt, mở trực tiếp nguồn gốc│
                       │  - Đổi Category inline, xem file đính │
                       │  - Soạn/Sửa JSON Payload tác vụ Bot   │
@@ -190,7 +190,7 @@
 - **Identity & SSO Management:** Keycloak Admin REST API (`python-keycloak`) + Custom Headers
 - **Security & Encryption:** Cryptography (`Fernet` cipher suite với `VAULT_SECRET_KEY`) + PyJWT
 - **Office & Sheet Automation:** `openpyxl`, `google-api-python-client`, `google-auth-oauthlib`, `gspread`
-- **External Communications:** `httpx` (Async HTTP Client), `python-telegram-bot`, GitHub REST API
+- **External Communications:** `httpx` (Async HTTP Client), Telegram Bot Push API, GitHub REST API
 
 ### 3.3. Database & Cloud Infrastructure Stack
 - **Database Engine:** Supabase PostgreSQL 16
@@ -279,7 +279,7 @@ ptv-tasks-administrator/
 │   │   ├── components/
 │   │   │   ├── common/
 │   │   │   │   ├── Header.tsx          # Header cố định: Mobile Hamburger, Theme Toggle, Profile, Logout
-│   │   │   │   └── Sidebar.tsx         # Menu điều hướng bên trái (9 modules) hỗ trợ Mobile Drawer
+│   │   │   │   └── Sidebar.tsx         # Menu điều hướng bên trái (8 modules) hỗ trợ Mobile Drawer
 │   │   │   └── layout/
 │   │   │       └── AppLayout.tsx       # Khung bố cục chuẩn bọc Sidebar + Header + Outlet nội dung
 │   │   ├── config/
@@ -308,10 +308,8 @@ ptv-tasks-administrator/
 │   │   │   │   └── ReportsExportPage.tsx # Xuất Báo Cáo KPI DTT 3Đ sang Excel (.xlsx) với SheetJS
 │   │   │   ├── studio/
 │   │   │   │   └── AutomationStudioPage.tsx # Khởi tạo & Điều phối Tác Vụ Tự Động Hóa Độc Lập
-│   │   │   ├── tasks/
-│   │   │   │   └── TaskManagementPage.tsx # Cổng Human-in-the-Loop: Soạn/Sửa JSON Payload trước khi duyệt
-│   │   │   └── telegram/
-│   │   │       └── TelegramAppPage.tsx # Mô phỏng giao diện di động Telegram Mini App (TMA)
+│   │   │   └── tasks/
+│   │   │       └── TaskManagementPage.tsx # Cổng Human-in-the-Loop: Soạn/Sửa JSON Payload trước khi duyệt
 │   │   ├── lib/
 │   │   │   ├── api.ts                  # Tiện ích gọi fetchApi<T> kết nối Backend kèm xử lý lỗi
 │   │   │   └── supabase.ts             # Khởi tạo Supabase JS Client Singleton
@@ -897,7 +895,6 @@ Sử dụng `react-router-dom` v7 quản lý toàn bộ luồng điều hướng
   - `/github`: Điều phối tạo Bug Issue GitHub (`GithubReporterPage`).
   - `/bots`: Trung tâm giám sát và điều khiển Bot Workers (`BotCommanderPage`).
   - `/reports`: Xuất Báo Cáo KPI DTT 3Đ sang Excel (`ReportsExportPage`).
-  - `/telegram`: Mô phỏng Telegram Mini App (`TelegramAppPage`).
   - `/monitor`: Giám sát 3 Tabs: Uptime, Auth Matrix & CI/CD Logs (`SiteMonitorPage`).
   - `/profile`: Thiết lập thông tin Tác Giả & MXH (`ProfileSettingsPage`).
 - **Cơ chế ProtectedRoute:** Kiểm tra trạng thái `loading` và `user` từ `AuthContext`. Nếu chưa đăng nhập, tự động chuyển hướng về `/login`.
@@ -960,7 +957,7 @@ Khai báo đầy đủ TypeScript Types & Interfaces:
 #### 1. [Sidebar.tsx](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/components/common/Sidebar.tsx)
 - Cột điều hướng bên trái cố định (`h-screen sticky top-0`) tích hợp Drawer Menu phản hồi mượt mà trên Mobile (`isMobileNavOpen`).
 - Logo thương hiệu Pythaverse Admin Automation Hub.
-- Menu 9 Modules quản trị: Executive Dashboard, Unified Inbox Feed, Task & Approval Hub, **Automation Studio**, GitHub Dispatcher, Bot Execution Center, Analytics & XLSX Export, Telegram Mini App, Site Health Monitor.
+- Menu 8 Modules quản trị: Executive Dashboard, Unified Inbox Feed, Task & Approval Hub, **Automation Studio**, GitHub Dispatcher, Bot Execution Center, Analytics & XLSX Export, Site Health Monitor.
 - Sử dụng `NavLink` với style kích hoạt trực quan, bóng đổ và màu sắc hiện đại.
 
 #### 2. [Header.tsx](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/components/common/Header.tsx)
@@ -1012,7 +1009,7 @@ Khai báo đầy đủ TypeScript Types & Interfaces:
 - Cho phép Quản trị viên chủ động cấu hình và kích hoạt các tác vụ bot mà **không cần gắn với một Inbox Ticket** (`ticket_id = null`, `is_manual_dispatch = true`).
 - **4 Bộ Dispatcher Engines:**
   1. `🔑 Keycloak Identity Bot`: Cấu hình Reset Mật khẩu, Xác thực Email, Tạm khóa / Kích hoạt tài khoản với bộ 3 Switch Toggles độc quyền.
-  2. `🏢 Workspace Phả Hệ & License Bot`: Tích hợp 6 phân luồng chuyên biệt (Trọn Gói Toàn Trình, Duyệt Đơn Hàng Trường, Duyệt Hợp Đồng Đối Tác, Duyệt Hợp Đồng Quản Trị, Tạo Tài Khoản, Ghi Danh LMS), Searchable Combobox lọc 480+ trường phả hệ, tự động điền Partner & Distributor, chọn danh mục môn học (`SWRP`, `IR`, `ASP`) và số lượng License.
+  2. `🏢 Workspace Phả Hệ & License Bot`: Tích hợp 4 mục chính (1. Phê Duyệt Đơn Hàng/Hợp Đồng, 2. Tạo & Duyệt Chuỗi Liên Thông, 3. Tạo Tài Khoản Hàng Loạt, 4. Ghi Danh LMS Độc Lập), Searchable Combobox lọc 480+ trường phả hệ, tự động điền Partner & Distributor, chọn danh mục môn học (`SWRP`, `IR`, `ASP`) và số lượng License.
   3. `🎓 LMS Course & Git Provisioning`: Ghi danh học sinh/giáo viên và kích hoạt tài khoản Git qua Moodle WebServices.
   4. `🤖 Google Feedback & Doc Triage`: Tự động đọc và @mention bình luận nhân sự phụ trách trên Google Docs.
 - **Live JSON Payload Editor:** Tự động sinh cấu trúc JSON tham số tương ứng thời gian thực, cho phép Admin chỉnh sửa trực tiếp hoặc Copy 1-click vào Clipboard.
@@ -1042,16 +1039,13 @@ Khai báo đầy đủ TypeScript Types & Interfaces:
   - Tự động đính kèm danh sách Link dẫn chứng OS Ticket, Gmail và Form Tracking.
 - Tích hợp thư viện SheetJS (`xlsx`) tạo và tải file `.xlsx` về máy ngay trên trình duyệt mà không cần xử lý nặng tại server.
 
-#### 10. [TelegramAppPage.tsx](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/telegram/TelegramAppPage.tsx) (Telegram Mini App Simulator)
-- Khung mô phỏng giao diện di động trên Telegram, cho phép phê duyệt nhanh tác vụ qua nút bấm cảm ứng tối ưu cho mobile.
-
-#### 11. [SiteMonitorPage.tsx](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/monitor/SiteMonitorPage.tsx) (Trung Tâm Giám Sát Sức Khỏe & Hạ Tầng 3-Tabs)
+#### 10. [SiteMonitorPage.tsx](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/monitor/SiteMonitorPage.tsx) (Trung Tâm Giám Sát Sức Khỏe & Hạ Tầng 3-Tabs)
 - Thiết kế 3 Tabs chuyên sâu cho toàn bộ hệ sinh thái:
   - **Tab 1: Giám Sát Công Khai:** Giám sát trạng thái Live của 10 website Pythaverse, thanh Uptime Bars 24 giờ theo chuẩn UptimeRobot, Live Uptime Bar 24 giờ và bảng Incident Log tra cứu lịch sử sự cố gián đoạn.
   - **Tab 2: Ma Trận Xác Thực & Phân Quyền:** Kiểm thử tự động đăng nhập Keycloak SSO cho 16 tài khoản mẫu thuộc 7 vai trò cốt lõi (`Admin`, `Sales Admin`, `Distributor`, `Partner`, `School`, `Teacher`, `Student`), đo thời gian phản hồi và xác thực quyền truy cập các route nội bộ của từng portal.
   - **Tab 3: CI/CD & Tiến Trình Triển Khai:** Kết nối Vercel REST API và Render REST API, theo dõi trạng thái các bản build Frontend SPA và Backend Container, tích hợp trình xem Terminal Build Logs thời gian thực trực tiếp trên trình duyệt.
 
-#### 12. [ProfileSettingsPage.tsx](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/profile/ProfileSettingsPage.tsx) (Thiết Lập Chủ Quyền Tác Giả)
+#### 11. [ProfileSettingsPage.tsx](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/profile/ProfileSettingsPage.tsx) (Thiết Lập Chủ Quyền Tác Giả)
 - Quản lý hồ sơ tác giả Nguyễn Mạnh Hùng, chức danh, đơn vị chủ quản, vị trí địa lý và bio giới thiệu.
 - Tải ảnh đại diện trực tiếp lên Supabase Storage bucket `ticket-attachments/avatars/`.
 - Quản lý hệ sinh thái mạng xã hội với tính năng tự động nhận diện nền tảng (Threads, Telegram, Zalo, WhatsApp, Instagram, X, YouTube, Discord, GitHub, LinkedIn, Facebook, Email).

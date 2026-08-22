@@ -94,7 +94,7 @@ export const authorConfig: AuthorConfig = {
       "Gemini AI Auto-Triage & Summarization",
       "Human-in-the-Loop Bot Approval Queue",
       "Multi-Worker Cloud Execution (Keycloak, LMS Playwright, GitHub REST)",
-      "Google Workspace & Telegram Mini App Integration",
+      "Google Workspace & Enterprise Automation Hub",
     ],
     techStack: [
       "React 19 SPA",

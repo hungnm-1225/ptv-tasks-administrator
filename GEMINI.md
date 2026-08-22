@@ -80,7 +80,7 @@ Gói dịch vụ được tách nhỏ thành 7 module chuyên biệt kế thừa
 ## 3. BỐN NGUYÊN TẮC BẤT DI BẤT DỊCH (ABSOLUTE RULES)
 
 1. **Human-in-the-Loop Gate (Cổng Phê Duyệt Con Người):**
-   - Tuyệt đối KHÔNG chạy ngầm bất kỳ tác vụ can thiệp hệ thống nào (Keycloak API, Playwright RPA, GitHub Issue...) nếu chưa có trạng thái `approval_status = 'approved'` do Quản trị viên phê duyệt trên Web hoặc Telegram.
+   - Tuyệt đối KHÔNG chạy ngầm bất kỳ tác vụ can thiệp hệ thống nào (Keycloak API, Playwright RPA, GitHub Issue...) nếu chưa có trạng thái `approval_status = 'approved'` do Quản trị viên phê duyệt trên Web Portal hoặc Telegram Bot.
 2. **Kiểm Soát Miền Doanh Nghiệp (@dtt.vn Whitelist):**
    - Chỉ người dùng có email Google thuộc miền `@dtt.vn` (đặc biệt quản trị viên tối cao `hung.nguyenmanh@dtt.vn`) mới có quyền truy cập hệ thống. Tự động từ chối và đăng xuất mọi tài khoản ngoài miền.
 3. **Memory Collection Safeguard (Chống Tràn RAM Máy Chủ):**

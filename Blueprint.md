@@ -30,7 +30,6 @@ To prevent syntax conflicts, breaking changes, and deprecated API calls, all cod
 - **Tailwind CSS**: `4.0.x` (Use new `@import "tailwindcss";` v4 syntax)
 - **Lucide React**: `0.475.x` (UI Icons)
 - **SheetJS (`xlsx`)**: `0.18.5` (Client-side Excel parsing & exporting)
-- **Telegram Mini App SDK**: `@telegram-apps/sdk-react: ^2.0.0`
 - **Supabase JS Client**: `@supabase/supabase-js: ^2.48.x`
 - **Recharts**: `2.15.x` (Dashboard KPI Data Visualization)
 
@@ -39,7 +38,6 @@ To prevent syntax conflicts, breaking changes, and deprecated API calls, all cod
 - **FastAPI**: `0.115.x` (Async Web Framework)
 - **Pydantic**: `2.10.x` (Strict Data Validation)
 - **google-genai**: `1.2.x` / `google-generativeai: ^0.8.4` (Gemini API SDK with Model Fallback)
-- **python-telegram-bot**: `21.10` (Async JobQueue & Telegram Mini App Integration)
 - **python-keycloak**: `5.1.x` (Keycloak Admin REST API integration)
 - **playwright**: `1.50.x` (Headless browser automation fallback for LMS/PLearn)
 - **PyJWT / google-auth-oauthlib**: Latest stable (OAuth2 Gmail Workspace authentication)
@@ -148,10 +146,6 @@ The Single Page Application MUST be structured with the following routes & sub-m
 - Date range filter.
 - Client-side export using `SheetJS` (`xlsx`) with custom styling, custom filenames, and auto-download.
 
-### Menu 7: Mobile Telegram Mini App Integration (TMA)
-- Embedded view optimized for Mobile Inside Telegram (`telegram-apps/sdk-react`).
-- Provides quick approval cards with haptic feedback.
-
 ---
 
 ## 🔄 4. END-TO-END AUTOMATION WORKFLOW
@@ -170,14 +164,12 @@ The Single Page Application MUST be structured with the following routes & sub-m
             [Saved to Supabase Database]
                         │
                         ▼
-      [Telegram Bot Sends Push Notification Alert]
+       [Telegram Bot Sends Push Notification Alert]
                         │
-  ┌─────────────────────┴─────────────────────┐
-  ▼                                           ▼
-[Quick Approve Button]              [Open Telegram Mini App]
-  │                                   (Review & Edit Payload)
-  │                                           │
-  └─────────────────────┬─────────────────────┘
+                        ▼
+    [Human-in-the-Loop Web Portal Control Hub]
+        (Review & Edit JSON Payload)
+                        │
                         │ (User Confirms / Approves)
                         ▼
           [Python Worker Execution]
@@ -205,10 +197,10 @@ The Single Page Application MUST be structured with the following routes & sub-m
 Antigravity AI Agent shall execute implementation in these chronological steps:
 
 - [ ] **Step 1:** Initialize Supabase DB using the provided PostgreSQL DDL script.
-- [ ] **Step 2:** Scaffold React 19 + Vite 6 + Tailwind CSS 4 frontend with the 7 specified menu routes.
+- [ ] **Step 2:** Scaffold React 19 + Vite 6 + Tailwind CSS 4 frontend with the specified menu routes.
 - [ ] **Step 3:** Build FastAPI backend in Python 3.11 with Gmail API reader, Keycloak REST API wrapper (`python-keycloak`), and GitHub Issue creation endpoint.
 - [ ] **Step 4:** Integrate Gemini AI engine with fallback model list (`gemini-3.7-flash`, `gemini-3.6-flash`, etc.).
-- [ ] **Step 5:** Setup Telegram Bot (`python-telegram-bot`) with Inline Keyboard approval buttons and Telegram Mini App webview link.
+- [ ] **Step 5:** Setup Telegram Bot notification push alert with Inline Keyboard approval buttons.
 - [ ] **Step 6:** Implement Client-Side XLSX Exporter using SheetJS (`xlsx`) in the Reports module.
 - [ ] **Step 7:** Run TypeScript linting (`npm run lint`) and Python type check (`mypy`) to ensure zero syntax/type errors.
 ```
