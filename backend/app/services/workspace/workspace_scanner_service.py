@@ -276,8 +276,8 @@ class WorkspaceScannerService(WorkspaceBaseService):
                         logger.error(f"❌ Lỗi xử lý School Orders của {dist_name}: {e_sch}")
 
                     # Đăng xuất an toàn trước khi quét Distributor tiếp theo
-                    await self._logout(page)
-                    await page.wait_for_timeout(1000)
+                    await context.clear_cookies()
+                    await page.wait_for_timeout(500)
 
                 logger.info(f"\n🎉 ========================================================")
                 logger.info(f"🏆 ĐỒNG BỘ 5 DISTRIBUTORS HOÀN TẤT XUẤT SẮC!")
