@@ -14,12 +14,14 @@ logger = logging.getLogger(__name__)
 
 class WorkspaceScannerService(WorkspaceBaseService):
     """
-    Service quét định kỳ toàn bộ Orders & Contracts của 5 Master Distributors 
-    và lưu Cache trực tiếp vào Supabase.
+    Service quét tự động và đồng bộ siêu tốc dữ liệu của 5 Master Distributors:
+    1. DST Contracts (Distributor -> Sales Admin)
+    2. PRT Contracts (Partner -> Distributor)
+    3. School Orders (School -> Partner) + Bóc tách chi tiết khóa học cho đơn Pending.
     """
 
     async def get_all_distributor_credentials(self) -> List[Dict[str, Any]]:
-        """Lấy danh sách 5 tài khoản Distributor từ bảng workspace_organizations & vault."""
+        """Lấy danh sách 5 tài khoản Distributor từ Supabase & giải mã Fernet."""
         supabase = get_supabase_client()
         try:
             res = supabase.table("workspace_organizations")\
@@ -44,17 +46,17 @@ class WorkspaceScannerService(WorkspaceBaseService):
                         "password": decrypt_password(encrypted_pass)
                     })
             
-            logger.info(f"🔑 Đã tìm thấy và giải mã {len(distributors)} tài khoản Distributor.")
+            logger.info(f"🔑 Đã tìm thấy và giải mã {len(distributors)} tài khoản Master Distributor.")
             return distributors
         except Exception as e:
             logger.error(f"❌ Lỗi lấy danh sách Distributor Credentials: {e}")
             return []
 
     async def scan_and_cache_all_distributors(self) -> Dict[str, Any]:
-        """Quét tuần tự 5 Distributor trong 1 phiên Playwright duy nhất để tiết kiệm RAM."""
+        """Khởi chạy 1 phiên Chromium duy nhất, quét tuần tự 5 Distributor qua Direct API."""
         distributors = await self.get_all_distributor_credentials()
         if not distributors:
-            return {"status": "error", "message": "Không có tài khoản Distributor nào để quét."}
+            return {"status": "error", "message": "Không tìm thấy tài khoản Distributor nào trong két sắt."}
 
         supabase = get_supabase_client()
         total_orders_synced = 0
@@ -66,139 +68,222 @@ class WorkspaceScannerService(WorkspaceBaseService):
                 for dist in distributors:
                     dist_code = dist.get("distributor_code", "N/A")
                     dist_name = dist.get("distributor_name", "Unknown")
-                    logger.info(f"🚀 Bắt đầu quét dữ liệu cho Distributor: [{dist_name}] ({dist_code})...")
+                    logger.info(f"\n=======================================================")
+                    logger.info(f"🚀 BẮT ĐẦU ĐỒNG BỘ CHO DISTRIBUTOR: [{dist_name}] ({dist_code})")
+                    logger.info(f"=======================================================")
 
-                    # 1. Đăng nhập Distributor
+                    # 1. Đăng nhập Distributor qua Keycloak SSO
                     is_ok, login_err = await self.login_role(page, dist["username"], dist["password"], "Distributor")
                     if not is_ok:
                         logger.warning(f"⚠️ Không thể đăng nhập Distributor {dist_name}: {login_err}")
                         continue
 
-                    # =========================================================
-                    # 2. CÀO DST CONTRACTS (Gửi lên Sales Admin)
-                    # =========================================================
+                    # Mở trang dashboard để nạp session & lấy distributor_id
+                    await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/dashboard", wait_until="domcontentloaded", timeout=45000)
+                    await page.wait_for_timeout(1500)
+
+                    # Lấy distributor_id từ biến toàn cục window.user
+                    dist_id = await page.evaluate("() => window.user?.distributor_id || null")
+                    if not dist_id:
+                        logger.warning(f"⚠️ Không tìm thấy window.user.distributor_id của {dist_name}, thử dùng fallback...")
+                        dist_id = dist_code
+
+                    logger.info(f"🎯 Đã xác thực Session Distributor ID: [{dist_id}]")
+
+                    # =========================================================================
+                    # 1. CÀO DST CONTRACTS (Gửi lên Sales Admin)
+                    # =========================================================================
                     try:
-                        logger.info(f"📄 [{dist_name}] Đang cào DST Contracts: /distributor-workspace/contract-po...")
-                        await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/contract-po", wait_until="networkidle", timeout=35000)
-                        await page.wait_for_selector(".MuiDataGrid-root", timeout=15000)
-                        await page.wait_for_timeout(1000)
+                        dst_api_url = f"https://pythaverse.space/wp-content/plugins/distributor_workspace_v3/api/order_sale/getListOrder.php?distributor_id={dist_id}"
+                        logger.info(f"📡 [1/3] Gọi API DST Contracts: {dst_api_url}")
+                        
+                        dst_res = await page.evaluate(f"""async () => {{
+                            try {{
+                                const r = await fetch('{dst_api_url}');
+                                return await r.json();
+                            }} catch(e) {{
+                                return {{ code: 500, error: e.toString() }};
+                            }}
+                        }}""")
 
-                        rows = page.locator(".MuiDataGrid-row")
-                        count = await rows.count()
+                        dst_list = dst_res.get("data", []) if isinstance(dst_res, dict) else []
+                        logger.info(f"✅ Thu thập được {len(dst_list)} DST Contracts.")
 
-                        for i in range(count):
-                            row = rows.nth(i)
-                            code_elem = row.locator("[data-field='order_code'] .MuiBox-root, [data-field='order_code']").first
-                            status_elem = row.locator("[data-field='status'] .MuiChip-label, [data-field='status']").first
-                            date_elem = row.locator("[data-field='order_date'], [data-field='created_at']").first
+                        for c in dst_list:
+                            contract_code = c.get("order_code")
+                            if not contract_code:
+                                continue
 
-                            contract_code = (await code_elem.inner_text()).strip() if await code_elem.count() > 0 else ""
-                            status_text = (await status_elem.inner_text()).strip() if await status_elem.count() > 0 else "Pending"
-                            contract_date = (await date_elem.inner_text()).strip() if await date_elem.count() > 0 else ""
+                            # Bóc tách môn học trong mảng items
+                            raw_items = c.get("items", []) or []
+                            courses_data = []
+                            for it in raw_items:
+                                if it.get("type") == "course":
+                                    courses_data.append({
+                                        "course_id": it.get("item_id"),
+                                        "course_name": it.get("item_name"),
+                                        "licenses": int(it.get("item_quantity", 1)) if str(it.get("item_quantity", "")).isdigit() else 1,
+                                        "category": "SWRP",
+                                        "total_price": it.get("total_price", 0)
+                                    })
 
-                            if contract_code:
-                                supabase.table("workspace_contracts_cache").upsert({
-                                    "contract_code": contract_code,
-                                    "contract_type": "DST",
-                                    "sender_name": dist_name,
-                                    "receiver_name": "Sales Admin",
-                                    "distributor_code": dist_code,
-                                    "status": status_text,
-                                    "contract_date": contract_date,
-                                    "last_synced_at": "now()"
-                                }, on_conflict="contract_code").execute()
-                                total_contracts_synced += 1
+                            supabase.table("workspace_contracts_cache").upsert({
+                                "contract_code": contract_code,
+                                "contract_type": "DST",
+                                "sender_name": dist_name,
+                                "receiver_name": "Sales Admin",
+                                "distributor_code": str(dist_code),
+                                "status": str(c.get("status", "Pending")).capitalize(),
+                                "contract_date": str(c.get("order_date") or c.get("created_at", "")).split("T")[0],
+                                "courses_data": courses_data,
+                                "raw_payload": c,
+                                "last_synced_at": "now()"
+                            }, on_conflict="contract_code").execute()
+                            total_contracts_synced += 1
 
                     except Exception as e_dst:
-                        logger.warning(f"⚠️ Lỗi cào DST Contracts của {dist_name}: {e_dst}")
+                        logger.error(f"❌ Lỗi xử lý DST Contracts của {dist_name}: {e_dst}")
 
-                    # =========================================================
-                    # 3. CÀO PRT CONTRACTS (Partner gửi tới Distributor)
-                    # =========================================================
+                    # =========================================================================
+                    # 2. CÀO PRT CONTRACTS (Partner gửi lên Distributor)
+                    # =========================================================================
                     try:
-                        logger.info(f"📝 [{dist_name}] Đang cào PRT Contracts: /distributor-workspace/partner-contract-po...")
-                        await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/partner-contract-po", wait_until="networkidle", timeout=35000)
-                        await page.wait_for_selector(".MuiDataGrid-root", timeout=15000)
-                        await page.wait_for_timeout(1000)
+                        prt_api_url = f"https://pythaverse.space/wp-content/plugins/distributor_workspace_v3/api/orders_management/getPartnerOrder.php?distributor_id={dist_id}"
+                        logger.info(f"📡 [2/3] Gọi API PRT Contracts: {prt_api_url}")
+                        
+                        prt_res = await page.evaluate(f"""async () => {{
+                            try {{
+                                const r = await fetch('{prt_api_url}');
+                                return await r.json();
+                            }} catch(e) {{
+                                return {{ code: 500, error: e.toString() }};
+                            }}
+                        }}""")
 
-                        rows = page.locator(".MuiDataGrid-row")
-                        count = await rows.count()
+                        prt_list = prt_res.get("data", []) if isinstance(prt_res, dict) else []
+                        logger.info(f"✅ Thu thập được {len(prt_list)} PRT Contracts.")
 
-                        for i in range(count):
-                            row = rows.nth(i)
-                            code_elem = row.locator("[data-field='order_code'] .MuiBox-root, [data-field='order_code']").first
-                            partner_elem = row.locator("[data-field='partner_name'], [data-field='sender_name']").first
-                            status_elem = row.locator("[data-field='status'] .MuiChip-label, [data-field='status']").first
-                            date_elem = row.locator("[data-field='order_date'], [data-field='created_at']").first
+                        for p_item in prt_list:
+                            contract_code = p_item.get("order_code")
+                            if not contract_code:
+                                continue
 
-                            contract_code = (await code_elem.inner_text()).strip() if await code_elem.count() > 0 else ""
-                            sender_name = (await partner_elem.inner_text()).strip() if await partner_elem.count() > 0 else "Partner"
-                            status_text = (await status_elem.inner_text()).strip() if await status_elem.count() > 0 else "Pending"
-                            contract_date = (await date_elem.inner_text()).strip() if await date_elem.count() > 0 else ""
+                            # Bóc tách môn học trong mảng courses
+                            raw_courses = p_item.get("courses", []) or []
+                            courses_data = []
+                            for crs in raw_courses:
+                                courses_data.append({
+                                    "course_id": crs.get("item_id"),
+                                    "course_name": crs.get("course_name") or crs.get("item_name"),
+                                    "category": crs.get("category", "SWRP"),
+                                    "licenses": int(crs.get("item_quantity", 1)) if str(crs.get("item_quantity", "")).isdigit() else 1,
+                                    "total_price": crs.get("total_price", 0)
+                                })
 
-                            if contract_code:
-                                supabase.table("workspace_contracts_cache").upsert({
-                                    "contract_code": contract_code,
-                                    "contract_type": "PRT",
-                                    "sender_name": sender_name,
-                                    "receiver_name": dist_name,
-                                    "distributor_code": dist_code,
-                                    "status": status_text,
-                                    "contract_date": contract_date,
-                                    "last_synced_at": "now()"
-                                }, on_conflict="contract_code").execute()
-                                total_contracts_synced += 1
+                            raw_status = str(p_item.get("status", "pending"))
+                            formatted_status = "Pending" if "pending" in raw_status.lower() else raw_status.capitalize()
+
+                            supabase.table("workspace_contracts_cache").upsert({
+                                "contract_code": contract_code,
+                                "contract_type": "PRT",
+                                "sender_name": p_item.get("partner_name") or "Partner",
+                                "receiver_name": dist_name,
+                                "distributor_code": str(dist_code),
+                                "status": formatted_status,
+                                "contract_date": str(p_item.get("order_date") or p_item.get("created_at", "")).split("T")[0],
+                                "courses_data": courses_data,
+                                "raw_payload": p_item,
+                                "last_synced_at": "now()"
+                            }, on_conflict="contract_code").execute()
+                            total_contracts_synced += 1
 
                     except Exception as e_prt:
-                        logger.warning(f"⚠️ Lỗi cào PRT Contracts của {dist_name}: {e_prt}")
+                        logger.error(f"❌ Lỗi xử lý PRT Contracts của {dist_name}: {e_prt}")
 
-                    # =========================================================
-                    # 4. CÀO SCHOOL ORDERS (Đơn hàng trường học thuộc tuyến)
-                    # =========================================================
+                    # =========================================================================
+                    # 3. CÀO SCHOOL ORDERS (School gửi lên Partner) & TỰ ĐỌC CHI TIẾT
+                    # =========================================================================
                     try:
-                        logger.info(f"🏫 [{dist_name}] Đang cào School Orders: /distributor-workspace/school-order...")
-                        await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/school-order", wait_until="networkidle", timeout=35000)
+                        sch_api_url = "https://pythaverse.space/wp-content/plugins/distributor_workspace_v3/api/orders_management/getListOrder.php"
+                        logger.info(f"📡 [3/3] Gọi API School Orders: {sch_api_url}")
                         
-                        if await page.locator(".MuiDataGrid-root").count() > 0:
-                            await page.wait_for_selector(".MuiDataGrid-root", timeout=10000)
-                            rows = page.locator(".MuiDataGrid-row")
-                            count = await rows.count()
+                        sch_res = await page.evaluate(f"""async () => {{
+                            try {{
+                                const r = await fetch('{sch_api_url}');
+                                return await r.json();
+                            }} catch(e) {{
+                                return {{ code: 500, error: e.toString() }};
+                            }}
+                        }}""")
 
-                            for i in range(count):
-                                row = rows.nth(i)
-                                order_elem = row.locator("[data-field='school_order_id'] span, [data-field='school_order_id']").first
-                                school_elem = row.locator("[data-field='school_name']").first
-                                partner_elem = row.locator("[data-field='partner_name']").first
-                                status_elem = row.locator("[data-field='status_name'], [data-field='status']").first
-                                date_elem = row.locator("[data-field='created_at']").first
+                        sch_list = sch_res.get("data", []) if isinstance(sch_res, dict) else []
+                        logger.info(f"✅ Thu thập được {len(sch_list)} School Orders (Toàn bộ 100% không cần phân trang).")
 
-                                order_code = (await order_elem.inner_text()).strip() if await order_elem.count() > 0 else ""
-                                school_name = (await school_elem.inner_text()).strip() if await school_elem.count() > 0 else "Unknown School"
-                                partner_name = (await partner_elem.inner_text()).strip() if await partner_elem.count() > 0 else ""
-                                status_text = (await status_elem.inner_text()).strip() if await status_elem.count() > 0 else "Awaiting Partner"
-                                order_date = (await date_elem.inner_text()).strip() if await date_elem.count() > 0 else ""
+                        for sch in sch_list:
+                            # Bỏ qua các mục contest cá nhân không phải của trường
+                            if sch.get("type_show") == "contest" and not sch.get("school_name"):
+                                continue
 
-                                if order_code:
-                                    supabase.table("workspace_orders_cache").upsert({
-                                        "order_code": order_code,
-                                        "school_name": school_name,
-                                        "partner_name": partner_name,
-                                        "distributor_name": dist_name,
-                                        "distributor_code": dist_code,
-                                        "status": status_text,
-                                        "order_date": order_date,
-                                        "last_synced_at": "now()"
-                                    }, on_conflict="order_code").execute()
-                                    total_orders_synced += 1
+                            numeric_order_id = sch.get("id") or sch.get("order_id")
+                            order_code = sch.get("school_order_id") or sch.get("partner_order_id") or f"SCH-{numeric_order_id}"
+                            status_name = sch.get("status_name") or "Awaiting Partner"
+                            
+                            courses_data = []
 
-                    except Exception as e_ord:
-                        logger.warning(f"⚠️ Không cào được School Orders tại route này của {dist_name}: {e_ord}")
+                            # 👉 NẾU ĐƠN HÀNG ĐANG CHỜ DUYỆT -> TỰ ĐỘNG GỌI getOrderDetail.php LẤY CHI TIẾT
+                            if ("awaiting" in status_name.lower() or "pending" in status_name.lower()) and numeric_order_id:
+                                try:
+                                    detail_url = f"https://pythaverse.space/wp-content/plugins/distributor_workspace_v3/api/orders_management/getOrderDetail.php?order_id={numeric_order_id}"
+                                    detail_res = await page.evaluate(f"""async () => {{
+                                        try {{
+                                            const r = await fetch('{detail_url}');
+                                            return await r.json();
+                                        }} catch(e) {{
+                                            return null;
+                                        }}
+                                    }}""")
 
-                    # Đăng xuất dọn dẹp session trước khi sang Distributor kế tiếp
+                                    if detail_res and "detail_package" in detail_res:
+                                        detail_courses = detail_res.get("detail_package", {}).get("courses", []) or []
+                                        for dc in detail_courses:
+                                            courses_data.append({
+                                                "course_id": dc.get("course_id"),
+                                                "course_name": dc.get("course_name"),
+                                                "category": dc.get("category", "SWRP"),
+                                                "licenses": int(dc.get("course_count", 1)),
+                                                "start_date": dc.get("course_enroll_start_date", "2026-09-01"),
+                                                "end_date": dc.get("course_enroll_end_date", "2027-05-31")
+                                            })
+                                except Exception as e_detail:
+                                    logger.warning(f"⚠️ Không đọc được detail Order {numeric_order_id}: {e_detail}")
+
+                            supabase.table("workspace_orders_cache").upsert({
+                                "order_code": order_code,
+                                "school_name": sch.get("school_name") or sch.get("school_user_name") or "Unknown School",
+                                "school_code": str(sch.get("school_id") or sch.get("buyer") or ""),
+                                "partner_name": sch.get("partner_name") or "Partner",
+                                "distributor_name": dist_name,
+                                "distributor_code": str(dist_code),
+                                "status": status_name,
+                                "order_date": str(sch.get("created_at", "")).split(" ")[0],
+                                "courses_data": courses_data,
+                                "raw_payload": sch,
+                                "last_synced_at": "now()"
+                            }, on_conflict="order_code").execute()
+                            total_orders_synced += 1
+
+                    except Exception as e_sch:
+                        logger.error(f"❌ Lỗi xử lý School Orders của {dist_name}: {e_sch}")
+
+                    # Đăng xuất an toàn trước khi quét Distributor tiếp theo
                     await self._logout(page)
                     await page.wait_for_timeout(1000)
 
-                logger.info(f"🎉 HOÀN TẤT ĐỒNG BỘ 5 DISTRIBUTORS! (Đã sync: {total_orders_synced} Orders, {total_contracts_synced} Contracts)")
+                logger.info(f"\n🎉 ========================================================")
+                logger.info(f"🏆 ĐỒNG BỘ 5 DISTRIBUTORS HOÀN TẤT XUẤT SẮC!")
+                logger.info(f"📊 Tổng kết: Đã lưu {total_contracts_synced} Hợp đồng & {total_orders_synced} Đơn hàng vào Supabase Cache.")
+                logger.info(f"========================================================\n")
+
                 return {
                     "status": "success",
                     "orders_synced": total_orders_synced,
@@ -206,7 +291,7 @@ class WorkspaceScannerService(WorkspaceBaseService):
                 }
 
             except Exception as e:
-                logger.error(f"❌ Lỗi quét tổng Distributor Scanner: {e}")
+                logger.error(f"❌ Lỗi toàn cục trong quá trình Scanner: {e}")
                 return {"status": "failed", "error": str(e)}
             finally:
                 await browser.close()
