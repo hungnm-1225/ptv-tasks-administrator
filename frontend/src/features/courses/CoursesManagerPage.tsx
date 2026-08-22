@@ -1,5 +1,5 @@
 // frontend/src/features/courses/CoursesManagerPage.tsx
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
     GraduationCap,
     Layers,
@@ -16,13 +16,18 @@ import {
     BookOpen,
     FileSpreadsheet,
     Settings2,
-    ArrowRightLeft
+    ArrowRightLeft,
+    UploadCloud,
+    FileText,
+    Link as LinkIcon
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import { fetchApi } from '../../lib/api';
 import { CourseItem } from '../../types';
 
 type CoursePaneType = 'workspace' | 'lms';
+type BulkInputMode = 'file' | 'text';
 
 export const CoursesManagerPage: React.FC = () => {
     const [activePane, setActivePane] = useState<CoursePaneType>('workspace');
@@ -44,9 +49,11 @@ export const CoursesManagerPage: React.FC = () => {
     const [formSku, setFormSku] = useState<string>('');
     const [formLmsUrl, setFormLmsUrl] = useState<string>('');
 
-    // --- Modal Bulk Import (Copy-Paste từ Excel) ---
+    // --- Modal Bulk Import (.xlsx, .csv hoặc Copy-Paste) ---
     const [isBulkModalOpen, setIsBulkModalOpen] = useState<boolean>(false);
+    const [bulkMode, setBulkMode] = useState<BulkInputMode>('file');
     const [bulkRawText, setBulkRawText] = useState<string>('');
+    const [uploadedFileName, setUploadedFileName] = useState<string>('');
     const [bulkPreview, setBulkPreview] = useState<Array<{
         course_id: number;
         category: string;
@@ -55,10 +62,10 @@ export const CoursesManagerPage: React.FC = () => {
         lms_url: string;
     }>>([]);
     const [isBulking, setIsBulking] = useState<boolean>(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     // --- Modal Quản Lý Danh Mục (Category Manager) ---
     const [isCatModalOpen, setIsCatModalOpen] = useState<boolean>(false);
-    const [newCatName, setNewCatName] = useState<string>('');
     const [editingCatOld, setEditingCatOld] = useState<string | null>(null);
     const [editingCatNew, setEditingCatNew] = useState<string>('');
     const [isCatSubmitting, setIsCatSubmitting] = useState<boolean>(false);
@@ -101,7 +108,15 @@ export const CoursesManagerPage: React.FC = () => {
         });
     }, [courses, selectedCategory, searchQuery]);
 
-    // 3. Mở Modal Thêm / Sửa
+    // 3. Xử lý khi thay đổi Course ID ở Form Đơn lẻ -> Tự động sinh Link LMS
+    const handleCourseIdChange = (val: string) => {
+        setFormCourseId(val);
+        if (val.trim() && !isNaN(Number(val.trim()))) {
+            setFormLmsUrl(`https://learn.pythaverse.space/course/view.php?id=${val.trim()}`);
+        }
+    };
+
+    // 4. Mở Modal Thêm / Sửa
     const handleOpenModal = (course?: CourseItem) => {
         if (course) {
             setEditingCourse(course);
@@ -109,33 +124,36 @@ export const CoursesManagerPage: React.FC = () => {
             setFormCategory(course.category);
             setFormCourseName(course.course_name);
             setFormSku(course.sku || '');
-            setFormLmsUrl(course.lms_url);
+            setFormLmsUrl(course.lms_url || `https://learn.pythaverse.space/course/view.php?id=${course.course_id}`);
         } else {
             setEditingCourse(null);
             setFormCourseId('');
             setFormCategory(selectedCategory !== 'all' ? selectedCategory : (categories[0] || 'SWRP'));
             setFormCourseName('');
             setFormSku('');
-            setFormLmsUrl('https://learn.pythaverse.space/course/view.php?id=');
+            setFormLmsUrl('');
         }
         setIsModalOpen(true);
     };
 
-    // 4. Lưu Form Khóa Học Đơn Lẻ
+    // 5. Lưu Form Khóa Học Đơn Lẻ
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!formCourseId || !formCategory || !formCourseName || !formLmsUrl) {
+        if (!formCourseId || !formCategory || !formCourseName) {
             toast.warning('Vui lòng điền đầy đủ các trường bắt buộc!');
             return;
         }
 
+        const cId = parseInt(formCourseId, 10);
+        const finalUrl = formLmsUrl.trim() || `https://learn.pythaverse.space/course/view.php?id=${cId}`;
+
         setIsSubmitting(true);
         const payload = {
-            course_id: parseInt(formCourseId, 10),
+            course_id: cId,
             category: formCategory.trim().toUpperCase(),
             course_name: formCourseName.trim(),
             sku: formSku.trim() || null,
-            lms_url: formLmsUrl.trim()
+            lms_url: finalUrl
         };
 
         try {
@@ -161,7 +179,7 @@ export const CoursesManagerPage: React.FC = () => {
         }
     };
 
-    // 5. Xóa khóa học đơn lẻ
+    // 6. Xóa khóa học đơn lẻ
     const handleDelete = async (course: CourseItem) => {
         if (!window.confirm(`Anh có chắc chắn muốn xóa khóa học "${course.course_name}" (#${course.course_id}) khỏi danh mục không?`)) {
             return;
@@ -176,7 +194,77 @@ export const CoursesManagerPage: React.FC = () => {
         }
     };
 
-    // 6. Xử lý Parse text Excel sang mảng khóa học (Bulk Import)
+    // 7. Xử lý Đọc File Excel / CSV bằng SheetJS
+    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setUploadedFileName(file.name);
+        const reader = new FileReader();
+
+        reader.onload = (evt) => {
+            try {
+                const bstr = evt.target?.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+                const rawRows: any[] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+
+                if (!rawRows || rawRows.length === 0) {
+                    toast.warning('File không có dữ liệu.');
+                    return;
+                }
+
+                const parsedList: any[] = [];
+                // Xác định dòng tiêu đề nếu có
+                let startIdx = 0;
+                const firstRowStr = (rawRows[0] || []).join(' ').toLowerCase();
+                if (firstRowStr.includes('id') || firstRowStr.includes('course') || firstRowStr.includes('danh mục')) {
+                    startIdx = 1; // Bỏ qua dòng header
+                }
+
+                for (let i = startIdx; i < rawRows.length; i++) {
+                    const row = rawRows[i];
+                    if (!row || row.length === 0) continue;
+
+                    const cIdRaw = String(row[0] || '').trim().replace('#', '');
+                    const cId = parseInt(cIdRaw, 10);
+                    const cat = String(row[1] || 'SWRP').trim().toUpperCase();
+                    const name = String(row[2] || '').trim();
+                    const sku = row[3] ? String(row[3]).trim() : null;
+                    let url = row[4] ? String(row[4]).trim() : '';
+
+                    // 🟢 Tự động sinh link LMS chuẩn theo ID
+                    if (!url && !isNaN(cId)) {
+                        url = `https://learn.pythaverse.space/course/view.php?id=${cId}`;
+                    }
+
+                    if (!isNaN(cId) && name) {
+                        parsedList.push({
+                            course_id: cId,
+                            category: cat,
+                            course_name: name,
+                            sku: sku,
+                            lms_url: url
+                        });
+                    }
+                }
+
+                setBulkPreview(parsedList);
+                if (parsedList.length > 0) {
+                    toast.success(`Đã đọc thành công ${parsedList.length} khóa học từ file "${file.name}"!`);
+                } else {
+                    toast.warning('Không tìm thấy dòng dữ liệu khóa học hợp lệ trong file.');
+                }
+            } catch (error: any) {
+                toast.error('Lỗi khi đọc file Excel/CSV: ' + (error.message || error));
+            }
+        };
+
+        reader.readAsBinaryString(file);
+    };
+
+    // 8. Xử lý Parse text Excel / TSV copy-paste
     const handleParseBulkText = (text: string) => {
         setBulkRawText(text);
         if (!text.trim()) {
@@ -188,7 +276,6 @@ export const CoursesManagerPage: React.FC = () => {
         const parsedList: any[] = [];
 
         lines.forEach(line => {
-            // Tách theo Tab (copy từ Excel) hoặc dấu phẩy / dấu gạch đứng |
             const parts = line.includes('\t')
                 ? line.split('\t')
                 : line.includes('|')
@@ -203,6 +290,7 @@ export const CoursesManagerPage: React.FC = () => {
                 const sku = parts[3]?.trim() || null;
                 let url = parts[4]?.trim() || '';
 
+                // 🟢 Tự động sinh link nếu thiếu
                 if (!url && !isNaN(cId)) {
                     url = `https://learn.pythaverse.space/course/view.php?id=${cId}`;
                 }
@@ -212,7 +300,7 @@ export const CoursesManagerPage: React.FC = () => {
                         course_id: cId,
                         category: cat,
                         course_name: name,
-                        sku: sku || null,
+                        sku: sku,
                         lms_url: url
                     });
                 }
@@ -222,7 +310,7 @@ export const CoursesManagerPage: React.FC = () => {
         setBulkPreview(parsedList);
     };
 
-    // 7. Thực thi Lưu Bulk Import
+    // 9. Thực thi Lưu Bulk Import lên Supabase
     const handleExecuteBulkUpsert = async () => {
         if (bulkPreview.length === 0) {
             toast.warning('Chưa có dòng dữ liệu hợp lệ nào để đồng bộ.');
@@ -238,6 +326,7 @@ export const CoursesManagerPage: React.FC = () => {
             toast.success(res.message || `Đã đồng bộ ${bulkPreview.length} khóa học thành công!`);
             setIsBulkModalOpen(false);
             setBulkRawText('');
+            setUploadedFileName('');
             setBulkPreview([]);
             loadData();
         } catch (err: any) {
@@ -247,7 +336,7 @@ export const CoursesManagerPage: React.FC = () => {
         }
     };
 
-    // 8. Đổi tên Category
+    // 10. Đổi tên Category
     const handleRenameCategory = async (oldCat: string) => {
         if (!editingCatNew.trim() || editingCatNew.trim().toUpperCase() === oldCat) {
             setEditingCatOld(null);
@@ -274,7 +363,7 @@ export const CoursesManagerPage: React.FC = () => {
         }
     };
 
-    // 9. Xóa / Gộp Category
+    // 11. Xóa / Gộp Category
     const handleDeleteCategory = async (cat: string) => {
         const remainingCats = categories.filter(c => c !== cat);
         let promptMsg = `Anh muốn làm gì với các khóa học thuộc danh mục "${cat}"?\n\n- Bấm OK để GỘP sang danh mục khác\n- Bấm Cancel để hủy bỏ.`;
@@ -374,11 +463,16 @@ export const CoursesManagerPage: React.FC = () => {
 
                         {/* Nút Nhập Nhanh Bulk Import */}
                         <button
-                            onClick={() => setIsBulkModalOpen(true)}
+                            onClick={() => {
+                                setIsBulkModalOpen(true);
+                                setBulkPreview([]);
+                                setBulkRawText('');
+                                setUploadedFileName('');
+                            }}
                             className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white text-xs font-semibold rounded-xl shadow-xs transition-all"
                         >
                             <FileSpreadsheet className="w-4 h-4" />
-                            Nhập Nhanh Excel (Bulk)
+                            Nhập Nhanh File / Excel
                         </button>
 
                         {/* Nút Thêm Khóa Học Lẻ */}
@@ -434,7 +528,7 @@ export const CoursesManagerPage: React.FC = () => {
                 <div className="bg-white dark:bg-slate-800 p-12 text-center rounded-2xl border border-slate-200 dark:border-slate-700 text-slate-400">
                     <BookOpen className="w-10 h-10 mx-auto mb-2 opacity-40 text-slate-400" />
                     <p className="text-sm font-medium">Không tìm thấy khóa học nào phù hợp</p>
-                    <p className="text-xs text-slate-500 mt-1">Hãy thử đổi danh mục hoặc bấm "Nhập Nhanh Excel" để nạp dữ liệu</p>
+                    <p className="text-xs text-slate-500 mt-1">Hãy thử đổi danh mục hoặc bấm "Nhập Nhanh File / Excel" để nạp dữ liệu</p>
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -466,7 +560,7 @@ export const CoursesManagerPage: React.FC = () => {
 
                             <div className="pt-4 mt-3 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between">
                                 <a
-                                    href={course.lms_url}
+                                    href={course.lms_url || `https://learn.pythaverse.space/course/view.php?id=${course.course_id}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="flex items-center gap-1 text-[11px] font-medium text-sky-600 dark:text-sky-400 hover:underline"
@@ -498,7 +592,7 @@ export const CoursesManagerPage: React.FC = () => {
             )}
 
             {/* ==================================================================== */}
-            {/* MODAL 1: BULK IMPORT EXCEL (NHẬP NHANH HÀNG LOẠT)                   */}
+            {/* MODAL 1: BULK IMPORT (.XLSX / .CSV / COPY-PASTE)                     */}
             {/* ==================================================================== */}
             {isBulkModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in">
@@ -510,38 +604,85 @@ export const CoursesManagerPage: React.FC = () => {
                             <X className="w-5 h-5" />
                         </button>
 
-                        <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-2">
+                        <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-1">
                             <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
-                            Nhập Nhanh Danh Sách Khóa Học (Bulk Upsert) – {activePane.toUpperCase()}
+                            Nhập Nhanh Danh Sách Khóa Học (Bulk) – {activePane.toUpperCase()}
                         </h3>
                         <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
-                            Copy các dòng từ Excel hoặc Google Sheet rồi dán vào đây. Cấu trúc mỗi dòng: <br />
-                            <code className="bg-slate-100 dark:bg-slate-900 px-1.5 py-0.5 rounded text-violet-600 dark:text-violet-400">
-                                Course ID [Tab] Category [Tab] Tên Khóa Học [Tab] SKU (tùy chọn) [Tab] LMS URL (tùy chọn)
-                            </code>
+                            Hệ thống sẽ tự động tạo URL <code className="text-violet-600 font-mono">https://learn.pythaverse.space/course/view.php?id=[Course_ID]</code>.
                         </p>
 
+                        {/* Chuyển đổi giữa Upload File và Dán Text */}
+                        <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-xl mb-3 text-xs">
+                            <button
+                                type="button"
+                                onClick={() => setBulkMode('file')}
+                                className={`flex-1 py-1.5 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition-all ${bulkMode === 'file'
+                                    ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                                    : 'text-slate-500 hover:text-slate-800'
+                                    }`}
+                            >
+                                <UploadCloud className="w-4 h-4" />
+                                Tải Lên File (.xlsx, .xls, .csv)
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setBulkMode('text')}
+                                className={`flex-1 py-1.5 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition-all ${bulkMode === 'text'
+                                    ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                                    : 'text-slate-500 hover:text-slate-800'
+                                    }`}
+                            >
+                                <FileText className="w-4 h-4" />
+                                Dán Dữ Liệu (Copy-Paste)
+                            </button>
+                        </div>
+
                         <div className="space-y-3 flex-1 overflow-y-auto pr-1">
-                            <textarea
-                                rows={5}
-                                value={bulkRawText}
-                                onChange={(e) => handleParseBulkText(e.target.value)}
-                                placeholder={`Ví dụ:\n654\tSWRP\tSWRP 9: LEANBOT Programming\tPTV-SWRP-09\thttps://learn.pythaverse.space/course/view.php?id=654\n655\tIR\tIR 10: AI & Robotics Essentials\tPTV-IR-10\thttps://learn.pythaverse.space/course/view.php?id=655`}
-                                className="w-full p-3 font-mono text-[11px] bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-emerald-500/40 outline-none"
-                            />
+                            {bulkMode === 'file' ? (
+                                <div>
+                                    <input
+                                        type="file"
+                                        ref={fileInputRef}
+                                        onChange={handleFileUpload}
+                                        accept=".xlsx, .xls, .csv"
+                                        className="hidden"
+                                    />
+                                    <div
+                                        onClick={() => fileInputRef.current?.click()}
+                                        className="border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-emerald-500 dark:hover:border-emerald-400 rounded-2xl p-6 text-center cursor-pointer transition-all bg-slate-50/50 dark:bg-slate-900/40"
+                                    >
+                                        <UploadCloud className="w-8 h-8 mx-auto text-emerald-600 dark:text-emerald-400 mb-2" />
+                                        <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                                            {uploadedFileName ? `Đã chọn: ${uploadedFileName}` : 'Bấm để chọn file Excel (.xlsx, .xls) hoặc CSV'}
+                                        </p>
+                                        <p className="text-[11px] text-slate-400 mt-1">
+                                            Cột yêu cầu trong file: <span className="font-mono">Course ID | Category | Course Name | SKU (tùy chọn)</span>
+                                        </p>
+                                    </div>
+                                </div>
+                            ) : (
+                                <textarea
+                                    rows={4}
+                                    value={bulkRawText}
+                                    onChange={(e) => handleParseBulkText(e.target.value)}
+                                    placeholder={`Ví dụ:\n654\tSWRP\tSWRP 9: LEANBOT Programming\tPTV-SWRP-09\n655\tIR\tIR 10: AI & Robotics Essentials\tPTV-IR-10`}
+                                    className="w-full p-3 font-mono text-[11px] bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-emerald-500/40 outline-none"
+                                />
+                            )}
 
                             {/* Bảng Xem Trước (Preview) */}
                             <div>
                                 <div className="flex items-center justify-between mb-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300">
                                     <span>Xem trước ({bulkPreview.length} khóa học hợp lệ):</span>
                                     {bulkPreview.length > 0 && (
-                                        <span className="text-emerald-600 dark:text-emerald-400 text-[11px]">✓ Đã nhận diện cấu trúc</span>
+                                        <span className="text-emerald-600 dark:text-emerald-400 text-[11px]">✓ Đã tự động tạo Link LMS</span>
                                     )}
                                 </div>
 
                                 <div className="max-h-48 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-xl text-xs">
                                     {bulkPreview.length === 0 ? (
-                                        <div className="p-4 text-center text-slate-400 text-xs">Chưa có dữ liệu xem trước. Hãy dán nội dung vào ô trên.</div>
+                                        <div className="p-4 text-center text-slate-400 text-xs">Chưa có dữ liệu xem trước. Hãy tải file hoặc dán nội dung.</div>
                                     ) : (
                                         <table className="w-full text-left border-collapse">
                                             <thead className="bg-slate-100 dark:bg-slate-900/80 sticky top-0 text-[11px] text-slate-500">
@@ -550,6 +691,7 @@ export const CoursesManagerPage: React.FC = () => {
                                                     <th className="p-2">Category</th>
                                                     <th className="p-2">Tên Khóa Học</th>
                                                     <th className="p-2">SKU</th>
+                                                    <th className="p-2">Tự Động Link LMS</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -559,6 +701,7 @@ export const CoursesManagerPage: React.FC = () => {
                                                         <td className="p-2"><span className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-[10px] font-bold">{item.category}</span></td>
                                                         <td className="p-2 font-medium text-slate-800 dark:text-slate-200 truncate max-w-xs">{item.course_name}</td>
                                                         <td className="p-2 font-mono text-slate-400">{item.sku || '-'}</td>
+                                                        <td className="p-2 font-mono text-sky-600 dark:text-sky-400 truncate max-w-xs">{item.lms_url}</td>
                                                     </tr>
                                                 ))}
                                             </tbody>
@@ -719,9 +862,9 @@ export const CoursesManagerPage: React.FC = () => {
                                     required
                                     disabled={!!editingCourse}
                                     value={formCourseId}
-                                    onChange={(e) => setFormCourseId(e.target.value)}
+                                    onChange={(e) => handleCourseIdChange(e.target.value)}
                                     placeholder="VD: 654"
-                                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-violet-500/40 outline-none"
+                                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-violet-500/40 outline-none font-mono"
                                 />
                             </div>
 
@@ -735,7 +878,7 @@ export const CoursesManagerPage: React.FC = () => {
                                     value={formCategory}
                                     onChange={(e) => setFormCategory(e.target.value)}
                                     placeholder="VD: SWRP, IR, ASP..."
-                                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-violet-500/40 outline-none uppercase"
+                                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-violet-500/40 outline-none uppercase font-bold"
                                 />
                             </div>
 
@@ -767,16 +910,16 @@ export const CoursesManagerPage: React.FC = () => {
                             </div>
 
                             <div>
-                                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                                    Đường dẫn LMS URL <span className="text-rose-500">*</span>
+                                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
+                                    <span>Đường dẫn LMS URL (Tự động tạo)</span>
+                                    <LinkIcon className="w-3.5 h-3.5 text-slate-400" />
                                 </label>
                                 <input
                                     type="url"
-                                    required
                                     value={formLmsUrl}
                                     onChange={(e) => setFormLmsUrl(e.target.value)}
                                     placeholder="https://learn.pythaverse.space/course/view.php?id=..."
-                                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-violet-500/40 outline-none"
+                                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-violet-500/40 outline-none font-mono text-[11px]"
                                 />
                             </div>
 

@@ -1,7 +1,7 @@
 # backend/app/api/v1/endpoints/courses.py
 from fastapi import APIRouter, HTTPException, Query
 from typing import Dict, Any, List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from app.core.supabase import get_supabase_client
 
 router = APIRouter()
@@ -11,7 +11,14 @@ class CourseSchema(BaseModel):
     category: str
     course_name: str
     sku: Optional[str] = None
-    lms_url: str
+    lms_url: Optional[str] = None
+
+    @model_validator(mode="after")
+    def auto_fill_lms_url(self):
+        # 🟢 Tự động sinh link nếu để trống
+        if not self.lms_url or not self.lms_url.strip():
+            self.lms_url = f"https://learn.pythaverse.space/course/view.php?id={self.course_id}"
+        return self
 
 class CourseUpdateSchema(BaseModel):
     course_id: Optional[int] = None
@@ -118,6 +125,7 @@ async def delete_course(course_type: str, course_db_id: str):
 
 class BulkCoursesPayload(BaseModel):
     courses: List[CourseSchema]
+
 
 class RenameCategoryPayload(BaseModel):
     old_category: str
