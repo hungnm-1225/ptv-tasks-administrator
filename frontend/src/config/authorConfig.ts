@@ -45,7 +45,7 @@ export const authorConfig: AuthorConfig = {
   bio: "Chuyên gia thiết kế các giải pháp Tự Động Hóa Doanh Nghiệp (Enterprise Automation Hub), tích hợp AI Gemini Triage, Bot Workers và điều phối tác vụ đa kênh cho Pythaverse.",
 
   // ✏️ Đường dẫn ảnh đại diện (Link ảnh online hoặc để ảnh avatar mẫu):
-  avatarUrl: "",
+  avatarUrl: "https://wndmnrgxupnwxizsxqbx.supabase.co/storage/v1/object/public/ticket-attachments/avatars/avatar_1787282442582.jpg",
 
   // ✏️ Địa điểm & Tổ chức:
   location: "Hà Nội, Việt Nam",
