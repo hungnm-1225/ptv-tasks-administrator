@@ -26,11 +26,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
     { to: '/inbox', label: 'Unified Inbox Feed', icon: Inbox },
     { to: '/studio', label: 'Automation Studio', icon: Zap },
     { to: '/tasks', label: 'Task & Approval Hub', icon: CheckSquare },
+    { to: '/courses', label: 'Courses Management', icon: BookOpen },
     { to: '/github', label: 'GitHub Dispatcher', icon: Github },
     { to: '/bots', label: 'Bot Execution Center', icon: Bot },
     { to: '/reports', label: 'Analytics & XLSX Export', icon: FileSpreadsheet },
     { to: '/monitor', label: 'Site Health Monitor', icon: Activity },
-    { to: '/courses', label: 'Courses Management', icon: BookOpen },
   ];
 
   const handleLinkClick = () => {
