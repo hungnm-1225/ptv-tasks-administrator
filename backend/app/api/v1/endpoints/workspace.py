@@ -7,6 +7,7 @@ from app.core.supabase import get_supabase_client
 from app.core.config import settings
 from app.services.workspace_lineage_service import workspace_lineage_service
 from app.services.workspace_playwright_service import workspace_playwright_service
+from app.services.workspace.workspace_scanner_service import workspace_scanner_service
 
 router = APIRouter()
 
@@ -91,61 +92,93 @@ async def get_workspace_courses(category: Optional[str] = Query(None)):
 
 
 # =============================================================================
-# 2. LIVE SCRAPERS: QUÉT DANH SÁCH ORDERS / CONTRACTS PENDING
+# 2. CACHED ENDPOINTS: ĐỌC DỮ LIỆU TỪ SUPABASE CACHE (TỐC ĐỘ 50ms - KHÔNG TỐN RAM)
+# =============================================================================
+@router.get("/cached-pending-orders")
+async def get_cached_pending_orders(
+    school_name: Optional[str] = Query(None),
+    distributor_code: Optional[str] = Query(None)
+):
+    """Lấy danh sách School Orders đang chờ duyệt từ bảng workspace_orders_cache."""
+    supabase = get_supabase_client()
+    try:
+        query = supabase.table("workspace_orders_cache").select("*").order("created_at", desc=True)
+        if school_name:
+            query = query.ilike("school_name", f"%{school_name.strip()}%")
+        if distributor_code:
+            query = query.eq("distributor_code", distributor_code)
+            
+        res = query.limit(50).execute()
+        return {
+            "status": "success",
+            "orders": res.data or [],
+            "total": len(res.data or []),
+            "source": "supabase_cache"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi đọc Cache Orders: {e}")
+
+
+@router.get("/cached-pending-contracts")
+async def get_cached_pending_contracts(
+    contract_type: Optional[str] = Query("PRT", description="'PRT' hoặc 'DST'"),
+    distributor_code: Optional[str] = Query(None)
+):
+    """Lấy danh sách Contracts đang chờ duyệt từ bảng workspace_contracts_cache."""
+    supabase = get_supabase_client()
+    try:
+        query = supabase.table("workspace_contracts_cache")\
+            .select("*")\
+            .eq("contract_type", contract_type.upper())\
+            .order("created_at", desc=True)
+            
+        if distributor_code:
+            query = query.eq("distributor_code", distributor_code)
+            
+        res = query.limit(50).execute()
+        return {
+            "status": "success",
+            "contracts": res.data or [],
+            "total": len(res.data or []),
+            "source": "supabase_cache"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi đọc Cache Contracts: {e}")
+
+
+@router.post("/sync-cache-now")
+async def trigger_distributor_cache_sync(background_tasks: BackgroundTasks):
+    """Kích hoạt tác vụ quét lại 5 Distributor chạy ngầm ngay lập tức."""
+    background_tasks.add_task(workspace_scanner_service.scan_and_cache_all_distributors)
+    return {
+        "status": "queued",
+        "message": "Đã kích hoạt quét và cập nhật Cache 5 Distributor trong nền an toàn!"
+    }
+
+
+# =============================================================================
+# 3. LIVE SCRAPERS (BACKUP CHO TRƯỜNG HỢP CẦN CÀO TRỰC TIẾP)
 # =============================================================================
 @router.get("/pending-school-orders")
 async def get_pending_school_orders(
-    partner_code: Optional[str] = Query(None, description="Mã Partner (VD: 'test' hoặc 'PAR_102')"),
-    school_identifier: Optional[str] = Query(None, description="Tên trường hoặc mã trường để suy vết Partner")
+    partner_code: Optional[str] = Query(None),
+    school_identifier: Optional[str] = Query(None)
 ):
-    """
-    Quét trực tiếp danh sách các School Order đang ở trạng thái 'Awaiting Partner' 
-    tại /partner-workspace/order-management bằng Playwright.
-    """
     identifier = school_identifier or partner_code or "000 SCHOOL FOR TESTING PURPOSE"
     lineage = workspace_lineage_service.resolve_by_school(identifier)
     
     if not lineage or not lineage.get("partner", {}).get("username"):
-        raise HTTPException(status_code=404, detail=f"Không tìm thấy tài khoản Partner của '{identifier}' trong két sắt.")
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy tài khoản Partner của '{identifier}'.")
     
     partner_creds = lineage["partner"]
     result = await workspace_playwright_service.fetch_partner_pending_school_orders(partner_creds)
-    
-    if result.get("status") != "success":
-        raise HTTPException(status_code=500, detail=result.get("error", "Lỗi quét danh sách School Orders"))
-        
-    return {
-        "partner_name": partner_creds.get("name"),
-        "partner_code": partner_creds.get("code"),
-        **result
-    }
-
-
-@router.get("/partner-contracts")
-async def get_partner_contracts(
-    partner_code: Optional[str] = Query(None),
-    pending_only: bool = Query(False)
-):
-    """Lấy danh sách các Contract/PO mà Partner đã tạo gửi lên Distributor."""
-    identifier = partner_code or "000 SCHOOL FOR TESTING PURPOSE"
-    lineage = workspace_lineage_service.resolve_by_school(identifier)
-    
-    if not lineage or not lineage.get("partner", {}).get("username"):
-        raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản Partner.")
-        
-    partner_creds = lineage["partner"]
-    result = await workspace_playwright_service.fetch_partner_contracts(partner_creds, filter_pending=pending_only)
     return result
 
 
 @router.get("/pending-partner-contracts")
 async def get_pending_partner_contracts(
-    distributor_code: Optional[str] = Query(None, description="Mã Distributor (VD: '2', 'DST_01')")
+    distributor_code: Optional[str] = Query(None)
 ):
-    """
-    Distributor quét danh sách Partner Contracts (PRT-...) đang chờ duyệt 
-    tại /distributor-workspace/partner-contract-po.
-    """
     identifier = distributor_code or "000 SCHOOL FOR TESTING PURPOSE"
     lineage = workspace_lineage_service.resolve_by_school(identifier)
     
@@ -159,7 +192,6 @@ async def get_pending_partner_contracts(
 
 @router.get("/pending-distributor-contracts")
 async def get_pending_distributor_contracts():
-    """Sales Admin quét danh sách DST Contracts (DST-...) đang chờ duyệt trên Dashboard."""
     admin_creds = {
         "username": getattr(settings, "TEST_ADMIN_USER", "salesadmin@dtt.vn"),
         "password": getattr(settings, "TEST_ADMIN_PASS", "Pythaverse@2026")
@@ -168,12 +200,27 @@ async def get_pending_distributor_contracts():
     return result
 
 
+@router.get("/school-order-details")
+async def get_school_order_details(
+    order_code: str = Query(..., description="Mã Order của trường (VD: 'SCH-10266-20260821-1347')"),
+    school_identifier: Optional[str] = Query(None)
+):
+    identifier = school_identifier or "000 SCHOOL FOR TESTING PURPOSE"
+    lineage = workspace_lineage_service.resolve_by_school(identifier)
+    
+    if not lineage or not lineage.get("partner", {}).get("username"):
+        raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản Partner.")
+        
+    partner_creds = lineage["partner"]
+    result = await workspace_playwright_service.fetch_school_order_detailed_courses(partner_creds, order_code)
+    return result
+
+
 # =============================================================================
-# 3. BÓC TÁCH COF TEXT
+# 4. BÓC TÁCH COF TEXT
 # =============================================================================
 @router.post("/extract-cof")
 async def extract_cof_content(req: ExtractCOFRequest):
-    """Bóc tách nội dung COF và map với Database."""
     supabase = get_supabase_client()
     text = req.cof_text
     
@@ -224,46 +271,8 @@ async def extract_cof_content(req: ExtractCOFRequest):
                         "end_date": end_date
                     })
 
-    if not extracted_courses:
-        fallback_course = db_courses_map.get(654, {
-            "category": "SWRP",
-            "course_name": "SWRP 9: LEANBOT Programming Applications with IoT [V2] (EN)",
-            "lms_url": "https://learn.pythaverse.space/course/view.php?id=654"
-        })
-        extracted_courses.append({
-            "category": fallback_course.get("category", "SWRP"),
-            "course_id": 654,
-            "course_name": fallback_course.get("course_name"),
-            "lms_url": fallback_course.get("lms_url"),
-            "licenses": total_students,
-            "start_date": "22-06-2026",
-            "end_date": "30-05-2027"
-        })
-
     return {
         "school_name": school_name,
         "total_students": total_students,
         "courses": extracted_courses
     }
-
-
-#(Bổ sung API bóc tách chi tiết môn học của Order được chọn)
-@router.get("/school-order-details")
-async def get_school_order_details(
-    order_code: str = Query(..., description="Mã Order của trường (VD: 'SCH-10266-20260821-1347')"),
-    school_identifier: Optional[str] = Query(None, description="Tên trường hoặc mã trường")
-):
-    """Mở chi tiết Order của trường để đọc chính xác danh sách các môn học, licenses và dates."""
-    identifier = school_identifier or "000 SCHOOL FOR TESTING PURPOSE"
-    lineage = workspace_lineage_service.resolve_by_school(identifier)
-    
-    if not lineage or not lineage.get("partner", {}).get("username"):
-        raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản Partner trong phả hệ.")
-        
-    partner_creds = lineage["partner"]
-    result = await workspace_playwright_service.fetch_school_order_detailed_courses(partner_creds, order_code)
-    
-    if result.get("status") != "success":
-        raise HTTPException(status_code=500, detail=result.get("error", "Lỗi đọc chi tiết khóa học"))
-        
-    return result
