@@ -17,19 +17,29 @@ class GitHubDispatcherService:
         self.default_repo = getattr(settings, "GITHUB_DEFAULT_REPO", "Pythaverse2026")
 
     async def _resolve_ticket_info(self, ticket_id: Optional[str]) -> Dict[str, str]:
-        """Tự động tra cứu thông tin Ticket từ Supabase nếu Payload thiếu Title/Body."""
+        """Tự động tra cứu thông tin Ticket từ Supabase với ĐÚNG TÊN CỘT DATABASE."""
         if not ticket_id:
             return {}
         try:
             supabase = get_supabase_client()
-            res = supabase.table("inbox_tickets").select("title, snippet, summary, sender, source").eq("id", ticket_id).execute()
+            # 🟢 Sửa đúng tên cột: subject, raw_content, ai_summary, sender_email, source
+            res = supabase.table("inbox_tickets")\
+                .select("subject, raw_content, ai_summary, sender_email, source")\
+                .eq("id", ticket_id)\
+                .execute()
+                
             if res.data and len(res.data) > 0:
                 ticket = res.data[0]
+                sender = ticket.get("sender_email") or "User"
+                subject = ticket.get("subject") or f"Yêu cầu hỗ trợ từ {sender}"
+                content = ticket.get("ai_summary") or ticket.get("raw_content") or "Không có nội dung chi tiết."
+                
                 return {
-                    "title": ticket.get("title") or f"[Ticket #{ticket_id[:8]}] Yêu cầu hỗ trợ từ {ticket.get('sender', 'User')}",
-                    "body": f"### 📌 Thông tin Ticket gốc ({ticket.get('source', 'System').upper()})\n\n"
-                            f"- **Người gửi:** `{ticket.get('sender', 'N/A')}`\n"
-                            f"- **Nội dung:**\n> {ticket.get('snippet') or ticket.get('summary') or 'Không có nội dung chi tiết.'}\n\n"
+                    "title": f"[BUG] {subject}",
+                    "body": f"### 📌 Thông tin Ticket gốc ({str(ticket.get('source', 'System')).upper()})\n\n"
+                            f"- **Người gửi:** `{sender}`\n"
+                            f"- **Tiêu đề gốc:** {subject}\n"
+                            f"- **Nội dung / Tóm tắt AI:**\n> {content}\n\n"
                             f"- **Ticket ID:** `{ticket_id}`\n\n"
                             f"*(Tác vụ được tạo tự động bởi Pythaverse Central Admin Hub)*"
                 }

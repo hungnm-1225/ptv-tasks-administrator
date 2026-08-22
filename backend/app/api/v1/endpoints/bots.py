@@ -156,11 +156,22 @@ async def retry_bot_task(task_id: str, background_tasks: BackgroundTasks):
                 background_tasks.add_task(poll_form_feedbacks)
             except ImportError:
                 pass
-                
+        # 🟢 Bổ sung xử lý khi bấm Restart GitHub Dispatcher
+        elif worker_key in ["github_dispatcher", "github_issue_creator"]:
+            # Reset task lỗi cũ để worker trở lại trạng thái ACTIVE xanh ngay
+            try:
+                supabase.table("bot_automation_tasks")\
+                    .update({"execution_status": "dismissed"})\
+                    .eq("bot_type", "github_issue_creator")\
+                    .eq("execution_status", "failed")\
+                    .execute()
+            except Exception as e:
+                print(f"Error resetting github worker failed tasks: {e}")
+
         return {
             "status": "worker_restarted",
             "worker": worker_key,
-            "message": f"Worker [{worker_key}] đã được kích hoạt chu kỳ kiểm tra mới thành công!",
+            "message": f"Worker [{worker_key}] đã được kiểm tra và kích hoạt lại thành công!",
             "timestamp": now_str
         }
 
