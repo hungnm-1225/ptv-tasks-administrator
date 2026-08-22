@@ -126,14 +126,15 @@ async def lifespan(app: FastAPI):
     
     # 6. Quét Workspace Distributor để update cache mỗi 45 phút
     scheduler.add_job(
-    safe_job_wrapper(
-        workspace_scanner_service.scan_and_cache_all_distributors, 
-        "workspace_distributor_scanner_cron"
-    ),
-    "interval",
-    minutes=45,  # Chạy 45 phút một lần để update cache đều đặn
-    id="distributor_cache_scanner_cron"
-)
+        safe_job_wrapper,
+        "interval",
+        minutes=45,
+        args=[
+            workspace_scanner_service.scan_and_cache_all_distributors, 
+            "workspace_distributor_scanner_cron"
+        ],
+        id="distributor_cache_scanner_cron"
+    )
 
     scheduler.start()
     yield

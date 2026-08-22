@@ -24,6 +24,7 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => {
   const menuItems = [
     { to: '/dashboard', label: 'Executive Dashboard', icon: LayoutDashboard },
+    { to: '/board', label: 'Work Board', icon: Trello },
     { to: '/inbox', label: 'Unified Inbox Feed', icon: Inbox },
     { to: '/studio', label: 'Automation Studio', icon: Zap },
     { to: '/tasks', label: 'Task & Approval Hub', icon: CheckSquare },
@@ -32,7 +33,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
     { to: '/bots', label: 'Bot Execution Center', icon: Bot },
     { to: '/reports', label: 'Analytics & XLSX Export', icon: FileSpreadsheet },
     { to: '/monitor', label: 'Site Health Monitor', icon: Activity },
-    { to: '/board', label: 'Work Board', icon: Trello },
   ];
 
   const handleLinkClick = () => {
