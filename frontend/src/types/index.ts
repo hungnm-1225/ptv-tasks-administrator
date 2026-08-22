@@ -130,27 +130,44 @@ export interface CourseItem {
   created_at?: string;
 }
 
+export interface BoardItem {
+  id: string;
+  title: string;
+  description?: string;
+  background_url?: string | null;
+  background_color?: string;
+  is_default?: boolean;
+  created_at?: string;
+}
+
+export interface BoardColumnItem {
+  id: string;
+  board_id: string;
+  title: string;
+  color: string;
+  column_type: 'backlog' | 'todo' | 'in_progress' | 'review' | 'done' | 'abort' | 'custom';
+  order_index: number;
+}
+
 export interface BoardSubtask {
   id: string;
   title: string;
   completed: boolean;
 }
 
-export interface BoardCard {
+export interface BoardCardItem {
   id: string;
+  board_id: string;
+  column_id: string;
   title: string;
   description?: string;
-  column_status: 'backlog' | 'todo' | 'in_progress' | 'review' | 'done';
   priority: 'urgent' | 'high' | 'normal' | 'low';
   category: string;
+  color: string;
   assigned_name?: string;
   assigned_email?: string;
-  due_date?: string;
-  source?: string;
-  source_id?: string;
-  ticket_id?: string;
+  due_date?: string | null; // ISO string with date & time
   subtasks?: BoardSubtask[];
   order_index?: number;
   created_at?: string;
-  updated_at?: string;
 }
