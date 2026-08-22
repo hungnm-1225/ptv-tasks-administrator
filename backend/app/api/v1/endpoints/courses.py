@@ -132,7 +132,7 @@ class RenameCategoryPayload(BaseModel):
     new_category: str
 
 # -------------------------------------------------------------------
-# 6. NHẬP NHANH / BULK UPSERT HÀNG LOẠT KHÓA HỌC
+# 6. NHẬP NHANH / BULK UPSERT HÀNG LOẠT KHÓA HỌC (ĐÃ TỐI ƯU CHỐNG LỖI)
 # -------------------------------------------------------------------
 @router.post("/{course_type}/bulk-upsert")
 async def bulk_upsert_courses(course_type: str, payload: BulkCoursesPayload):
@@ -142,15 +142,31 @@ async def bulk_upsert_courses(course_type: str, payload: BulkCoursesPayload):
     if not payload.courses:
         raise HTTPException(status_code=400, detail="Danh sách khóa học rỗng.")
         
-    records = [c.model_dump() for c in payload.courses]
-    # Dùng upsert trên cột course_id để nếu có rồi thì update, chưa có thì insert
-    res = supabase.table(table).upsert(records, on_conflict="course_id").execute()
-    
-    return {
-        "status": "success",
-        "total_processed": len(records),
-        "message": f"Đã đồng bộ thành công {len(records)} khóa học vào {table}!"
-    }
+    # 🛡️ 1. Tự động khử trùng lặp Course ID trong danh sách 285 dòng (giữ lại bản ghi mới nhất)
+    unique_records_map = {}
+    for c in payload.courses:
+        data = c.model_dump()
+        if not data.get("lms_url") or not str(data.get("lms_url")).strip():
+            data["lms_url"] = f"https://learn.pythaverse.space/course/view.php?id={c.course_id}"
+        unique_records_map[c.course_id] = data
+
+    records = list(unique_records_map.values())
+
+    try:
+        # 🚀 2. Chia Batch 50 bản ghi để gửi lên Supabase mượt mà, không lo timeout
+        batch_size = 50
+        for i in range(0, len(records), batch_size):
+            chunk = records[i:i + batch_size]
+            supabase.table(table).upsert(chunk, on_conflict="course_id").execute()
+            
+        return {
+            "status": "success",
+            "total_processed": len(records),
+            "message": f"Đã đồng bộ thành công {len(records)} khóa học vào {table}!"
+        }
+    except Exception as ex:
+        print(f"Lỗi Bulk Upsert {table}: {ex}")
+        raise HTTPException(status_code=500, detail=f"Lỗi cơ sở dữ liệu Supabase: {str(ex)}")
 
 
 # -------------------------------------------------------------------
