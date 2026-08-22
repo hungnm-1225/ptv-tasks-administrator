@@ -43,10 +43,9 @@
      - [5.5.8. Dịch Vụ Đọc & Bình Luận Google Docs (`google_doc_service.py`)](#558-dịch-vụ-đọc--bình-luận-google-docs-google_doc_servicepy)
      - [5.5.9. Dịch Vụ Cào Dữ Liệu OS Ticket (`osticket_service.py`)](#559-dịch-vụ-cào-dữ-liệu-os-ticket-osticket_servicepy)
      - [5.5.10. Dịch Vụ Giám Sát Sức Khỏe Hệ Thống & CI/CD Logs (`site_monitor_service.py`)](#5510-dịch-vụ-giám-sát-sức-khỏe-hệ-thống--cicd-logs-site_monitor_servicepy)
-     - [5.5.11. Dịch Vụ Thông Báo Telegram Bot (`telegram_service.py`)](#5511-dịch-vụ-thông-báo-telegram-bot-telegram_servicepy)
-     - [5.5.12. Dịch Vụ Điều Phối Tạo Issue GitHub (`github_service.py`)](#5512-dịch-vụ-điều-phối-tạo-issue-github-github_servicepy)
-     - [5.5.13. Dịch Vụ Ghi Danh Moodle LMS Đơn Lẻ (`playwright_service.py`)](#5513-dịch-vụ-ghi-danh-moodle-lms-đơn-lẻ-playwright_servicepy)
-     - [5.5.14. Worker Điều Phối Xử Lý Ticket Đầu Vào (`ticket_processor.py`)](#5514-worker-điều-phối-xử-lý-ticket-đầu-vào-ticket_processorpy)
+     - [5.5.11. Dịch Vụ Điều Phối Tạo Issue GitHub (`github_service.py`)](#5511-dịch-vụ-điều-phối-tạo-issue-github-github_servicepy)
+     - [5.5.12. Dịch Vụ Ghi Danh Moodle LMS Đơn Lẻ (`playwright_service.py`)](#5512-dịch-vụ-ghi-danh-moodle-lms-đơn-lẻ-playwright_servicepy)
+     - [5.5.13. Worker Điều Phối Xử Lý Ticket Đầu Vào (`ticket_processor.py`)](#5513-worker-điều-phối-xử-lý-ticket-đầu-vào-ticket_processorpy)
    - [5.6. Workers Điều Phối Thực Thi (`backend/app/workers/`)](#56-workers-điều-phối-thực-thi-backendappworkers)
    - [5.7. Bảng Tra Cứu Toàn Bộ REST API Endpoints (`backend/app/api/v1/endpoints/`)](#57-bảng-tra-cứu-toàn-bộ-rest-api-endpoints-backendappapiv1endpoints)
    - [5.8. Scripts & Bộ Công Cụ Vận Hành Tự Động (`backend/scripts/` & `backend/seed_monitor_credentials.py`)](#58-scripts--bộ-công-cụ-vận-hành-tự-động-backendscripts--backendseed_monitor_credentialspy)
@@ -120,7 +119,6 @@ flowchart TD
     end
 
     subgraph PORTAL["HUMAN-IN-THE-LOOP CONTROL PORTAL"]
-        E["Telegram Push Alert<br/>[Approve] | [Reject]"]
         F["React 19 Enterprise SPA<br/>Unified Inbox & Automation Studio"]
     end
 
@@ -285,7 +283,7 @@ flowchart TD
 - **Identity & SSO Management:** Keycloak Admin REST API + Custom Headers Browser Simulation + Playwright RPA Fallback
 - **Security & Encryption:** Cryptography (`Fernet` cipher suite với `VAULT_SECRET_KEY`) + PyJWT
 - **Office & Sheet Automation:** `openpyxl`, `google-api-python-client`, `google-auth-oauthlib`, `gspread`
-- **External Communications:** `httpx` (Async HTTP Client), Telegram Bot Push API, GitHub REST API
+- **External Communications:** `httpx` (Async HTTP Client), GitHub REST API
 
 ### 3.3. Database & Cloud Infrastructure Stack
 - **Database Engine:** Supabase PostgreSQL 16
@@ -345,7 +343,6 @@ ptv-tasks-administrator/
 │   │   │   ├── google_drive_service.py # Quản lý cây thư mục Google Drive 6 tầng theo năm & phả hệ
 │   │   │   ├── osticket_service.py     # Playwright cào OS Ticket, bóc tách Internal ID & Display Number
 │   │   │   ├── site_monitor_service.py # Giám sát Uptime Live 10 Website, Auth Matrix 16 Accounts & CI/CD Logs
-│   │   │   ├── telegram_service.py     # Gửi tin nhắn Telegram kèm Inline Keyboard nút duyệt nhanh
 │   │   │   ├── github_service.py       # Dịch vụ gửi Issue vào Private Repo qua GitHub REST API
 │   │   │   ├── playwright_service.py   # Tự động hóa ghi danh khóa học Moodle LMS / PLearn đơn lẻ
 │   │   │   └── ticket_processor.py     # Ingest ticket đầu vào kết hợp Gemini AI Triage
@@ -471,7 +468,6 @@ Kế thừa từ `pydantic_settings.BaseSettings`, tự động đọc và ép k
 - **Hệ thống:** `PROJECT_NAME`, `API_V1_STR` (`/api/v1`), `ENV` (`development`/`production`), `ALLOWED_DOMAIN` (`dtt.vn`), `VAULT_SECRET_KEY` (Key mã hóa Fernet).
 - **Supabase:** `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
 - **Gemini AI:** `GEMINI_API_KEY`, `GEMINI_PRIMARY_MODEL` (`gemini-3.7-flash`), `GEMINI_FALLBACK_MODEL` (`gemini-3.6-flash`).
-- **Telegram Bot:** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ADMIN_CHAT_ID`.
 - **Keycloak:** `KEYCLOAK_SERVER_URL`, `KEYCLOAK_REALM` (`idp`/`master`), `KEYCLOAK_CLIENT_ID` (`admin-cli`), `KEYCLOAK_ADMIN_USER`, `KEYCLOAK_ADMIN_PASS`.
 - **GitHub Dispatcher:** `GITHUB_PAT`, `GITHUB_DEFAULT_OWNER`, `GITHUB_DEFAULT_REPO`.
 - **Google & OS Ticket:** `GOOGLE_CREDENTIALS_JSON`, `SPREADSHEET_ID`, `GMAIL_REFRESH_TOKEN`, `OSTICKET_URL`, `OSTICKET_ADMIN_USER`, `OSTICKET_ADMIN_PASS`.
@@ -715,17 +711,14 @@ Hệ thống xử lý danh tính Keycloak 2 tầng với cơ chế Safe-by-Defau
 - `get_uptime_history(site_id, days=45) -> list`: Trả về lịch sử 24h phục vụ render Uptime Bars.
 - `get_incident_log(limit=50) -> list`: Lấy danh sách toàn bộ các sự cố sập web từ Supabase.
 
-#### 5.5.11. Dịch Vụ Thông Báo Telegram Bot (`telegram_service.py`)
-- `send_approval_notification(task_id, ticket_summary, bot_type, payload) -> bool`: Gửi tin nhắn Markdown kèm Inline Keyboard `[Phê duyệt ngay]` | `[Từ chối]`.
-
-#### 5.5.12. Dịch Vụ Điều Phối Tạo Issue GitHub (`github_service.py`)
+#### 5.5.11. Dịch Vụ Điều Phối Tạo Issue GitHub (`github_service.py`)
 - `create_issue(payload: dict) -> dict`: Gửi REST API tới GitHub tạo Issue mới trong Private Repo với title, body markdown, labels và assignees.
 
-#### 5.5.13. Dịch Vụ Ghi Danh Moodle LMS Đơn Lẻ (`playwright_service.py`)
+#### 5.5.12. Dịch Vụ Ghi Danh Moodle LMS Đơn Lẻ (`playwright_service.py`)
 - `enroll_student(payload: dict) -> dict`: Tự động hóa ghi danh học viên vào khóa học LMS / PLearn đơn lẻ.
 
-#### 5.5.14. Worker Điều Phối Xử Lý Ticket Đầu Vào (`ticket_processor.py`)
-- `async def process_incoming_ticket(ticket_data: dict) -> dict`: Ingest ticket đầu vào, gọi `gemini.analyze_ticket()`, cập nhật Supabase và gửi push alert Telegram nếu có đề xuất tác vụ bot.
+#### 5.5.13. Worker Điều Phối Xử Lý Ticket Đầu Vào (`ticket_processor.py`)
+- `async def process_incoming_ticket(ticket_data: dict) -> dict`: Ingest ticket đầu vào, gọi `gemini.analyze_ticket()` và trích xuất tác vụ đề xuất.
 
 ---
 
@@ -738,7 +731,7 @@ Hàm `async def execute_approved_bot_task(bot_type: str, payload_data: dict) -> 
 - `github_issue_creator`: Gọi `github_service.create_issue()`.
 
 #### 2. [ticket_processor.py](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/workers/ticket_processor.py) – Xử Lý Ticket Đầu Vào
-- `async def process_incoming_ticket(ticket_data: dict) -> dict`: Kích hoạt Gemini AI Triage và gửi cảnh báo Telegram nếu đề xuất tác vụ bot.
+- `async def process_incoming_ticket(ticket_data: dict) -> dict`: Kích hoạt Gemini AI Triage và trích xuất tác vụ đề xuất.
 
 ---
 
@@ -1060,7 +1053,7 @@ Khẳng định quyền tác giả và bản quyền dự án, hiển thị côn
 - `bio`: Chuyên gia thiết kế các giải pháp Tự Động Hóa Doanh Nghiệp (Enterprise Automation Hub), tích hợp AI Gemini Triage, Bot Workers và điều phối tác vụ đa kênh cho Pythaverse.
 - `avatarUrl`: Ảnh đại diện tác giả lưu trữ trên Supabase Storage.
 - `location`: "Hà Nội, Việt Nam" | `organization`: "Pythaverse / DTT Corporation".
-- `socials`: Danh sách các nút bấm mạng xã hội tương tác trực tiếp (GitHub, LinkedIn, Facebook, Email, Portfolio, Telegram, Threads...).
+- `socials`: Danh sách các nút bấm mạng xã hội tương tác trực tiếp (GitHub, LinkedIn, Facebook, Email, Portfolio, Threads...).
 - `projectInfo`: Phiên bản `v1.0.0 Enterprise Release`, công nghệ cốt lõi và các điểm nhấn kiến trúc.
 
 ---
@@ -1183,7 +1176,7 @@ Khai báo đầy đủ TypeScript Types & Interfaces:
 #### 11. [ProfileSettingsPage.tsx](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/profile/ProfileSettingsPage.tsx) (Thiết Lập Chủ Quyền Tác Giả)
 - Quản lý hồ sơ tác giả Nguyễn Mạnh Hùng, chức danh, đơn vị chủ quản, vị trí địa lý và bio giới thiệu.
 - Tải ảnh đại diện trực tiếp lên Supabase Storage bucket `ticket-attachments/avatars/`.
-- Quản lý hệ sinh thái mạng xã hội với tính năng tự động nhận diện nền tảng (Threads, Telegram, Zalo, WhatsApp, Instagram, X, YouTube, Discord, GitHub, LinkedIn, Facebook, Email).
+- Quản lý hệ sinh thái mạng xã hội với tính năng tự động nhận diện nền tảng (Threads, Zalo, WhatsApp, Instagram, X, YouTube, Discord, GitHub, LinkedIn, Facebook, Email).
 - Lưu trữ và đồng bộ tức thì vào bảng `author_profile` trong Supabase.
 
 #### 12. [CoursesManagerPage.tsx](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/courses/CoursesManagerPage.tsx) (Quản Lý Danh Mục Khóa Học)
@@ -1285,10 +1278,6 @@ KEYCLOAK_ADMIN_PASS="your_keycloak_admin_password"
 GITHUB_PAT="github_pat_your_fine_grained_token_with_issues_write_scope"
 GITHUB_DEFAULT_OWNER="PTV-TechHub"
 GITHUB_DEFAULT_REPO="Pythaverse2026"
-
-# --- TELEGRAM BOT & NOTIFICATION ---
-TELEGRAM_BOT_TOKEN="your_telegram_bot_token"
-TELEGRAM_ADMIN_CHAT_ID="your_telegram_chat_id"
 
 # --- LIVE SITE MONITOR & WORKSPACE RPA ---
 KEYCLOAK_URL="https://eid.pythaverse.space/auth"

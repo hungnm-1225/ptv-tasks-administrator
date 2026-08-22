@@ -121,7 +121,7 @@ async def poll_form_feedbacks():
         logger.error(f"❌ Lỗi khi quét và lưu Google Sheet: {e}")
 
 # =========================================================================
-# 2. HÀM ĐỒNG BỘ NGƯỢC: CẬP NHẬT SHEET KHI BẤM DUYỆT TRÊN WEB / TELEGRAM
+# 2. HÀM ĐỒNG BỘ NGƯỢC: CẬP NHẬT SHEET KHI BẤM DUYỆT TRÊN WEB
 # =========================================================================
 async def update_feedback_row(sheet_name: str, row_index: int, category: str, status: str = "To Implement"):
     """Cập nhật Cột L (Category), Cột M (Assigned Checkbox = TRUE), Cột P (Status) trên Google Sheet"""

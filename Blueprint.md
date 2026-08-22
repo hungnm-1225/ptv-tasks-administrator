@@ -3,7 +3,7 @@
 ```markdown
 # 🚀 PROJECT BLUEPRINT: PYTHAVERSE CENTRAL ADMIN & AUTOMATION HUB
 > **Version:** 1.0.0 (Production Blueprint)
-> **Architecture:** Single Page Application (PWA + Telegram Mini App) + Python AI Brain + Supabase Engine
+> **Architecture:** Single Page Application (PWA / Web Portal) + Python AI Brain + Supabase Engine
 > **Core Concept:** Multi-channel Unified Inbox + Gemini AI Triage + Human-in-the-Loop Approval + Cloud Bot Execution
 
 ---
@@ -12,7 +12,7 @@
 When parsing this blueprint, Antigravity AI MUST invoke the following internal specialized skills:
 - `@architect`: Review system flow, state management, and async worker architecture.
 - `@database-specialist`: Apply Supabase PostgreSQL 16 schema, RLS policies, and index optimizations.
-- `@frontend-developer`: Build React 19 + TypeScript 5 + Tailwind CSS 4 + Lucide React components (PWA & Telegram Mini App ready).
+- `@frontend-developer`: Build React 19 + TypeScript 5 + Tailwind CSS 4 + Lucide React components (Responsive PWA & Web Portal).
 - `@backend-developer`: Construct Python 3.11 FastAPI server, Gmail API listener, Keycloak REST API, and GitHub Issue Dispatcher.
 - `@security-auditor`: Enforce strict OAuth2 `@dtt.vn` domain whitelist, Fine-Grained GitHub PAT scoping, and Human-In-The-Loop safety guards.
 
@@ -164,11 +164,8 @@ The Single Page Application MUST be structured with the following routes & sub-m
             [Saved to Supabase Database]
                         │
                         ▼
-       [Telegram Bot Sends Push Notification Alert]
-                        │
-                        ▼
-    [Human-in-the-Loop Web Portal Control Hub]
-        (Review & Edit JSON Payload)
+     [Human-in-the-Loop Web Portal Control Hub]
+         (Review & Edit JSON Payload)
                         │
                         │ (User Confirms / Approves)
                         ▼
@@ -200,7 +197,7 @@ Antigravity AI Agent shall execute implementation in these chronological steps:
 - [ ] **Step 2:** Scaffold React 19 + Vite 6 + Tailwind CSS 4 frontend with the specified menu routes.
 - [ ] **Step 3:** Build FastAPI backend in Python 3.11 with Gmail API reader, Keycloak REST API wrapper (`python-keycloak`), and GitHub Issue creation endpoint.
 - [ ] **Step 4:** Integrate Gemini AI engine with fallback model list (`gemini-3.7-flash`, `gemini-3.6-flash`, etc.).
-- [ ] **Step 5:** Setup Telegram Bot notification push alert with Inline Keyboard approval buttons.
+- [ ] **Step 5:** Build Human-in-the-Loop Approval Hub with payload editor and live status sync.
 - [ ] **Step 6:** Implement Client-Side XLSX Exporter using SheetJS (`xlsx`) in the Reports module.
 - [ ] **Step 7:** Run TypeScript linting (`npm run lint`) and Python type check (`mypy`) to ensure zero syntax/type errors.
 ```

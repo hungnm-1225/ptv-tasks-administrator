@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     # --- GOOGLE GEMINI AI (THẾ HỆ MỚI NHẤT) ---
     GEMINI_API_KEY: str = ""
     GEMINI_PRIMARY_MODEL: str = "gemini-3.7-flash"
-    GEMINI_FALLBACK_MODEL: str = "gemini-3.5-flash"
+    GEMINI_FALLBACK_MODEL: str = "gemini-3.6-flash"
     GEMINI_MODELS: List[str] = [
         "gemini-3.7-flash",
         "gemini-3.6-flash",
@@ -44,10 +44,6 @@ class Settings(BaseSettings):
         "gemini-flash-latest",
         "gemini-flash-lite-latest"
     ]
-
-    # --- TELEGRAM BOT & NOTIFICATION ---
-    TELEGRAM_BOT_TOKEN: str = ""
-    TELEGRAM_ADMIN_CHAT_ID: Optional[str] = None
 
     # --- KEYCLOAK IDENTITY IDP ---
     KEYCLOAK_SERVER_URL: str = ""

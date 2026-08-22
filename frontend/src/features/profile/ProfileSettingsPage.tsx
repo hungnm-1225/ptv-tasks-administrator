@@ -19,9 +19,6 @@ const detectPlatform = (url: string, name: string): { iconName: string; colorCla
     if (lowerUrl.includes('threads.net') || lowerName.includes('threads')) {
         return { iconName: 'threads', colorClass: 'hover:text-slate-100 hover:border-slate-400', defaultName: 'Threads' };
     }
-    if (lowerUrl.includes('t.me') || lowerUrl.includes('telegram') || lowerName.includes('telegram')) {
-        return { iconName: 'telegram', colorClass: 'hover:text-sky-400 hover:border-sky-500/50', defaultName: 'Telegram' };
-    }
     if (lowerUrl.includes('zalo.me') || lowerName.includes('zalo')) {
         return { iconName: 'zalo', colorClass: 'hover:text-blue-500 hover:border-blue-500/50', defaultName: 'Zalo' };
     }
@@ -217,7 +214,6 @@ export const ProfileSettingsPage: React.FC = () => {
             case 'linkedin': return <Linkedin className="w-4 h-4 text-blue-600" />;
             case 'facebook': return <Facebook className="w-4 h-4 text-blue-500" />;
             case 'mail': return <Mail className="w-4 h-4 text-rose-500" />;
-            case 'telegram': return <Send className="w-4 h-4 text-sky-500" />;
             case 'instagram': return <Instagram className="w-4 h-4 text-pink-500" />;
             case 'threads': return <AtSign className="w-4 h-4 text-slate-800 dark:text-slate-200" />;
             case 'whatsapp':
@@ -409,7 +405,7 @@ export const ProfileSettingsPage: React.FC = () => {
                                 <div className="flex items-center justify-between">
                                     <div>
                                         <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Hệ Sinh Thái Mạng Xã Hội</h3>
-                                        <p className="text-[11px] text-slate-500">Tự động nhận diện Threads, Telegram, Zalo, WhatsApp, Instagram, X, YouTube, Discord...</p>
+                                        <p className="text-[11px] text-slate-500">Tự động nhận diện Threads, Zalo, WhatsApp, Instagram, X, YouTube, Discord...</p>
                                     </div>
                                     <button
                                         type="button"

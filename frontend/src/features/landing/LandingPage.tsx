@@ -66,7 +66,6 @@ export const LandingPage: React.FC = () => {
       case 'linkedin': return <Linkedin className="w-3.5 h-3.5 text-blue-500" />;
       case 'facebook': return <Facebook className="w-3.5 h-3.5 text-blue-600" />;
       case 'mail': return <Mail className="w-3.5 h-3.5 text-rose-500" />;
-      case 'telegram': return <Send className="w-3.5 h-3.5 text-sky-400" />;
       case 'instagram': return <Instagram className="w-3.5 h-3.5 text-pink-500" />;
       case 'threads': return <AtSign className="w-3.5 h-3.5 text-slate-800 dark:text-slate-200" />;
       case 'whatsapp':
