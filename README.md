@@ -212,13 +212,14 @@ ptv-tasks-administrator/
 │   │   │   └── v1/
 │   │   │       ├── endpoints/
 │   │   │       │   ├── bots.py         # REST API: Giám sát trạng thái 6 Workers & Restart/Retry
+│   │   │       │   ├── courses.py      # REST API: CRUD & Bulk Upsert khóa học (workspace_courses + lms_courses)
 │   │   │       │   ├── github.py       # REST API: Tạo GitHub Issue & AI Auto-Fill Bug Report
 │   │   │       │   ├── monitor.py      # REST API: Uptime 10 Site, Ma Trận Auth 16 TK & CI/CD Logs
 │   │   │       │   ├── reports.py      # REST API: Tổng hợp KPI Cards & Dữ liệu xuất Excel DTT 3Đ
 │   │   │       │   ├── tasks.py        # REST API: Quản lý hàng đợi tác vụ Human-in-the-Loop & Phê duyệt
 │   │   │       │   ├── tickets.py      # REST API: Hòm thư hợp nhất đa kênh (Lọc, Tag, Bỏ qua, Triage)
 │   │   │       │   └── workspace.py    # REST API: Phả hệ 480 trường, Danh mục khóa học & Bóc tách COF
-│   │   │       └── router.py           # Gom 7 routers vào tiền tố `/api/v1`
+│   │   │       └── router.py           # Gom 8 routers vào tiền tố `/api/v1`
 │   │   ├── brain/
 │   │   │   └── knowledge_base.json     # Cơ sở tri thức hệ thống: Ma trận 7 phân hệ & Phân công nhân sự
 │   │   ├── core/
@@ -292,6 +293,8 @@ ptv-tasks-administrator/
 │   │   │   │   └── LoginPage.tsx       # Trang Đăng nhập Google OAuth SSO độc quyền @dtt.vn
 │   │   │   ├── bots/
 │   │   │   │   └── BotCommanderPage.tsx# Giám sát 6 Workers, Terminal Logs & Điều khiển chạy lại
+│   │   │   ├── courses/
+│   │   │   │   └── CoursesManagerPage.tsx  # Quản lý CSDL khóa học: CRUD, Bulk Import Excel/CSV, Đổi tên & Gộp Category
 │   │   │   ├── dashboard/
 │   │   │   │   └── DashboardPage.tsx   # Executive Dashboard: 4 KPI Cards, PieChart, BarChart
 │   │   │   ├── github/
@@ -678,6 +681,14 @@ Hàm `async def execute_approved_bot_task(bot_type: str, payload_data: dict) -> 
 | `GET` | `/api/v1/monitor/deployments/render` | `monitor.py` | Lấy trạng thái Container Backend Docker từ Render REST API (Tab 3). |
 | `GET` | `/api/v1/monitor/deployments/{provider}/{id}/logs` | `monitor.py` | Trích xuất toàn bộ terminal build logs của bản build. |
 | `GET` | `/api/v1/monitor/incidents` | `monitor.py` | Lấy danh sách các sự cố DOWN gần nhất từ Supabase. |
+| `GET` | `/api/v1/courses/{type}` | `courses.py` | Lấy danh sách khóa học (`workspace` hoặc `lms`), hỗ trợ lọc category & full-text search. |
+| `GET` | `/api/v1/courses/{type}/categories` | `courses.py` | Lấy danh sách tất cả categories duy nhất của loại khóa học. |
+| `POST` | `/api/v1/courses/{type}` | `courses.py` | Tạo mới một khóa học đơn lẻ (có kiểm tra trùng Course ID). |
+| `PUT` | `/api/v1/courses/{type}/{id}` | `courses.py` | Cập nhật thông tin khóa học theo UUID trong database. |
+| `DELETE` | `/api/v1/courses/{type}/{id}` | `courses.py` | Xóa một khóa học theo UUID trong database. |
+| `POST` | `/api/v1/courses/{type}/bulk-upsert` | `courses.py` | Nhập nhanh & Đồng bộ hàng loạt khóa học (upsert on conflict course_id). |
+| `PUT` | `/api/v1/courses/{type}/categories/rename` | `courses.py` | Đổi tên một danh mục, cập nhật hàng loạt tất cả khóa học liên quan. |
+| `DELETE` | `/api/v1/courses/{type}/categories/{name}` | `courses.py` | Xóa hoặc Gộp (merge) một category sang category khác. |
 
 ---
 
@@ -716,7 +727,7 @@ CREATE TYPE approval_status AS ENUM ('pending', 'approved', 'rejected');
 
 ---
 
-### 6.2. Cấu Trúc Chi Tiết 8 Bảng Dữ Liệu
+### 6.2. Cấu Trúc Chi Tiết Các Bảng Dữ Liệu
 
 #### 1. Bảng `inbox_tickets` (Hòm thư hợp nhất đa kênh)
 | Tên Cột | Kiểu Dữ Liệu | Ràng Buộc / Mặc Định | Ý Nghĩa & Mục Đích Nghiệp Vụ |
@@ -799,17 +810,30 @@ CREATE TYPE approval_status AS ENUM ('pending', 'approved', 'rejected');
 | `is_active` | `BOOLEAN` | `DEFAULT TRUE` | Trạng thái hoạt động của tài khoản. |
 | `updated_at` | `TIMESTAMPTZ` | `DEFAULT NOW()` | Thời điểm cập nhật cuối cùng. |
 
-#### 7. Bảng `workspace_courses` (Danh mục khóa học chuẩn)
+#### 7. Bảng `workspace_courses` (Danh mục khóa học chuẩn dùng cho RPA License Chain & COF Matching)
 | Tên Cột | Kiểu Dữ Liệu | Ràng Buộc / Mặc Định | Ý Nghĩa & Mục Đích Nghiệp Vụ |
 |---|---|---|---|
 | `id` | `UUID` | `PRIMARY KEY DEFAULT uuid_generate_v4()` | Khóa chính khóa học. |
 | `course_id` | `INTEGER` | `UNIQUE NOT NULL` | Mã ID số của khóa học trên LMS (VD: `654`). |
 | `course_name` | `VARCHAR(255)` | `NOT NULL` | Tên đầy đủ của khóa học. |
 | `category` | `VARCHAR(50)` | `NOT NULL` | Phân loại Category (`SWRP`, `IR`, `ASP`, `Other`). |
+| `sku` | `VARCHAR(100)` | - | Mã SKU sản phẩm (nếu có) dùng cho việc đối chiếu COF tự động. |
 | `lms_url` | `TEXT` | `NOT NULL` | Đường dẫn trực tiếp tới khóa học trên LMS. |
 | `created_at` | `TIMESTAMPTZ` | `DEFAULT NOW()` | Thời điểm tạo khóa học. |
 
-#### 8. Bảng `author_profile` (Hồ sơ Tác Giả & Khẳng định Chủ Quyền Động)
+#### 8. Bảng `lms_courses` (Danh mục khóa học PLearn Moodle dùng cho Ghi Danh LMS)
+> Có cấu trúc giống hệt `workspace_courses` nhưng lưu riêng để quản lý độc lập. Cả 2 bảng đều được truy cập qua [CoursesManagerPage.tsx](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/courses/CoursesManagerPage.tsx) với switcher pane.
+| Tên Cột | Kiểu Dữ Liệu | Ràng Buộc / Mặc Định | Ý Nghĩa & Mục Đích Nghiệp Vụ |
+|---|---|---|---|
+| `id` | `UUID` | `PRIMARY KEY DEFAULT uuid_generate_v4()` | Khóa chính khóa học. |
+| `course_id` | `INTEGER` | `UNIQUE NOT NULL` | Mã ID số của khóa học trên LMS PLearn. |
+| `course_name` | `VARCHAR(255)` | `NOT NULL` | Tên đầy đủ của khóa học. |
+| `category` | `VARCHAR(50)` | `NOT NULL` | Phân loại Category (`SWRP`, `IR`, `ASP`, `Other`). |
+| `sku` | `VARCHAR(100)` | - | Mã SKU tùy chọn. |
+| `lms_url` | `TEXT` | `NOT NULL` | Đường dẫn trực tiếp tới khóa học PLearn. |
+| `created_at` | `TIMESTAMPTZ` | `DEFAULT NOW()` | Thời điểm tạo khóa học. |
+
+#### 9. Bảng `author_profile` (Hồ sơ Tác Giả & Khẳng định Chủ Quyền Động)
 | Tên Cột | Kiểu Dữ Liệu | Ràng Buộc / Mặc Định | Ý Nghĩa & Mục Đích Nghiệp Vụ |
 |---|---|---|---|
 | `id` | `UUID` | `PRIMARY KEY DEFAULT uuid_generate_v4()` | Khóa chính hồ sơ tác giả (`00000000-0000-0000-0000-000000000001`). |
@@ -823,7 +847,7 @@ CREATE TYPE approval_status AS ENUM ('pending', 'approved', 'rejected');
 | `project_info` | `JSONB` | `DEFAULT '{}'::jsonb` | Thông tin phiên bản và điểm nhấn kiến trúc. |
 | `updated_at` | `TIMESTAMPTZ` | `DEFAULT NOW()` | Thời điểm cập nhật gần nhất. |
 
-#### 9. Bảng `site_monitor_credentials` (Két sắt thông tin kiểm thử Ma Trận Xác Thực & Phân Quyền)
+#### 10. Bảng `site_monitor_credentials` (Két sắt thông tin kiểm thử Ma Trận Xác Thực & Phân Quyền)
 | Tên Cột | Kiểu Dữ Liệu | Ràng Buộc / Mặc Định | Ý Nghĩa & Mục Đích Nghiệp Vụ |
 |---|---|---|---|
 | `id` | `UUID` | `PRIMARY KEY DEFAULT uuid_generate_v4()` | Khóa chính tài khoản test. |
@@ -897,6 +921,7 @@ Sử dụng `react-router-dom` v7 quản lý toàn bộ luồng điều hướng
   - `/reports`: Xuất Báo Cáo KPI DTT 3Đ sang Excel (`ReportsExportPage`).
   - `/monitor`: Giám sát 3 Tabs: Uptime, Auth Matrix & CI/CD Logs (`SiteMonitorPage`).
   - `/profile`: Thiết lập thông tin Tác Giả & MXH (`ProfileSettingsPage`).
+  - `/courses`: Quản lý Danh Mục Khóa Học LMS & Workspace (`CoursesManagerPage`).
 - **Cơ chế ProtectedRoute:** Kiểm tra trạng thái `loading` và `user` từ `AuthContext`. Nếu chưa đăng nhập, tự động chuyển hướng về `/login`.
 
 ---
@@ -949,6 +974,7 @@ Khai báo đầy đủ TypeScript Types & Interfaces:
 - `ReportsSummary`: Số liệu KPI tổng thể, category_ratios, daily_trends.
 - `BotWorkersStatusResponse` & `BotTerminalLog`: Cấu trúc dữ liệu giám sát Workers và Terminal Logs.
 - `GithubIssuePayload` & `GithubIssueResponse`: Cấu trúc request/response tạo issue trên GitHub.
+- `CourseItem`: Interface khóa học (`id`, `course_id`, `category`, `course_name`, `sku?`, `lms_url`, `created_at?`) dùng chung cho cả `workspace_courses` và `lms_courses`.
 
 ---
 
@@ -957,7 +983,7 @@ Khai báo đầy đủ TypeScript Types & Interfaces:
 #### 1. [Sidebar.tsx](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/components/common/Sidebar.tsx)
 - Cột điều hướng bên trái cố định (`h-screen sticky top-0`) tích hợp Drawer Menu phản hồi mượt mà trên Mobile (`isMobileNavOpen`).
 - Logo thương hiệu Pythaverse Admin Automation Hub.
-- Menu 8 Modules quản trị: Executive Dashboard, Unified Inbox Feed, Task & Approval Hub, **Automation Studio**, GitHub Dispatcher, Bot Execution Center, Analytics & XLSX Export, Site Health Monitor.
+- Menu 9 Modules quản trị: Executive Dashboard, Unified Inbox Feed, Task & Approval Hub, **Automation Studio**, GitHub Dispatcher, Bot Execution Center, Analytics & XLSX Export, Site Health Monitor, **Course Manager**.
 - Sử dụng `NavLink` với style kích hoạt trực quan, bóng đổ và màu sắc hiện đại.
 
 #### 2. [Header.tsx](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/components/common/Header.tsx)
@@ -1051,6 +1077,27 @@ Khai báo đầy đủ TypeScript Types & Interfaces:
 - Quản lý hệ sinh thái mạng xã hội với tính năng tự động nhận diện nền tảng (Threads, Telegram, Zalo, WhatsApp, Instagram, X, YouTube, Discord, GitHub, LinkedIn, Facebook, Email).
 - Lưu trữ và đồng bộ tức thì vào bảng `author_profile` trong Supabase.
 
+#### 12. [CoursesManagerPage.tsx](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/courses/CoursesManagerPage.tsx) (Quản Lý Danh Mục Khóa Học)
+
+> **Mục đích:** Cung cấp giao diện quản lý toàn diện cho 2 nguồn khóa học song song: **Workspace Courses** (cơ sở dữ liệu dùng cho RPA License Chain & COF matching) và **LMS Courses** (cơ sở dữ liệu PLearn Moodle). Các thay đổi tại đây ảnh hưởng trực tiếp tới việc matching khóa học trong AutomationStudioPage và UnifiedInboxPage.
+
+- **Switcher Pane:** Nút chuyển đổi 2 pane (`workspace` | `lms`) tải lại dữ liệu độc lập theo bảng Supabase tương ứng (`workspace_courses` hoặc `lms_courses`).
+- **Tìm kiếm & Lọc:** Ô tìm kiếm real-time theo Course ID, Course Name, SKU và Category; Dropdown lọc theo Category.
+- **CRUD Khóa Học Đơn Lẻ (Modal):**
+  - **Thêm mới:** Form điền `Course ID`, `Category`, `Course Name`, `SKU` (tùy chọn), `LMS URL` – LMS URL tự động sinh từ Course ID (`https://learn.pythaverse.space/course/view.php?id={course_id}`) nếu để trống.
+  - **Chỉnh sửa:** Mở Modal với dữ liệu sẵn có, gửi `PUT /courses/{type}/{id}`.
+  - **Xóa:** Xác nhận popup, gửi `DELETE /courses/{type}/{id}`.
+- **Bulk Import (Modal nhập nhanh hàng loạt):**
+  - **Chế độ File:** Kéo thả hoặc chọn file `.xlsx` / `.csv` → SheetJS đọc file ngay trên trình duyệt → Preview bảng dữ liệu trước khi gửi.
+  - **Chế độ Text:** Copy-paste dữ liệu dạng tab-separated trực tiếp vào textarea → Parse real-time → Preview bảng.
+  - **Cả 2 chế độ:** Tự động map cột theo thứ tự `Course ID | Category | Course Name | SKU | LMS URL` và Preview 5 dòng đầu.
+  - Gửi `POST /courses/{type}/bulk-upsert` – Backend dùng Supabase `upsert on_conflict=course_id` để không gây trùng lặp.
+- **Quản Lý Danh Mục (Modal Category Manager):**
+  - Hiển thị danh sách tất cả categories hiện có kèm số khóa học.
+  - **Đổi tên:** Chọn category cũ → nhập tên mới → gửi `PUT /courses/{type}/categories/rename` cập nhật hàng loạt.
+  - **Xóa / Gộp:** Gửi `DELETE /courses/{type}/categories/{name}?target_category={tên}` để gộp sang category khác hoặc xóa toàn bộ.
+- **Bảng danh sách:** Hiển thị Course ID, Category Badge, Course Name, SKU, nút mở LMS URL (`ExternalLink`), nút Sửa và Xóa từng dòng.
+
 ---
 
 ## 8. Quy Chuẩn Phát Triển & Hướng Dẫn Mở Rộng Cho AI / Developer
@@ -1073,10 +1120,18 @@ Khi AI Assistant hoặc Developer tiếp tục bảo trì và mở rộng hệ t
 1. Khai báo thông tin website vào mảng `DEFAULT_MONITORED_SITES` trong [site_monitor_service.py](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/site_monitor_service.py) với `id`, `name`, `url`, `category`, `enabled`, `show_live_alert`, `check_login`.
 2. Giao diện [SiteMonitorPage.tsx](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/monitor/SiteMonitorPage.tsx) trên Frontend sẽ tự động nhận diện và hiển thị thanh Uptime Bars cho website mới.
 
-### 8.4. Quy Tắc Code Sạch & Bảo Mật (Clean Code Standards)
+### 8.4. Thêm Khóa Học Vào Hệ Thống (Courses Manager)
+> **Lưu ý quan trọng:** Dự án có 2 bảng khóa học song song: `workspace_courses` (dùng cho RPA License Chain, COF matching) và `lms_courses` (dùng cho PLearn LMS enrollment). Phân biệt rõ trước khi thêm.
+1. **Qua Giao Diện:** Truy cập `/courses`, chọn đúng pane (`Workspace` hoặc `LMS`), bấm `+ Thêm Khóa Học` hoặc `Nhập Nhanh (.xlsx / CSV)`.
+2. **Qua API:** `POST /api/v1/courses/{workspace|lms}` với payload `{course_id, category, course_name, sku?, lms_url?}`. LMS URL tự động sinh nếu để trống.
+3. **Bulk Import:** `POST /api/v1/courses/{type}/bulk-upsert` với mảng `courses[]` – Backend tự upsert, không lo trùng lặp.
+4. **Đồng bộ Category:** Sau khi thêm, kiểm tra Automation Studio & COF extraction xem Category mới có được nhận diện đúng không.
+
+### 8.5. Quy Tắc Code Sạch & Bảo Mật (Clean Code Standards)
 - **Type Safety:** 100% hàm Python phải có Type Hints đầy đủ; 100% components React phải có TypeScript Interfaces rõ ràng.
 - **Bảo mật bí mật:** Tuyệt đối không hardcode API key, mật khẩu, JWT token vào mã nguồn. Tất cả phải nạp qua `app.core.config.settings` hoặc `import.meta.env`.
 - **Human-in-the-Loop Integrity:** Tuyệt đối không được bỏ qua bước phê duyệt `bot_automation_tasks` để tự động chạy ngầm các tác vụ can thiệp hệ thống.
+- **Toast Library:** Frontend sử dụng `sonner` (không phải `react-hot-toast`) làm thư viện toast notification. Luôn import `{ toast } from 'sonner'` trong các feature pages.
 
 ---
 
