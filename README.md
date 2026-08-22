@@ -619,7 +619,7 @@ Hệ thống xử lý danh tính Keycloak 2 tầng với cơ chế Safe-by-Defau
 - `check_all_sites()` & `check_single_site(site)`: Gửi HTTP Request kiểm tra Live Uptime cho 10 websites.
 - `run_auth_matrix_checks() -> list[dict]`: Đọc 16 tài khoản test giải mã Fernet từ bảng `site_monitor_credentials`, gửi request xác thực Keycloak SSO và kiểm tra quyền truy cập route nội bộ cho 7 roles.
 - `get_deployment_logs(provider: str, deployment_id: str) -> str`: Gọi Vercel API hoặc Render API trích xuất live terminal build logs.
-- `get_uptime_history(site_id, days=45) -> list`: Trả về lịch sử 45 ngày phục vụ render Uptime Bars.
+- `get_uptime_history(site_id, days=45) -> list`: Trả về lịch sử 24h phục vụ render Uptime Bars.
 - `get_incident_log(limit=50) -> list`: Lấy danh sách toàn bộ các sự cố sập web từ Supabase.
 
 #### 5.5.11. Dịch Vụ Thông Báo Telegram Bot (`telegram_service.py`)
@@ -1047,7 +1047,7 @@ Khai báo đầy đủ TypeScript Types & Interfaces:
 
 #### 11. [SiteMonitorPage.tsx](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/monitor/SiteMonitorPage.tsx) (Trung Tâm Giám Sát Sức Khỏe & Hạ Tầng 3-Tabs)
 - Thiết kế 3 Tabs chuyên sâu cho toàn bộ hệ sinh thái:
-  - **Tab 1: Giám Sát Công Khai:** Giám sát trạng thái Live của 10 website Pythaverse, thanh Uptime Bars 45 ngày theo chuẩn UptimeRobot, Live Uptime Bar 24 giờ và bảng Incident Log tra cứu lịch sử sự cố gián đoạn.
+  - **Tab 1: Giám Sát Công Khai:** Giám sát trạng thái Live của 10 website Pythaverse, thanh Uptime Bars 24 giờ theo chuẩn UptimeRobot, Live Uptime Bar 24 giờ và bảng Incident Log tra cứu lịch sử sự cố gián đoạn.
   - **Tab 2: Ma Trận Xác Thực & Phân Quyền:** Kiểm thử tự động đăng nhập Keycloak SSO cho 16 tài khoản mẫu thuộc 7 vai trò cốt lõi (`Admin`, `Sales Admin`, `Distributor`, `Partner`, `School`, `Teacher`, `Student`), đo thời gian phản hồi và xác thực quyền truy cập các route nội bộ của từng portal.
   - **Tab 3: CI/CD & Tiến Trình Triển Khai:** Kết nối Vercel REST API và Render REST API, theo dõi trạng thái các bản build Frontend SPA và Backend Container, tích hợp trình xem Terminal Build Logs thời gian thực trực tiếp trên trình duyệt.
 

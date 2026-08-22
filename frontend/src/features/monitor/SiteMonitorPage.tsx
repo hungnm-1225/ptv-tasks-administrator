@@ -623,7 +623,7 @@ export const SiteMonitorPage: React.FC = () => {
             {incidents.length === 0 ? (
               <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400 py-2">
                 <CheckCircle2 className="w-4 h-4" />
-                <span>Không có sự cố nào được ghi nhận trong 45 ngày qua. Tất cả hệ thống vận hành trơn tru!</span>
+                <span>Không có sự cố nào được ghi nhận trong 24 giờ. Tất cả hệ thống vận hành trơn tru!</span>
               </div>
             ) : (
               <div className="divide-y divide-slate-100 dark:divide-slate-700 text-xs">

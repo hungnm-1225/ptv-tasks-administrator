@@ -71,7 +71,7 @@ Gói dịch vụ được tách nhỏ thành 7 module chuyên biệt kế thừa
 - Tích hợp 4 Dispatcher Engines: Keycloak Identity (3 Safe Toggles), Workspace License Phả Hệ (6 sub-flows, 480 trường), LMS Moodle & Git Provisioning, Google Feedback Doc Triage.
 
 ### 2.8. Giám Sát Sức Khỏe Hệ Sinh Thái Đa Tầng 3-Tabs (`SiteMonitorPage.tsx`)
-- **Tab 1 (Giám Sát Công Khai):** Giám sát Live 10 Website Pythaverse, Live Uptime Bar 24 giờ và Uptime Bars 45 ngày phong cách UptimeRobot.
+- **Tab 1 (Giám Sát Công Khai):** Giám sát Live 10 Website Pythaverse, Live Uptime Bar 24 giờ và Uptime Bars 24h phong cách UptimeRobot.
 - **Tab 2 (Ma Trận Xác Thực & Phân Quyền):** Kiểm thử tự động đăng nhập Keycloak SSO & quyền truy cập route nội bộ cho 16 tài khoản test 7 vai trò (`Admin`, `Sales Admin`, `Distributor`, `Partner`, `School`, `Teacher`, `Student`) giải mã Fernet từ bảng `site_monitor_credentials`.
 - **Tab 3 (CI/CD & Tiến Trình Triển Khai):** Kết nối Vercel REST API và Render REST API, theo dõi trạng thái builds và hiển thị live terminal logs.
 

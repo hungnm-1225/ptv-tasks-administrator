@@ -119,10 +119,10 @@ def _make_initial_state(site: dict) -> dict:
 _sites_cache: list[dict] = [_make_initial_state(s) for s in DEFAULT_MONITORED_SITES]
 
 # ---------------------------------------------------------------------------
-# UPTIME HISTORY (CẢ 45 NGÀY VÀ 24 GIỜ)
+# UPTIME HISTORY (CẢ 45 VÀ 24 GIỜ)
 # ---------------------------------------------------------------------------
 def get_uptime_history(site_id: str, days: int = 45) -> list[dict]:
-    """Trả về lịch sử theo ngày (phục vụ tương thích 45 ngày)"""
+    """Trả về lịch sử theo ngày (phục vụ tương thích 24h)"""
     result = []
     today = now_vn().date()
     db = get_supabase()
