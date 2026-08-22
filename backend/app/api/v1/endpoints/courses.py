@@ -115,3 +115,92 @@ async def delete_course(course_type: str, course_db_id: str):
     
     res = supabase.table(table).delete().eq("id", course_db_id).execute()
     return {"status": "success", "message": "Đã xóa khóa học thành công."}
+
+class BulkCoursesPayload(BaseModel):
+    courses: List[CourseSchema]
+
+class RenameCategoryPayload(BaseModel):
+    old_category: str
+    new_category: str
+
+# -------------------------------------------------------------------
+# 6. NHẬP NHANH / BULK UPSERT HÀNG LOẠT KHÓA HỌC
+# -------------------------------------------------------------------
+@router.post("/{course_type}/bulk-upsert")
+async def bulk_upsert_courses(course_type: str, payload: BulkCoursesPayload):
+    table = get_table_name(course_type)
+    supabase = get_supabase_client()
+    
+    if not payload.courses:
+        raise HTTPException(status_code=400, detail="Danh sách khóa học rỗng.")
+        
+    records = [c.model_dump() for c in payload.courses]
+    # Dùng upsert trên cột course_id để nếu có rồi thì update, chưa có thì insert
+    res = supabase.table(table).upsert(records, on_conflict="course_id").execute()
+    
+    return {
+        "status": "success",
+        "total_processed": len(records),
+        "message": f"Đã đồng bộ thành công {len(records)} khóa học vào {table}!"
+    }
+
+
+# -------------------------------------------------------------------
+# 7. ĐỔI TÊN DANH MỤC (RENAME CATEGORY HÀNG LOẠT)
+# -------------------------------------------------------------------
+@router.put("/{course_type}/categories/rename")
+async def rename_category(course_type: str, payload: RenameCategoryPayload):
+    table = get_table_name(course_type)
+    supabase = get_supabase_client()
+    
+    old_cat = payload.old_category.strip().upper()
+    new_cat = payload.new_category.strip().upper()
+    
+    if not old_cat or not new_cat:
+        raise HTTPException(status_code=400, detail="Tên danh mục không được để trống.")
+        
+    res = supabase.table(table)\
+        .update({"category": new_cat})\
+        .eq("category", old_cat)\
+        .execute()
+        
+    return {
+        "status": "success",
+        "message": f"Đã đổi tên danh mục từ '{old_cat}' sang '{new_cat}' cho các khóa học liên quan."
+    }
+
+
+# -------------------------------------------------------------------
+# 8. XÓA / GỘP DANH MỤC
+# -------------------------------------------------------------------
+@router.delete("/{course_type}/categories/{category_name}")
+async def delete_category(
+    course_type: str, 
+    category_name: str,
+    target_category: Optional[str] = Query(None, description="Nếu truyền, sẽ gộp khóa học sang category này thay vì xóa")
+):
+    table = get_table_name(course_type)
+    supabase = get_supabase_client()
+    cat_clean = category_name.strip().upper()
+    
+    if target_category and target_category.strip().upper() != cat_clean:
+        # Gộp sang category khác
+        target_clean = target_category.strip().upper()
+        res = supabase.table(table)\
+            .update({"category": target_clean})\
+            .eq("category", cat_clean)\
+            .execute()
+        return {
+            "status": "success",
+            "message": f"Đã gộp tất cả khóa học từ '{cat_clean}' sang '{target_clean}'."
+        }
+    else:
+        # Xóa toàn bộ khóa học thuộc category này
+        res = supabase.table(table)\
+            .delete()\
+            .eq("category", cat_clean)\
+            .execute()
+        return {
+            "status": "success",
+            "message": f"Đã xóa toàn bộ các khóa học thuộc danh mục '{cat_clean}'."
+        }
