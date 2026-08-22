@@ -83,7 +83,7 @@ export const AutomationStudioPage: React.FC = () => {
   const [additionalNotes, setAdditionalNotes] = useState<string>('Pythaverse Auto-Pipeline Managed');
 
   // Specific Order / Contract identifiers
-  const [targetOrderCode, setTargetOrderCode] = useState<string>('SCH-10266-20260821-1347');
+  const [targetOrderCode, setTargetOrderCode] = useState<string>('');
   const [targetContractCode, setTargetContractCode] = useState<string>('PRT-20260603-444');
   const [adminJustification, setAdminJustification] = useState<string>(
     'Afiq requests and approves the requests, Hung QA processes the contract via Automation Hub'
@@ -475,8 +475,8 @@ export const AutomationStudioPage: React.FC = () => {
                   type="button"
                   onClick={() => setSelectedBotType(tab.id as any)}
                   className={`flex flex-col items-start gap-1 p-4 rounded-2xl border text-left transition-all duration-150 cursor-pointer ${isSel
-                      ? 'bg-gradient-to-br from-violet-600 to-indigo-600 text-white border-transparent shadow-md shadow-violet-500/25'
-                      : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700/80 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    ? 'bg-gradient-to-br from-violet-600 to-indigo-600 text-white border-transparent shadow-md shadow-violet-500/25'
+                    : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700/80 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
                 >
                   <Icon className={`w-5 h-5 ${isSel ? 'text-white' : 'text-violet-600 dark:text-violet-400'}`} />
@@ -501,10 +501,10 @@ export const AutomationStudioPage: React.FC = () => {
               </label>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-violet-100/60 dark:bg-violet-900/40 p-2 rounded-2xl text-xs font-medium">
                 {[
-                  { id: 'end_to_end', label: '⚡ Trọn Gói 4-in-1 (E2E)' },
-                  { id: 'approve_school_order', label: '🏫 Duyệt School Order (Partner)' },
-                  { id: 'approve_partner_contract', label: '🤝 Duyệt Contract Đối Tác (Distributor)' },
-                  { id: 'admin_approve_contract', label: '👑 Duyệt Contract Sales Admin' },
+                  { id: 'end_to_end', label: '⚡ Trọn Gói Toàn Trình' },
+                  { id: 'approve_school_order', label: '🏫 Duyệt Đơn Hàng Trường' },
+                  { id: 'approve_partner_contract', label: '🤝 Duyệt Hợp Đồng Đối Tác' },
+                  { id: 'admin_approve_contract', label: '👑 Duyệt Hợp Đồng Quản Trị' },
                   { id: 'bulk_accounts', label: '👥 Tạo Tài Khoản' },
                   { id: 'lms_enroll', label: '🎓 Ghi Danh LMS' },
                 ].map((sub) => (
@@ -517,8 +517,8 @@ export const AutomationStudioPage: React.FC = () => {
                       setParsedOrderCourses([]);
                     }}
                     className={`py-2.5 px-3 rounded-xl text-center transition-all cursor-pointer text-xs ${workspaceSubFlow === sub.id
-                        ? 'bg-white dark:bg-slate-800 font-bold text-violet-700 dark:text-violet-300 shadow-2xs'
-                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                      ? 'bg-white dark:bg-slate-800 font-bold text-violet-700 dark:text-violet-300 shadow-2xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                       }`}
                   >
                     {sub.label}
@@ -599,7 +599,7 @@ export const AutomationStudioPage: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-white dark:bg-slate-800/90 rounded-2xl border border-violet-200 dark:border-slate-700 shadow-2xs">
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                    Contact Information:
+                    Thông Tin Liên Hệ:
                   </label>
                   <input
                     type="text"
@@ -610,7 +610,7 @@ export const AutomationStudioPage: React.FC = () => {
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                    Additional Notes:
+                    Ghi Chú Bổ Sung:
                   </label>
                   <input
                     type="text"
@@ -632,10 +632,10 @@ export const AutomationStudioPage: React.FC = () => {
                       <Clock className="w-4 h-4 text-violet-600" />
                       <span>
                         {workspaceSubFlow === 'approve_school_order'
-                          ? 'Mã School Order Cần Phê Duyệt:'
+                          ? 'Mã Đơn Hàng Trường Cần Duyệt:'
                           : workspaceSubFlow === 'approve_partner_contract'
-                            ? 'Mã Partner Contract Cần Duyệt (PRT-...):'
-                            : 'Mã DST Contract Cần Duyệt (DST-...):'}
+                            ? 'Mã Hợp Đồng Đối Tác Cần Duyệt:'
+                            : 'Mã Hợp Đồng Nhà Phân Phối Cần Duyệt:'}
                       </span>
                     </label>
 
@@ -650,7 +650,7 @@ export const AutomationStudioPage: React.FC = () => {
                       ) : (
                         <RefreshCw className="w-3.5 h-3.5" />
                       )}
-                      <span>Quét Danh Sách Pending (Live)</span>
+                      <span>Quét Danh Sách Đang Chờ</span>
                     </button>
                   </div>
 
@@ -683,7 +683,7 @@ export const AutomationStudioPage: React.FC = () => {
                   {workspaceSubFlow === 'admin_approve_contract' && (
                     <div className="space-y-1.5 pt-1">
                       <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
-                        <span>Justification Note (Bắt buộc {'>='} 15 ký tự):</span>
+                        <span>Lý Do Phê Duyệt (Tối thiểu 15 ký tự):</span>
                         <span className="text-[11px] text-slate-400 font-mono">
                           {adminJustification.length} ký tự
                         </span>
@@ -722,8 +722,8 @@ export const AutomationStudioPage: React.FC = () => {
                                 toast.success(`Đã chọn mã: ${itemCode}`);
                               }}
                               className={`w-full text-left p-3 rounded-xl text-xs flex items-center justify-between cursor-pointer transition ${isCurrent
-                                  ? 'bg-violet-100 dark:bg-violet-950/70 border border-violet-300 text-violet-800 dark:text-violet-200 font-bold shadow-2xs'
-                                  : 'hover:bg-slate-200/60 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                                ? 'bg-violet-100 dark:bg-violet-950/70 border border-violet-300 text-violet-800 dark:text-violet-200 font-bold shadow-2xs'
+                                : 'hover:bg-slate-200/60 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
                                 }`}
                             >
                               <div>
@@ -963,7 +963,7 @@ export const AutomationStudioPage: React.FC = () => {
                   {enableLmsEnrollment && (
                     <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-700">
                       <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">Tên Nhóm/Lớp (Group Name):</label>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Tên Nhóm hoặc Lớp:</label>
                         <input
                           type="text"
                           value={lmsGroupName}
@@ -973,7 +973,7 @@ export const AutomationStudioPage: React.FC = () => {
                         />
                       </div>
                       <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">Danh sách email học sinh (mỗi dòng 1 email):</label>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Danh Sách Email Học Sinh (Mỗi dòng 1 email):</label>
                         <textarea
                           rows={3}
                           value={lmsStudentEmails}
@@ -996,7 +996,7 @@ export const AutomationStudioPage: React.FC = () => {
             <div className="flex items-center justify-between">
               <label className="text-xs font-bold text-amber-900 dark:text-amber-300 flex items-center gap-1.5">
                 <KeyRound className="w-4 h-4 text-amber-600" />
-                <span>Quản Trị Danh Tính Keycloak (Safe-by-Default):</span>
+                <span>Quản Trị Danh Tính Keycloak:</span>
               </label>
               <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200 font-bold">
                 Bảo vệ 3 lớp
@@ -1020,16 +1020,16 @@ export const AutomationStudioPage: React.FC = () => {
               {/* 1. Reset Pass */}
               <div
                 className={`p-4 rounded-2xl border transition-all ${kcEnableResetPass
-                    ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
-                    : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
+                  ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
+                  : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
                   }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div
                       className={`p-2 rounded-xl ${kcEnableResetPass
-                          ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300'
-                          : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
+                        ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300'
+                        : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
                         }`}
                     >
                       <KeyRound className="w-4 h-4" />
@@ -1068,8 +1068,8 @@ export const AutomationStudioPage: React.FC = () => {
                         type="button"
                         onClick={() => setKcForceChange(!kcForceChange)}
                         className={`w-4 h-4 rounded border flex items-center justify-center cursor-pointer transition ${kcForceChange
-                            ? 'bg-amber-500 border-amber-500 text-white'
-                            : 'border-slate-300 dark:border-slate-600'
+                          ? 'bg-amber-500 border-amber-500 text-white'
+                          : 'border-slate-300 dark:border-slate-600'
                           }`}
                       >
                         {kcForceChange && <Check className="w-3 h-3" />}
@@ -1088,23 +1088,23 @@ export const AutomationStudioPage: React.FC = () => {
               {/* 2. Email Verified */}
               <div
                 className={`p-4 rounded-2xl border transition-all ${kcEnableVerify
-                    ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
-                    : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
+                  ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
+                  : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
                   }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div
                       className={`p-2 rounded-xl ${kcEnableVerify
-                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300'
-                          : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
+                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300'
+                        : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
                         }`}
                     >
                       <ShieldCheck className="w-4 h-4" />
                     </div>
                     <div>
                       <div className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                        2. Xác Thực Email (Email Verified)
+                        2. Xác Thực Email
                       </div>
                       <div className="text-[10px] text-slate-400">Gỡ lỗi tài khoản chưa xác thực email</div>
                     </div>
@@ -1126,18 +1126,18 @@ export const AutomationStudioPage: React.FC = () => {
                       type="button"
                       onClick={() => setKcVerifyAction('verify')}
                       className={`flex-1 py-2 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcVerifyAction === 'verify'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
-                          : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-500'
                         }`}
                     >
-                      ✓ Đã Xác Thực (Verified)
+                      ✓ Đã Xác Thực
                     </button>
                     <button
                       type="button"
                       onClick={() => setKcVerifyAction('unverify')}
                       className={`flex-1 py-2 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcVerifyAction === 'unverify'
-                          ? 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
-                          : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                        ? 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-500'
                         }`}
                     >
                       ✗ Gỡ Xác Thực
@@ -1149,16 +1149,16 @@ export const AutomationStudioPage: React.FC = () => {
               {/* 3. Account Status */}
               <div
                 className={`p-4 rounded-2xl border transition-all ${kcEnableStatus
-                    ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
-                    : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
+                  ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
+                  : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
                   }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div
                       className={`p-2 rounded-xl ${kcEnableStatus
-                          ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-300'
-                          : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
+                        ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-300'
+                        : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
                         }`}
                     >
                       <UserX className="w-4 h-4" />
@@ -1187,21 +1187,21 @@ export const AutomationStudioPage: React.FC = () => {
                       type="button"
                       onClick={() => setKcStatusAction('enable')}
                       className={`flex-1 py-2 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcStatusAction === 'enable'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
-                          : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-500'
                         }`}
                     >
-                      ✓ Kích Hoạt (Enable)
+                      ✓ Kích Hoạt
                     </button>
                     <button
                       type="button"
                       onClick={() => setKcStatusAction('disable')}
                       className={`flex-1 py-2 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcStatusAction === 'disable'
-                          ? 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
-                          : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                        ? 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-500'
                         }`}
                     >
-                      ✗ Vô Hiệu Hóa (Disable)
+                      ✗ Vô Hiệu Hóa
                     </button>
                   </div>
                 )}

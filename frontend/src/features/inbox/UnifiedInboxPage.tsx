@@ -1542,7 +1542,7 @@ export const UnifiedInboxPage: React.FC = () => {
                         </div>
                         <div>
                           <div className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                            2. Xác Thực Email (Email Verified)
+                            2. Xác Thực Email
                           </div>
                           <div className="text-[10px] text-slate-400">Gỡ lỗi tài khoản chưa xác thực email</div>
                         </div>
@@ -1577,7 +1577,7 @@ export const UnifiedInboxPage: React.FC = () => {
                               : 'border-slate-200 dark:border-slate-700 text-slate-500'
                           }`}
                         >
-                          ✓ Đã Xác Thực (Verified)
+                          ✓ Đã Xác Thực
                         </button>
                         <button
                           type="button"
@@ -1618,7 +1618,7 @@ export const UnifiedInboxPage: React.FC = () => {
                         </div>
                         <div>
                           <div className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                            3. Trạng Thái Hoạt Động (Account Status)
+                            3. Trạng Thái Hoạt Động
                           </div>
                           <div className="text-[10px] text-slate-400">Khóa hoặc kích hoạt lại người dùng</div>
                         </div>

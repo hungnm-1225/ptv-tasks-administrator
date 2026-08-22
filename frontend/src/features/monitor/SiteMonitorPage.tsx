@@ -224,7 +224,7 @@ const UptimeBar: React.FC<UptimeBarProps> = ({
             <div className="bg-slate-950 text-white text-[11px] font-mono rounded-lg px-3 py-1.5 shadow-xl border border-slate-700 whitespace-nowrap">
               <span className="text-slate-300 font-semibold">{tooltip.item.hour}: </span>
               <span className={tooltip.item.status === 'DOWN' ? 'text-rose-400 font-bold' : 'text-emerald-400 font-bold'}>
-                {tooltip.item.status === 'DOWN' ? '🔴 Sập (DOWN)' : '🟢 Hoạt động tốt (UP)'}
+                {tooltip.item.status === 'DOWN' ? '🔴 Gián đoạn' : '🟢 Hoạt động ổn định'}
               </span>
             </div>
           </div>
@@ -505,7 +505,7 @@ export const SiteMonitorPage: React.FC = () => {
             }`}
         >
           <Globe className="w-4 h-4" />
-          <span>1. Giám Sát Công Khai (Public)</span>
+          <span>1. Giám Sát Công Khai</span>
         </button>
 
         <button
@@ -516,7 +516,7 @@ export const SiteMonitorPage: React.FC = () => {
             }`}
         >
           <ShieldCheck className="w-4 h-4" />
-          <span>2. Xác Thực & Phân Quyền (7 Roles + Satellite)</span>
+          <span>2. Ma Trận Xác Thực & Phân Quyền</span>
         </button>
 
         <button
@@ -527,7 +527,7 @@ export const SiteMonitorPage: React.FC = () => {
             }`}
         >
           <GitBranch className="w-4 h-4" />
-          <span>3. CI/CD & Deploy Pipelines (Vercel & Render)</span>
+          <span>3. CI/CD & Tiến Trình Triển Khai</span>
         </button>
       </div>
 

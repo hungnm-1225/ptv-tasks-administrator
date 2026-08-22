@@ -319,7 +319,7 @@ export const TaskManagementPage: React.FC = () => {
                           <span className="truncate block">{ticketTitle}</span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300 text-[10px] font-semibold">
-                            <Zap className="w-3 h-3 text-violet-500" /> Tác vụ Direct (Studio)
+                            <Zap className="w-3 h-3 text-violet-500" /> Tác vụ Studio Trực Tiếp
                           </span>
                         )}
                       </td>
@@ -360,7 +360,7 @@ export const TaskManagementPage: React.FC = () => {
         </div>
       )}
 
-      {/* Modal: Phê Duyệt Trực Quan (Human-in-the-Loop Visual Form) */}
+      {/* Modal: Phê Duyệt Trực Quan (Human-in-the-Loop) */}
       {selectedTask && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl space-y-4 animate-in zoom-in duration-200">
@@ -426,7 +426,7 @@ export const TaskManagementPage: React.FC = () => {
                     <label className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
                       <span className="flex items-center gap-1.5">
                         <Users className="w-3.5 h-3.5 text-violet-600" />
-                        Danh sách Tài Khoản / Email (Hỗ trợ 1 hoặc nhiều người):
+                        Danh Sách Tài Khoản Hoặc Email:
                       </span>
                       <span className="text-[10px] text-slate-400 font-normal">Mỗi email 1 dòng</span>
                     </label>
@@ -446,9 +446,9 @@ export const TaskManagementPage: React.FC = () => {
                     </label>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       {[
-                        { id: 'bulk_both', label: 'Reset & Verify' },
-                        { id: 'bulk_reset_pass', label: 'Chỉ Reset Pass' },
-                        { id: 'bulk_verify', label: 'Chỉ Verify Mail' },
+                        { id: 'bulk_both', label: 'Đổi Mật Khẩu & Xác Thực' },
+                        { id: 'bulk_reset_pass', label: 'Chỉ Đổi Mật Khẩu' },
+                        { id: 'bulk_verify', label: 'Chỉ Xác Thực Email' },
                         { id: 'bulk_set_status', label: 'Chỉ Đổi Trạng Thái' },
                       ].map((item) => (
                         <button
@@ -543,8 +543,8 @@ export const TaskManagementPage: React.FC = () => {
                       </label>
                       <div className="flex items-center gap-1.5">
                         {[
-                          { id: 'enabled', label: 'Kích Hoạt (Enabled)' },
-                          { id: 'disabled', label: 'Khóa (Disabled)' },
+                          { id: 'enabled', label: 'Kích Hoạt' },
+                          { id: 'disabled', label: 'Khóa' },
                           { id: 'keep', label: 'Giữ Nguyên' },
                         ].map((st) => (
                           <button
@@ -610,7 +610,7 @@ export const TaskManagementPage: React.FC = () => {
                   className="flex items-center gap-1.5 px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-semibold transition cursor-pointer"
                 >
                   <XCircle className="w-3.5 h-3.5" />
-                  <span>Từ Chối (Reject)</span>
+                  <span>Từ Chối</span>
                 </button>
 
                 <div className="flex items-center gap-2.5">
@@ -632,7 +632,7 @@ export const TaskManagementPage: React.FC = () => {
                     ) : (
                       <>
                         <Play className="w-3.5 h-3.5 fill-current" />
-                        <span>Approve & Run Worker</span>
+                        <span>Phê Duyệt & Chạy Worker</span>
                       </>
                     )}
                   </button>
