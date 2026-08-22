@@ -12,6 +12,7 @@ import {
   Activity,
   X,
   Sparkles,
+  BookOpen
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -29,6 +30,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
     { to: '/bots', label: 'Bot Execution Center', icon: Bot },
     { to: '/reports', label: 'Analytics & XLSX Export', icon: FileSpreadsheet },
     { to: '/monitor', label: 'Site Health Monitor', icon: Activity },
+    { to: '/courses', label: 'Courses Management', icon: BookOpen },
   ];
 
   const handleLinkClick = () => {

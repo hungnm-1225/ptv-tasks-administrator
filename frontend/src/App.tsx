@@ -16,6 +16,7 @@ import { SiteMonitorPage } from './features/monitor/SiteMonitorPage';
 import { ProfileSettingsPage } from './features/profile/ProfileSettingsPage';
 import { Loader2 } from 'lucide-react';
 import { AutomationStudioPage } from './features/studio/AutomationStudioPage';
+import { CoursesManagerPage } from './features/courses/CoursesManagerPage';
 
 const ProtectedRoute: React.FC = () => {
   const { user, loading } = useAuth();
@@ -64,6 +65,7 @@ const AppContent: React.FC = () => {
             <Route path="/monitor" element={<SiteMonitorPage />} />
             <Route path="/profile" element={<ProfileSettingsPage />} />
             <Route path="/studio" element={<AutomationStudioPage />} />
+            <Route path="/courses" element={<CoursesManagerPage />} />
           </Route>
 
           {/* Fallback */}

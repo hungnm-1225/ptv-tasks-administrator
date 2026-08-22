@@ -1,6 +1,6 @@
 # backend/app/api/v1/router.py
 from fastapi import APIRouter
-from app.api.v1.endpoints import tickets, tasks, bots, github, reports, monitor, workspace
+from app.api.v1.endpoints import tickets, tasks, bots, github, reports, monitor, workspace, courses
 
 api_router = APIRouter()
 
@@ -11,3 +11,4 @@ api_router.include_router(github.router, prefix="/github", tags=["github"])
 api_router.include_router(reports.router, prefix="/reports", tags=["reports"])
 api_router.include_router(monitor.router, prefix="/monitor", tags=["monitor"])
 api_router.include_router(workspace.router, prefix="/workspace", tags=["workspace"])
+api_router.include_router(courses.router, prefix="/courses", tags=["Courses Management"])

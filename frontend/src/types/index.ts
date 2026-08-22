@@ -119,3 +119,13 @@ export interface GithubIssueResponse {
   issue_number?: number;
   message?: string;
 }
+
+export interface CourseItem {
+  id: string;
+  course_id: number;
+  category: string;
+  course_name: string;
+  sku?: string | null;
+  lms_url: string;
+  created_at?: string;
+}

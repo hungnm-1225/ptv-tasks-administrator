@@ -24,7 +24,11 @@ import {
   Crown,
   Users,
   GraduationCap,
+  Calendar,
   Sparkles,
+  UserCheck,
+  ShieldAlert,
+  Edit3,
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { BotType } from '../../types';
@@ -91,7 +95,7 @@ export const AutomationStudioPage: React.FC = () => {
   const [contactInfo, setContactInfo] = useState<string>('Admin Automation Hub (operation@pythaverse.space)');
   const [additionalNotes, setAdditionalNotes] = useState<string>('Pythaverse Auto-Pipeline Managed');
 
-  // Mã định danh Order / Contract cần duyệt
+  // Specific Order / Contract identifiers
   const [targetOrderCode, setTargetOrderCode] = useState<string>('');
   const [targetContractCode, setTargetContractCode] = useState<string>('');
   const [adminJustification, setAdminJustification] = useState<string>(
@@ -104,17 +108,50 @@ export const AutomationStudioPage: React.FC = () => {
   const [scrapedPendingList, setScrapedPendingList] = useState<ScrapedPendingItem[]>([]);
   const [parsedOrderCourses, setParsedOrderCourses] = useState<any[]>([]);
 
-  // LMS Revamp State
+  // =========================================================================
+  // LMS STANDALONE REVAMP STATE (Ghi danh Moodle PLearn trực tiếp)
+  // =========================================================================
+  const [lmsIsCustomCourse, setLmsIsCustomCourse] = useState<boolean>(false);
   const [lmsCourseCategory, setLmsCourseCategory] = useState<string>('SWRP');
   const [lmsCourseId, setLmsCourseId] = useState<number>(654);
   const [lmsCourseName, setLmsCourseName] = useState<string>(
     'SWRP 9: LEANBOT Programming Applications with IoT [V2] (EN)'
   );
-  const [lmsStartDate, setLmsStartDate] = useState<string>('01-09-2026');
-  const [lmsEndDate, setLmsEndDate] = useState<string>('31-05-2027');
-  const [lmsGroupName, setLmsGroupName] = useState<string>('Class A');
+
+  // Tính ngày mặc định: hôm nay -> 1 năm sau (ví dụ: 22-08-2026 -> 21-08-2027)
+  const getFormattedDate = (d: Date) => {
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}-${month}-${year}`;
+  };
+
+  const today = new Date();
+  const nextYear = new Date(today);
+  nextYear.setFullYear(today.getFullYear() + 1);
+  nextYear.setDate(nextYear.getDate() - 1);
+
+  const [lmsStartDate, setLmsStartDate] = useState<string>(getFormattedDate(today));
+  const [lmsEndDate, setLmsEndDate] = useState<string>(getFormattedDate(nextYear));
+
+  // Role Mode: 'same_role' (Cùng 1 vai trò) | 'multi_role' (Phân chia 3 vai trò)
+  const [lmsRoleMode, setLmsRoleMode] = useState<'same_role' | 'multi_role'>('multi_role');
+  const [lmsSingleRole, setLmsSingleRole] = useState<'student' | 'non_editing_teacher' | 'manager'>('student');
+  const [lmsBulkSingleEmails, setLmsBulkSingleEmails] = useState<string>('');
+
+  // 3 Role Textareas
   const [lmsStudentEmails, setLmsStudentEmails] = useState<string>('');
   const [lmsTeacherEmails, setLmsTeacherEmails] = useState<string>('');
+  const [lmsManagerEmails, setLmsManagerEmails] = useState<string>('');
+
+  // Quick Date Setter
+  const setQuickEndDate = (monthsToAdd: number) => {
+    const d = new Date();
+    d.setMonth(d.getMonth() + monthsToAdd);
+    d.setDate(d.getDate() - 1);
+    setLmsEndDate(getFormattedDate(d));
+    toast.success(`Đã đặt hạn truy cập: +${monthsToAdd} tháng (${getFormattedDate(d)})`);
+  };
 
   // Keycloak Safe Controls
   const [kcTargetEmail, setKcTargetEmail] = useState<string>('teacher.demo@pythaverse.space');
@@ -148,8 +185,8 @@ export const AutomationStudioPage: React.FC = () => {
       course_name: 'SWRP 9: LEANBOT Programming Applications with IoT [V2] (EN)',
       lms_url: 'https://learn.pythaverse.space/course/view.php?id=654',
       licenses: 50,
-      start_date: '01-09-2026',
-      end_date: '31-05-2027',
+      start_date: getFormattedDate(today),
+      end_date: getFormattedDate(nextYear),
     },
   ]);
 
@@ -285,8 +322,8 @@ export const AutomationStudioPage: React.FC = () => {
         course_name: defaultCourse.course_name,
         lms_url: defaultCourse.lms_url,
         licenses: 50,
-        start_date: '01-09-2026',
-        end_date: '31-05-2027',
+        start_date: getFormattedDate(today),
+        end_date: getFormattedDate(nextYear),
       },
     ]);
   };
@@ -342,11 +379,6 @@ export const AutomationStudioPage: React.FC = () => {
         }
       } else if (workspaceMainCategory === 'create_and_approve') {
         if (createApproveSubFlow === 'end_to_end') {
-          const studentEmailsList = lmsStudentEmails
-            .split('\n')
-            .map((e) => e.trim())
-            .filter((e) => e.length > 0);
-
           payload = {
             action: 'pipeline_end_to_end',
             school_name: selectedSchool?.school_name || 'Pythaverse School Demo',
@@ -359,8 +391,6 @@ export const AutomationStudioPage: React.FC = () => {
             order_details: {
               contact_info: contactInfo,
               additional_notes: additionalNotes,
-              group_name: lmsGroupName,
-              student_emails: studentEmailsList,
               courses: selectedCourses.map((c) => ({
                 category: c.category,
                 course_id: c.course_id,
@@ -406,24 +436,44 @@ export const AutomationStudioPage: React.FC = () => {
           record_count: 50,
         };
       } else if (workspaceMainCategory === 'lms_enroll') {
-        const studentEmailsList = lmsStudentEmails
-          .split('\n')
-          .map((e) => e.trim())
-          .filter((e) => e.length > 0);
-        const teacherEmailsList = lmsTeacherEmails
-          .split('\n')
-          .map((e) => e.trim())
-          .filter((e) => e.length > 0);
+        // Parse emails based on role mode
+        let studentsList: string[] = [];
+        let teachersList: string[] = [];
+        let managersList: string[] = [];
+
+        if (lmsRoleMode === 'same_role') {
+          const bulkEmails = lmsBulkSingleEmails
+            .split('\n')
+            .map((e) => e.trim())
+            .filter((e) => e.length > 0);
+
+          if (lmsSingleRole === 'student') studentsList = bulkEmails;
+          else if (lmsSingleRole === 'non_editing_teacher') teachersList = bulkEmails;
+          else if (lmsSingleRole === 'manager') managersList = bulkEmails;
+        } else {
+          studentsList = lmsStudentEmails.split('\n').map((e) => e.trim()).filter((e) => e.length > 0);
+          teachersList = lmsTeacherEmails.split('\n').map((e) => e.trim()).filter((e) => e.length > 0);
+          managersList = lmsManagerEmails.split('\n').map((e) => e.trim()).filter((e) => e.length > 0);
+        }
+
+        if (studentsList.length === 0 && teachersList.length === 0 && managersList.length === 0) {
+          toast.error('Vui lòng nhập ít nhất một email cần ghi danh hoặc gia hạn!');
+          return;
+        }
 
         payload = {
-          action: 'school_enroll_users',
-          school_name: selectedSchool?.school_name,
+          action: 'direct_moodle_lms_enroll',
+          platform: 'learn.pythaverse.space',
+          course_id: lmsCourseId,
           course_name: lmsCourseName,
+          category: lmsCourseCategory,
           start_date: lmsStartDate,
           end_date: lmsEndDate,
-          group_name_raw: lmsGroupName,
-          student_emails: studentEmailsList,
-          teacher_emails: teacherEmailsList,
+          role_mode: lmsRoleMode,
+          students: studentsList,
+          non_editing_teachers: teachersList,
+          managers: managersList,
+          auto_renew_existing: true,
         };
       }
     } else if (selectedBotType === 'keycloak_api') {
@@ -459,7 +509,7 @@ export const AutomationStudioPage: React.FC = () => {
         method: 'POST',
         body: JSON.stringify({
           ticket_id: null,
-          bot_type: selectedBotType,
+          bot_type: selectedBotType === 'workspace_rpa' && workspaceMainCategory === 'lms_enroll' ? 'lms_playwright' : selectedBotType,
           payload_data: payload,
         }),
       });
@@ -527,7 +577,7 @@ export const AutomationStudioPage: React.FC = () => {
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
-              { id: 'workspace_rpa', label: 'Workspace RPA', icon: Building2, desc: 'Đơn Hàng & Hợp Đồng' },
+              { id: 'workspace_rpa', label: 'Workspace & LMS', icon: Building2, desc: 'Đơn Hàng, Hợp Đồng & LMS' },
               { id: 'keycloak_api', label: 'Keycloak IDP', icon: KeyRound, desc: 'Quản Trị Người Dùng' },
               { id: 'feedback_doc_triage', label: 'Feedback Sheet', icon: FileText, desc: 'Ghi Chú Tài Liệu' },
               { id: 'github_issue_creator', label: 'GitHub Issue', icon: Github, desc: 'Báo Cáo Lỗi' },
@@ -540,8 +590,8 @@ export const AutomationStudioPage: React.FC = () => {
                   type="button"
                   onClick={() => setSelectedBotType(tab.id as any)}
                   className={`flex flex-col items-start gap-1 p-4 rounded-2xl border text-left transition-all duration-150 cursor-pointer ${isSel
-                      ? 'bg-gradient-to-br from-violet-600 to-indigo-600 text-white border-transparent shadow-md shadow-violet-500/25'
-                      : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700/80 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    ? 'bg-gradient-to-br from-violet-600 to-indigo-600 text-white border-transparent shadow-md shadow-violet-500/25'
+                    : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700/80 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
                 >
                   <Icon className={`w-5 h-5 ${isSel ? 'text-white' : 'text-violet-600 dark:text-violet-400'}`} />
@@ -586,8 +636,8 @@ export const AutomationStudioPage: React.FC = () => {
                         setParsedOrderCourses([]);
                       }}
                       className={`py-3 px-3 rounded-xl text-center transition-all cursor-pointer flex items-center justify-center gap-1.5 text-xs ${isCur
-                          ? 'bg-white dark:bg-slate-800 font-bold text-violet-700 dark:text-violet-300 shadow-2xs'
-                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                        ? 'bg-white dark:bg-slate-800 font-bold text-violet-700 dark:text-violet-300 shadow-2xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                         }`}
                     >
                       <MIcon className="w-4 h-4" />
@@ -598,77 +648,78 @@ export const AutomationStudioPage: React.FC = () => {
               </div>
             </div>
 
-            {/* TRƯỜNG HỌC & PHẢ HỆ ÁP DỤNG */}
-            <div className="space-y-2 relative" ref={schoolDropdownRef}>
-              <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
-                  <Building2 className="w-3.5 h-3.5 text-violet-600" />
-                  <span>Trường Học Áp Dụng (Trong 480 Trường Phả Hệ):</span>
-                </span>
-                <span className="text-xs text-violet-600 font-bold font-mono">
-                  {selectedSchool?.school_code || ''}
-                </span>
-              </label>
+            {/* TRƯỜNG HỌC ÁP DỤNG (Ẩn khi ở Tab 4 - LMS Standalone không cần trường) */}
+            {workspaceMainCategory !== 'lms_enroll' && (
+              <div className="space-y-2 relative" ref={schoolDropdownRef}>
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Building2 className="w-3.5 h-3.5 text-violet-600" />
+                    <span>Trường Học Áp Dụng (Trong 480 Trường Phả Hệ):</span>
+                  </span>
+                  <span className="text-xs text-violet-600 font-bold font-mono">
+                    {selectedSchool?.school_code || ''}
+                  </span>
+                </label>
 
-              <div className="relative">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={schoolSearchQuery}
-                  onFocus={() => setIsSchoolDropdownOpen(true)}
-                  onChange={(e) => {
-                    setSchoolSearchQuery(e.target.value);
-                    setIsSchoolDropdownOpen(true);
-                  }}
-                  placeholder="Tìm theo tên trường hoặc mã SCH_..."
-                  className="w-full pl-10 pr-4 bg-white dark:bg-slate-800 border border-violet-200 dark:border-violet-700/80 rounded-xl p-3 text-xs text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition shadow-2xs"
-                />
-              </div>
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={schoolSearchQuery}
+                    onFocus={() => setIsSchoolDropdownOpen(true)}
+                    onChange={(e) => {
+                      setSchoolSearchQuery(e.target.value);
+                      setIsSchoolDropdownOpen(true);
+                    }}
+                    placeholder="Tìm theo tên trường hoặc mã SCH_..."
+                    className="w-full pl-10 pr-4 bg-white dark:bg-slate-800 border border-violet-200 dark:border-violet-700/80 rounded-xl p-3 text-xs text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition shadow-2xs"
+                  />
+                </div>
 
-              {isSchoolDropdownOpen && (
-                <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl max-h-60 overflow-y-auto p-1.5 space-y-1">
-                  {schoolsList
-                    .filter((s) => s.school_name.toLowerCase().includes(schoolSearchQuery.toLowerCase()))
-                    .slice(0, 30)
-                    .map((s) => (
-                      <button
-                        key={s.school_code}
-                        type="button"
-                        onClick={() => {
-                          setSelectedSchool(s);
-                          setSchoolSearchQuery(`${s.school_name} (${s.school_code})`);
-                          setIsSchoolDropdownOpen(false);
-                        }}
-                        className="w-full text-left p-3 rounded-xl text-xs hover:bg-violet-50 dark:hover:bg-slate-700/60 flex items-center justify-between cursor-pointer transition"
-                      >
-                        <div>
-                          <div className="font-bold text-slate-800 dark:text-slate-200">{s.school_name}</div>
-                          <div className="text-[11px] text-slate-400 font-mono">
-                            Mã: {s.school_code} | Đối Tác: {s.partner_name}
+                {isSchoolDropdownOpen && (
+                  <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl max-h-60 overflow-y-auto p-1.5 space-y-1">
+                    {schoolsList
+                      .filter((s) => s.school_name.toLowerCase().includes(schoolSearchQuery.toLowerCase()))
+                      .slice(0, 30)
+                      .map((s) => (
+                        <button
+                          key={s.school_code}
+                          type="button"
+                          onClick={() => {
+                            setSelectedSchool(s);
+                            setSchoolSearchQuery(`${s.school_name} (${s.school_code})`);
+                            setIsSchoolDropdownOpen(false);
+                          }}
+                          className="w-full text-left p-3 rounded-xl text-xs hover:bg-violet-50 dark:hover:bg-slate-700/60 flex items-center justify-between cursor-pointer transition"
+                        >
+                          <div>
+                            <div className="font-bold text-slate-800 dark:text-slate-200">{s.school_name}</div>
+                            <div className="text-[11px] text-slate-400 font-mono">
+                              Mã: {s.school_code} | Đối Tác: {s.partner_name}
+                            </div>
                           </div>
-                        </div>
-                        {selectedSchool?.school_code === s.school_code && (
-                          <Check className="w-4 h-4 text-violet-600" />
-                        )}
-                      </button>
-                    ))}
-                </div>
-              )}
+                          {selectedSchool?.school_code === s.school_code && (
+                            <Check className="w-4 h-4 text-violet-600" />
+                          )}
+                        </button>
+                      ))}
+                  </div>
+                )}
 
-              {selectedSchool && (
-                <div className="p-3 rounded-xl bg-white dark:bg-slate-800/90 border border-violet-200/80 dark:border-violet-800/50 text-xs font-mono text-violet-700 dark:text-violet-300 flex items-center gap-2 shadow-2xs">
-                  <Layers className="w-4 h-4 text-violet-500 shrink-0" />
-                  <span className="truncate">{selectedSchool.full_lineage}</span>
-                </div>
-              )}
-            </div>
+                {selectedSchool && (
+                  <div className="p-3 rounded-xl bg-white dark:bg-slate-800/90 border border-violet-200/80 dark:border-violet-800/50 text-xs font-mono text-violet-700 dark:text-violet-300 flex items-center gap-2 shadow-2xs">
+                    <Layers className="w-4 h-4 text-violet-500 shrink-0" />
+                    <span className="truncate">{selectedSchool.full_lineage}</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* ============================================================= */}
             {/* MỤC 1: PHÊ DUYỆT CÁC ĐƠN HÀNG / HỢP ĐỒNG ĐANG CHỜ              */}
             {/* ============================================================= */}
             {workspaceMainCategory === 'approve' && (
               <div className="space-y-4">
-                {/* 3 Tab con phê duyệt */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {[
                     { id: 'approve_school_order', label: 'Đơn Hàng Trường', desc: 'Đối tác duyệt' },
@@ -684,8 +735,8 @@ export const AutomationStudioPage: React.FC = () => {
                         setParsedOrderCourses([]);
                       }}
                       className={`p-3 rounded-xl border text-left transition cursor-pointer ${approveSubFlow === sub.id
-                          ? 'bg-violet-600 text-white border-transparent shadow-xs'
-                          : 'bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50'
+                        ? 'bg-violet-600 text-white border-transparent shadow-xs'
+                        : 'bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50'
                         }`}
                     >
                       <div className="font-bold text-xs">{sub.label}</div>
@@ -696,7 +747,6 @@ export const AutomationStudioPage: React.FC = () => {
                   ))}
                 </div>
 
-                {/* Panel Quét và Nhập Mã */}
                 <div className="p-5 bg-white dark:bg-slate-800/90 rounded-2xl border border-violet-200 dark:border-slate-700 space-y-4 shadow-2xs">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-violet-900 dark:text-violet-200 flex items-center gap-1.5">
@@ -725,7 +775,6 @@ export const AutomationStudioPage: React.FC = () => {
                     </button>
                   </div>
 
-                  {/* Input mã */}
                   <div>
                     {approveSubFlow === 'approve_school_order' ? (
                       <input
@@ -750,7 +799,6 @@ export const AutomationStudioPage: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Justification note cho Sales Admin */}
                   {approveSubFlow === 'admin_approve_contract' && (
                     <div className="space-y-1.5 pt-1">
                       <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
@@ -768,7 +816,6 @@ export const AutomationStudioPage: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Danh sách đã quét được */}
                   {scrapedPendingList.length > 0 && (
                     <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-700">
                       <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
@@ -793,8 +840,8 @@ export const AutomationStudioPage: React.FC = () => {
                                 toast.success(`Đã chọn mã: ${itemCode}`);
                               }}
                               className={`w-full text-left p-3 rounded-xl text-xs flex items-center justify-between cursor-pointer transition ${isCurrent
-                                  ? 'bg-violet-100 dark:bg-violet-950/70 border border-violet-300 text-violet-800 dark:text-violet-200 font-bold shadow-2xs'
-                                  : 'hover:bg-slate-200/60 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                                ? 'bg-violet-100 dark:bg-violet-950/70 border border-violet-300 text-violet-800 dark:text-violet-200 font-bold shadow-2xs'
+                                : 'hover:bg-slate-200/60 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
                                 }`}
                             >
                               <div>
@@ -814,7 +861,6 @@ export const AutomationStudioPage: React.FC = () => {
                     </div>
                   )}
 
-                  {/* THẺ BÓC TÁCH KHÓA HỌC TỰ ĐỘNG CỦA ORDER ĐƯỢC CHỌN */}
                   {approveSubFlow === 'approve_school_order' && (
                     <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-700">
                       <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
@@ -865,7 +911,6 @@ export const AutomationStudioPage: React.FC = () => {
             {/* ============================================================= */}
             {workspaceMainCategory === 'create_and_approve' && (
               <div className="space-y-5">
-                {/* 3 Tab con tạo & duyệt */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {[
                     { id: 'end_to_end', label: 'Trọn Gói Toàn Trình', desc: 'Trường ➔ Quản trị ➔ LMS' },
@@ -877,8 +922,8 @@ export const AutomationStudioPage: React.FC = () => {
                       type="button"
                       onClick={() => setCreateApproveSubFlow(sub.id as any)}
                       className={`p-3 rounded-xl border text-left transition cursor-pointer ${createApproveSubFlow === sub.id
-                          ? 'bg-violet-600 text-white border-transparent shadow-xs'
-                          : 'bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50'
+                        ? 'bg-violet-600 text-white border-transparent shadow-xs'
+                        : 'bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50'
                         }`}
                     >
                       <div className="font-bold text-xs">{sub.label}</div>
@@ -889,7 +934,6 @@ export const AutomationStudioPage: React.FC = () => {
                   ))}
                 </div>
 
-                {/* Thông tin liên hệ & Ghi chú */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-white dark:bg-slate-800/90 rounded-2xl border border-violet-200 dark:border-slate-700 shadow-2xs">
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
@@ -915,7 +959,6 @@ export const AutomationStudioPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Danh Sách Khóa Học Cấp Phép */}
                 <div className="space-y-4 pt-2">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-violet-900 dark:text-violet-300 flex items-center gap-1.5">
@@ -1093,127 +1136,288 @@ export const AutomationStudioPage: React.FC = () => {
             )}
 
             {/* ============================================================= */}
-            {/* MỤC 4: GHI DANH KHÓA HỌC LMS (REVAMP)                         */}
+            {/* MỤC 4: GHI DANH KHÓA HỌC LMS (REVAMP ĐỘC LẬP HOÀN TOÀN)       */}
             {/* ============================================================= */}
             {workspaceMainCategory === 'lms_enroll' && (
-              <div className="p-5 bg-white dark:bg-slate-800/90 rounded-2xl border border-violet-200 dark:border-slate-700 space-y-4 shadow-2xs">
-                <div className="flex items-center gap-2">
-                  <GraduationCap className="w-5 h-5 text-emerald-600" />
-                  <div>
-                    <div className="font-bold text-xs text-slate-800 dark:text-slate-200">
-                      Ghi Danh Khóa Học LMS Độc Lập
+              <div className="p-6 bg-white dark:bg-slate-800/90 rounded-3xl border border-emerald-200/80 dark:border-emerald-800/50 space-y-5 shadow-2xs">
+                {/* Header Sub-Module */}
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-300 rounded-xl">
+                      <GraduationCap className="w-5 h-5" />
                     </div>
-                    <div className="text-[11px] text-slate-400">
-                      Tự động tạo Nhóm lớp chuẩn format và ghi danh học sinh, giáo viên vào khóa học LMS.
+                    <div>
+                      <div className="font-extrabold text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                        <span>Ghi Danh & Gia Hạn Khóa Học PLearn LMS</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-mono font-bold">
+                          learn.pythaverse.space
+                        </span>
+                      </div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">
+                        Tự động ghi danh người dùng mới hoặc tự động gia hạn (Renew Access) nếu đã có trong khóa.
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setLmsIsCustomCourse(!lmsIsCustomCourse)}
+                    className={`flex items-center gap-1 text-xs px-3 py-1.5 rounded-xl border font-bold transition cursor-pointer ${lmsIsCustomCourse
+                      ? 'bg-violet-50 text-violet-700 border-violet-300 dark:bg-violet-950/60 dark:text-violet-300'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300'
+                      }`}
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    <span>{lmsIsCustomCourse ? 'Khóa Tự Đặt (Custom)' : 'Khóa Chuẩn (Standard)'}</span>
+                  </button>
+                </div>
+
+                {/* 1. Chọn Khóa Học LMS */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                    <BookOpen className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Khóa Học LMS Cần Ghi Danh:</span>
+                  </label>
+
+                  {lmsIsCustomCourse ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Moodle Course ID:</label>
+                        <input
+                          type="number"
+                          value={lmsCourseId}
+                          onChange={(e) => setLmsCourseId(parseInt(e.target.value) || 0)}
+                          placeholder="VD: 654"
+                          className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono font-bold outline-none"
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Tên Khóa Học Tự Đặt:</label>
+                        <input
+                          type="text"
+                          value={lmsCourseName}
+                          onChange={(e) => setLmsCourseName(e.target.value)}
+                          placeholder="VD: Khóa Đào Tạo Giáo Viên STEM 2026"
+                          className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-semibold outline-none"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Phân loại:</label>
+                        <select
+                          value={lmsCourseCategory}
+                          onChange={(e) => {
+                            const cat = e.target.value;
+                            setLmsCourseCategory(cat);
+                            const match = coursesList.filter((c) => c.category === cat);
+                            if (match.length > 0) {
+                              setLmsCourseId(match[0].course_id);
+                              setLmsCourseName(match[0].course_name);
+                            }
+                          }}
+                          className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-semibold outline-none"
+                        >
+                          {categoriesList.map((cat) => (
+                            <option key={cat} value={cat}>
+                              {cat}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">
+                          Chọn khóa học ({coursesList.filter((c) => c.category === lmsCourseCategory).length} môn):
+                        </label>
+                        <select
+                          value={lmsCourseId}
+                          onChange={(e) => {
+                            const cId = parseInt(e.target.value);
+                            setLmsCourseId(cId);
+                            const target = coursesList.find((c) => c.course_id === cId);
+                            if (target) setLmsCourseName(target.course_name);
+                          }}
+                          className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-semibold outline-none truncate"
+                        >
+                          {coursesList
+                            .filter((c) => c.category === lmsCourseCategory)
+                            .map((c) => (
+                              <option key={c.course_id} value={c.course_id}>
+                                {c.course_name} (ID: {c.course_id})
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Thiết lập Thời Hạn Quyền Truy Cập (Start Date -> End Date) */}
+                <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-violet-600" />
+                      <span>Thời Hạn Quyền Truy Cập (Mặc Định 1 Năm):</span>
+                    </label>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setQuickEndDate(6)}
+                        className="px-2.5 py-1 text-[10px] font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg hover:border-violet-400 cursor-pointer transition"
+                      >
+                        +6 Tháng
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setQuickEndDate(12)}
+                        className="px-2.5 py-1 text-[10px] font-bold bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300 border border-violet-300 dark:border-violet-800 rounded-lg cursor-pointer transition"
+                      >
+                        +1 Năm (Chuẩn)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setQuickEndDate(24)}
+                        className="px-2.5 py-1 text-[10px] font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg hover:border-violet-400 cursor-pointer transition"
+                      >
+                        +2 Năm
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">Ngày Bắt Đầu Truy Cập:</label>
+                      <input
+                        type="text"
+                        value={lmsStartDate}
+                        onChange={(e) => setLmsStartDate(e.target.value)}
+                        placeholder="dd-mm-yyyy"
+                        className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono font-bold outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">Ngày Hết Hạn Truy Cập:</label>
+                      <input
+                        type="text"
+                        value={lmsEndDate}
+                        onChange={(e) => setLmsEndDate(e.target.value)}
+                        placeholder="dd-mm-yyyy"
+                        className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono font-bold outline-none"
+                      />
                     </div>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">Phân loại:</label>
-                    <select
-                      value={lmsCourseCategory}
-                      onChange={(e) => {
-                        const cat = e.target.value;
-                        setLmsCourseCategory(cat);
-                        const match = coursesList.filter((c) => c.category === cat);
-                        if (match.length > 0) {
-                          setLmsCourseId(match[0].course_id);
-                          setLmsCourseName(match[0].course_name);
-                        }
-                      }}
-                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-semibold outline-none"
-                    >
-                      {categoriesList.map((cat) => (
-                        <option key={cat} value={cat}>
-                          {cat}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">Khóa học:</label>
-                    <select
-                      value={lmsCourseId}
-                      onChange={(e) => {
-                        const cId = parseInt(e.target.value);
-                        setLmsCourseId(cId);
-                        const target = coursesList.find((c) => c.course_id === cId);
-                        if (target) setLmsCourseName(target.course_name);
-                      }}
-                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-semibold outline-none truncate"
-                    >
-                      {coursesList
-                        .filter((c) => c.category === lmsCourseCategory)
-                        .map((c) => (
-                          <option key={c.course_id} value={c.course_id}>
-                            {c.course_name}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">Tên Nhóm hoặc Lớp:</label>
-                    <input
-                      type="text"
-                      value={lmsGroupName}
-                      onChange={(e) => setLmsGroupName(e.target.value)}
-                      placeholder="VD: Grade 10A"
-                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-bold outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">Ngày Bắt Đầu:</label>
-                    <input
-                      type="text"
-                      value={lmsStartDate}
-                      placeholder="dd-mm-yyyy"
-                      onChange={(e) => setLmsStartDate(e.target.value)}
-                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-mono outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">Ngày Kết Thúc:</label>
-                    <input
-                      type="text"
-                      value={lmsEndDate}
-                      placeholder="dd-mm-yyyy"
-                      onChange={(e) => setLmsEndDate(e.target.value)}
-                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-mono outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">
-                      Danh Sách Email Học Sinh (Mỗi dòng 1 email):
+                {/* 3. Chế Độ Phân Vai Trò (Same Role vs Multi Role) */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                      <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Phương Thức Gán Vai Trò (3 Role Moodle Chuẩn):</span>
                     </label>
-                    <textarea
-                      rows={4}
-                      value={lmsStudentEmails}
-                      onChange={(e) => setLmsStudentEmails(e.target.value)}
-                      placeholder="student1@school.edu&#10;student2@school.edu"
-                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono outline-none"
-                    />
+
+                    <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold">
+                      <button
+                        type="button"
+                        onClick={() => setLmsRoleMode('multi_role')}
+                        className={`px-3 py-1 rounded-lg transition cursor-pointer ${lmsRoleMode === 'multi_role'
+                          ? 'bg-white dark:bg-slate-700 text-emerald-700 dark:text-emerald-300 font-bold shadow-2xs'
+                          : 'text-slate-500'
+                          }`}
+                      >
+                        Phân Chia 3 Vai Trò
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLmsRoleMode('same_role')}
+                        className={`px-3 py-1 rounded-lg transition cursor-pointer ${lmsRoleMode === 'same_role'
+                          ? 'bg-white dark:bg-slate-700 text-emerald-700 dark:text-emerald-300 font-bold shadow-2xs'
+                          : 'text-slate-500'
+                          }`}
+                      >
+                        Cùng Một Vai Trò
+                      </button>
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">
-                      Danh Sách Email Giáo Viên (Mỗi dòng 1 email):
-                    </label>
-                    <textarea
-                      rows={4}
-                      value={lmsTeacherEmails}
-                      onChange={(e) => setLmsTeacherEmails(e.target.value)}
-                      placeholder="teacher1@school.edu&#10;teacher2@school.edu"
-                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono outline-none"
-                    />
-                  </div>
+
+                  {/* Chế độ 1: Cùng một vai trò */}
+                  {lmsRoleMode === 'same_role' ? (
+                    <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Chọn Vai Trò Áp Dụng:</label>
+                        <select
+                          value={lmsSingleRole}
+                          onChange={(e) => setLmsSingleRole(e.target.value as any)}
+                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-bold outline-none"
+                        >
+                          <option value="student">🎓 Học Viên (Student)</option>
+                          <option value="non_editing_teacher">👨‍🏫 Giáo Viên Trợ Giảng (Non-editing Teacher)</option>
+                          <option value="manager">🛡️ Quản Lý Khóa Học (Manager)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">
+                          Danh Sách Email Người Dùng (Mỗi dòng 1 email):
+                        </label>
+                        <textarea
+                          rows={4}
+                          value={lmsBulkSingleEmails}
+                          onChange={(e) => setLmsBulkSingleEmails(e.target.value)}
+                          placeholder="user1@pythaverse.space&#10;user2@pythaverse.space&#10;user3@pythaverse.space"
+                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-xs font-mono outline-none"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    /* Chế độ 2: Phân chia chi tiết 3 Textareas */
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {/* Học viên */}
+                      <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                        <label className="text-[11px] font-bold text-sky-700 dark:text-sky-300 flex items-center gap-1">
+                          <span>🎓 Học Viên (Student):</span>
+                        </label>
+                        <textarea
+                          rows={5}
+                          value={lmsStudentEmails}
+                          onChange={(e) => setLmsStudentEmails(e.target.value)}
+                          placeholder="student1@pythaverse.space&#10;student2@pythaverse.space"
+                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono outline-none"
+                        />
+                      </div>
+
+                      {/* Giáo viên trợ giảng */}
+                      <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                        <label className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
+                          <span>👨‍🏫 Trợ Giảng (Non-editing Teacher):</span>
+                        </label>
+                        <textarea
+                          rows={5}
+                          value={lmsTeacherEmails}
+                          onChange={(e) => setLmsTeacherEmails(e.target.value)}
+                          placeholder="teacher1@pythaverse.space&#10;teacher2@pythaverse.space"
+                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono outline-none"
+                        />
+                      </div>
+
+                      {/* Quản lý */}
+                      <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                        <label className="text-[11px] font-bold text-purple-700 dark:text-purple-300 flex items-center gap-1">
+                          <span>🛡️ Quản Lý (Manager):</span>
+                        </label>
+                        <textarea
+                          rows={5}
+                          value={lmsManagerEmails}
+                          onChange={(e) => setLmsManagerEmails(e.target.value)}
+                          placeholder="manager1@pythaverse.space"
+                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono outline-none"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1250,16 +1454,16 @@ export const AutomationStudioPage: React.FC = () => {
               {/* 1. Reset Pass */}
               <div
                 className={`p-4 rounded-2xl border transition-all ${kcEnableResetPass
-                    ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
-                    : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
+                  ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
+                  : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
                   }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div
                       className={`p-2 rounded-xl ${kcEnableResetPass
-                          ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300'
-                          : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
+                        ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300'
+                        : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
                         }`}
                     >
                       <KeyRound className="w-4 h-4" />
@@ -1298,8 +1502,8 @@ export const AutomationStudioPage: React.FC = () => {
                         type="button"
                         onClick={() => setKcForceChange(!kcForceChange)}
                         className={`w-4 h-4 rounded border flex items-center justify-center cursor-pointer transition ${kcForceChange
-                            ? 'bg-amber-500 border-amber-500 text-white'
-                            : 'border-slate-300 dark:border-slate-600'
+                          ? 'bg-amber-500 border-amber-500 text-white'
+                          : 'border-slate-300 dark:border-slate-600'
                           }`}
                       >
                         {kcForceChange && <Check className="w-3 h-3" />}
@@ -1318,16 +1522,16 @@ export const AutomationStudioPage: React.FC = () => {
               {/* 2. Email Verified */}
               <div
                 className={`p-4 rounded-2xl border transition-all ${kcEnableVerify
-                    ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
-                    : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
+                  ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
+                  : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
                   }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div
                       className={`p-2 rounded-xl ${kcEnableVerify
-                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300'
-                          : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
+                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300'
+                        : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
                         }`}
                     >
                       <ShieldCheck className="w-4 h-4" />
@@ -1356,8 +1560,8 @@ export const AutomationStudioPage: React.FC = () => {
                       type="button"
                       onClick={() => setKcVerifyAction('verify')}
                       className={`flex-1 py-2 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcVerifyAction === 'verify'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
-                          : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-500'
                         }`}
                     >
                       ✓ Đã Xác Thực
@@ -1366,8 +1570,8 @@ export const AutomationStudioPage: React.FC = () => {
                       type="button"
                       onClick={() => setKcVerifyAction('unverify')}
                       className={`flex-1 py-2 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcVerifyAction === 'unverify'
-                          ? 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
-                          : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                        ? 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-500'
                         }`}
                     >
                       ✗ Gỡ Xác Thực
@@ -1379,16 +1583,16 @@ export const AutomationStudioPage: React.FC = () => {
               {/* 3. Account Status */}
               <div
                 className={`p-4 rounded-2xl border transition-all ${kcEnableStatus
-                    ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
-                    : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
+                  ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
+                  : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
                   }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div
                       className={`p-2 rounded-xl ${kcEnableStatus
-                          ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-300'
-                          : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
+                        ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-300'
+                        : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
                         }`}
                     >
                       <UserX className="w-4 h-4" />
@@ -1417,8 +1621,8 @@ export const AutomationStudioPage: React.FC = () => {
                       type="button"
                       onClick={() => setKcStatusAction('enable')}
                       className={`flex-1 py-2 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcStatusAction === 'enable'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
-                          : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-500'
                         }`}
                     >
                       ✓ Kích Hoạt
@@ -1427,8 +1631,8 @@ export const AutomationStudioPage: React.FC = () => {
                       type="button"
                       onClick={() => setKcStatusAction('disable')}
                       className={`flex-1 py-2 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcStatusAction === 'disable'
-                          ? 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
-                          : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                        ? 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-500'
                         }`}
                     >
                       ✗ Vô Hiệu Hóa
