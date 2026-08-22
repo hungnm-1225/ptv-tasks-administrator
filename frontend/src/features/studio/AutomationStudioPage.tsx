@@ -257,8 +257,9 @@ export const AutomationStudioPage: React.FC = () => {
     setParsedOrderCourses([]);
     try {
       if (approveSubFlow === 'approve_school_order') {
+        // Đọc từ Cache Supabase theo tên trường
         const res = await fetchApi<any>(
-          `/workspace/pending-school-orders?school_identifier=${encodeURIComponent(
+          `/workspace/cached-pending-orders?school_name=${encodeURIComponent(
             selectedSchool?.school_name || ''
           )}`
         );
@@ -267,38 +268,40 @@ export const AutomationStudioPage: React.FC = () => {
         if (orders.length > 0) {
           const firstCode = orders[0].order_code;
           setTargetOrderCode(firstCode);
-          toast.success(`Tìm thấy ${orders.length} đơn hàng trường đang chờ duyệt!`);
+          toast.success(`⚡ [Cache Supabase] Tìm thấy ${orders.length} đơn hàng trường đang chờ duyệt!`);
           handleLoadOrderDetails(firstCode);
         } else {
-          toast.info('Không có đơn hàng trường nào đang chờ duyệt.');
+          toast.info('Không có đơn hàng nào trong Cache. Bạn có thể bấm Sync lại để quét mới!');
         }
       } else if (approveSubFlow === 'approve_partner_contract') {
+        // Đọc PRT Contracts từ Cache Supabase
         const res = await fetchApi<any>(
-          `/workspace/pending-partner-contracts?distributor_code=${encodeURIComponent(
-            selectedSchool?.distributor_name || ''
-          )}`
+          `/workspace/cached-pending-contracts?contract_type=PRT`
         );
         const contracts = res?.contracts || [];
         setScrapedPendingList(contracts);
         if (contracts.length > 0) {
           setTargetContractCode(contracts[0].contract_code);
-          toast.success(`Tìm thấy ${contracts.length} hợp đồng đối tác đang chờ duyệt!`);
+          toast.success(`⚡ [Cache Supabase] Tìm thấy ${contracts.length} hợp đồng đối tác đang chờ!`);
         } else {
-          toast.info('Không có hợp đồng đối tác nào đang chờ duyệt.');
+          toast.info('Không có hợp đồng đối tác nào trong Cache.');
         }
       } else if (approveSubFlow === 'admin_approve_contract') {
-        const res = await fetchApi<any>('/workspace/pending-distributor-contracts');
+        // Đọc DST Contracts từ Cache Supabase
+        const res = await fetchApi<any>(
+          `/workspace/cached-pending-contracts?contract_type=DST`
+        );
         const contracts = res?.contracts || [];
         setScrapedPendingList(contracts);
         if (contracts.length > 0) {
           setTargetContractCode(contracts[0].contract_code);
-          toast.success(`Tìm thấy ${contracts.length} hợp đồng đang chờ quản trị duyệt!`);
+          toast.success(`⚡ [Cache Supabase] Tìm thấy ${contracts.length} hợp đồng quản trị đang chờ!`);
         } else {
-          toast.info('Không có hợp đồng nào đang chờ quản trị duyệt.');
+          toast.info('Không có hợp đồng quản trị nào trong Cache.');
         }
       }
     } catch (err) {
-      toast.error('Lỗi quét dữ liệu: ' + (err as Error).message);
+      toast.error('Lỗi đọc Cache: ' + (err as Error).message);
     } finally {
       setIsScrapingLive(false);
     }

@@ -17,6 +17,7 @@ from app.services.site_monitor_service import poll_site_uptime_cron
 from app.services.workspace_playwright_service import workspace_playwright_service
 from app.services.cof_excel_service import COFExcelService
 from app.core.supabase import get_supabase_client
+from app.services.workspace.workspace_scanner_service import workspace_scanner_service
 
 # Import API Router
 from app.api.v1.router import api_router
@@ -123,6 +124,17 @@ async def lifespan(app: FastAPI):
     # 5. Quét Task Workspace Long-Running mỗi 5 phút
     scheduler.add_job(safe_job_wrapper, 'interval', minutes=5, args=[poll_workspace_long_tasks, "Quét Task Workspace Long-Running"], id='workspace_long_tasks_cron')
     
+    # 6. Quét Workspace Distributor để update cache mỗi 45 phút
+    scheduler.add_job(
+    safe_job_wrapper(
+        workspace_scanner_service.scan_and_cache_all_distributors, 
+        "workspace_distributor_scanner_cron"
+    ),
+    "interval",
+    minutes=45,  # Chạy 45 phút một lần để update cache đều đặn
+    id="distributor_cache_scanner_cron"
+)
+
     scheduler.start()
     yield
     
