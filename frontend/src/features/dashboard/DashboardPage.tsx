@@ -144,7 +144,7 @@ export const DashboardPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Card 4: System Health */}
+        {/* Card 4: System Health (Thời Gian Thực 24h) */}
         <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 shadow-xs hover:border-slate-300 dark:hover:border-slate-600 transition-all duration-200">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400">System Health</span>
@@ -155,7 +155,12 @@ export const DashboardPage: React.FC = () => {
           <div className="text-2xl font-bold text-slate-900 dark:text-slate-100 mt-3">
             {summary?.system_health ?? '100%'}
           </div>
-          <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium mt-1.5">Workers hoạt động ổn định</div>
+          <div className={`text-[11px] font-medium mt-1.5 truncate ${(summary?.system_health === '100%')
+            ? 'text-emerald-600 dark:text-emerald-400'
+            : 'text-amber-600 dark:text-amber-400'
+            }`}>
+            {(summary as any)?.system_health_subtext ?? '10/10 Sites & Workers tối ưu (24h)'}
+          </div>
         </div>
       </div>
 

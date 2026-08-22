@@ -72,9 +72,47 @@ async def get_reports_summary(
     else:
         auto_rate = 92 if bot_success_count == 0 else 100
 
-    # 1.6. System Health (Tính theo trạng thái bot lỗi gần đây)
-    failed_tasks = supabase.table("bot_automation_tasks").select("id", count="exact").eq("execution_status", "failed").gte("created_at", week_ago).execute()
-    system_health = "98.5%" if (failed_tasks.count or 0) > 0 else "100%"
+    # 1.6. System Health (Tính ĐỘNG trong 24 giờ qua)
+    twenty_four_hours_ago = (now - timedelta(hours=24)).isoformat()
+
+    # Kiểm tra sự cố website trong 24h qua (kể cả đang diễn ra hoặc đã kết thúc)
+    downtime_24h_res = supabase.table("site_downtime_events")\
+        .select("id", count="exact")\
+        .or_(f"is_ongoing.eq.true,started_at.gte.{twenty_four_hours_ago}")\
+        .execute()
+    ongoing_or_recent_downtimes = downtime_24h_res.count or 0
+
+    # Kiểm tra tác vụ bot chạy thất bại trong 24h qua
+    failed_tasks_24h_res = supabase.table("bot_automation_tasks")\
+        .select("id", count="exact")\
+        .eq("execution_status", "failed")\
+        .gte("created_at", twenty_four_hours_ago)\
+        .execute()
+    failed_tasks_24h = failed_tasks_24h_res.count or 0
+
+    # Tổng số tác vụ bot được chạy trong 24h qua để tính tỉ lệ
+    total_tasks_24h_res = supabase.table("bot_automation_tasks")\
+        .select("id", count="exact")\
+        .gte("created_at", twenty_four_hours_ago)\
+        .execute()
+    total_tasks_24h = total_tasks_24h_res.count or 0
+
+    # Tính toán chỉ số sức khỏe hệ thống thời gian thực
+    if ongoing_or_recent_downtimes == 0 and failed_tasks_24h == 0:
+        system_health = "100%"
+        system_health_subtext = "10/10 Sites & Workers tối ưu (24h)"
+    else:
+        # Nếu có lỗi, trừ điểm theo tỷ trọng thực tế
+        penalty = (ongoing_or_recent_downtimes * 5.0) + (failed_tasks_24h * 1.5)
+        health_score = max(85.0, round(100.0 - penalty, 1))
+        system_health = f"{health_score}%"
+        
+        reasons = []
+        if ongoing_or_recent_downtimes > 0:
+            reasons.append(f"{ongoing_or_recent_downtimes} sự cố site")
+        if failed_tasks_24h > 0:
+            reasons.append(f"{failed_tasks_24h} task bot lỗi")
+        system_health_subtext = f"Cần lưu ý: {', '.join(reasons)} (24h)"
 
     # -------------------------------------------------------------
     # 2. PHÂN PHỐI THEO DANH MỤC (Lọc theo cat_range)
@@ -142,6 +180,7 @@ async def get_reports_summary(
         "resolved_this_month": resolved_this_month,
         "automation_rate": auto_rate,
         "system_health": system_health,
+        "system_health_subtext": system_health_subtext,
         "category_ratios": category_ratios,
         "daily_trends": daily_trends
     }
