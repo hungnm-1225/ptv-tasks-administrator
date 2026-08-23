@@ -11,6 +11,7 @@ from app.services.workspace_playwright_service import workspace_playwright_servi
 from app.services.workspace_lineage_service import workspace_lineage_service
 from app.services.keycloak_service import keycloak_service
 from app.services.github_service import github_service
+from app.services.playwright_service import playwright_lms_service
 
 logger = logging.getLogger(__name__)
 
@@ -242,6 +243,10 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
                     student_emails=payload_data.get("student_emails", []),
                     teacher_emails=payload_data.get("teacher_emails", [])
                 )
+            elif bot_type in ["lms_playwright", "lms_git_provisioning", "lms_enroll"]:
+                logger.info("🎓 Kích hoạt Playwright LMS Direct Enroller...")
+                result = await playwright_lms_service.enroll_users_pipeline(payload_data)
+                return result
 
             else:
                 return {"status": "failed", "error": f"Action '{action}' chưa được định nghĩa trong Workspace RPA."}

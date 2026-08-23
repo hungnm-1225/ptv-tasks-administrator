@@ -179,6 +179,37 @@ export const AutomationStudioPage: React.FC = () => {
   const [lmsStartDate, setLmsStartDate] = useState<string>(getFormattedDate(today));
   const [lmsEndDate, setLmsEndDate] = useState<string>(getFormattedDate(nextYear));
 
+  // Thêm/Cập nhật state group name & data
+  const [lmsGroupName, setLmsGroupName] = useState<string>('');
+
+  // Đảm bảo fetch API gọi đúng endpoint Moodle lms_courses:
+  useEffect(() => {
+    const fetchLmsCourses = async () => {
+      try {
+        // 1. Lấy danh mục categories của riêng LMS
+        const cats = await fetchApi<string[]>('/courses/lms/categories');
+        if (cats && cats.length > 0) {
+          setCategoriesList(cats);
+          setLmsCourseCategory(cats[0]);
+        }
+
+        // 2. Lấy toàn bộ danh sách khóa học lms_courses
+        const res = await fetchApi<any[]>('/courses/lms');
+        if (res) {
+          setLmsCoursesList(res);
+          if (res.length > 0) {
+            setLmsCourseId(res[0].course_id);
+            setLmsCourseName(res[0].course_name);
+          }
+        }
+      } catch (err) {
+        console.error('Lỗi nạp khóa học LMS:', err);
+      }
+    };
+
+    fetchLmsCourses();
+  }, []);
+
   // Role Mode: 'multi_role' (3 ô riêng) | 'same_role' (1 vai trò chung)
   const [lmsRoleMode, setLmsRoleMode] = useState<'same_role' | 'multi_role'>('multi_role');
   const [lmsSingleRole, setLmsSingleRole] = useState<'student' | 'non_editing_teacher' | 'manager'>('student');
@@ -1401,19 +1432,19 @@ export const AutomationStudioPage: React.FC = () => {
                     </div>
                     <div>
                       <div className="font-extrabold text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                        <span>Ghi Danh & Gia Hạn Khóa Học PLearn LMS</span>
+                        <span>Ghi Danh & Gia Hạn Khóa Học PLearn LMS (Demo/Training)</span>
                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-mono font-bold">
                           learn.pythaverse.space
                         </span>
                       </div>
                       <div className="text-xs text-slate-500 dark:text-slate-400">
-                        Dữ liệu khóa học được đồng bộ từ bảng <span className="font-mono font-bold text-emerald-600">lms_courses</span>.
+                        Dữ liệu khóa học được đồng bộ chuẩn xác từ bảng <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">lms_courses</span>.
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Chọn Khóa Học LMS từ bảng lms_courses */}
+                {/* Chọn Khóa Học LMS */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="text-[10px] font-bold text-slate-500 uppercase">Phân loại (Category):</label>
@@ -1463,34 +1494,54 @@ export const AutomationStudioPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Thiết lập Thời Hạn (Mặc định 1 Năm - Không cần nút rườm rà) */}
-                <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
-                  <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                    <Calendar className="w-3.5 h-3.5 text-violet-600" />
-                    <span>Thời Hạn Quyền Truy Cập (Mặc Định 1 Năm):</span>
-                  </label>
+                {/* Thiết lập Thời Hạn & Tên Group */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2 sm:col-span-2">
+                    <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-violet-600" />
+                      <span>Thời Hạn Quyền Truy Cập (Mặc Định 1 Năm):</span>
+                    </label>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 uppercase">Ngày Bắt Đầu:</label>
-                      <input
-                        type="text"
-                        value={lmsStartDate}
-                        onChange={(e) => setLmsStartDate(e.target.value)}
-                        placeholder="dd-mm-yyyy"
-                        className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono font-bold outline-none"
-                      />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Ngày Bắt Đầu:</label>
+                        <input
+                          type="text"
+                          value={lmsStartDate}
+                          onChange={(e) => setLmsStartDate(e.target.value)}
+                          placeholder="dd-mm-yyyy"
+                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono font-bold outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Ngày Hết Hạn:</label>
+                        <input
+                          type="text"
+                          value={lmsEndDate}
+                          onChange={(e) => setLmsEndDate(e.target.value)}
+                          placeholder="dd-mm-yyyy"
+                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono font-bold outline-none"
+                        />
+                      </div>
                     </div>
+                  </div>
+
+                  {/* Ô nhập Group (Tùy chọn) */}
+                  <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2 flex flex-col justify-between">
                     <div>
-                      <label className="text-[10px] font-bold text-slate-500 uppercase">Ngày Hết Hạn:</label>
-                      <input
-                        type="text"
-                        value={lmsEndDate}
-                        onChange={(e) => setLmsEndDate(e.target.value)}
-                        placeholder="dd-mm-yyyy"
-                        className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono font-bold outline-none"
-                      />
+                      <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                        <Users className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Tên Nhóm / Group (Tùy chọn):</span>
+                      </label>
+                      <p className="text-[10px] text-slate-500 mt-1">Tự động gom các học viên vào Group trong Moodle.</p>
                     </div>
+                    <input
+                      type="text"
+                      value={lmsGroupName}
+                      onChange={(e) => setLmsGroupName(e.target.value)}
+                      placeholder="VD: DEMO_TEACHER_2026"
+                      className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-semibold outline-none"
+                    />
                   </div>
                 </div>
 
@@ -1542,52 +1593,72 @@ export const AutomationStudioPage: React.FC = () => {
                       </div>
 
                       <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">
-                          Danh Sách Email (Mỗi dòng 1 email):
-                        </label>
+                        <div className="flex justify-between items-center mb-1">
+                          <label className="text-[10px] font-bold text-slate-500 uppercase">
+                            Danh Sách Email (Mỗi dòng 1 email):
+                          </label>
+                          <span className="text-[10px] font-mono font-bold text-emerald-600">
+                            {lmsBulkSingleEmails.split('\n').filter((x) => x.trim().length > 0).length} emails
+                          </span>
+                        </div>
                         <textarea
                           rows={4}
                           value={lmsBulkSingleEmails}
                           onChange={(e) => setLmsBulkSingleEmails(e.target.value)}
                           placeholder="user1@pythaverse.space&#10;user2@pythaverse.space"
-                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-xs font-mono outline-none"
+                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-xs font-mono outline-none focus:border-emerald-500"
                         />
                       </div>
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
-                        <label className="text-[11px] font-bold text-sky-700 dark:text-sky-300">🎓 Học Viên (Student):</label>
+                        <div className="flex justify-between items-center">
+                          <label className="text-[11px] font-bold text-sky-700 dark:text-sky-300">🎓 Học Viên (Student):</label>
+                          <span className="text-[10px] font-mono text-sky-600 font-bold">
+                            {lmsStudentEmails.split('\n').filter((x) => x.trim().length > 0).length}
+                          </span>
+                        </div>
                         <textarea
                           rows={5}
                           value={lmsStudentEmails}
                           onChange={(e) => setLmsStudentEmails(e.target.value)}
                           placeholder="student1@pythaverse.space&#10;student2@pythaverse.space"
-                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono outline-none"
+                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono outline-none focus:border-sky-500"
                         />
                       </div>
 
                       <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
-                        <label className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
-                          👨‍🏫 Trợ Giảng (Non-editing Teacher):
-                        </label>
+                        <div className="flex justify-between items-center">
+                          <label className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
+                            👨‍🏫 Trợ Giảng (Non-editing Teacher):
+                          </label>
+                          <span className="text-[10px] font-mono text-emerald-600 font-bold">
+                            {lmsTeacherEmails.split('\n').filter((x) => x.trim().length > 0).length}
+                          </span>
+                        </div>
                         <textarea
                           rows={5}
                           value={lmsTeacherEmails}
                           onChange={(e) => setLmsTeacherEmails(e.target.value)}
                           placeholder="teacher1@pythaverse.space&#10;teacher2@pythaverse.space"
-                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono outline-none"
+                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono outline-none focus:border-emerald-500"
                         />
                       </div>
 
                       <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
-                        <label className="text-[11px] font-bold text-purple-700 dark:text-purple-300">🛡️ Quản Lý (Manager):</label>
+                        <div className="flex justify-between items-center">
+                          <label className="text-[11px] font-bold text-purple-700 dark:text-purple-300">🛡️ Quản Lý (Manager):</label>
+                          <span className="text-[10px] font-mono text-purple-600 font-bold">
+                            {lmsManagerEmails.split('\n').filter((x) => x.trim().length > 0).length}
+                          </span>
+                        </div>
                         <textarea
                           rows={5}
                           value={lmsManagerEmails}
                           onChange={(e) => setLmsManagerEmails(e.target.value)}
                           placeholder="manager1@pythaverse.space"
-                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono outline-none"
+                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono outline-none focus:border-purple-500"
                         />
                       </div>
                     </div>
