@@ -13,8 +13,8 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
 |---|---|---|---|
 | **Frontend UI/UX** | `frontend-specialist` | `.agent/agents/frontend-specialist.md` | React 19, TypeScript, Tailwind CSS v4, Dark/Light theme, SaaS aesthetic, chống AI-slop, loại bỏ nhãn song ngữ thừa, responsive, accessible. |
 | **Backend & REST APIs** | `backend-specialist` | `.agent/agents/backend-specialist.md` | Python 3.11, FastAPI, Pydantic v2 validation, Async/Await, APScheduler 5 Crons, Safe Job Wrapper. |
-| **Database & Storage** | `database-architect` | `.agent/agents/database-architect.md` | Supabase PostgreSQL 16, ENUMs, Foreign Keys, RLS Policies `@dtt.vn`, Performance Indexes, Triggers. |
-| **RPA & Web Scraping** | `qa-automation-engineer` | `.agent/agents/qa-automation-engineer.md` | Playwright Async Chromium, Gói `workspace/` modularized, Viewport chuẩn, Selector kiên cố, Smart Polling, dọn RAM `gc.collect()`. |
+| **Database & Storage** | `database-architect` | `.agent/agents/database-architect.md` | Supabase PostgreSQL 16 (16 bảng), ENUMs, Foreign Keys, RLS Policies `@dtt.vn`, Performance Indexes, Triggers. |
+| **RPA & Web Scraping** | `qa-automation-engineer` | `.agent/agents/qa-automation-engineer.md` | Playwright Async Chromium, Gói `workspace/` modularized 8 modules, Scanner Direct API, Viewport chuẩn, Selector kiên cố, Smart Polling, dọn RAM `gc.collect()`. |
 | **Security & Identity** | `security-auditor` | `.agent/agents/security-auditor.md` | Whitelist Domain `@dtt.vn`, Fernet Credential Vault (`VAULT_SECRET_KEY`), Keycloak Admin REST API, Bearer Token validation. |
 | **Điều Phối Đa Nhiệm** | `orchestrator` | `.agent/agents/orchestrator.md` | Phân tích luồng end-to-end, giải quyết xung đột dữ liệu, thiết kế pipeline liên thông đa dịch vụ. |
 | **Gỡ Lỗi & Điều Tra Lỗi** | `debugger` | `.agent/agents/debugger.md` | 4-Phase Systematic Debugging, bắt log thực thi, cô lập nguyên nhân gốc rễ, Gemini 10-model fallback. |
@@ -34,14 +34,15 @@ Khi phân tích, sửa code hoặc tư vấn giải pháp, AI phải luôn nắm
 6. **Support Helpdesk (`support.pythaverse.space`):** osTicket Helpdesk Engine cào dữ liệu qua Playwright.
 7. **PContest (`contest.pythaverse.space`):** Hệ thống thi đấu trực tuyến và bảng xếp hạng Leaderboard.
 
-### 2.2. Kiến Trúc Gói Dịch Vụ Workspace RPA Mới (`backend/app/services/workspace/`)
-Gói dịch vụ được tách nhỏ thành 7 module chuyên biệt kế thừa đa tầng:
+### 2.2. Kiến Trúc Gói Dịch Vụ Workspace RPA (`backend/app/services/workspace/`)
+Gói dịch vụ được tách nhỏ thành 8 module chuyên biệt kế thừa đa tầng:
 - `base.py`: Lớp `WorkspaceBaseService` khởi tạo Chromium tối ưu RAM (`--no-sandbox`, `--disable-dev-shm-usage`, `--single-process`), xử lý đăng nhập Keycloak SSO `login_role()` và chuẩn hóa ngày `normalize_date_iso()`.
 - `order_service.py`: Lớp `WorkspaceOrderService` (`school_create_order`, `partner_approve_school_order`, `fetch_partner_pending_school_orders`, `fetch_school_order_detailed_courses`).
 - `contract_service.py`: Lớp `WorkspaceContractService` (`partner_create_contract`, `distributor_approve_partner_contract`, `distributor_create_contract`, `admin_approve_distributor_contract`, `fetch_partner_contracts`, `fetch_distributor_pending_contracts`, `fetch_sales_admin_pending_contracts`).
 - `orchestrator_service.py`: Lớp `WorkspaceOrchestratorService` (`execute_full_license_hierarchy_chain` Master E2E Chain 4 cấp, `execute_approve_school_order_standalone`, `execute_approve_partner_contract_standalone`, `execute_admin_approve_contract_standalone`).
 - `account_service.py`: Lớp `WorkspaceAccountService` (`submit_account_creation_batch` Pha 1 nộp batch và lấy Request ID; `check_and_export_batch_result` Pha 2 Polling định kỳ).
 - `enroll_service.py`: Lớp `WorkspaceEnrollService` (`school_enroll_users_and_groups` tạo group và ghi danh học sinh/giáo viên LMS).
+- `workspace_scanner_service.py`: Lớp `WorkspaceScannerService` (Quét tự động và đồng bộ siêu tốc dữ liệu DST/PRT/School Orders của 5 Master Distributors qua Direct API trong ngữ cảnh Playwright session, lưu vào `workspace_contracts_cache` và `workspace_orders_cache`).
 - `__init__.py`: Class `WorkspacePlaywrightService` gom toàn bộ đa kế thừa thành singleton `workspace_playwright_service`.
 - `workspace_playwright_service.py`: Bridge file re-export 100% tương thích ngược.
 
@@ -74,6 +75,15 @@ Gói dịch vụ được tách nhỏ thành 7 module chuyên biệt kế thừa
 - **Tab 1 (Giám Sát Công Khai):** Giám sát Live 10 Website Pythaverse, Live Uptime Bar 24 giờ và Uptime Bars 24h phong cách UptimeRobot.
 - **Tab 2 (Ma Trận Xác Thực & Phân Quyền):** Kiểm thử tự động đăng nhập Keycloak SSO & quyền truy cập route nội bộ cho 16 tài khoản test 7 vai trò (`Admin`, `Sales Admin`, `Distributor`, `Partner`, `School`, `Teacher`, `Student`) giải mã Fernet từ bảng `site_monitor_credentials`.
 - **Tab 3 (CI/CD & Tiến Trình Triển Khai):** Kết nối Vercel REST API và Render REST API, theo dõi trạng thái builds và hiển thị live terminal logs.
+
+### 2.9. Bảng Điều Phối Tác Vụ Kanban Thông Minh (`WorkBoardPage.tsx` / `/board`)
+- Quản lý đa bảng (`work_boards`), tùy biến wallpaper và màu nền.
+- 6 cột trạng thái tiêu chuẩn (`work_board_columns`): Backlog, To Do, In Progress, Review, Done, Abort.
+- Thẻ công việc chi tiết (`work_board_cards`): Kéo thả Drag & Drop, Subtasks checklist với thanh tiến độ thời gian thực, phân quyền phụ trách, hạn chót (`due_date`) và hiệu ứng pháo hoa hạt TypeScript Canvas Confetti khi hoàn thành nhiệm vụ.
+
+### 2.10. Quản Lý Danh Mục Khóa Học Song Song (`CoursesManagerPage.tsx` / `/courses`)
+- Phân biệt rõ 2 bảng khóa học: `workspace_courses` (dùng cho RPA License Chain, COF matching) và `lms_courses` (dùng cho Moodle LMS PLearn enrollment).
+- Hỗ trợ CRUD đơn lẻ với URL LMS tự sinh, Bulk Upsert từ file `.xlsx`/`.csv` hoặc paste văn bản qua SheetJS, và Category Manager đổi tên/gộp danh mục hàng loạt.
 
 ---
 
