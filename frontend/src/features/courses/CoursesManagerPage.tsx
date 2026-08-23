@@ -411,7 +411,7 @@ export const CoursesManagerPage: React.FC = () => {
                             }`}
                     >
                         <Layers className="w-3.5 h-3.5" />
-                        Workspace Courses (Order/License)
+                        Workspace Courses
                     </button>
                     <button
                         onClick={() => setActivePane('lms')}
@@ -421,7 +421,7 @@ export const CoursesManagerPage: React.FC = () => {
                             }`}
                     >
                         <GraduationCap className="w-3.5 h-3.5" />
-                        LMS Learn Portal (learn.pythaverse.space)
+                        LMS PLearn Courses
                     </button>
                 </div>
             </div>
@@ -606,7 +606,7 @@ export const CoursesManagerPage: React.FC = () => {
 
                         <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-1">
                             <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
-                            Nhập Nhanh Danh Sách Khóa Học (Bulk) – {activePane.toUpperCase()}
+                            Nhập Nhanh Danh Sách Khóa Học – {activePane.toUpperCase()}
                         </h3>
                         <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
                             Hệ thống sẽ tự động tạo URL <code className="text-violet-600 font-mono">https://learn.pythaverse.space/course/view.php?id=[Course_ID]</code>.

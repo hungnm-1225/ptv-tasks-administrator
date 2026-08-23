@@ -787,10 +787,10 @@ export const AutomationStudioPage: React.FC = () => {
                     )}
                     <span>
                       {currentEntityMode === 'school'
-                        ? 'Trường Học Áp Dụng (Trong 480 Trường Phả Hệ):'
+                        ? 'Trường học áp dụng:'
                         : currentEntityMode === 'partner'
-                          ? 'Đối Tác Phụ Trách (Partner):'
-                          : 'Nhà Phân Phối Cấp Cao (Distributor):'}
+                          ? 'Đối tác phụ trách:'
+                          : 'Nhà phân phối:'}
                     </span>
                   </span>
                   <span className="text-xs text-violet-600 font-bold font-mono">
@@ -816,8 +816,8 @@ export const AutomationStudioPage: React.FC = () => {
                       currentEntityMode === 'school'
                         ? 'Tìm theo tên trường học hoặc mã SCH_...'
                         : currentEntityMode === 'partner'
-                          ? 'Tìm theo tên Đối Tác (Partner)...'
-                          : 'Tìm theo tên Nhà Phân Phối (Distributor)...'
+                          ? 'Tìm theo tên đối tác...'
+                          : 'Tìm theo tên nhà phân phối...'
                     }
                     className="w-full pl-10 pr-4 bg-white dark:bg-slate-800 border border-violet-200 dark:border-violet-700/80 rounded-xl p-3 text-xs text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition shadow-2xs"
                   />
@@ -1031,10 +1031,10 @@ export const AutomationStudioPage: React.FC = () => {
                         {/* 4 Nút Lọc Status */}
                         <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-[11px] font-semibold">
                           {[
-                            { id: 'pending', label: '⏳ Chờ Duyệt (Pending)' },
-                            { id: 'approved', label: '✅ Đã Duyệt' },
-                            { id: 'rejected', label: '❌ Bị Từ Chối' },
-                            { id: 'all', label: '📋 Tất Cả' },
+                            { id: 'pending', label: '⏳ Chờ duyệt' },
+                            { id: 'approved', label: '✅ Đã duyệt' },
+                            { id: 'rejected', label: '❌ Bị từ chối' },
+                            { id: 'all', label: '📋 Tất cả' },
                           ].map((st) => (
                             <button
                               key={st.id}
@@ -1432,7 +1432,7 @@ export const AutomationStudioPage: React.FC = () => {
                     </div>
                     <div>
                       <div className="font-extrabold text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                        <span>Ghi Danh & Gia Hạn Khóa Học PLearn LMS (Demo/Training)</span>
+                        <span>Ghi Danh & Gia Hạn Khóa Học PLearn LMS</span>
                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-mono font-bold">
                           learn.pythaverse.space
                         </span>
@@ -1447,7 +1447,7 @@ export const AutomationStudioPage: React.FC = () => {
                 {/* Chọn Khóa Học LMS */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">Phân loại (Category):</label>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase">Phân loại:</label>
                     <select
                       value={lmsCourseCategory}
                       onChange={(e) => {
@@ -1531,7 +1531,7 @@ export const AutomationStudioPage: React.FC = () => {
                     <div>
                       <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                         <Users className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Tên Nhóm / Group (Tùy chọn):</span>
+                        <span>Tên Nhóm / Group:</span>
                       </label>
                       <p className="text-[10px] text-slate-500 mt-1">Tự động gom các học viên vào Group trong Moodle.</p>
                     </div>
@@ -1586,9 +1586,9 @@ export const AutomationStudioPage: React.FC = () => {
                           onChange={(e) => setLmsSingleRole(e.target.value as any)}
                           className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-bold outline-none"
                         >
-                          <option value="student">🎓 Học Viên (Student)</option>
-                          <option value="non_editing_teacher">👨‍🏫 Giáo Viên Trợ Giảng (Non-editing Teacher)</option>
-                          <option value="manager">🛡️ Quản Lý Khóa Học (Manager)</option>
+                          <option value="student">🎓 Học Viên</option>
+                          <option value="non_editing_teacher">👨‍🏫 Giáo Viên Trợ Giảng</option>
+                          <option value="manager">🛡️ Quản Lý Khóa Học</option>
                         </select>
                       </div>
 
@@ -1614,7 +1614,7 @@ export const AutomationStudioPage: React.FC = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
                         <div className="flex justify-between items-center">
-                          <label className="text-[11px] font-bold text-sky-700 dark:text-sky-300">🎓 Học Viên (Student):</label>
+                          <label className="text-[11px] font-bold text-sky-700 dark:text-sky-300">🎓 Học Viên:</label>
                           <span className="text-[10px] font-mono text-sky-600 font-bold">
                             {lmsStudentEmails.split('\n').filter((x) => x.trim().length > 0).length}
                           </span>
@@ -1631,7 +1631,7 @@ export const AutomationStudioPage: React.FC = () => {
                       <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
                         <div className="flex justify-between items-center">
                           <label className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
-                            👨‍🏫 Trợ Giảng (Non-editing Teacher):
+                            👨‍🏫 Trợ Giảng:
                           </label>
                           <span className="text-[10px] font-mono text-emerald-600 font-bold">
                             {lmsTeacherEmails.split('\n').filter((x) => x.trim().length > 0).length}
@@ -1648,7 +1648,7 @@ export const AutomationStudioPage: React.FC = () => {
 
                       <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
                         <div className="flex justify-between items-center">
-                          <label className="text-[11px] font-bold text-purple-700 dark:text-purple-300">🛡️ Quản Lý (Manager):</label>
+                          <label className="text-[11px] font-bold text-purple-700 dark:text-purple-300">🛡️ Quản Lý:</label>
                           <span className="text-[10px] font-mono text-purple-600 font-bold">
                             {lmsManagerEmails.split('\n').filter((x) => x.trim().length > 0).length}
                           </span>

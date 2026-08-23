@@ -686,7 +686,7 @@ export const UnifiedInboxPage: React.FC = () => {
       case 'waiting_poll':
         return (
           <span className="px-2 py-0.5 bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-300 text-[10px] font-bold rounded-md flex items-center gap-1 animate-pulse">
-            <Clock className="w-3 h-3" /> ĐANG XỬ LÝ (BOT)
+            <Clock className="w-3 h-3" /> ĐANG XỬ LÝ
           </span>
         );
       case 'dismissed':
@@ -794,11 +794,11 @@ export const UnifiedInboxPage: React.FC = () => {
                 onChange={(e) => setSelectedStatus(e.target.value)}
                 className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
               >
-                <option value="all" className="bg-white dark:bg-slate-800">Tất cả Trạng Thái</option>
-                <option value="pending" className="bg-white dark:bg-slate-800">⏳ Chờ Xử Lý</option>
-                <option value="processing" className="bg-white dark:bg-slate-800">🔄 Đang Xử Lý (Bot)</option>
-                <option value="completed" className="bg-white dark:bg-slate-800">✅ Đã Giải Quyết</option>
-                <option value="dismissed" className="bg-white dark:bg-slate-800">🗑️ Đã Bỏ Qua</option>
+                <option value="all" className="bg-white dark:bg-slate-800">Tất cả trạng thái</option>
+                <option value="pending" className="bg-white dark:bg-slate-800">⏳ Chờ xử lý</option>
+                <option value="processing" className="bg-white dark:bg-slate-800">🔄 Đang xử lý</option>
+                <option value="completed" className="bg-white dark:bg-slate-800">✅ Đã giải quyết</option>
+                <option value="dismissed" className="bg-white dark:bg-slate-800">🗑️ Đã bỏ qua</option>
               </select>
             </div>
           </div>
@@ -1653,7 +1653,7 @@ export const UnifiedInboxPage: React.FC = () => {
                               : 'border-slate-200 dark:border-slate-700 text-slate-500'
                           }`}
                         >
-                          ✓ Kích Hoạt (Enable)
+                          ✓ Kích Hoạt
                         </button>
                         <button
                           type="button"
@@ -1667,7 +1667,7 @@ export const UnifiedInboxPage: React.FC = () => {
                               : 'border-slate-200 dark:border-slate-700 text-slate-500'
                           }`}
                         >
-                          ✗ Vô Hiệu Hóa (Disable)
+                          ✗ Vô Hiệu Hóa
                         </button>
                       </div>
                     )}
@@ -1679,7 +1679,7 @@ export const UnifiedInboxPage: React.FC = () => {
             {/* 🎯 BƯỚC 3: PAYLOAD JSON PREVIEW */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
-                <span>Tham Số Thực Thi (Payload JSON)</span>
+                <span>Tham Số Thực Thi (JSON)</span>
                 <span className="text-[10px] text-slate-400 font-normal">Tự động đồng bộ theo các lựa chọn trên</span>
               </label>
               <textarea

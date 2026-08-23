@@ -21,8 +21,9 @@
    - [2.5. Luồng Nghiệp Vụ 4: Quản Lý Cây Thư Mục Google Drive Phân Tầng 6 Cấp](#25-luồng-nghiệp-vụ-4-quản-lý-cây-thư-mục-google-drive-phân-tầng-6-cấp)
    - [2.6. Luồng Nghiệp Vụ 5: Báo Lỗi GitHub Issue Tích Hợp AI & Ghi Chú QA](#26-luồng-nghiệp-vụ-5-báo-lỗi-github-issue-tích-hợp-ai--ghi-chú-qa)
    - [2.7. Luồng Nghiệp Vụ 6: Thu Thập Đa Kênh & Đồng Bộ Ngược](#27-luồng-nghiệp-vụ-6-thu-thập-đa-kênh--đồng-bộ-ngược)
-   - [2.8. Luồng Nghiệp Vụ 7: Giám Sát Uptime Live 10 Website, Ma Trận Phân Quyền 7 Roles & CI/CD Logs](#28-luồng-nghiệp-vụ-7-giám-sát-uptime-live-10-website-ma-trận-phân-quyền-7-roles--cicd-logs)
-   - [2.9. Luồng Nghiệp Vụ 8: Điều Phối Tác Vụ Kanban Thông Minh (Work Board & Subtasks Tracking)](#29-luồng-nghiệp-vụ-8-điều-phối-tác-vụ-kanban-thông-minh-work-board--subtasks-tracking)
+   - [2.8. Luồng Nghiệp Vụ 7: Giám Sát Sức Khỏe Live 10 Website, Ma Trận Xác Thực 7 Roles & CI/CD Logs](#28-luồng-nghiệp-vụ-7-giám-sát-sức-khỏe-live-10-website-ma-trận-xác-thực-7-roles--cicd-logs)
+   - [2.9. Luồng Nghiệp Vụ 8: Bảng Điều Phối Tác Vụ Kanban Thông Minh (Work Board & Subtasks Tracking)](#29-luồng-nghiệp-vụ-8-bảng-điều-phối-tác-vụ-kanban-thông-minh-work-board--subtasks-tracking)
+   - [2.10. Luồng Nghiệp Vụ 9: Quản Lý Danh Mục Khóa Học Song Song (Workspace Courses vs LMS Courses)](#210-luồng-nghiệp-vụ-9-quản-lý-danh-mục-khóa-học-song-song-workspace-courses-vs-lms-courses)
 3. [Tech Stack & Danh Mục Công Nghệ Chi Tiết](#3-tech-stack--danh-mục-công-nghệ-chi-tiết)
    - [3.1. Frontend & Client-Side Stack](#31-frontend--client-side-stack)
    - [3.2. Backend & Automation Engine Stack](#32-backend--automation-engine-stack)
@@ -60,7 +61,7 @@
    - [7.3. Cấu Hình Chủ Quyền Tác Giả (`config/authorConfig.ts`)](#73-cấu-hình-chủ-quyền-tác-giả-configauthorconfigts)
    - [7.4. Client Utilities & Type Definitions (`lib/` & `types/`)](#74-client-utilities--type-definitions-lib--types)
    - [7.5. Layout & Navigation Components (`components/`)](#75-layout--navigation-components-components)
-   - [7.6. Chi Tiết 10 Module Tính Năng Giao Diện (`features/`)](#76-chi-tiết-10-module-tính-năng-giao-diện-features)
+   - [7.6. Chi Tiết 13 Module Tính Năng Giao Diện (`features/`)](#76-chi-tiết-13-module-tính-năng-giao-diện-features)
 8. [Quy Chuẩn Phát Triển & Hướng Dẫn Mở Rộng Cho AI / Developer](#8-quy-chuẩn-phát-triển--hướng-dẫn-mở-rộng-cho-ai--developer)
 9. [Biến Môi Trường (.env) & Hướng Dẫn Triển Khai Vận Hành](#9-biến-môi-trường-env--hướng-dẫn-triển-khai-vận-hành)
 
@@ -257,16 +258,22 @@ flowchart TD
 - **Google Sheets:** Quét form phản hồi, lấy link Google Doc và thông tin quốc gia. Khi xử lý xong, đồng bộ ngược lại Google Sheet: Cột L (Category), Cột M (`Assigned = TRUE`), Cột P (`Status = 'To Implement'`).
 - **OS Ticket:** Playwright đăng nhập `/scp/login.php`, cào danh sách vé mở, bóc tách Internal ID & Display Number, tải file đính kèm và lưu vào DB.
 
-### 2.8. Luồng Nghiệp Vụ 7: Giám Sát Uptime Live 10 Website, Ma Trận Phân Quyền 7 Roles & CI/CD Logs
+### 2.8. Luồng Nghiệp Vụ 7: Giám Sát Sức Khỏe Live 10 Website, Ma Trận Xác Thực 7 Roles & CI/CD Logs
 - **Tab 1 (Public Uptime):** Giám sát thời gian thực 10 Website Pythaverse, đo latency, ghi log sự cố sập web vào `site_downtime_events`, render thanh Uptime Bars 24 giờ.
 - **Tab 2 (Auth Matrix):** Đọc 16 tài khoản test giải mã Fernet từ bảng `site_monitor_credentials`, gửi request xác thực Keycloak SSO và kiểm tra quyền truy cập route nội bộ cho 7 roles (`Admin`, `Sales Admin`, `Distributor`, `Partner`, `School`, `Teacher`, `Student`).
 - **Tab 3 (CI/CD Deploys):** Kết nối Vercel REST API và Render REST API, theo dõi trạng thái các bản build Frontend SPA và Backend Docker Container, hiển thị live terminal logs.
 
-### 2.9. Luồng Nghiệp Vụ 8: Điều Phối Tác Vụ Kanban Thông Minh (Work Board & Subtasks Tracking)
+### 2.9. Luồng Nghiệp Vụ 8: Bảng Điều Phối Tác Vụ Kanban Thông Minh (Work Board & Subtasks Tracking)
 - Quản lý đa bảng làm việc (`work_boards`), tùy chỉnh màu sắc và hình nền không gian làm việc (Wallpapers chất lượng cao).
 - Tự động sinh 6 cột trạng thái chuẩn (`Backlog`, `To Do`, `In Progress`, `Review`, `Done`, `Abort`) hoặc tạo cột tùy biến (`work_board_columns`).
 - Kéo thả thẻ mượt mà (Drag-and-Drop) giữa các cột, cập nhật `column_id` và `order_index` thời gian thực.
 - Quản lý danh sách công việc con (Subtasks) với thanh tiến độ hoàn thành trực quan, tự động kích hoạt pháo hoa hạt TypeScript Canvas Confetti rực rỡ khi hoàn thành toàn bộ subtasks hoặc chuyển thẻ sang cột Done.
+
+### 2.10. Luồng Nghiệp Vụ 9: Quản Lý Danh Mục Khóa Học Song Song (Workspace Courses vs LMS Courses)
+- Phân biệt rõ ràng 2 bảng khóa học độc lập trong hệ thống:
+  1. `workspace_courses`: Dùng cho quy trình cấp phát License RPA, tạo Order/Contract phả hệ và đối chiếu mã SKU trong COF.
+  2. `lms_courses`: Dùng cho việc ghi danh học viên và giáo viên trực tiếp vào cổng Moodle LMS PLearn (`learn.pythaverse.space`).
+- Hỗ trợ quản lý đơn lẻ (CRUD), nhập nhanh hàng loạt (Bulk Import qua Excel hoặc Copy-Paste) và đổi tên/gộp danh mục (Category Manager) đồng bộ toàn diện.
 
 ---
 
@@ -518,6 +525,8 @@ Kế thừa từ `pydantic_settings.BaseSettings`, tự động đọc và ép k
     }
     ```
   - **Bẫy lỗi Quota & 429:** Tự động bắt các lỗi `429`, `quota`, `resource_exhausted` để chuyển ngay sang model kế tiếp trong danh sách fallback mà không gây gián đoạn luồng xử lý.
+- **Phương thức `generate_github_issue(ground_truth_context: str, ticket_data: dict, qa_notes: str) -> str`:**
+  - Nạp toàn bộ 3 nguồn thông tin (Ground Truth + Ticket + Ghi chú QA) để sinh Issue Markdown chuẩn mực.
 - **Hàm bất đồng bộ `process_ticket_with_ai(ticket_id: str)`:**
   - Đọc thông tin ticket từ bảng `inbox_tickets` trong Supabase theo `ticket_id`.
   - Kích hoạt `AIEngine.analyze_ticket()`.
@@ -656,13 +665,16 @@ backend/app/services/
 - `init_cipher_suite() -> Fernet`: Khởi tạo đối tượng giải mã Fernet an toàn từ `settings.VAULT_SECRET_KEY`.
 - `decrypt_password(encrypted_pass: str) -> str`: Giải mã mật khẩu an toàn khi Playwright cần đăng nhập.
 - `resolve_by_school(school_identifier: str, country_hint: Optional[str]) -> dict`: Nhập tên trường hoặc mã trường ➔ Tự động truy vết 3 cấp (`School` ➔ `Partner` ➔ `Distributor`) và giải mã bộ 3 tài khoản tương ứng.
+- `resolve_by_partner(partner_identifier: str, country_hint: Optional[str]) -> dict`: Truy vết Partner ➔ Distributor.
+- `resolve_by_distributor(distributor_identifier: str) -> dict`: Truy vết Distributor.
+- `get_all_hierarchy_schools() -> list[dict]`: Lấy danh sách toàn bộ 480+ trường kèm đầy đủ phả hệ 3 cấp.
 
 #### 5.5.4. Dịch Vụ Bóc Tách & Ghi Ngược COF Excel (`cof_excel_service.py`)
 - `_clean_str(val) -> str`: Làm sạch chuỗi, loại bỏ khoảng trắng thừa.
 - `_format_date_dob(dob_raw) -> str`: Chuẩn hóa ngày sinh về định dạng `D/M/YYYY`.
 - `parse_cof_file(file_path: str) -> dict`: Bóc tách Tab 1 (Courses), Tab 2 (Students chưa có user), Tab 3 (Teachers).
 - `generate_accounts_excel(accounts_to_create, output_path) -> int`: Tạo file `accounts.xlsx` chuẩn 7 cột bắt đầu từ dòng 6.
-- `write_results_back_to_cof(...) -> str`: Map Username/Password vào cột 12-13, Group LMS vào cột 14, tô màu cam nhạt (`#FCE4D6`) và chữ đỏ đậm (`#C00000`).
+- `write_results_back_to_cof(original_cof_path, accounts_result_path, output_path, lms_group_name) -> str`: Map Username/Password vào cột 12-13, Group LMS vào cột 14, tô màu cam nhạt (`#FCE4D6`) và chữ đỏ đậm (`#C00000`).
 
 #### 5.5.5. Dịch Vụ Quản Trị Danh Tính Keycloak (`keycloak_service.py`)
 Hệ thống xử lý danh tính Keycloak 2 tầng với cơ chế Safe-by-Default:
@@ -682,6 +694,7 @@ Hệ thống xử lý danh tính Keycloak 2 tầng với cơ chế Safe-by-Defau
 - `get_gmail_service()`: Khởi tạo Gmail API Client bằng Refresh Token OAuth2.
 - `process_gmail_attachments(service, msg_id, payload) -> list`: Tải file đính kèm và upload lên Supabase Storage với MIME type chuẩn.
 - `poll_unread_gmails()`: Cronjob quét thư chưa đọc nhãn INBOX, lưu vào `inbox_tickets` kèm `internalDate` chuẩn xác.
+- `mark_gmail_as_read(source_id)`: Xóa nhãn `UNREAD` trên Gmail khi ticket hoàn thành.
 
 #### 5.5.8. Dịch Vụ Thu Thập Phản Hồi Google Sheets (`google_sheet_service.py`)
 - `poll_form_feedbacks()`: Cronjob quét Google Sheet, đọc các dòng chưa gán (`Assigned != TRUE`), bóc tách Google Doc URL và lưu vào Supabase.
@@ -1193,7 +1206,6 @@ Khai báo đầy đủ 22 TypeScript Types & Interfaces:
 #### 2. [Header.tsx](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/components/common/Header.tsx)
 - Thanh điều khiển trên cùng với hiệu ứng làm mờ nền (`backdrop-blur-md`).
 - Tích hợp nút Hamburger Menu trên mobile (`lg:hidden`).
-- Ô tìm kiếm toàn cục (Global Search Input).
 - Nút chuyển đổi giao diện Sáng / Tối (`Moon` / `Sun`).
 - Profile Dropdown menu: Chuyển hướng tới `/profile` (Thiết lập thông tin tài khoản & MXH) và nút Đăng xuất (`LogOut`).
 
@@ -1202,7 +1214,7 @@ Khai báo đầy đủ 22 TypeScript Types & Interfaces:
 
 ---
 
-### 7.6. Chi Tiết 10 Module Tính Năng Giao Diện (`features/`)
+### 7.6. Chi Tiết 13 Module Tính Năng Giao Diện (`features/`)
 
 #### 1. [LandingPage.tsx](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/landing/LandingPage.tsx) (Trang Chủ Trình Diễn)
 - Giao diện Dark/Light mode sang trọng với các hiệu ứng ánh sáng ambient blur blobs.

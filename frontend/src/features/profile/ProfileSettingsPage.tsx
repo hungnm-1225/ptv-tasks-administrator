@@ -380,7 +380,7 @@ export const ProfileSettingsPage: React.FC = () => {
                                 </div>
 
                                 <div className="space-y-1.5">
-                                    <label className="text-xs font-medium text-slate-700 dark:text-slate-300">Địa Điểm (Location)</label>
+                                    <label className="text-xs font-medium text-slate-700 dark:text-slate-300">Địa Điểm</label>
                                     <input
                                         type="text"
                                         value={location}
@@ -391,7 +391,7 @@ export const ProfileSettingsPage: React.FC = () => {
                             </div>
 
                             <div className="space-y-1.5">
-                                <label className="text-xs font-medium text-slate-700 dark:text-slate-300">Giới Thiệu Ngắn (Bio Tác Giả)</label>
+                                <label className="text-xs font-medium text-slate-700 dark:text-slate-300">Giới Thiệu Tác Giả</label>
                                 <textarea
                                     rows={3}
                                     value={bio}
@@ -478,7 +478,7 @@ export const ProfileSettingsPage: React.FC = () => {
             {/* TAB 2: PROJECT INFO */}
             {activeTab === 'project' && (
                 <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800/80 shadow-xs space-y-6">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Thông Tin Dự Án (Project Info)</h3>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Thông Tin Dự Án</h3>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="space-y-1.5">
@@ -492,7 +492,7 @@ export const ProfileSettingsPage: React.FC = () => {
                         </div>
 
                         <div className="space-y-1.5">
-                            <label className="text-xs font-medium text-slate-700 dark:text-slate-300">Phiên Bản (Version)</label>
+                            <label className="text-xs font-medium text-slate-700 dark:text-slate-300">Phiên Bản</label>
                             <input
                                 type="text"
                                 value={projectInfo.version}

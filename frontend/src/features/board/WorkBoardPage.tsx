@@ -806,19 +806,19 @@ export const WorkBoardPage: React.FC = () => {
                             </div>
 
                             <div>
-                                <label className="block font-semibold mb-1">Loại cột (Hành vi đặc biệt):</label>
+                                <label className="block font-semibold mb-1">Loại cột:</label>
                                 <select
                                     value={columnFormType}
                                     onChange={(e) => setColumnFormType(e.target.value)}
                                     className="w-full p-2 bg-slate-800 border border-slate-700 rounded-xl text-white outline-none"
                                 >
-                                    <option value="custom">📌 Cột thông thường (Custom)</option>
+                                    <option value="custom">📌 Cột thông thường</option>
                                     <option value="backlog">📋 Backlog (Tiếp nhận)</option>
                                     <option value="todo">⏳ To Do (Cần làm)</option>
                                     <option value="in_progress">⚡ In Progress (Đang làm)</option>
                                     <option value="review">🔍 Review (Chờ duyệt)</option>
-                                    <option value="done">🎉 Done (Kích hoạt pháo hoa khi thả vào)</option>
-                                    <option value="abort">🚫 Abort / Hủy bỏ</option>
+                                    <option value="done">🎉 Done (Hoàn thành)</option>
+                                    <option value="abort">🚫 Hủy bỏ</option>
                                 </select>
                             </div>
 
@@ -888,10 +888,10 @@ export const WorkBoardPage: React.FC = () => {
                                         onChange={(e) => setActiveCard({ ...activeCard, priority: e.target.value as any })}
                                         className="w-full p-1.5 bg-slate-900 border border-slate-700 rounded-lg text-white font-bold"
                                     >
-                                        <option value="urgent">🔥 Khẩn cấp (Urgent)</option>
-                                        <option value="high">⚡ Cao (High)</option>
-                                        <option value="normal">🌿 Bình thường (Normal)</option>
-                                        <option value="low">☕ Thấp (Low)</option>
+                                        <option value="urgent">🔥 Khẩn cấp</option>
+                                        <option value="high">⚡ Mức cao</option>
+                                        <option value="normal">🌿 Bình thường</option>
+                                        <option value="low">☕ Mức thấp</option>
                                     </select>
                                 </div>
 
