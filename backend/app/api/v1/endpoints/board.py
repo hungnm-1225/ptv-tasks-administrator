@@ -152,8 +152,16 @@ async def delete_column(column_id: str):
 @router.get("/boards/{board_id}/cards")
 async def list_board_cards(board_id: str) -> List[Dict[str, Any]]:
     supabase = get_supabase_client()
-    res = supabase.table("work_board_cards").select("*").eq("board_id", board_id).order("order_index", desc=False).order("created_at", desc=True).execute()
-    return res.data or []
+    try:
+        res = supabase.table("work_board_cards")\
+            .select("*")\
+            .eq("board_id", board_id)\
+            .order("order_index", desc=False)\
+            .execute()
+        return res.data or []
+    except Exception as e:
+        print(f"Error fetching cards for board {board_id}: {e}")
+        return []
 
 @router.post("/cards")
 async def create_card(payload: BoardCardCreateSchema):

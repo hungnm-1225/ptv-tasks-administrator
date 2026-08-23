@@ -97,18 +97,22 @@ async def get_workspace_courses(category: Optional[str] = Query(None)):
 @router.get("/cached-pending-orders")
 async def get_cached_pending_orders(
     school_name: Optional[str] = Query(None),
-    distributor_code: Optional[str] = Query(None)
+    distributor_code: Optional[str] = Query(None),
+    status: Optional[str] = Query(None)
 ):
-    """Lấy danh sách School Orders đang chờ duyệt từ bảng workspace_orders_cache."""
+    """Lấy danh sách School Orders từ bảng workspace_orders_cache."""
     supabase = get_supabase_client()
     try:
-        query = supabase.table("workspace_orders_cache").select("*").order("created_at", desc=True)
-        if school_name:
+        query = supabase.table("workspace_orders_cache").select("*").order("order_date", desc=True)
+        
+        # Chỉ lọc nếu school_name không phải là trường test mặc định
+        if school_name and "000 SCHOOL" not in school_name.upper():
             query = query.ilike("school_name", f"%{school_name.strip()}%")
+            
         if distributor_code:
             query = query.eq("distributor_code", distributor_code)
             
-        res = query.limit(50).execute()
+        res = query.limit(100).execute()
         return {
             "status": "success",
             "orders": res.data or [],

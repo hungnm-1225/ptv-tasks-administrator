@@ -328,9 +328,12 @@ export const AutomationStudioPage: React.FC = () => {
     setParsedOrderCourses([]);
     try {
       if (approveSubFlow === 'approve_school_order') {
-        const res = await fetchApi<any>(
-          `/workspace/cached-pending-orders?school_name=${encodeURIComponent(selectedSchool?.school_name || '')}`
-        );
+        // Tải danh sách đơn hàng trường (không bị chặn bởi trường 000)
+        const filterParam = selectedSchool && !selectedSchool.school_name.includes('000 SCHOOL')
+          ? `?school_name=${encodeURIComponent(selectedSchool.school_name)}`
+          : '';
+
+        const res = await fetchApi<any>(`/workspace/cached-pending-orders${filterParam}`);
         const orders = res?.orders || [];
         setScrapedPendingList(orders);
         if (orders.length > 0) {
@@ -341,9 +344,9 @@ export const AutomationStudioPage: React.FC = () => {
           } else {
             handleLoadOrderDetails(firstCode);
           }
-          toast.success(`⚡ [Cache] Đã nạp ${orders.length} đơn hàng trường học!`);
+          toast.success(`⚡ [Cache] Đã nạp thành công ${orders.length} đơn hàng trường học!`);
         } else {
-          toast.info('Không có đơn hàng nào trong Cache. Bạn có thể bấm "Đồng Bộ Mới" để bot quét lại.');
+          toast.info('Chưa có đơn hàng nào phù hợp với bộ lọc.');
         }
       } else if (approveSubFlow === 'approve_partner_contract') {
         const res = await fetchApi<any>(`/workspace/cached-pending-contracts?contract_type=PRT`);
@@ -352,8 +355,6 @@ export const AutomationStudioPage: React.FC = () => {
         if (contracts.length > 0) {
           setTargetContractCode(contracts[0].contract_code);
           toast.success(`⚡ [Cache] Đã nạp ${contracts.length} hợp đồng đối tác!`);
-        } else {
-          toast.info('Không có hợp đồng đối tác nào trong Cache.');
         }
       } else if (approveSubFlow === 'admin_approve_contract') {
         const res = await fetchApi<any>(`/workspace/cached-pending-contracts?contract_type=DST`);
@@ -362,8 +363,6 @@ export const AutomationStudioPage: React.FC = () => {
         if (contracts.length > 0) {
           setTargetContractCode(contracts[0].contract_code);
           toast.success(`⚡ [Cache] Đã nạp ${contracts.length} hợp đồng quản trị!`);
-        } else {
-          toast.info('Không có hợp đồng quản trị nào trong Cache.');
         }
       }
     } catch (err) {
