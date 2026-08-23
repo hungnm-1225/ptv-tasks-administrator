@@ -167,5 +167,93 @@ class WorkspaceLineageService:
                 "name": "PTV Master Distributor", "username": "", "password": ""
             }
         }
+    
+    @staticmethod
+    def resolve_by_partner(partner_identifier: str) -> Optional[Dict[str, Any]]:
+        """
+        Nhập tên hoặc mã Partner -> Trả về tài khoản của Partner và Distributor cấp cha.
+        """
+        supabase = get_supabase_client()
+        query = supabase.table("workspace_organizations")\
+            .select("*, workspace_credentials_vault(*)")\
+            .eq("role_type", "partner")
+
+        if str(partner_identifier).startswith("PAR_") or str(partner_identifier).isdigit():
+            partner_res = query.eq("code", str(partner_identifier)).execute()
+        else:
+            partner_res = query.ilike("name", f"%{partner_identifier.strip()}%").execute()
+
+        if not partner_res.data:
+            logger.warning(f"Không tìm thấy Partner phù hợp: '{partner_identifier}'")
+            return None
+
+        partner = partner_res.data[0]
+        raw_p_vault = partner.get("workspace_credentials_vault")
+        p_creds = raw_p_vault[0] if (isinstance(raw_p_vault, list) and len(raw_p_vault) > 0) else (raw_p_vault or {})
+
+        partner_data = {
+            "id": partner.get("id"),
+            "code": partner.get("code"),
+            "name": partner.get("name"),
+            "username": p_creds.get("username", ""),
+            "password": decrypt_password(p_creds.get("encrypted_password", ""))
+        }
+
+        distributor_data = None
+        dist_id = partner.get("parent_id")
+        if dist_id:
+            dist_res = supabase.table("workspace_organizations")\
+                .select("*, workspace_credentials_vault(*)")\
+                .eq("id", dist_id)\
+                .execute()
+            if dist_res.data and len(dist_res.data) > 0:
+                dist = dist_res.data[0]
+                raw_d_vault = dist.get("workspace_credentials_vault")
+                d_creds = raw_d_vault[0] if (isinstance(raw_d_vault, list) and len(raw_d_vault) > 0) else (raw_d_vault or {})
+                distributor_data = {
+                    "id": dist.get("id"),
+                    "code": dist.get("code"),
+                    "name": dist.get("name"),
+                    "username": d_creds.get("username", ""),
+                    "password": decrypt_password(d_creds.get("encrypted_password", ""))
+                }
+
+        return {
+            "partner": partner_data,
+            "distributor": distributor_data or {"name": "PTV Master Distributor", "username": "", "password": ""}
+        }
+
+    @staticmethod
+    def resolve_by_distributor(distributor_identifier: str) -> Optional[Dict[str, Any]]:
+        """
+        Nhập tên hoặc mã Distributor -> Trả về tài khoản của Distributor.
+        """
+        supabase = get_supabase_client()
+        query = supabase.table("workspace_organizations")\
+            .select("*, workspace_credentials_vault(*)")\
+            .eq("role_type", "distributor")
+
+        if str(distributor_identifier).startswith("DST_") or str(distributor_identifier).isdigit():
+            dist_res = query.eq("code", str(distributor_identifier)).execute()
+        else:
+            dist_res = query.ilike("name", f"%{distributor_identifier.strip()}%").execute()
+
+        if not dist_res.data:
+            logger.warning(f"Không tìm thấy Distributor phù hợp: '{distributor_identifier}'")
+            return None
+
+        dist = dist_res.data[0]
+        raw_d_vault = dist.get("workspace_credentials_vault")
+        d_creds = raw_d_vault[0] if (isinstance(raw_d_vault, list) and len(raw_d_vault) > 0) else (raw_d_vault or {})
+
+        return {
+            "distributor": {
+                "id": dist.get("id"),
+                "code": dist.get("code"),
+                "name": dist.get("name"),
+                "username": d_creds.get("username", ""),
+                "password": decrypt_password(d_creds.get("encrypted_password", ""))
+            }
+        }
 
 workspace_lineage_service = WorkspaceLineageService()

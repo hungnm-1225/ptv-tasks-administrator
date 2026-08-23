@@ -66,13 +66,30 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
                 "password": getattr(settings, "TEST_ADMIN_PASS", "Pythaverse@2026")
             }
 
-            # Tự động suy vết phả hệ nếu chưa truyền đủ credentials
-            if (school_name or payload_data.get("partner_code")) and (not partner_creds or not distributor_creds):
-                lineage = workspace_lineage_service.resolve_by_school(str(school_name or payload_data.get("partner_code")))
-                if lineage:
-                    school_creds = school_creds or lineage.get("school")
-                    partner_creds = partner_creds or lineage.get("partner")
-                    distributor_creds = distributor_creds or lineage.get("distributor")
+            # Tự động suy vết phả hệ thông minh theo bất kỳ cấp nào (School -> Partner -> Distributor)
+            partner_name = payload_data.get("partner_name") or payload_data.get("partner_code")
+            distributor_name = payload_data.get("distributor_name") or payload_data.get("distributor_code")
+
+            # 1. Nếu có Distributor
+            if distributor_name and not distributor_creds:
+                d_lin = workspace_lineage_service.resolve_by_distributor(str(distributor_name))
+                if d_lin:
+                    distributor_creds = d_lin.get("distributor")
+
+            # 2. Nếu có Partner
+            if partner_name and (not partner_creds or not distributor_creds):
+                p_lin = workspace_lineage_service.resolve_by_partner(str(partner_name))
+                if p_lin:
+                    partner_creds = partner_creds or p_lin.get("partner")
+                    distributor_creds = distributor_creds or p_lin.get("distributor")
+
+            # 3. Nếu có School
+            if school_name and (not school_creds or not partner_creds or not distributor_creds):
+                s_lin = workspace_lineage_service.resolve_by_school(str(school_name))
+                if s_lin:
+                    school_creds = school_creds or s_lin.get("school")
+                    partner_creds = partner_creds or s_lin.get("partner")
+                    distributor_creds = distributor_creds or s_lin.get("distributor")
 
             # Chuẩn hóa dữ liệu order / courses
             courses_list = payload_data.get("courses") or []

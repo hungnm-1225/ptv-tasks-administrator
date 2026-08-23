@@ -460,6 +460,9 @@ export const AutomationStudioPage: React.FC = () => {
             action: 'approve_partner_contract_standalone',
             contract_code: targetContractCode,
             partner_name: selectedPartner?.name,
+            partner_code: selectedPartner?.code,
+            distributor_name: selectedDistributor?.name,
+            distributor_code: selectedDistributor?.code,
           };
         } else if (approveSubFlow === 'admin_approve_contract') {
           if (!targetContractCode) {
