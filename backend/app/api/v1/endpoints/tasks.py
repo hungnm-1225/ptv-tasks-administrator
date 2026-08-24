@@ -151,27 +151,52 @@ async def list_tasks(approval_status: Optional[str] = None):
 
 @router.post("", response_model=Dict[str, Any])
 @router.post("/", response_model=Dict[str, Any])
-async def create_task(payload: Dict[str, Any]):
+async def create_task(payload: Dict[str, Any], background_tasks: BackgroundTasks):
+    """Tạo task mới. Hỗ trợ cờ run_immediately để chạy Worker ngầm ngay từ Automation Studio."""
     ticket_id = payload.get("ticket_id")
     bot_type = payload.get("bot_type", "keycloak_api")
     payload_data = payload.get("payload_data", {"action": "auto_triage", "ticket_id": ticket_id})
+    
+    # 🟢 Kiểm tra xem có yêu cầu thực thi ngay từ Studio hay không
+    run_immediately = payload.get("run_immediately", False) or payload.get("approval_status") == "approved"
     
     try:
         supabase = get_supabase_client()
         time_str = get_vn_time_str()
         now_iso = get_vn_iso()
         
+        initial_approval = "approved" if run_immediately else "pending"
+        initial_log = (
+            f"[{time_str}] [INFO] [{bot_type}]: Direct dispatch from Studio by Admin. Queuing real worker for execution..."
+            if run_immediately else
+            f"[{time_str}] [INFO] Task queued by Admin. Standing by for approval."
+        )
+        
         res = supabase.table("bot_automation_tasks").insert({
             "ticket_id": ticket_id,
             "bot_type": bot_type,
             "payload_data": payload_data,
-            "approval_status": "pending",
+            "approval_status": initial_approval,
             "execution_status": "queued",
-            "execution_logs": f"[{time_str}] [INFO] Task queued by Admin. Standing by for approval.",
-            "created_at": now_iso
+            "execution_logs": initial_log,
+            "created_at": now_iso,
+            "executed_at": now_iso if run_immediately else None
         }).execute()
         
-        return {"status": "success", "data": res.data[0] if res.data else {}}
+        task_data = res.data[0] if res.data else {}
+        task_id = task_data.get("id")
+        
+        # 🟢 Nếu yêu cầu chạy ngay, đẩy Worker vào background_tasks lập tức!
+        if run_immediately and task_id:
+            background_tasks.add_task(run_approved_task_worker, str(task_id), bot_type, payload_data, ticket_id)
+            logger.info(f"⚡ [Direct Dispatch] Đã khởi chạy Worker ngầm ngay cho Task #{str(task_id)[:8]} ({bot_type})")
+        
+        return {
+            "status": "success", 
+            "data": task_data, 
+            "dispatched_immediately": run_immediately,
+            "message": "Đã khởi chạy Worker thành công!" if run_immediately else "Đã đưa vào hàng đợi."
+        }
     except Exception as e:
         logger.error(f"❌ Lỗi tạo bot task: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -21,93 +21,31 @@ import {
     Palette,
     Layers,
     FolderPlus,
-    AlertTriangle,
+    Sliders,
+    Tag,
+    Flame,
+    CheckCircle2,
+    Ban,
+    RotateCcw,
     UploadCloud
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { supabase } from '../../lib/supabase';
 import { fetchApi } from '../../lib/api';
-import { BoardItem, BoardColumnItem, BoardCardItem, BoardSubtask } from '../../types';
+import { supabase } from '../../lib/supabase';
+import { BoardItem, BoardColumnItem, BoardCardItem, BoardSubtask, BoardPriorityItem } from '../../types';
 
-const COLOR_PALETTE = [
-    '#8b5cf6', // Violet
-    '#38bdf8', // Sky Blue
-    '#10b981', // Emerald
-    '#fbbf24', // Amber
-    '#f43f5e', // Rose
-    '#ec4899', // Pink
-    '#64748b', // Slate
-    '#f97316', // Orange
+const PRESET_OVERLAYS = [
+    { name: 'Đen Mờ (Dark)', color: '#000000' },
+    { name: 'Trắng Sáng (Light)', color: '#ffffff' },
+    { name: 'Xanh Navy (Deep Blue)', color: '#0f172a' },
+    { name: 'Tím Đậm (Neon Indigo)', color: '#1e1b4b' },
+    { name: 'Xám Khói (Slate)', color: '#334155' }
 ];
-
-const PRESET_WALLPAPERS = [
-    { name: 'Default Dark', value: '', color: '#0f172a' },
-    { name: 'Aurora Deep', value: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?auto=format&fit=crop&w=1600&q=80', color: '#0f172a' },
-    { name: 'Cyber Neon', value: 'https://images.unsplash.com/photo-1550684848-fac1c5b4e853?auto=format&fit=crop&w=1600&q=80', color: '#0f172a' },
-    { name: 'Minimal Mountain', value: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1600&q=80', color: '#0f172a' }
-];
-
-// --- 🎆 TỰ TẠO HIỆU ỨNG PHÁO HOA CONFETTI THUẦN TYPESCRIPT (KHÔNG CẦN CÀI THƯ VIỆN) ---
-const triggerConfetti = () => {
-    const canvas = document.createElement('canvas');
-    canvas.className = 'fixed inset-0 pointer-events-none z-[9999]';
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    document.body.appendChild(canvas);
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const particles: any[] = [];
-    const colors = ['#8b5cf6', '#38bdf8', '#10b981', '#fbbf24', '#f43f5e', '#ffffff'];
-
-    for (let i = 0; i < 90; i++) {
-        particles.push({
-            x: window.innerWidth / 2,
-            y: window.innerHeight / 2 + 100,
-            radius: Math.random() * 4 + 2,
-            color: colors[Math.floor(Math.random() * colors.length)],
-            vx: (Math.random() - 0.5) * 16,
-            vy: (Math.random() - 0.7) * 18,
-            alpha: 1
-        });
-    }
-
-    let animationFrame: number;
-    const render = () => {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        let alive = false;
-
-        particles.forEach(p => {
-            p.x += p.vx;
-            p.y += p.vy;
-            p.vy += 0.4; // Trọng lực
-            p.alpha -= 0.015;
-
-            if (p.alpha > 0) {
-                alive = true;
-                ctx.globalAlpha = p.alpha;
-                ctx.fillStyle = p.color;
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-                ctx.fill();
-            }
-        });
-
-        if (alive) {
-            animationFrame = requestAnimationFrame(render);
-        } else {
-            cancelAnimationFrame(animationFrame);
-            document.body.removeChild(canvas);
-        }
-    };
-
-    render();
-};
 
 export const WorkBoardPage: React.FC = () => {
-    // Boards & Active Selection
+    // Boards & States
     const [boards, setBoards] = useState<BoardItem[]>([]);
+    const [trashBoards, setTrashBoards] = useState<BoardItem[]>([]);
     const [activeBoardId, setActiveBoardId] = useState<string>('');
     const [columns, setColumns] = useState<BoardColumnItem[]>([]);
     const [cards, setCards] = useState<BoardCardItem[]>([]);
@@ -122,11 +60,11 @@ export const WorkBoardPage: React.FC = () => {
     const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
 
     // Modals
-    const [isBoardModalOpen, setIsBoardModalOpen] = useState<boolean>(false);
-    const [newBoardTitle, setNewBoardTitle] = useState<string>('');
-    const [newBoardBg, setNewBoardBg] = useState<string>('');
+    const [isSettingsModalOpen, setIsSettingsModalOpen] = useState<boolean>(false);
+    const [settingsTab, setSettingsTab] = useState<'visuals' | 'taxonomy' | 'trash'>('visuals');
 
-    const [isBgSettingsOpen, setIsBgSettingsOpen] = useState<boolean>(false);
+    const [isNewBoardModalOpen, setIsNewBoardModalOpen] = useState<boolean>(false);
+    const [newBoardTitle, setNewBoardTitle] = useState<string>('');
 
     const [isColumnModalOpen, setIsColumnModalOpen] = useState<boolean>(false);
     const [editingColumn, setEditingColumn] = useState<BoardColumnItem | null>(null);
@@ -139,92 +77,37 @@ export const WorkBoardPage: React.FC = () => {
     const [newSubtaskTitle, setNewSubtaskTitle] = useState<string>('');
     const [isSavingCard, setIsSavingCard] = useState<boolean>(false);
 
-    // Quick Add
+    // Quick Add State (Mặc định Thấp & Khác)
     const [quickAddColId, setQuickAddColId] = useState<string | null>(null);
     const [quickAddTitle, setQuickAddTitle] = useState<string>('');
+    const [quickAddPriority, setQuickAddPriority] = useState<string>('low');
+    const [quickAddCategory, setQuickAddCategory] = useState<string>('Khác');
 
-    // Upload background
+    // Board Settings Temporary State
+    const [boardOverlayColor, setBoardOverlayColor] = useState<string>('#000000');
+    const [boardOverlayOpacity, setBoardOverlayOpacity] = useState<number>(0.35);
+    const [boardColumnOpacity, setBoardColumnOpacity] = useState<number>(0.75);
+    const [boardCardOpacity, setBoardCardOpacity] = useState<number>(0.85);
+    const [newCategoryInput, setNewCategoryInput] = useState<string>('');
     const [isUploadingBg, setIsUploadingBg] = useState<boolean>(false);
+
     const bgFileInputRef = useRef<HTMLInputElement>(null);
 
-    const handleUploadBgFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file || !activeBoardId) return;
-
-        // Kiểm tra định dạng ảnh
-        if (!file.type.startsWith('image/')) {
-            toast.warning('Vui lòng chọn file hình ảnh (PNG, JPG, WEBP)!');
-            return;
-        }
-
-        // Giới hạn dung lượng 5MB
-        if (file.size > 5 * 1024 * 1024) {
-            toast.warning('Dung lượng ảnh tối đa là 5MB.');
-            return;
-        }
-
-        setIsUploadingBg(true);
-        const toastId = toast.loading('Đang tải ảnh lên Supabase Storage...');
-
-        try {
-            const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-            const filePath = `board_backgrounds/bg_${Date.now()}_${cleanFileName}`;
-
-            // 1. Upload lên bucket ticket-attachments
-            const { error: uploadError } = await supabase.storage
-                .from('ticket-attachments')
-                .upload(filePath, file, { cacheControl: '3600', upsert: true });
-
-            if (uploadError) throw uploadError;
-
-            // 2. Lấy Public URL chính chủ
-            const { data } = supabase.storage
-                .from('ticket-attachments')
-                .getPublicUrl(filePath);
-
-            const publicUrl = data.publicUrl;
-
-            // 3. Cập nhật URL vào Board
-            await fetchApi(`/board/boards/${activeBoardId}`, {
-                method: 'PUT',
-                body: JSON.stringify({ background_url: publicUrl })
-            });
-
-            setBoards(prev => prev.map(b => b.id === activeBoardId ? { ...b, background_url: publicUrl } : b));
-            toast.success('Đã tải và áp dụng ảnh nền thành công!', { id: toastId });
-            setIsBgSettingsOpen(false);
-        } catch (err: any) {
-            toast.error('Lỗi upload ảnh nền: ' + (err.message || err), { id: toastId });
-        } finally {
-            setIsUploadingBg(false);
-            if (bgFileInputRef.current) bgFileInputRef.current.value = '';
-        }
-    };
-
-    // 🟢 Hàm xóa ảnh nền (về mặc định)
-    const handleRemoveBackground = async () => {
-        if (!activeBoardId) return;
-        try {
-            await fetchApi(`/board/boards/${activeBoardId}`, {
-                method: 'PUT',
-                body: JSON.stringify({ background_url: null })
-            });
-            setBoards(prev => prev.map(b => b.id === activeBoardId ? { ...b, background_url: null } : b));
-            toast.success('Đã đặt lại hình nền mặc định!');
-            setIsBgSettingsOpen(false);
-        } catch (err: any) {
-            toast.error('Lỗi khi xóa hình nền: ' + (err.message || err));
-        }
-    };
-
-    // 1. Tải danh sách Boards
+    // 1. Tải Boards
     const loadBoards = useCallback(async () => {
         try {
-            const data = await fetchApi<BoardItem[]>('/board/boards');
-            setBoards(data);
-            if (data.length > 0 && !activeBoardId) {
-                const defaultB = data.find(b => b.is_default) || data[0];
-                setActiveBoardId(defaultB.id);
+            const [activeData, trashData] = await Promise.all([
+                fetchApi<BoardItem[]>('/board/boards'),
+                fetchApi<BoardItem[]>('/board/boards/trash')
+            ]);
+            setBoards(activeData);
+            setTrashBoards(trashData);
+
+            if (activeData.length > 0) {
+                if (!activeBoardId || !activeData.some(b => b.id === activeBoardId)) {
+                    const defaultB = activeData.find(b => b.is_default) || activeData[0];
+                    setActiveBoardId(defaultB.id);
+                }
             }
         } catch (err: any) {
             toast.error('Lỗi nạp danh sách bảng: ' + (err.message || err));
@@ -235,7 +118,7 @@ export const WorkBoardPage: React.FC = () => {
         loadBoards();
     }, [loadBoards]);
 
-    // 2. Tải Cột & Thẻ của Board đang chọn
+    // 2. Tải Dữ Liệu Board Đang Chọn
     const loadBoardData = useCallback(async (boardId: string) => {
         if (!boardId) return;
         setIsLoading(true);
@@ -256,10 +139,30 @@ export const WorkBoardPage: React.FC = () => {
     useEffect(() => {
         if (activeBoardId) {
             loadBoardData(activeBoardId);
+            const curBoard = boards.find(b => b.id === activeBoardId);
+            if (curBoard) {
+                setBoardOverlayColor(curBoard.overlay_color || '#000000');
+                setBoardOverlayOpacity(curBoard.overlay_opacity ?? 0.35);
+                setBoardColumnOpacity(curBoard.column_opacity ?? 0.75);
+                setBoardCardOpacity(curBoard.card_opacity ?? 0.85);
+            }
         }
-    }, [activeBoardId, loadBoardData]);
+    }, [activeBoardId, loadBoardData, boards]);
 
     const activeBoard = useMemo(() => boards.find(b => b.id === activeBoardId), [boards, activeBoardId]);
+
+    const boardCategories: string[] = useMemo(() => {
+        return activeBoard?.categories || ['System Bug', 'Keycloak Account', 'LMS Enroll', 'License', 'Khác'];
+    }, [activeBoard]);
+
+    const boardPriorities: BoardPriorityItem[] = useMemo(() => {
+        return activeBoard?.priorities || [
+            { key: 'low', label: 'Thấp', color: '#64748b' },
+            { key: 'normal', label: 'Bình thường', color: '#38bdf8' },
+            { key: 'high', label: 'Cao', color: '#fbbf24' },
+            { key: 'urgent', label: 'Khẩn cấp', color: '#f43f5e' }
+        ];
+    }, [activeBoard]);
 
     // 3. Lọc Cards
     const filteredCards = useMemo(() => {
@@ -277,7 +180,7 @@ export const WorkBoardPage: React.FC = () => {
         });
     }, [cards, searchQuery, filterPriority, filterCategory]);
 
-    // 4. Xử lý Drag & Drop + Pháo hoa
+    // 4. Xử lý Drag & Drop Thẻ
     const handleDragStart = (cardId: string) => setDraggedCardId(cardId);
     const handleDragOver = (e: React.DragEvent) => e.preventDefault();
 
@@ -291,15 +194,15 @@ export const WorkBoardPage: React.FC = () => {
 
         const targetCol = columns.find(c => c.id === targetColumnId);
 
-        // 🎆 HIỆU ỨNG PHÁO HOA KHI THẢ VÀO CỘT DONE
+        // Thông báo trạng thái chuyển cột
         if (targetCol?.column_type === 'done') {
-            triggerConfetti();
-            toast.success('🎉 Chúc mừng anh đã hoàn thành công việc!');
+            toast.success(`✓ Đã hoàn thành công việc: "${targetCard.title}"`);
         } else if (targetCol?.column_type === 'abort') {
-            toast.warning('🚫 Đã chuyển công việc vào mục Hủy/Tạm dừng.');
+            toast.error(`🚫 Đã hủy/tạm dừng: "${targetCard.title}"`);
+        } else {
+            toast.info(`Đã chuyển sang [${targetCol?.title}]`);
         }
 
-        // Optimistic UI
         setCards(prev => prev.map(c => c.id === draggedCardId ? { ...c, column_id: targetColumnId } : c));
         setDraggedCardId(null);
 
@@ -309,12 +212,11 @@ export const WorkBoardPage: React.FC = () => {
                 body: JSON.stringify({ column_id: targetColumnId })
             });
         } catch (err: any) {
-            toast.error('Lỗi di chuyển thẻ: ' + (err.message || err));
             loadBoardData(activeBoardId);
         }
     };
 
-    // 5. Thêm nhanh Thẻ trên Cột
+    // 5. Thêm nhanh Thẻ với Priority & Category mặc định (Thấp & Khác)
     const handleQuickAddCard = async (colId: string) => {
         if (!quickAddTitle.trim()) {
             setQuickAddColId(null);
@@ -328,8 +230,8 @@ export const WorkBoardPage: React.FC = () => {
                     board_id: activeBoardId,
                     column_id: colId,
                     title: quickAddTitle.trim(),
-                    priority: 'normal',
-                    category: 'other',
+                    priority: quickAddPriority,
+                    category: quickAddCategory,
                     color: '#8b5cf6',
                     assigned_name: 'Hùng Nguyễn Mạnh'
                 })
@@ -339,108 +241,122 @@ export const WorkBoardPage: React.FC = () => {
             setCards(prev => [res.data, ...prev]);
             setQuickAddTitle('');
             setQuickAddColId(null);
+            setQuickAddPriority('low');
+            setQuickAddCategory('Khác');
         } catch (err: any) {
-            toast.error('Lỗi khi thêm thẻ: ' + (err.message || err));
+            toast.error('Lỗi thêm thẻ: ' + (err.message || err));
         }
     };
 
-    // 6. Tạo Board Mới
-    const handleCreateBoard = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!newBoardTitle.trim()) return;
+    // 6. Upload Ảnh Nền Board lên Supabase
+    const handleUploadBgFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !activeBoardId) return;
+
+        setIsUploadingBg(true);
+        const toastId = toast.loading('Đang tải ảnh nền lên Supabase...');
 
         try {
-            const res: any = await fetchApi('/board/boards', {
-                method: 'POST',
-                body: JSON.stringify({
-                    title: newBoardTitle.trim(),
-                    background_url: newBoardBg.trim() || null
-                })
+            const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+            const filePath = `board_backgrounds/bg_${Date.now()}_${cleanFileName}`;
+
+            const { error: uploadError } = await supabase.storage
+                .from('ticket-attachments')
+                .upload(filePath, file, { cacheControl: '3600', upsert: true });
+
+            if (uploadError) throw uploadError;
+
+            const { data } = supabase.storage.from('ticket-attachments').getPublicUrl(filePath);
+            const publicUrl = data.publicUrl;
+
+            await fetchApi(`/board/boards/${activeBoardId}`, {
+                method: 'PUT',
+                body: JSON.stringify({ background_url: publicUrl })
             });
 
-            toast.success(`Đã tạo bảng "${newBoardTitle}" thành công!`);
-            setBoards(prev => [...prev, res.data]);
-            setActiveBoardId(res.data.id);
-            setIsBoardModalOpen(false);
-            setNewBoardTitle('');
-            setNewBoardBg('');
+            setBoards(prev => prev.map(b => b.id === activeBoardId ? { ...b, background_url: publicUrl } : b));
+            toast.success('Đã áp dụng ảnh nền mới!', { id: toastId });
         } catch (err: any) {
-            toast.error('Lỗi tạo bảng: ' + (err.message || err));
+            toast.error('Lỗi tải ảnh: ' + (err.message || err), { id: toastId });
+        } finally {
+            setIsUploadingBg(false);
+            if (bgFileInputRef.current) bgFileInputRef.current.value = '';
         }
     };
 
-    // 7. Cập nhật Background Board
-    const handleSaveBackground = async (bgUrl: string) => {
+    // 7. Lưu Toàn Bộ Cài Đặt Board (Độ mờ, Overlay, Categories, Priorities)
+    const handleSaveBoardSettings = async () => {
         if (!activeBoardId) return;
         try {
             await fetchApi(`/board/boards/${activeBoardId}`, {
                 method: 'PUT',
-                body: JSON.stringify({ background_url: bgUrl })
+                body: JSON.stringify({
+                    overlay_color: boardOverlayColor,
+                    overlay_opacity: boardOverlayOpacity,
+                    column_opacity: boardColumnOpacity,
+                    card_opacity: boardCardOpacity,
+                    categories: boardCategories,
+                    priorities: boardPriorities
+                })
             });
-            setBoards(prev => prev.map(b => b.id === activeBoardId ? { ...b, background_url: bgUrl } : b));
-            toast.success('Đã đổi hình nền Board thành công!');
-            setIsBgSettingsOpen(false);
+
+            setBoards(prev => prev.map(b => b.id === activeBoardId ? {
+                ...b,
+                overlay_color: boardOverlayColor,
+                overlay_opacity: boardOverlayOpacity,
+                column_opacity: boardColumnOpacity,
+                card_opacity: boardCardOpacity,
+                categories: boardCategories,
+                priorities: boardPriorities
+            } : b));
+
+            toast.success('Đã lưu toàn bộ thiết lập Board!');
+            setIsSettingsModalOpen(false);
         } catch (err: any) {
-            toast.error('Lỗi cập nhật hình nền: ' + (err.message || err));
+            toast.error('Lỗi lưu cài đặt: ' + (err.message || err));
         }
     };
 
-    // 8. Lưu Cột (Thêm/Sửa Cột)
-    const handleSaveColumn = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!columnFormTitle.trim() || !activeBoardId) return;
+    // 8. Xóa Board (Đưa vào Thùng Rác 30 ngày)
+    const handleSoftDeleteBoard = async () => {
+        if (!activeBoardId) return;
+        if (!window.confirm(`Chuyển bảng "${activeBoard?.title}" vào Thùng rác? (Bảng sẽ tự động xóa vĩnh viễn sau 30 ngày).`)) return;
 
         try {
-            if (editingColumn) {
-                await fetchApi(`/board/columns/${editingColumn.id}`, {
-                    method: 'PUT',
-                    body: JSON.stringify({
-                        title: columnFormTitle.trim(),
-                        color: columnFormColor,
-                        column_type: columnFormType
-                    })
-                });
-                toast.success('Đã cập nhật cột!');
-            } else {
-                await fetchApi(`/board/boards/${activeBoardId}/columns`, {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        title: columnFormTitle.trim(),
-                        color: columnFormColor,
-                        column_type: columnFormType,
-                        order_index: columns.length
-                    })
-                });
-                toast.success('Đã thêm cột mới vào bảng!');
-            }
-            setIsColumnModalOpen(false);
-            loadBoardData(activeBoardId);
+            await fetchApi(`/board/boards/${activeBoardId}`, { method: 'DELETE' });
+            toast.success('Đã chuyển bảng vào Thùng rác.');
+            setIsSettingsModalOpen(false);
+            loadBoards();
         } catch (err: any) {
-            toast.error('Lỗi lưu cột: ' + (err.message || err));
+            toast.error('Lỗi xóa bảng: ' + (err.message || err));
         }
     };
 
-    // 9. Xóa Cột
-    const handleDeleteColumn = async (colId: string) => {
-        if (!window.confirm('Xóa cột này sẽ xóa tất cả các thẻ nằm bên trong cột. Anh có chắc không?')) return;
+    // 9. Khôi phục Board từ Thùng Rác
+    const handleRestoreBoard = async (bId: string) => {
         try {
-            await fetchApi(`/board/columns/${colId}`, { method: 'DELETE' });
-            toast.success('Đã xóa cột.');
-            setColumns(prev => prev.filter(c => c.id !== colId));
-            setCards(prev => prev.filter(c => c.column_id !== colId));
+            await fetchApi(`/board/boards/${bId}/restore`, { method: 'PUT' });
+            toast.success('Đã khôi phục bảng!');
+            loadBoards();
         } catch (err: any) {
-            toast.error('Lỗi khi xóa cột: ' + (err.message || err));
+            toast.error('Lỗi khôi phục: ' + (err.message || err));
         }
     };
 
-    // 10. Mở Modal Chi Tiết Card
-    const handleOpenCardModal = (card: BoardCardItem) => {
-        setActiveCard({ ...card, subtasks: card.subtasks || [] });
-        setIsCardModalOpen(true);
+    // 10. Xóa Vĩnh Viễn Board
+    const handlePermanentDeleteBoard = async (bId: string) => {
+        if (!window.confirm('Hành động này sẽ XÓA VĨNH VIỄN toàn bộ Cột và Thẻ của bảng này và không thể phục hồi. Anh có chắc không?')) return;
+        try {
+            await fetchApi(`/board/boards/${bId}/permanent`, { method: 'DELETE' });
+            toast.success('Đã xóa vĩnh viễn bảng.');
+            loadBoards();
+        } catch (err: any) {
+            toast.error('Lỗi xóa vĩnh viễn: ' + (err.message || err));
+        }
     };
 
     // 11. Lưu Card Chi Tiết
-    const handleSaveCard = async () => {
+    const handleSaveCardDetail = async () => {
         if (!activeCard) return;
         setIsSavingCard(true);
         try {
@@ -458,231 +374,282 @@ export const WorkBoardPage: React.FC = () => {
         }
     };
 
-    // 12. Định dạng Ngày Giờ
-    const formatDateTime = (isoStr?: string | null) => {
-        if (!isoStr) return null;
-        try {
-            const d = new Date(isoStr);
-            const isOverdue = d.getTime() < Date.now();
-            const timeStr = d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-            const dateStr = d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
-            return { text: `${timeStr} - ${dateStr}`, isOverdue };
-        } catch {
-            return null;
-        }
+    // Helper Màu Cột / Thẻ RGBA
+    const hexToRgba = (hex: string, opacity: number) => {
+        let c = hex.replace('#', '');
+        if (c.length === 3) c = c.split('').map(x => x + x).join('');
+        const num = parseInt(c, 16);
+        return `rgba(${(num >> 16) & 255}, ${(num >> 8) & 255}, ${num & 255}, ${opacity})`;
     };
 
     return (
-        <div
-            className="relative -m-6 p-6 min-h-[calc(100vh-64px)] flex flex-col transition-all bg-cover bg-center"
-            style={{
-                backgroundImage: activeBoard?.background_url ? `linear-gradient(rgba(15, 23, 42, 0.75), rgba(15, 23, 42, 0.85)), url(${activeBoard.background_url})` : undefined,
-                backgroundColor: activeBoard?.background_url ? undefined : '#0f172a'
-            }}
-        >
-            {/* Top Header: Board Selector & Customization Actions */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4 bg-slate-900/60 backdrop-blur-md p-3.5 rounded-2xl border border-slate-700/60 shadow-lg text-xs">
-                <div className="flex items-center gap-3 flex-wrap">
-                    {/* Board Selector */}
-                    <div className="flex items-center gap-2">
-                        <Layers className="w-4 h-4 text-violet-400" />
-                        <select
-                            value={activeBoardId}
-                            onChange={(e) => setActiveBoardId(e.target.value)}
-                            className="px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-xs font-bold text-slate-100 outline-none cursor-pointer focus:ring-2 focus:ring-violet-500/40"
+        <div className="relative w-full h-[calc(100vh-64px)] flex flex-col overflow-hidden bg-slate-950">
+            {/* 🖼️ Lớp Hình Nền + Lớp Phủ Màu Mờ Tùy Chỉnh (0-100%) */}
+            {activeBoard?.background_url && (
+                <div
+                    className="absolute inset-0 bg-cover bg-center transition-all"
+                    style={{ backgroundImage: `url(${activeBoard.background_url})` }}
+                />
+            )}
+            <div
+                className="absolute inset-0 transition-all pointer-events-none"
+                style={{
+                    backgroundColor: activeBoard?.overlay_color || '#000000',
+                    opacity: activeBoard?.overlay_opacity ?? 0.35
+                }}
+            />
+
+            {/* Content Container (Full Width tràn viền) */}
+            <div className="relative z-10 w-full h-full flex flex-col p-4 space-y-3">
+                {/* Top Control Bar */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-900/80 backdrop-blur-md p-3 rounded-2xl border border-slate-700/70 shadow-xl text-xs">
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                        {/* Board Selector */}
+                        <div className="flex items-center gap-2">
+                            <Layers className="w-4 h-4 text-violet-400" />
+                            <select
+                                value={activeBoardId}
+                                onChange={(e) => setActiveBoardId(e.target.value)}
+                                className="px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-xs font-bold text-slate-100 outline-none cursor-pointer focus:ring-2 focus:ring-violet-500/40"
+                            >
+                                {boards.map(b => (
+                                    <option key={b.id} value={b.id}>📋 {b.title}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Nút Tạo Board */}
+                        <button
+                            onClick={() => setIsNewBoardModalOpen(true)}
+                            className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl border border-slate-700 transition-colors"
                         >
-                            {boards.map(b => (
-                                <option key={b.id} value={b.id}>📋 {b.title}</option>
+                            <FolderPlus className="w-3.5 h-3.5 text-violet-400" />
+                            Tạo Board
+                        </button>
+
+                        {/* Nút Cài Đặt Chuyên Sâu */}
+                        <button
+                            onClick={() => setIsSettingsModalOpen(true)}
+                            className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl border border-slate-700 transition-colors"
+                        >
+                            <Sliders className="w-3.5 h-3.5 text-emerald-400" />
+                            Tùy Chỉnh Board
+                        </button>
+
+                        {/* Nút Thêm Cột */}
+                        <button
+                            onClick={() => {
+                                setEditingColumn(null);
+                                setColumnFormTitle('');
+                                setColumnFormColor('#8b5cf6');
+                                setColumnFormType('custom');
+                                setIsColumnModalOpen(true);
+                            }}
+                            className="flex items-center gap-1 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white font-semibold rounded-xl transition-all shadow-xs"
+                        >
+                            <Plus className="w-3.5 h-3.5" />
+                            Thêm Cột
+                        </button>
+                    </div>
+
+                    {/* Search & Filters */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <div className="relative">
+                            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                            <input
+                                type="text"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                placeholder="Tìm thẻ..."
+                                className="pl-8 pr-3 py-1.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-400 outline-none w-36 focus:w-48 transition-all"
+                            />
+                        </div>
+
+                        {/* Lọc Priority */}
+                        <select
+                            value={filterPriority}
+                            onChange={(e) => setFilterPriority(e.target.value)}
+                            className="px-2.5 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-200 outline-none"
+                        >
+                            <option value="all">⚡ Tất cả Priority</option>
+                            {boardPriorities.map(p => (
+                                <option key={p.key} value={p.key}>{p.label}</option>
+                            ))}
+                        </select>
+
+                        {/* Lọc Category */}
+                        <select
+                            value={filterCategory}
+                            onChange={(e) => setFilterCategory(e.target.value)}
+                            className="px-2.5 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-200 outline-none"
+                        >
+                            <option value="all">🏷️ Tất cả Phân loại</option>
+                            {boardCategories.map(cat => (
+                                <option key={cat} value={cat}>{cat}</option>
                             ))}
                         </select>
                     </div>
-
-                    {/* Nút Tạo Board Mới */}
-                    <button
-                        onClick={() => setIsBoardModalOpen(true)}
-                        className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl border border-slate-700 transition-colors"
-                    >
-                        <FolderPlus className="w-3.5 h-3.5 text-violet-400" />
-                        Tạo Board Mới
-                    </button>
-
-                    {/* Nút Tùy Chỉnh Background */}
-                    <button
-                        onClick={() => setIsBgSettingsOpen(true)}
-                        className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl border border-slate-700 transition-colors"
-                    >
-                        <ImageIcon className="w-3.5 h-3.5 text-emerald-400" />
-                        Đổi Hình Nền
-                    </button>
-
-                    {/* Nút Thêm Cột Mới */}
-                    <button
-                        onClick={() => {
-                            setEditingColumn(null);
-                            setColumnFormTitle('');
-                            setColumnFormColor('#8b5cf6');
-                            setColumnFormType('custom');
-                            setIsColumnModalOpen(true);
-                        }}
-                        className="flex items-center gap-1 px-2.5 py-1.5 bg-violet-600 hover:bg-violet-700 text-white font-semibold rounded-xl transition-all shadow-xs"
-                    >
-                        <Plus className="w-3.5 h-3.5" />
-                        Thêm Cột
-                    </button>
                 </div>
 
-                {/* Search & Priority Filters */}
-                <div className="flex items-center gap-2 flex-wrap">
-                    <div className="relative">
-                        <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                        <input
-                            type="text"
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            placeholder="Tìm kiếm thẻ..."
-                            className="pl-8 pr-3 py-1.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-400 outline-none w-44 focus:w-56 transition-all"
-                        />
-                    </div>
+                {/* Kanban Board Columns Area (Full Width Hỗ Trợ Cuộn Ngang) */}
+                <div className="flex-1 flex gap-3.5 items-start overflow-x-auto pb-2">
+                    {columns.map(col => {
+                        const colCards = filteredCards.filter(c => c.column_id === col.id);
+                        const isDoneCol = col.column_type === 'done';
+                        const isAbortCol = col.column_type === 'abort';
 
-                    <select
-                        value={filterPriority}
-                        onChange={(e) => setFilterPriority(e.target.value)}
-                        className="px-2.5 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-200 outline-none"
-                    >
-                        <option value="all">⚡ Tất cả Priority</option>
-                        <option value="urgent">🔥 Urgent</option>
-                        <option value="high">⚡ High</option>
-                        <option value="normal">🌿 Normal</option>
-                        <option value="low">☕ Low</option>
-                    </select>
-                </div>
-            </div>
+                        return (
+                            <div
+                                key={col.id}
+                                onDragOver={handleDragOver}
+                                onDrop={() => handleDrop(col.id)}
+                                className="w-72 shrink-0 p-3 rounded-2xl border border-slate-700/70 flex flex-col max-h-[calc(100vh-160px)] shadow-xl transition-all"
+                                style={{
+                                    backgroundColor: hexToRgba('#0f172a', activeBoard?.column_opacity ?? 0.75),
+                                    borderTop: `3px solid ${col.color}`
+                                }}
+                            >
+                                {/* Header Cột */}
+                                <div className="flex items-center justify-between mb-2.5 px-1">
+                                    <div className="flex items-center gap-2">
+                                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: col.color }} />
+                                        <h3 className="text-xs font-bold text-slate-100 truncate max-w-[130px]">{col.title}</h3>
+                                        <span className="px-1.5 py-0.5 rounded-md bg-slate-800 text-[10px] font-bold text-slate-300">
+                                            {colCards.length}
+                                        </span>
+                                    </div>
 
-            {/* Kanban Columns Grid */}
-            <div className="flex-1 flex gap-3.5 items-start overflow-x-auto pb-4 pt-1">
-                {columns.map(col => {
-                    const colCards = filteredCards.filter(c => c.column_id === col.id);
-
-                    return (
-                        <div
-                            key={col.id}
-                            onDragOver={handleDragOver}
-                            onDrop={() => handleDrop(col.id)}
-                            className="w-72 shrink-0 bg-slate-900/75 backdrop-blur-md p-3 rounded-2xl border border-slate-700/70 flex flex-col max-h-[calc(100vh-185px)] shadow-xl transition-all"
-                            style={{ borderTop: `3px solid ${col.color}` }}
-                        >
-                            {/* Header Cột */}
-                            <div className="flex items-center justify-between mb-2.5 px-1">
-                                <div className="flex items-center gap-2">
-                                    <span
-                                        className="w-2.5 h-2.5 rounded-full"
-                                        style={{ backgroundColor: col.color }}
-                                    />
-                                    <h3 className="text-xs font-bold text-slate-100 truncate max-w-[130px]" title={col.title}>
-                                        {col.title}
-                                    </h3>
-                                    <span className="px-1.5 py-0.5 rounded-md bg-slate-800 text-[10px] font-bold text-slate-300">
-                                        {colCards.length}
-                                    </span>
-                                </div>
-
-                                <div className="flex items-center gap-1">
-                                    <button
-                                        onClick={() => {
-                                            setEditingColumn(col);
-                                            setColumnFormTitle(col.title);
-                                            setColumnFormColor(col.color);
-                                            setColumnFormType(col.column_type);
-                                            setIsColumnModalOpen(true);
-                                        }}
-                                        className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-md"
-                                        title="Chỉnh sửa cột"
-                                    >
-                                        <Settings2 className="w-3.5 h-3.5" />
-                                    </button>
-                                    <button
-                                        onClick={() => {
-                                            setQuickAddColId(col.id);
-                                            setQuickAddTitle('');
-                                        }}
-                                        className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-md"
-                                        title="Thêm thẻ nhanh"
-                                    >
-                                        <Plus className="w-3.5 h-3.5" />
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Ô Thêm Nhanh */}
-                            {quickAddColId === col.id && (
-                                <div className="bg-slate-800 p-2.5 rounded-xl border border-violet-500 mb-2.5 animate-in fade-in">
-                                    <textarea
-                                        rows={2}
-                                        autoFocus
-                                        value={quickAddTitle}
-                                        onChange={(e) => setQuickAddTitle(e.target.value)}
-                                        placeholder="Nhập tiêu đề thẻ..."
-                                        className="w-full p-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-slate-100 outline-none"
-                                    />
-                                    <div className="flex items-center justify-end gap-1.5 mt-2">
+                                    <div className="flex items-center gap-1">
                                         <button
-                                            onClick={() => setQuickAddColId(null)}
-                                            className="px-2 py-1 text-[11px] text-slate-400 hover:text-slate-200"
+                                            onClick={() => {
+                                                setEditingColumn(col);
+                                                setColumnFormTitle(col.title);
+                                                setColumnFormColor(col.color);
+                                                setColumnFormType(col.column_type);
+                                                setIsColumnModalOpen(true);
+                                            }}
+                                            className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-md"
                                         >
-                                            Hủy
+                                            <Settings2 className="w-3.5 h-3.5" />
                                         </button>
                                         <button
-                                            onClick={() => handleQuickAddCard(col.id)}
-                                            className="px-3 py-1 bg-violet-600 text-white rounded-lg text-[11px] font-semibold hover:bg-violet-700"
+                                            onClick={() => {
+                                                setQuickAddColId(col.id);
+                                                setQuickAddTitle('');
+                                                setQuickAddPriority('low');
+                                                setQuickAddCategory('Khác');
+                                            }}
+                                            className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-md"
                                         >
-                                            Thêm
+                                            <Plus className="w-3.5 h-3.5" />
                                         </button>
                                     </div>
                                 </div>
-                            )}
 
-                            {/* Danh Sách Thẻ */}
-                            <div className="flex-1 overflow-y-auto space-y-2.5 pr-0.5">
-                                {colCards.length === 0 && quickAddColId !== col.id && (
-                                    <div className="py-12 text-center text-slate-500 text-[11px] border border-dashed border-slate-800 rounded-xl">
-                                        Kéo thả thẻ vào đây
+                                {/* Ô Thêm Nhanh Thẻ (Có set Priority & Category mặc định Thấp & Khác) */}
+                                {quickAddColId === col.id && (
+                                    <div className="bg-slate-800/90 p-2.5 rounded-xl border border-violet-500 mb-2.5 text-xs space-y-2 animate-in fade-in">
+                                        <textarea
+                                            rows={2}
+                                            autoFocus
+                                            value={quickAddTitle}
+                                            onChange={(e) => setQuickAddTitle(e.target.value)}
+                                            placeholder="Nhập tiêu đề thẻ công việc..."
+                                            className="w-full p-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 outline-none text-xs"
+                                        />
+
+                                        <div className="grid grid-cols-2 gap-1.5">
+                                            <select
+                                                value={quickAddPriority}
+                                                onChange={(e) => setQuickAddPriority(e.target.value)}
+                                                className="p-1 bg-slate-900 border border-slate-700 rounded text-[11px] text-slate-300 outline-none"
+                                            >
+                                                {boardPriorities.map(p => (
+                                                    <option key={p.key} value={p.key}>{p.label}</option>
+                                                ))}
+                                            </select>
+
+                                            <select
+                                                value={quickAddCategory}
+                                                onChange={(e) => setQuickAddCategory(e.target.value)}
+                                                className="p-1 bg-slate-900 border border-slate-700 rounded text-[11px] text-slate-300 outline-none"
+                                            >
+                                                {boardCategories.map(cat => (
+                                                    <option key={cat} value={cat}>{cat}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+
+                                        <div className="flex items-center justify-end gap-1.5 pt-1">
+                                            <button
+                                                onClick={() => setQuickAddColId(null)}
+                                                className="px-2 py-1 text-[11px] text-slate-400 hover:text-slate-200"
+                                            >
+                                                Hủy
+                                            </button>
+                                            <button
+                                                onClick={() => handleQuickAddCard(col.id)}
+                                                className="px-3 py-1 bg-violet-600 text-white rounded-lg text-[11px] font-semibold hover:bg-violet-700"
+                                            >
+                                                Thêm Thẻ
+                                            </button>
+                                        </div>
                                     </div>
                                 )}
 
-                                {colCards.map(card => {
-                                    const subtasks = card.subtasks || [];
-                                    const completedSubtasks = subtasks.filter(s => s.completed).length;
-                                    const dtInfo = formatDateTime(card.due_date);
+                                {/* Danh Sách Thẻ */}
+                                <div className="flex-1 overflow-y-auto space-y-2.5 pr-0.5">
+                                    {colCards.length === 0 && quickAddColId !== col.id && (
+                                        <div className="py-12 text-center text-slate-500 text-[11px] border border-dashed border-slate-800 rounded-xl">
+                                            Kéo thả thẻ vào đây
+                                        </div>
+                                    )}
 
-                                    return (
-                                        <div
-                                            key={card.id}
-                                            draggable
-                                            onDragStart={() => handleDragStart(card.id)}
-                                            onClick={() => handleOpenCardModal(card)}
-                                            className="bg-slate-800/90 p-3.5 rounded-xl border border-slate-700 hover:border-violet-400 shadow-md hover:shadow-xl transition-all cursor-grab active:cursor-grabbing group relative flex flex-col justify-between"
-                                            style={{ borderLeft: `4px solid ${card.color || '#8b5cf6'}` }}
-                                        >
-                                            <div>
-                                                {/* Priority & Category */}
+                                    {colCards.map(card => {
+                                        const subtasks = card.subtasks || [];
+                                        const completedSubtasks = subtasks.filter(s => s.completed).length;
+                                        const priorityObj = boardPriorities.find(p => p.key === card.priority) || { label: card.priority, color: '#64748b' };
+
+                                        return (
+                                            <div
+                                                key={card.id}
+                                                draggable
+                                                onDragStart={() => handleDragStart(card.id)}
+                                                onClick={() => {
+                                                    setActiveCard({ ...card, subtasks: card.subtasks || [] });
+                                                    setIsCardModalOpen(true);
+                                                }}
+                                                className={`p-3.5 rounded-xl border border-slate-700/80 shadow-md hover:shadow-xl transition-all cursor-grab active:cursor-grabbing group relative ${isDoneCol ? 'opacity-75 bg-emerald-950/20 border-emerald-800/40' :
+                                                    isAbortCol ? 'opacity-65 bg-rose-950/20 border-rose-900/40' : ''
+                                                    }`}
+                                                style={{
+                                                    backgroundColor: isDoneCol || isAbortCol ? undefined : hexToRgba('#1e293b', activeBoard?.card_opacity ?? 0.85),
+                                                    borderLeft: `4px solid ${isDoneCol ? '#10b981' : isAbortCol ? '#f43f5e' : (card.color || '#8b5cf6')}`
+                                                }}
+                                            >
+                                                {/* Priority & Category Badges */}
                                                 <div className="flex items-center justify-between gap-1 mb-2">
-                                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${card.priority === 'urgent' ? 'bg-rose-900/50 text-rose-300' :
-                                                        card.priority === 'high' ? 'bg-amber-900/50 text-amber-300' :
-                                                            'bg-slate-700 text-slate-300'
-                                                        }`}>
-                                                        {card.priority === 'urgent' && '🔥 '}
-                                                        {card.priority}
+                                                    <span
+                                                        className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider text-slate-100"
+                                                        style={{ backgroundColor: priorityObj.color + '40', color: priorityObj.color }}
+                                                    >
+                                                        {priorityObj.label}
                                                     </span>
 
                                                     <span className="text-[10px] font-mono text-slate-400 bg-slate-900 px-1.5 py-0.5 rounded">
-                                                        {card.category}
+                                                        {card.category || 'Khác'}
                                                     </span>
                                                 </div>
 
-                                                {/* Title */}
-                                                <h4 className="text-xs font-bold text-slate-100 leading-snug line-clamp-2 mb-2">
-                                                    {card.title}
-                                                </h4>
+                                                {/* Tiêu đề (Hiệu ứng Gạch Ngang nếu Abort, Tích Xanh nếu Done) */}
+                                                <div className="flex items-start gap-1.5 mb-2">
+                                                    {isDoneCol && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />}
+                                                    {isAbortCol && <Ban className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />}
+                                                    <h4 className={`text-xs font-bold text-slate-100 leading-snug line-clamp-2 ${isDoneCol ? 'text-slate-300' : isAbortCol ? 'line-through text-slate-400' : ''
+                                                        }`}>
+                                                        {card.title}
+                                                    </h4>
+                                                </div>
 
                                                 {/* Subtasks Progress */}
                                                 {subtasks.length > 0 && (
@@ -697,43 +664,321 @@ export const WorkBoardPage: React.FC = () => {
                                                         </div>
                                                     </div>
                                                 )}
-                                            </div>
 
-                                            {/* Footer: Date Time & Assignee */}
-                                            <div className="flex items-center justify-between pt-2 border-t border-slate-700/60 text-[10px]">
-                                                {dtInfo ? (
-                                                    <span className={`flex items-center gap-1 font-semibold ${dtInfo.isOverdue ? 'text-rose-400' : 'text-slate-300'
-                                                        }`}>
-                                                        <Clock className="w-3 h-3" />
-                                                        {dtInfo.text}
-                                                    </span>
-                                                ) : (
-                                                    <span className="flex items-center gap-1 text-slate-400">
+                                                {/* Footer: User & Date */}
+                                                <div className="flex items-center justify-between pt-2 border-t border-slate-700/60 text-[10px] text-slate-400">
+                                                    <span className="flex items-center gap-1 truncate max-w-[120px]">
                                                         <User className="w-3 h-3" />
                                                         {card.assigned_name || 'Admin'}
                                                     </span>
-                                                )}
+                                                    {card.due_date && (
+                                                        <span className="flex items-center gap-1 text-slate-300 font-mono">
+                                                            <Clock className="w-3 h-3" />
+                                                            {new Date(card.due_date).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })}
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </div>
-                                        </div>
-                                    );
-                                })}
+                                        );
+                                    })}
+                                </div>
                             </div>
-                        </div>
-                    );
-                })}
+                        );
+                    })}
+                </div>
             </div>
 
             {/* ==================================================================== */}
-            {/* MODAL 1: TẠO BOARD MỚI                                               */}
+            {/* MODAL: TÙY CHỈNH BOARD CHUYÊN SÂU (3 TABS)                          */}
             {/* ==================================================================== */}
-            {isBoardModalOpen && (
+            {isSettingsModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-xl w-full p-6 text-xs text-slate-200 shadow-2xl relative max-h-[90vh] flex flex-col">
+                        <button
+                            onClick={() => setIsSettingsModalOpen(false)}
+                            className="absolute right-4 top-4 text-slate-400 hover:text-white"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+
+                        <h3 className="text-base font-bold text-white mb-2 flex items-center gap-2">
+                            <Sliders className="w-5 h-5 text-emerald-400" />
+                            Tùy Chỉnh Toàn Diện – [{activeBoard?.title}]
+                        </h3>
+
+                        {/* 3 Tabs Điều Khiển */}
+                        <div className="flex bg-slate-800 p-1 rounded-xl mb-4 text-xs">
+                            <button
+                                type="button"
+                                onClick={() => setSettingsTab('visuals')}
+                                className={`flex-1 py-1.5 rounded-lg font-semibold transition-all ${settingsTab === 'visuals' ? 'bg-slate-700 text-white shadow-xs' : 'text-slate-400'
+                                    }`}
+                            >
+                                🎨 Hình Nền & Độ Mờ
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setSettingsTab('taxonomy')}
+                                className={`flex-1 py-1.5 rounded-lg font-semibold transition-all ${settingsTab === 'taxonomy' ? 'bg-slate-700 text-white shadow-xs' : 'text-slate-400'
+                                    }`}
+                            >
+                                🏷️ Phân Loại & Priority
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setSettingsTab('trash')}
+                                className={`flex-1 py-1.5 rounded-lg font-semibold transition-all ${settingsTab === 'trash' ? 'bg-slate-700 text-white shadow-xs' : 'text-slate-400'
+                                    }`}
+                            >
+                                🗑️ Thùng Rác Board ({trashBoards.length})
+                            </button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+                            {/* TAB 1: VISUALS & OPACITY SLIDERS */}
+                            {settingsTab === 'visuals' && (
+                                <div className="space-y-4">
+                                    {/* Upload Ảnh */}
+                                    <div>
+                                        <label className="block font-semibold mb-1">Ảnh Nền Board:</label>
+                                        <input type="file" ref={bgFileInputRef} onChange={handleUploadBgFile} accept="image/*" className="hidden" />
+                                        <div
+                                            onClick={() => !isUploadingBg && bgFileInputRef.current?.click()}
+                                            className="border border-dashed border-slate-700 hover:border-emerald-400 p-4 rounded-xl text-center cursor-pointer bg-slate-800/50"
+                                        >
+                                            {isUploadingBg ? (
+                                                <span className="text-violet-400 flex items-center justify-center gap-2">
+                                                    <Loader2 className="w-4 h-4 animate-spin" /> Đang tải lên Supabase...
+                                                </span>
+                                            ) : (
+                                                <span className="text-slate-300 flex items-center justify-center gap-2">
+                                                    <UploadCloud className="w-4 h-4 text-emerald-400" /> Bấm để chọn ảnh nền mới từ máy tính
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Màu Lớp Phủ Overlay */}
+                                    <div>
+                                        <label className="block font-semibold mb-1">Màu Lớp Phủ (Overlay Color):</label>
+                                        <div className="flex gap-2 flex-wrap">
+                                            {PRESET_OVERLAYS.map(ov => (
+                                                <button
+                                                    key={ov.name}
+                                                    type="button"
+                                                    onClick={() => setBoardOverlayColor(ov.color)}
+                                                    className={`px-3 py-1 rounded-lg border text-[11px] font-medium transition-all ${boardOverlayColor === ov.color ? 'border-emerald-400 bg-emerald-950/30 text-emerald-300' : 'border-slate-700 bg-slate-800 text-slate-300'
+                                                        }`}
+                                                >
+                                                    {ov.name}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* 🎚️ 3 THANH TRƯỢT OPACITY TỪ 0 - 100% */}
+                                    <div className="bg-slate-800/60 p-3.5 rounded-xl border border-slate-700 space-y-3">
+                                        <div>
+                                            <div className="flex justify-between mb-1">
+                                                <span className="font-semibold">Độ mờ tối của Lớp Phủ Board:</span>
+                                                <span className="font-mono text-emerald-400">{Math.round(boardOverlayOpacity * 100)}%</span>
+                                            </div>
+                                            <input
+                                                type="range"
+                                                min="0"
+                                                max="1"
+                                                step="0.05"
+                                                value={boardOverlayOpacity}
+                                                onChange={(e) => setBoardOverlayOpacity(parseFloat(e.target.value))}
+                                                className="w-full accent-emerald-500 cursor-pointer"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <div className="flex justify-between mb-1">
+                                                <span className="font-semibold">Độ trong suốt nền Cột (Columns):</span>
+                                                <span className="font-mono text-violet-400">{Math.round(boardColumnOpacity * 100)}%</span>
+                                            </div>
+                                            <input
+                                                type="range"
+                                                min="0.1"
+                                                max="1"
+                                                step="0.05"
+                                                value={boardColumnOpacity}
+                                                onChange={(e) => setBoardColumnOpacity(parseFloat(e.target.value))}
+                                                className="w-full accent-violet-500 cursor-pointer"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <div className="flex justify-between mb-1">
+                                                <span className="font-semibold">Độ trong suốt nền Thẻ (Cards):</span>
+                                                <span className="font-mono text-sky-400">{Math.round(boardCardOpacity * 100)}%</span>
+                                            </div>
+                                            <input
+                                                type="range"
+                                                min="0.2"
+                                                max="1"
+                                                step="0.05"
+                                                value={boardCardOpacity}
+                                                onChange={(e) => setBoardCardOpacity(parseFloat(e.target.value))}
+                                                className="w-full accent-sky-500 cursor-pointer"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* TAB 2: TAXONOMY (CATEGORIES & PRIORITIES) */}
+                            {settingsTab === 'taxonomy' && (
+                                <div className="space-y-4">
+                                    {/* Danh Mục Categories */}
+                                    <div>
+                                        <label className="block font-semibold mb-1.5">Danh sách Phân Loại (Categories) áp dụng cho Board:</label>
+                                        <div className="flex flex-wrap gap-1.5 mb-2">
+                                            {boardCategories.map((cat, idx) => (
+                                                <span key={idx} className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 border border-slate-700 rounded-lg text-slate-200">
+                                                    {cat}
+                                                    {boardCategories.length > 1 && (
+                                                        <button
+                                                            onClick={() => {
+                                                                const updated = boardCategories.filter((_, i) => i !== idx);
+                                                                setBoards(prev => prev.map(b => b.id === activeBoardId ? { ...b, categories: updated } : b));
+                                                            }}
+                                                            className="text-slate-400 hover:text-rose-400"
+                                                        >
+                                                            <X className="w-3 h-3" />
+                                                        </button>
+                                                    )}
+                                                </span>
+                                            ))}
+                                        </div>
+
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="text"
+                                                value={newCategoryInput}
+                                                onChange={(e) => setNewCategoryInput(e.target.value)}
+                                                placeholder="Thêm phân loại mới..."
+                                                className="flex-1 p-2 bg-slate-800 border border-slate-700 rounded-xl text-white outline-none"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    if (!newCategoryInput.trim()) return;
+                                                    const updated = [...boardCategories, newCategoryInput.trim()];
+                                                    setBoards(prev => prev.map(b => b.id === activeBoardId ? { ...b, categories: updated } : b));
+                                                    setNewCategoryInput('');
+                                                }}
+                                                className="px-3 py-2 bg-violet-600 text-white rounded-xl font-semibold"
+                                            >
+                                                Thêm
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* TAB 3: TRASH BIN & BOARD DELETION */}
+                            {settingsTab === 'trash' && (
+                                <div className="space-y-4">
+                                    <div className="p-3 bg-rose-950/30 border border-rose-800/60 rounded-xl flex items-center justify-between">
+                                        <div>
+                                            <h4 className="font-bold text-rose-300">Xóa Bảng Hiện Tại</h4>
+                                            <p className="text-[11px] text-slate-400">Bảng sẽ chuyển vào Thùng rác và lưu trữ an toàn trong 30 ngày.</p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={handleSoftDeleteBoard}
+                                            className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-semibold rounded-lg"
+                                        >
+                                            Xóa Bảng Này
+                                        </button>
+                                    </div>
+
+                                    <div>
+                                        <h4 className="font-bold mb-2 text-slate-300">Danh sách Bảng trong Thùng rác (Tự hủy sau 30 ngày):</h4>
+                                        {trashBoards.length === 0 ? (
+                                            <div className="p-6 text-center text-slate-500 bg-slate-800/40 rounded-xl">Thùng rác trống.</div>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {trashBoards.map(tb => (
+                                                    <div key={tb.id} className="p-2.5 bg-slate-800 rounded-xl border border-slate-700 flex items-center justify-between">
+                                                        <div>
+                                                            <div className="font-bold text-white">{tb.title}</div>
+                                                            <div className="text-[10px] text-slate-400">
+                                                                Đã xóa: {tb.deleted_at ? new Date(tb.deleted_at).toLocaleDateString('vi-VN') : 'Gần đây'}
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="flex items-center gap-2">
+                                                            <button
+                                                                onClick={() => handleRestoreBoard(tb.id)}
+                                                                className="flex items-center gap-1 px-2.5 py-1 bg-emerald-600/30 text-emerald-300 hover:bg-emerald-600/50 rounded-lg text-[11px]"
+                                                            >
+                                                                <RotateCcw className="w-3 h-3" /> Khôi phục
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handlePermanentDeleteBoard(tb.id)}
+                                                                className="p-1 text-rose-400 hover:text-rose-300"
+                                                                title="Xóa vĩnh viễn"
+                                                            >
+                                                                <Trash2 className="w-3.5 h-3.5" />
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex justify-end gap-2 pt-4 mt-3 border-t border-slate-800">
+                            <button
+                                type="button"
+                                onClick={() => setIsSettingsModalOpen(false)}
+                                className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl"
+                            >
+                                Đóng
+                            </button>
+                            {settingsTab !== 'trash' && (
+                                <button
+                                    type="button"
+                                    onClick={handleSaveBoardSettings}
+                                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl"
+                                >
+                                    Lưu Thiết Lập
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ==================================================================== */}
+            {/* MODAL: TẠO BOARD MỚI                                                 */}
+            {/* ==================================================================== */}
+            {isNewBoardModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
                     <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 text-xs text-slate-200">
                         <h3 className="text-base font-bold text-white mb-3 flex items-center gap-2">
-                            <FolderPlus className="w-5 h-5 text-violet-400" />
-                            Tạo Board Mới
+                            <FolderPlus className="w-5 h-5 text-violet-400" /> Tạo Board Mới
                         </h3>
-                        <form onSubmit={handleCreateBoard} className="space-y-4">
+                        <form onSubmit={async (e) => {
+                            e.preventDefault();
+                            if (!newBoardTitle.trim()) return;
+                            const res: any = await fetchApi('/board/boards', {
+                                method: 'POST',
+                                body: JSON.stringify({ title: newBoardTitle.trim() })
+                            });
+                            toast.success(`Đã tạo bảng "${newBoardTitle}"!`);
+                            setBoards(prev => [...prev, res.data]);
+                            setActiveBoardId(res.data.id);
+                            setIsNewBoardModalOpen(false);
+                            setNewBoardTitle('');
+                        }} className="space-y-4">
                             <div>
                                 <label className="block font-semibold mb-1">Tên Board <span className="text-rose-500">*</span></label>
                                 <input
@@ -741,36 +986,13 @@ export const WorkBoardPage: React.FC = () => {
                                     required
                                     value={newBoardTitle}
                                     onChange={(e) => setNewBoardTitle(e.target.value)}
-                                    placeholder="VD: Quản Lý Khách Hàng / RPA Tasks..."
-                                    className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-xl outline-none text-white focus:ring-2 focus:ring-violet-500/40"
+                                    placeholder="VD: Quản Lý Khách Hàng / RPA..."
+                                    className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white outline-none"
                                 />
                             </div>
-
-                            <div>
-                                <label className="block font-semibold mb-1">Link Ảnh Nền (Tùy chọn)</label>
-                                <input
-                                    type="url"
-                                    value={newBoardBg}
-                                    onChange={(e) => setNewBoardBg(e.target.value)}
-                                    placeholder="https://images.unsplash.com/..."
-                                    className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-xl outline-none text-white text-[11px]"
-                                />
-                            </div>
-
-                            <div className="flex justify-end gap-2 pt-2">
-                                <button
-                                    type="button"
-                                    onClick={() => setIsBoardModalOpen(false)}
-                                    className="px-4 py-2 bg-slate-800 rounded-xl text-slate-400 hover:text-white"
-                                >
-                                    Hủy
-                                </button>
-                                <button
-                                    type="submit"
-                                    className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white font-semibold rounded-xl"
-                                >
-                                    Tạo Board
-                                </button>
+                            <div className="flex justify-end gap-2">
+                                <button type="button" onClick={() => setIsNewBoardModalOpen(false)} className="px-4 py-2 bg-slate-800 text-slate-400 rounded-xl">Hủy</button>
+                                <button type="submit" className="px-4 py-2 bg-violet-600 text-white font-semibold rounded-xl">Tạo Board</button>
                             </div>
                         </form>
                     </div>
@@ -778,182 +1000,55 @@ export const WorkBoardPage: React.FC = () => {
             )}
 
             {/* ==================================================================== */}
-            {/* MODAL 2: TÙY CHỈNH HÌNH NỀN BOARD (UPLOAD TRỰC TIẾP LÊN SUPABASE)    */}
-            {/* ==================================================================== */}
-            {isBgSettingsOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in">
-                    <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 text-xs text-slate-200 relative shadow-2xl">
-                        <button
-                            onClick={() => setIsBgSettingsOpen(false)}
-                            className="absolute right-4 top-4 text-slate-400 hover:text-white"
-                        >
-                            <X className="w-5 h-5" />
-                        </button>
-
-                        <h3 className="text-base font-bold text-white mb-2 flex items-center gap-2">
-                            <ImageIcon className="w-5 h-5 text-emerald-400" />
-                            Tùy Chỉnh Hình Nền Board
-                        </h3>
-                        <p className="text-[11px] text-slate-400 mb-4">
-                            Tải ảnh từ máy tính để lưu trữ trực tiếp trên Supabase Storage.
-                        </p>
-
-                        <div className="space-y-4">
-                            {/* Khu vực Upload Ảnh Từ Máy */}
-                            <div>
-                                <input
-                                    type="file"
-                                    ref={bgFileInputRef}
-                                    onChange={handleUploadBgFile}
-                                    accept="image/png, image/jpeg, image/jpg, image/webp"
-                                    className="hidden"
-                                />
-
-                                <div
-                                    onClick={() => !isUploadingBg && bgFileInputRef.current?.click()}
-                                    className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all ${isUploadingBg
-                                        ? 'border-violet-500 bg-violet-950/20 opacity-60 cursor-wait'
-                                        : 'border-slate-700 hover:border-emerald-400 bg-slate-800/60 hover:bg-slate-800'
-                                        }`}
-                                >
-                                    {isUploadingBg ? (
-                                        <div className="flex flex-col items-center gap-2">
-                                            <Loader2 className="w-8 h-8 text-violet-400 animate-spin" />
-                                            <span className="text-xs font-semibold text-violet-300">Đang lưu vào Supabase...</span>
-                                        </div>
-                                    ) : (
-                                        <div className="flex flex-col items-center gap-2">
-                                            <UploadCloud className="w-8 h-8 text-emerald-400" />
-                                            <span className="text-xs font-semibold text-slate-100">Bấm để chọn ảnh từ máy tính</span>
-                                            <span className="text-[10px] text-slate-400">Hỗ trợ PNG, JPG, WEBP (Tối đa 5MB)</span>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-
-                            {/* Xem trước ảnh hiện tại (nếu có) */}
-                            {activeBoard?.background_url && (
-                                <div className="p-3 bg-slate-800/80 rounded-xl border border-slate-700 flex items-center justify-between">
-                                    <div className="flex items-center gap-2.5">
-                                        <img
-                                            src={activeBoard.background_url}
-                                            alt="Current background"
-                                            className="w-12 h-8 rounded object-cover border border-slate-600"
-                                        />
-                                        <span className="text-[11px] text-slate-300 font-medium truncate max-w-[180px]">
-                                            Ảnh nền đang dùng
-                                        </span>
-                                    </div>
-
-                                    <button
-                                        type="button"
-                                        onClick={handleRemoveBackground}
-                                        className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-900/40 hover:bg-rose-900/60 text-rose-300 rounded-lg transition-colors text-[11px]"
-                                    >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                        Xóa ảnh
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="flex justify-end pt-4 mt-4 border-t border-slate-800">
-                            <button
-                                type="button"
-                                onClick={() => setIsBgSettingsOpen(false)}
-                                className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl hover:bg-slate-700"
-                            >
-                                Đóng
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* ==================================================================== */}
-            {/* MODAL 3: THÊM / SỬA / XÓA CỘT                                        */}
+            {/* MODAL: THÊM / SỬA CỘT                                                */}
             {/* ==================================================================== */}
             {isColumnModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
                     <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 text-xs text-slate-200">
-                        <h3 className="text-base font-bold text-white mb-3 flex items-center gap-2">
-                            <Settings2 className="w-5 h-5 text-violet-400" />
+                        <h3 className="text-base font-bold text-white mb-3">
                             {editingColumn ? 'Chỉnh Sửa Cột' : 'Thêm Cột Mới'}
                         </h3>
-
-                        <form onSubmit={handleSaveColumn} className="space-y-4">
+                        <form onSubmit={async (e) => {
+                            e.preventDefault();
+                            if (editingColumn) {
+                                await fetchApi(`/board/columns/${editingColumn.id}`, {
+                                    method: 'PUT',
+                                    body: JSON.stringify({ title: columnFormTitle, color: columnFormColor, column_type: columnFormType })
+                                });
+                            } else {
+                                await fetchApi(`/board/boards/${activeBoardId}/columns`, {
+                                    method: 'POST',
+                                    body: JSON.stringify({ title: columnFormTitle, color: columnFormColor, column_type: columnFormType, order_index: columns.length })
+                                });
+                            }
+                            setIsColumnModalOpen(false);
+                            loadBoardData(activeBoardId);
+                        }} className="space-y-3">
                             <div>
-                                <label className="block font-semibold mb-1">Tên Cột <span className="text-rose-500">*</span></label>
+                                <label className="block font-semibold mb-1">Tên Cột</label>
                                 <input
                                     type="text"
                                     required
                                     value={columnFormTitle}
                                     onChange={(e) => setColumnFormTitle(e.target.value)}
-                                    placeholder="VD: Test QA, Cần Hỗ Trợ..."
-                                    className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white outline-none"
+                                    className="w-full p-2 bg-slate-800 border border-slate-700 rounded-xl text-white outline-none"
                                 />
                             </div>
-
                             <div>
-                                <label className="block font-semibold mb-1">Màu sắc định danh cột:</label>
-                                <div className="flex gap-2 flex-wrap">
-                                    {COLOR_PALETTE.map(c => (
-                                        <button
-                                            key={c}
-                                            type="button"
-                                            onClick={() => setColumnFormColor(c)}
-                                            className={`w-7 h-7 rounded-full border-2 transition-all ${columnFormColor === c ? 'border-white scale-110' : 'border-transparent'
-                                                }`}
-                                            style={{ backgroundColor: c }}
-                                        />
-                                    ))}
-                                </div>
-                            </div>
-
-                            <div>
-                                <label className="block font-semibold mb-1">Loại cột:</label>
+                                <label className="block font-semibold mb-1">Loại Cột</label>
                                 <select
                                     value={columnFormType}
                                     onChange={(e) => setColumnFormType(e.target.value)}
                                     className="w-full p-2 bg-slate-800 border border-slate-700 rounded-xl text-white outline-none"
                                 >
-                                    <option value="custom">📌 Cột thông thường</option>
-                                    <option value="backlog">📋 Backlog (Tiếp nhận)</option>
-                                    <option value="todo">⏳ To Do (Cần làm)</option>
-                                    <option value="in_progress">⚡ In Progress (Đang làm)</option>
-                                    <option value="review">🔍 Review (Chờ duyệt)</option>
-                                    <option value="done">🎉 Done (Hoàn thành)</option>
-                                    <option value="abort">🚫 Hủy bỏ</option>
+                                    <option value="custom">📌 Thông thường</option>
+                                    <option value="done">✓ Hoàn thành (Tích xanh & Mờ dịu)</option>
+                                    <option value="abort">🚫 Hủy bỏ (Gạch ngang chữ)</option>
                                 </select>
                             </div>
-
-                            <div className="flex items-center justify-between pt-3 border-t border-slate-800">
-                                {editingColumn ? (
-                                    <button
-                                        type="button"
-                                        onClick={() => handleDeleteColumn(editingColumn.id)}
-                                        className="flex items-center gap-1 text-rose-400 hover:text-rose-300 font-semibold"
-                                    >
-                                        <Trash2 className="w-4 h-4" />
-                                        Xóa Cột Này
-                                    </button>
-                                ) : <div />}
-
-                                <div className="flex gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => setIsColumnModalOpen(false)}
-                                        className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl"
-                                    >
-                                        Hủy
-                                    </button>
-                                    <button
-                                        type="submit"
-                                        className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white font-semibold rounded-xl"
-                                    >
-                                        Lưu Cột
-                                    </button>
-                                </div>
+                            <div className="flex justify-end gap-2 pt-2">
+                                <button type="button" onClick={() => setIsColumnModalOpen(false)} className="px-4 py-2 bg-slate-800 rounded-xl text-slate-400">Hủy</button>
+                                <button type="submit" className="px-4 py-2 bg-violet-600 text-white font-semibold rounded-xl">Lưu Cột</button>
                             </div>
                         </form>
                     </div>
@@ -961,58 +1056,48 @@ export const WorkBoardPage: React.FC = () => {
             )}
 
             {/* ==================================================================== */}
-            {/* MODAL 4: CHI TIẾT & CHỈNH SỬA CARD (FULL NGÀY GIỜ + MÀU THẺ)         */}
+            {/* MODAL: CHI TIẾT CARD                                                 */}
             {/* ==================================================================== */}
             {isCardModalOpen && activeCard && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs">
                     <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-xl w-full p-6 text-xs text-slate-200 relative max-h-[90vh] flex flex-col">
-                        <button
-                            onClick={() => setIsCardModalOpen(false)}
-                            className="absolute right-4 top-4 text-slate-400 hover:text-white"
-                        >
+                        <button onClick={() => setIsCardModalOpen(false)} className="absolute right-4 top-4 text-slate-400 hover:text-white">
                             <X className="w-5 h-5" />
                         </button>
 
-                        {/* Tiêu đề & Màu Thẻ */}
-                        <div className="flex items-center gap-2 mb-3">
-                            <input
-                                type="text"
-                                value={activeCard.title}
-                                onChange={(e) => setActiveCard({ ...activeCard, title: e.target.value })}
-                                className="text-base font-bold text-white bg-transparent border-b border-transparent hover:border-slate-700 focus:border-violet-500 outline-none flex-1 pb-1"
-                            />
-                        </div>
+                        <input
+                            type="text"
+                            value={activeCard.title}
+                            onChange={(e) => setActiveCard({ ...activeCard, title: e.target.value })}
+                            className="text-base font-bold text-white bg-transparent border-b border-slate-700 focus:border-violet-500 outline-none pb-1 mb-4"
+                        />
 
                         <div className="space-y-4 flex-1 overflow-y-auto pr-1">
-                            {/* Thuộc tính Grid */}
                             <div className="grid grid-cols-2 gap-3 bg-slate-800/60 p-3 rounded-xl border border-slate-700">
                                 <div>
                                     <label className="block text-[11px] font-semibold text-slate-400 mb-1">Mức độ ưu tiên</label>
                                     <select
                                         value={activeCard.priority}
-                                        onChange={(e) => setActiveCard({ ...activeCard, priority: e.target.value as any })}
+                                        onChange={(e) => setActiveCard({ ...activeCard, priority: e.target.value })}
                                         className="w-full p-1.5 bg-slate-900 border border-slate-700 rounded-lg text-white font-bold"
                                     >
-                                        <option value="urgent">🔥 Khẩn cấp</option>
-                                        <option value="high">⚡ Mức cao</option>
-                                        <option value="normal">🌿 Bình thường</option>
-                                        <option value="low">☕ Mức thấp</option>
+                                        {boardPriorities.map(p => (
+                                            <option key={p.key} value={p.key}>{p.label}</option>
+                                        ))}
                                     </select>
                                 </div>
 
                                 <div>
-                                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Màu sắc thẻ</label>
-                                    <div className="flex gap-1.5">
-                                        {COLOR_PALETTE.slice(0, 5).map(c => (
-                                            <button
-                                                key={c}
-                                                type="button"
-                                                onClick={() => setActiveCard({ ...activeCard, color: c })}
-                                                className={`w-6 h-6 rounded-full border ${activeCard.color === c ? 'border-white scale-110' : 'border-transparent'}`}
-                                                style={{ backgroundColor: c }}
-                                            />
+                                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Phân loại (Category)</label>
+                                    <select
+                                        value={activeCard.category || 'Khác'}
+                                        onChange={(e) => setActiveCard({ ...activeCard, category: e.target.value })}
+                                        className="w-full p-1.5 bg-slate-900 border border-slate-700 rounded-lg text-white"
+                                    >
+                                        {boardCategories.map(cat => (
+                                            <option key={cat} value={cat}>{cat}</option>
                                         ))}
-                                    </div>
+                                    </select>
                                 </div>
 
                                 <div>
@@ -1026,7 +1111,6 @@ export const WorkBoardPage: React.FC = () => {
                                 </div>
 
                                 <div>
-                                    {/* 🟢 HẠN CHÓT: NGÀY VÀ GIỜ CHI TIẾT */}
                                     <label className="block text-[11px] font-semibold text-slate-400 mb-1">Hạn chót (Ngày & Giờ)</label>
                                     <input
                                         type="datetime-local"
@@ -1037,27 +1121,23 @@ export const WorkBoardPage: React.FC = () => {
                                 </div>
                             </div>
 
-                            {/* Mô tả */}
                             <div>
                                 <label className="block font-semibold mb-1">Mô tả công việc</label>
                                 <textarea
                                     rows={3}
                                     value={activeCard.description || ''}
                                     onChange={(e) => setActiveCard({ ...activeCard, description: e.target.value })}
-                                    placeholder="Ghi chú chi tiết..."
+                                    placeholder="Chi tiết công việc..."
                                     className="w-full p-2 bg-slate-800 border border-slate-700 rounded-xl text-white outline-none"
                                 />
                             </div>
 
                             {/* Subtasks */}
                             <div>
-                                <label className="block font-semibold mb-1.5 flex justify-between">
-                                    <span>Checklist công việc con:</span>
-                                    <span className="text-slate-400 font-normal">
-                                        {(activeCard.subtasks || []).filter(s => s.completed).length}/{(activeCard.subtasks || []).length}
-                                    </span>
+                                <label className="block font-semibold mb-1 flex justify-between">
+                                    <span>Checklist công việc:</span>
+                                    <span className="text-slate-400">{(activeCard.subtasks || []).filter(s => s.completed).length}/{(activeCard.subtasks || []).length}</span>
                                 </label>
-
                                 <div className="space-y-1.5 mb-2">
                                     {(activeCard.subtasks || []).map(sub => (
                                         <div key={sub.id} className="flex items-center gap-2 p-2 bg-slate-800 rounded-lg">
@@ -1070,34 +1150,19 @@ export const WorkBoardPage: React.FC = () => {
                                                 }}
                                             />
                                             <span className={`flex-1 ${sub.completed ? 'line-through text-slate-500' : 'text-white'}`}>{sub.title}</span>
-                                            <button
-                                                onClick={() => {
-                                                    const updated = (activeCard.subtasks || []).filter(s => s.id !== sub.id);
-                                                    setActiveCard({ ...activeCard, subtasks: updated });
-                                                }}
-                                                className="text-slate-400 hover:text-rose-400"
-                                            >
-                                                <X className="w-3.5 h-3.5" />
-                                            </button>
+                                            <button onClick={() => {
+                                                const updated = (activeCard.subtasks || []).filter(s => s.id !== sub.id);
+                                                setActiveCard({ ...activeCard, subtasks: updated });
+                                            }} className="text-slate-400 hover:text-rose-400"><X className="w-3.5 h-3.5" /></button>
                                         </div>
                                     ))}
                                 </div>
-
                                 <div className="flex gap-2">
                                     <input
                                         type="text"
                                         value={newSubtaskTitle}
                                         onChange={(e) => setNewSubtaskTitle(e.target.value)}
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter' && newSubtaskTitle.trim()) {
-                                                setActiveCard({
-                                                    ...activeCard,
-                                                    subtasks: [...(activeCard.subtasks || []), { id: Date.now().toString(), title: newSubtaskTitle.trim(), completed: false }]
-                                                });
-                                                setNewSubtaskTitle('');
-                                            }
-                                        }}
-                                        placeholder="Thêm đầu việc mới..."
+                                        placeholder="Thêm đầu việc..."
                                         className="flex-1 p-2 bg-slate-800 border border-slate-700 rounded-xl text-white outline-none"
                                     />
                                     <button
@@ -1132,17 +1197,8 @@ export const WorkBoardPage: React.FC = () => {
                                 Xóa Thẻ
                             </button>
                             <div className="flex gap-2">
-                                <button
-                                    onClick={() => setIsCardModalOpen(false)}
-                                    className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl"
-                                >
-                                    Hủy
-                                </button>
-                                <button
-                                    disabled={isSavingCard}
-                                    onClick={handleSaveCard}
-                                    className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white font-semibold rounded-xl"
-                                >
+                                <button onClick={() => setIsCardModalOpen(false)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl">Hủy</button>
+                                <button disabled={isSavingCard} onClick={handleSaveCardDetail} className="px-4 py-2 bg-violet-600 text-white font-semibold rounded-xl">
                                     Lưu Thay Đổi
                                 </button>
                             </div>

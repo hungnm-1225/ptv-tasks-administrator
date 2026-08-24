@@ -120,14 +120,10 @@ export interface GithubIssueResponse {
   message?: string;
 }
 
-export interface CourseItem {
-  id: string;
-  course_id: number;
-  category: string;
-  course_name: string;
-  sku?: string | null;
-  lms_url: string;
-  created_at?: string;
+export interface BoardPriorityItem {
+  key: string;
+  label: string;
+  color: string;
 }
 
 export interface BoardItem {
@@ -135,8 +131,15 @@ export interface BoardItem {
   title: string;
   description?: string;
   background_url?: string | null;
-  background_color?: string;
+  overlay_color?: string;
+  overlay_opacity?: number;
+  column_opacity?: number;
+  card_opacity?: number;
   is_default?: boolean;
+  is_deleted?: boolean;
+  deleted_at?: string | null;
+  categories?: string[];
+  priorities?: BoardPriorityItem[];
   created_at?: string;
 }
 
@@ -161,12 +164,12 @@ export interface BoardCardItem {
   column_id: string;
   title: string;
   description?: string;
-  priority: 'urgent' | 'high' | 'normal' | 'low';
+  priority: string;
   category: string;
   color: string;
   assigned_name?: string;
   assigned_email?: string;
-  due_date?: string | null; // ISO string with date & time
+  due_date?: string | null;
   subtasks?: BoardSubtask[];
   order_index?: number;
   created_at?: string;

@@ -31,6 +31,10 @@ import {
   Briefcase,
   Store,
   X,
+  AlertCircle,
+  Terminal,
+  Code2,
+  Send,
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { BotType } from '../../types';
@@ -85,6 +89,13 @@ interface ScrapedPendingItem {
   type?: string;
   status?: string;
   courses_data?: any[];
+}
+
+interface PreparedTaskSummary {
+  engineName: string;
+  actionTitle: string;
+  targetEntity: string;
+  detailsList: string[];
 }
 
 export const AutomationStudioPage: React.FC = () => {
@@ -147,12 +158,12 @@ export const AutomationStudioPage: React.FC = () => {
   const [lmsCourseName, setLmsCourseName] = useState<string>('');
   const [lmsGroupName, setLmsGroupName] = useState<string>('');
 
-  // 👉 ĐỐI TƯỢNG TÌM KIẾM BÊN TRÊN (MẶC ĐỊNH LÀ NULL ĐỂ KHÔNG ÉP CỨNG)
+  // 👉 ĐỐI TƯỢNG TÌM KIẾM BÊN TRÊN
   const [selectedSchool, setSelectedSchool] = useState<HierarchySchoolItem | null>(null);
   const [selectedPartner, setSelectedPartner] = useState<{ name: string; code: string } | null>(null);
   const [selectedDistributor, setSelectedDistributor] = useState<{ name: string; code: string } | null>(null);
 
-  // Input tìm kiếm động theo cấp (MẶC ĐỊNH RỖNG "")
+  // Input tìm kiếm động theo cấp
   const [entitySearchQuery, setEntitySearchQuery] = useState<string>('');
   const [isEntityDropdownOpen, setIsEntityDropdownOpen] = useState<boolean>(false);
   const entityDropdownRef = useRef<HTMLDivElement | null>(null);
@@ -161,7 +172,7 @@ export const AutomationStudioPage: React.FC = () => {
   const [uploadedAccountsFile, setUploadedAccountsFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Tính ngày mặc định: Hôm nay -> Đúng 1 Năm Sau (Ngày kết thúc)
+  // Tính ngày mặc định
   const getFormattedDate = (d: Date) => {
     const day = String(d.getDate()).padStart(2, '0');
     const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -218,8 +229,16 @@ export const AutomationStudioPage: React.FC = () => {
   const [submitting, setSubmitting] = useState<boolean>(false);
 
   // =========================================================================
-  // 🔄 NẠP METADATA (KHÔNG TỰ GÁN PHẦN TỬ ĐẦU TIÊN VÀO Ô SEARCH)
+  // 🛡️ STATE CONFIRMATION MODAL (XÁC NHẬN AN TOÀN TRƯỚC KHI CHẠY)
   // =========================================================================
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState<boolean>(false);
+  const [preparedPayload, setPreparedPayload] = useState<{
+    bot_type: BotType | 'lms_playwright';
+    payload_data: Record<string, any>;
+    summary: PreparedTaskSummary;
+  } | null>(null);
+
+  // Nạp metadata ban đầu
   useEffect(() => {
     const loadAllMetadata = async () => {
       try {
@@ -231,7 +250,6 @@ export const AutomationStudioPage: React.FC = () => {
           fetchApi<CourseItem[]>('/courses/lms').catch(() => []),
         ]);
 
-        // Gán dữ liệu danh mục nhưng ĐỂ TRỐNG lựa chọn tìm kiếm
         setSchoolsList(schools || []);
         if (wsCats && wsCats.length > 0) setWorkspaceCategoriesList(wsCats);
         setWorkspaceCoursesList(wsCourses || []);
@@ -268,7 +286,6 @@ export const AutomationStudioPage: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Danh sách Partner duy nhất
   const uniquePartners = useMemo(() => {
     const map = new Map<string, { name: string; code: string }>();
     schoolsList.forEach((s) => {
@@ -279,7 +296,6 @@ export const AutomationStudioPage: React.FC = () => {
     return Array.from(map.values());
   }, [schoolsList]);
 
-  // Danh sách Distributor duy nhất
   const uniqueDistributors = useMemo(() => {
     const map = new Map<string, { name: string; code: string }>();
     schoolsList.forEach((s) => {
@@ -290,7 +306,6 @@ export const AutomationStudioPage: React.FC = () => {
     return Array.from(map.values());
   }, [schoolsList]);
 
-  // Xác định cấp đối tượng đang tương tác (School / Partner / Distributor)
   const currentEntityMode = useMemo<'school' | 'partner' | 'distributor'>(() => {
     if (workspaceMainCategory === 'approve') {
       if (approveSubFlow === 'approve_partner_contract') return 'partner';
@@ -305,7 +320,6 @@ export const AutomationStudioPage: React.FC = () => {
     return 'school';
   }, [workspaceMainCategory, approveSubFlow, createApproveSubFlow]);
 
-  // Đọc chi tiết môn học của Order
   const handleLoadOrderDetails = async (orderCodeToLoad: string, schoolNameForQuery?: string) => {
     setIsLoadingOrderDetails(true);
     try {
@@ -328,7 +342,6 @@ export const AutomationStudioPage: React.FC = () => {
     }
   };
 
-  // Quét danh sách Orders / Contracts từ Cache Supabase (Lấy toàn bộ)
   const handleFetchCachedList = async () => {
     setIsScrapingLive(true);
     setScrapedPendingList([]);
@@ -340,7 +353,7 @@ export const AutomationStudioPage: React.FC = () => {
         const orders = res?.orders || [];
         setScrapedPendingList(orders);
         if (orders.length > 0) {
-          toast.success(`⚡ [Cache] Đã nạp thành công ${orders.length} đơn hàng trường học!`);
+          toast.success(`⚡ [Cache] Đã nạp ${orders.length} đơn hàng trường học!`);
         } else {
           toast.info('Chưa có đơn hàng nào trong Cache.');
         }
@@ -366,14 +379,12 @@ export const AutomationStudioPage: React.FC = () => {
     }
   };
 
-  // Tự động tải cache khi chuyển tab Duyệt
   useEffect(() => {
     if (workspaceMainCategory === 'approve') {
       handleFetchCachedList();
     }
   }, [approveSubFlow, workspaceMainCategory]);
 
-  // Kích hoạt quét ngầm 5 Distributor
   const handleTriggerSyncBackground = async () => {
     setIsSyncingBackground(true);
     try {
@@ -386,12 +397,8 @@ export const AutomationStudioPage: React.FC = () => {
     }
   };
 
-  // =========================================================================
-  // 👉 BỘ LỌC ĐA CHIỀU THÔNG MINH (Status + Entity Search + Code Search)
-  // =========================================================================
   const filteredCacheList = useMemo(() => {
     return scrapedPendingList.filter((item) => {
-      // 1. Lọc theo trạng thái Status
       const rawStat = (item.status || '').toLowerCase();
       if (statusFilter === 'pending') {
         const isPending = rawStat.includes('pending') || rawStat.includes('awaiting') || rawStat === '3' || rawStat === '7';
@@ -404,7 +411,6 @@ export const AutomationStudioPage: React.FC = () => {
         if (!isRejected) return false;
       }
 
-      // 2. Lọc theo ô tìm kiếm thực thể (Entity Search Input)
       const entityQuery = entitySearchQuery.trim().toLowerCase();
       if (entityQuery) {
         if (currentEntityMode === 'school') {
@@ -421,7 +427,6 @@ export const AutomationStudioPage: React.FC = () => {
         }
       }
 
-      // 3. Lọc theo ô tìm kiếm mã Order / Contract
       if (approveSubFlow === 'approve_school_order') {
         const orderQuery = targetOrderCode.trim().toLowerCase();
         if (orderQuery) {
@@ -475,24 +480,34 @@ export const AutomationStudioPage: React.FC = () => {
   };
 
   // =========================================================================
-  // 🚀 ĐƯA TÁC VỤ VÀO TASK HUB (LẤY 100% DỮ LIỆU TỪ ITEM ĐƯỢC CHỌN)
+  // 🛡️ BƯỚC 1: KIỂM TRA DỮ LIỆU & MỞ CONFIRMATION MODAL
   // =========================================================================
-  const handleSubmitStudioTask = async () => {
+  const handleOpenConfirmModal = () => {
     let payload: Record<string, any> = {
       is_manual_dispatch: true,
       creator: 'Admin Studio',
     };
 
+    let summary: PreparedTaskSummary = {
+      engineName: '',
+      actionTitle: '',
+      targetEntity: '',
+      detailsList: [],
+    };
+
+    let actualBotType: BotType | 'lms_playwright' = selectedBotType;
+
     if (selectedBotType === 'workspace_rpa') {
+      summary.engineName = '🏢 Workspace RPA & LMS Pipeline';
+
       if (workspaceMainCategory === 'approve') {
         if (approveSubFlow === 'approve_school_order') {
           if (!targetOrderCode) {
             toast.error('Vui lòng nhập hoặc chọn mã đơn hàng trường cần duyệt!');
             return;
           }
-          // 👉 Ưu tiên lấy đúng School & Partner từ chính item được chọn
-          const resolvedSchoolName = selectedCachedItem?.school_name || selectedSchool?.school_name;
-          const resolvedPartnerName = selectedCachedItem?.partner_name || selectedSchool?.partner_name;
+          const resolvedSchoolName = selectedCachedItem?.school_name || selectedSchool?.school_name || 'Tự động truy vết theo Order';
+          const resolvedPartnerName = selectedCachedItem?.partner_name || selectedSchool?.partner_name || 'Tự động truy vết';
 
           payload = {
             action: 'approve_school_order_standalone',
@@ -501,14 +516,21 @@ export const AutomationStudioPage: React.FC = () => {
             partner_name: resolvedPartnerName,
             courses: parsedOrderCourses.length > 0 ? parsedOrderCourses : undefined,
           };
+
+          summary.actionTitle = 'Phê Duyệt Đơn Hàng Trường Học (School Order)';
+          summary.targetEntity = `Mã Đơn: ${targetOrderCode}`;
+          summary.detailsList = [
+            `Trường học: ${resolvedSchoolName}`,
+            `Đối tác quản lý: ${resolvedPartnerName}`,
+            `Số lượng môn học bóc tách: ${parsedOrderCourses.length} môn`,
+          ];
         } else if (approveSubFlow === 'approve_partner_contract') {
           if (!targetContractCode) {
             toast.error('Vui lòng nhập hoặc chọn mã hợp đồng đối tác cần duyệt!');
             return;
           }
-          // 👉 Ưu tiên lấy đúng Partner & Distributor từ chính item được chọn
-          const resolvedPartnerName = selectedCachedItem?.partner_name || selectedCachedItem?.sender_name || selectedPartner?.name;
-          const resolvedDistName = selectedCachedItem?.distributor_name || selectedCachedItem?.receiver_name || selectedDistributor?.name;
+          const resolvedPartnerName = selectedCachedItem?.partner_name || selectedCachedItem?.sender_name || selectedPartner?.name || 'Tự động truy vết';
+          const resolvedDistName = selectedCachedItem?.distributor_name || selectedCachedItem?.receiver_name || selectedDistributor?.name || 'Tự động truy vết';
           const resolvedDistCode = selectedCachedItem?.distributor_code || selectedDistributor?.code;
 
           payload = {
@@ -519,12 +541,19 @@ export const AutomationStudioPage: React.FC = () => {
             distributor_code: resolvedDistCode,
             courses: parsedOrderCourses.length > 0 ? parsedOrderCourses : undefined,
           };
+
+          summary.actionTitle = 'Phê Duyệt Hợp Đồng Đối Tác (PRT Contract)';
+          summary.targetEntity = `Mã Hợp Đồng: ${targetContractCode}`;
+          summary.detailsList = [
+            `Đối tác gửi: ${resolvedPartnerName}`,
+            `Nhà phân phối nhận: ${resolvedDistName}`,
+          ];
         } else if (approveSubFlow === 'admin_approve_contract') {
           if (!targetContractCode) {
             toast.error('Vui lòng nhập hoặc chọn mã hợp đồng quản trị cần duyệt!');
             return;
           }
-          const resolvedDistName = selectedCachedItem?.distributor_name || selectedCachedItem?.sender_name || selectedDistributor?.name;
+          const resolvedDistName = selectedCachedItem?.distributor_name || selectedCachedItem?.sender_name || selectedDistributor?.name || 'Tự động truy vết';
           const resolvedDistCode = selectedCachedItem?.distributor_code || selectedDistributor?.code;
 
           payload = {
@@ -534,6 +563,13 @@ export const AutomationStudioPage: React.FC = () => {
             distributor_code: resolvedDistCode,
             justification: adminJustification,
           };
+
+          summary.actionTitle = 'Sales Admin Phê Duyệt Hợp Đồng Quản Trị (DST Contract)';
+          summary.targetEntity = `Mã Hợp Đồng: ${targetContractCode}`;
+          summary.detailsList = [
+            `Nhà phân phối: ${resolvedDistName}`,
+            `Lý do phê duyệt: "${adminJustification.slice(0, 45)}..."`,
+          ];
         }
       } else if (workspaceMainCategory === 'create_and_approve') {
         if (createApproveSubFlow === 'end_to_end') {
@@ -563,6 +599,13 @@ export const AutomationStudioPage: React.FC = () => {
               })),
             },
           };
+
+          summary.actionTitle = 'Chạy Toàn Trình Trọn Gói 4 Cấp (End-to-End Pipeline)';
+          summary.targetEntity = selectedSchool.school_name;
+          summary.detailsList = [
+            `Tuyến phả hệ: ${selectedSchool.full_lineage}`,
+            `Tổng số môn cấp phép: ${selectedCourses.length} môn`,
+          ];
         } else if (createApproveSubFlow === 'partner_create_chain') {
           if (!selectedPartner) {
             toast.error('Vui lòng chọn đối tác phụ trách!');
@@ -581,6 +624,10 @@ export const AutomationStudioPage: React.FC = () => {
               })),
             },
           };
+
+          summary.actionTitle = 'Tạo & Duyệt Chuỗi Đối Tác (Partner ➔ Distributor)';
+          summary.targetEntity = selectedPartner.name;
+          summary.detailsList = [`Đối tác: ${selectedPartner.name} (Mã: ${selectedPartner.code})`];
         } else if (createApproveSubFlow === 'distributor_create_chain') {
           if (!selectedDistributor) {
             toast.error('Vui lòng chọn nhà phân phối!');
@@ -600,10 +647,14 @@ export const AutomationStudioPage: React.FC = () => {
               })),
             },
           };
+
+          summary.actionTitle = 'Tạo & Duyệt Chuỗi Nhà Phân Phối (Distributor ➔ Sales Admin)';
+          summary.targetEntity = selectedDistributor.name;
+          summary.detailsList = [`Nhà phân phối: ${selectedDistributor.name} (Mã: ${selectedDistributor.code})`];
         }
       } else if (workspaceMainCategory === 'bulk_accounts') {
         if (!uploadedAccountsFile) {
-          toast.error('Vui lòng chọn hoặc kéo thả file Excel (.xlsx) chứa danh sách tài khoản!');
+          toast.error('Vui lòng chọn file Excel (.xlsx) chứa danh sách tài khoản!');
           return;
         }
         payload = {
@@ -613,7 +664,15 @@ export const AutomationStudioPage: React.FC = () => {
           filename: uploadedAccountsFile.name,
           file_size_kb: Math.round(uploadedAccountsFile.size / 1024),
         };
+
+        summary.actionTitle = 'Tạo Tài Khoản Hàng Loạt Từ File Excel (Pha 1)';
+        summary.targetEntity = selectedSchool?.school_name || 'Chưa chọn trường';
+        summary.detailsList = [
+          `File tải lên: ${uploadedAccountsFile.name} (${Math.round(uploadedAccountsFile.size / 1024)} KB)`,
+          `Trường thụ hưởng: ${selectedSchool?.school_name || 'N/A'}`,
+        ];
       } else if (workspaceMainCategory === 'lms_enroll') {
+        actualBotType = 'lms_playwright';
         let studentsList: string[] = [];
         let teachersList: string[] = [];
         let managersList: string[] = [];
@@ -629,7 +688,8 @@ export const AutomationStudioPage: React.FC = () => {
           managersList = lmsManagerEmails.split('\n').map((e) => e.trim()).filter((e) => e.length > 0);
         }
 
-        if (studentsList.length === 0 && teachersList.length === 0 && managersList.length === 0) {
+        const totalEmails = studentsList.length + teachersList.length + managersList.length;
+        if (totalEmails === 0) {
           toast.error('Vui lòng nhập ít nhất một email cần ghi danh vào LMS!');
           return;
         }
@@ -649,19 +709,43 @@ export const AutomationStudioPage: React.FC = () => {
           manager_emails: managersList,
           auto_renew_existing: true,
         };
+
+        summary.engineName = '🎓 PLearn Moodle LMS Direct Enroller';
+        summary.actionTitle = 'Ghi Danh & Phân Quyền Khóa Học Trực Tiếp';
+        summary.targetEntity = `${lmsCourseName} (ID: ${lmsCourseId})`;
+        summary.detailsList = [
+          `Tổng số tài khoản: ${totalEmails} người dùng`,
+          `Thời hạn: ${lmsStartDate} ➔ ${lmsEndDate}`,
+          `Tên Group: ${lmsGroupName.trim() || '(Không gán group)'}`,
+        ];
       }
     } else if (selectedBotType === 'keycloak_api') {
       const actions: string[] = [];
       const conf: Record<string, any> = { target_email: kcTargetEmail };
+      const details: string[] = [];
+
       if (kcEnableResetPass) {
         actions.push('reset_password');
         conf.temporary_password = kcTempPass;
         conf.force_change_on_first_login = kcForceChange;
+        details.push(`Đặt lại pass tạm: "${kcTempPass}" (Bắt buộc đổi: ${kcForceChange ? 'Có' : 'Không'})`);
       }
-      if (kcEnableVerify) actions.push(kcVerifyAction === 'verify' ? 'mark_email_verified' : 'mark_email_unverified');
-      if (kcEnableStatus) actions.push(kcStatusAction === 'enable' ? 'enable_account' : 'disable_account');
+      if (kcEnableVerify) {
+        actions.push(kcVerifyAction === 'verify' ? 'mark_email_verified' : 'mark_email_unverified');
+        details.push(`Xác thực Email: ${kcVerifyAction === 'verify' ? 'Đã xác thực (TRUE)' : 'Gỡ xác thực (FALSE)'}`);
+      }
+      if (kcEnableStatus) {
+        actions.push(kcStatusAction === 'enable' ? 'enable_account' : 'disable_account');
+        details.push(`Trạng thái: ${kcStatusAction === 'enable' ? 'Kích hoạt (Enabled)' : 'Vô hiệu hóa (Disabled)'}`);
+      }
+
       conf.actions = actions.length > 0 ? actions : ['noop_preview'];
       payload = conf;
+
+      summary.engineName = '🔑 Keycloak IDP Management Bot';
+      summary.actionTitle = 'Quản Trị Danh Tính & Mật Khẩu Người Dùng';
+      summary.targetEntity = kcTargetEmail;
+      summary.detailsList = details.length > 0 ? details : ['Chưa chọn hành động can thiệp nào'];
     } else if (selectedBotType === 'feedback_doc_triage') {
       payload = {
         action: 'comment_and_assign',
@@ -669,13 +753,37 @@ export const AutomationStudioPage: React.FC = () => {
         assignee_email: assigneeEmail,
         row_index: rowIndex,
       };
+
+      summary.engineName = '🤖 Feedback Sheet & Google Doc Triage';
+      summary.actionTitle = 'Đọc Tài Liệu & @Mention Giao Việc';
+      summary.targetEntity = `Dòng #${rowIndex} trên Sheet`;
+      summary.detailsList = [`Google Doc: ${docUrl || 'N/A'}`, `Gán nhân sự: ${assigneeEmail}`];
     } else if (selectedBotType === 'github_issue_creator') {
       payload = {
         action: 'create_github_issue',
         title: githubTitle,
         assignees: [githubAssignee],
       };
+
+      summary.engineName = '🐙 GitHub Issue Dispatcher';
+      summary.actionTitle = 'Khởi Tạo Bug Report Trong Private Repo';
+      summary.targetEntity = githubTitle;
+      summary.detailsList = [`Người phụ trách: @${githubAssignee}`, `Kho lưu trữ: PTV-TechHub/Pythaverse2026`];
     }
+
+    setPreparedPayload({
+      bot_type: actualBotType,
+      payload_data: payload,
+      summary,
+    });
+    setIsConfirmModalOpen(true);
+  };
+
+  // =========================================================================
+  // 🚀 BƯỚC 2: XÁC NHẬN & CHẠY WORKER NGẦM LẬP TỨC (DIRECT 1-CLICK DISPATCH)
+  // =========================================================================
+  const handleConfirmExecute = async () => {
+    if (!preparedPayload) return;
 
     setSubmitting(true);
     try {
@@ -683,21 +791,33 @@ export const AutomationStudioPage: React.FC = () => {
         method: 'POST',
         body: JSON.stringify({
           ticket_id: null,
-          bot_type: selectedBotType === 'workspace_rpa' && workspaceMainCategory === 'lms_enroll' ? 'lms_playwright' : selectedBotType,
-          payload_data: payload,
+          bot_type: preparedPayload.bot_type,
+          payload_data: preparedPayload.payload_data,
+          run_immediately: true, // 🟢 Cờ kích hoạt chạy Worker ngay lập tức!
+          approval_status: 'approved',
         }),
       });
 
+      setIsConfirmModalOpen(false);
+
       toast.success(
         <div className="space-y-1">
-          <div className="font-bold">Đã đưa tác vụ vào hàng đợi phê duyệt!</div>
-          <button onClick={() => navigate('/tasks')} className="text-violet-400 underline text-xs font-semibold cursor-pointer">
-            Mở Task Hub để kiểm tra và duyệt ➔
+          <div className="font-bold flex items-center gap-1.5 text-emerald-400">
+            <CheckCircle2 className="w-4 h-4" />
+            <span>Đã kích hoạt Worker thành công!</span>
+          </div>
+          <div className="text-xs text-slate-300">Tác vụ đang được thực thi ngầm dưới nền.</div>
+          <button
+            onClick={() => navigate('/bots')}
+            className="text-violet-400 hover:text-violet-300 underline text-xs font-semibold cursor-pointer block mt-1 transition"
+          >
+            Mở Bot Command Center xem Live Terminal ➔
           </button>
-        </div>
+        </div>,
+        { duration: 6000 }
       );
     } catch (err) {
-      toast.error('Lỗi điều phối tác vụ: ' + (err as Error).message);
+      toast.error('Lỗi khi kích hoạt Worker: ' + (err as Error).message);
     } finally {
       setSubmitting(false);
     }
@@ -727,10 +847,11 @@ export const AutomationStudioPage: React.FC = () => {
         </div>
 
         <button
-          onClick={() => navigate('/tasks')}
+          onClick={() => navigate('/bots')}
           className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-violet-600 dark:hover:text-violet-400 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-2xs hover:shadow-xs transition"
         >
-          <span>Xem Task Hub</span>
+          <Terminal className="w-3.5 h-3.5 text-violet-500" />
+          <span>Xem Bot Center</span>
           <ArrowRight className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -817,7 +938,7 @@ export const AutomationStudioPage: React.FC = () => {
               </div>
             </div>
 
-            {/* 👉 TÌM KIẾM ĐỐI TƯỢNG ĐỘNG (MẶC ĐỊNH TRỐNG, GÕ ĐỂ LỌC DANH SÁCH BÊN DƯỚI) */}
+            {/* TÌM KIẾM ĐỐI TƯỢNG ĐỘNG */}
             {workspaceMainCategory !== 'lms_enroll' && (
               <div className="space-y-2 relative" ref={entityDropdownRef}>
                 <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
@@ -970,9 +1091,7 @@ export const AutomationStudioPage: React.FC = () => {
               </div>
             )}
 
-            {/* ============================================================= */}
-            {/* MỤC 1: PHÊ DUYỆT (LỌC THÔNG MINH & KHÔNG GHI ĐÈ DỮ LIỆU GỐC)    */}
-            {/* ============================================================= */}
+            {/* MỤC 1: PHÊ DUYỆT */}
             {workspaceMainCategory === 'approve' && (
               <div className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -1042,7 +1161,7 @@ export const AutomationStudioPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Input mã đơn/hợp đồng (Đồng thời là ô tìm kiếm mã trực tiếp) */}
+                  {/* Input mã đơn/hợp đồng */}
                   <div className="relative">
                     {approveSubFlow === 'approve_school_order' ? (
                       <input
@@ -1097,7 +1216,7 @@ export const AutomationStudioPage: React.FC = () => {
                     </div>
                   )}
 
-                  {/* 👉 DANH SÁCH LỌC THEO TỪ KHÓA & TRẠNG THÁI */}
+                  {/* DANH SÁCH LỌC THEO TỪ KHÓA & TRẠNG THÁI */}
                   {scrapedPendingList.length > 0 && (
                     <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-700">
                       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -1108,7 +1227,6 @@ export const AutomationStudioPage: React.FC = () => {
                           </span>
                         </div>
 
-                        {/* 4 Nút Lọc Status */}
                         <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-[11px] font-semibold">
                           {[
                             { id: 'pending', label: '⏳ Chờ duyệt' },
@@ -1149,7 +1267,6 @@ export const AutomationStudioPage: React.FC = () => {
                                 key={pIdx}
                                 type="button"
                                 onClick={() => {
-                                  // 👉 LƯU TOÀN BỘ BẢN GHI ĐƯỢC CHỌN ĐỂ TRÍCH XUẤT ĐÚNG THỰC THỂ GỐC
                                   setSelectedCachedItem(item);
 
                                   if (approveSubFlow === 'approve_school_order') {
@@ -1196,7 +1313,7 @@ export const AutomationStudioPage: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Hiển thị chi tiết môn học bên trong Order */}
+                  {/* Chi tiết môn học Order */}
                   {approveSubFlow === 'approve_school_order' && (
                     <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-700">
                       <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
@@ -1244,9 +1361,7 @@ export const AutomationStudioPage: React.FC = () => {
               </div>
             )}
 
-            {/* ============================================================= */}
-            {/* MỤC 2: TẠO MỚI & DUYỆT CHUỖI LIÊN THÔNG                       */}
-            {/* ============================================================= */}
+            {/* MỤC 2: TẠO MỚI & DUYỆT CHUỖI */}
             {workspaceMainCategory === 'create_and_approve' && (
               <div className="space-y-5">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -1441,9 +1556,7 @@ export const AutomationStudioPage: React.FC = () => {
               </div>
             )}
 
-            {/* ============================================================= */}
-            {/* MỤC 3: TẠO TÀI KHOẢN HÀNG LOẠT (KHUNG NỘP FILE EXCEL .XLSX)     */}
-            {/* ============================================================= */}
+            {/* MỤC 3: TẠO TÀI KHOẢN HÀNG LOẠT */}
             {workspaceMainCategory === 'bulk_accounts' && (
               <div className="p-6 bg-white dark:bg-slate-800/90 rounded-3xl border border-violet-200 dark:border-slate-700 space-y-4 shadow-2xs">
                 <div className="flex items-center gap-3">
@@ -1508,12 +1621,9 @@ export const AutomationStudioPage: React.FC = () => {
               </div>
             )}
 
-            {/* ============================================================= */}
-            {/* MỤC 4: GHI DANH LMS (KẾT NỐI TỪ BẢNG lms_courses)             */}
-            {/* ============================================================= */}
+            {/* MỤC 4: GHI DANH LMS */}
             {workspaceMainCategory === 'lms_enroll' && (
               <div className="p-6 bg-white dark:bg-slate-800/90 rounded-3xl border border-emerald-200/80 dark:border-emerald-800/50 space-y-5 shadow-2xs">
-                {/* Header */}
                 <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
                   <div className="flex items-center gap-3">
                     <div className="p-2.5 bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-300 rounded-xl">
@@ -1534,7 +1644,6 @@ export const AutomationStudioPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Chọn Khóa Học LMS */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="text-[10px] font-bold text-slate-500 uppercase">
@@ -1586,7 +1695,6 @@ export const AutomationStudioPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Thiết lập Thời Hạn & Tên Group */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2 sm:col-span-2">
                     <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
@@ -1618,7 +1726,6 @@ export const AutomationStudioPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Ô nhập Group (Tùy chọn) */}
                   <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2 flex flex-col justify-between">
                     <div>
                       <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
@@ -1637,7 +1744,6 @@ export const AutomationStudioPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Phân Vai Trò */}
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
@@ -2033,19 +2139,129 @@ export const AutomationStudioPage: React.FC = () => {
           </div>
         )}
 
-        {/* Nút Submit Duy Nhất */}
+        {/* 🟢 Nút Bấm Chính: Mở Confirmation Modal để kiểm tra và duyệt ngay */}
         <div className="pt-2">
           <button
             type="button"
             disabled={submitting}
-            onClick={handleSubmitStudioTask}
-            className="w-full py-4 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-sm font-extrabold rounded-2xl transition flex items-center justify-center gap-2 shadow-lg shadow-violet-500/25 cursor-pointer disabled:opacity-50 active:scale-[0.99]"
+            onClick={handleOpenConfirmModal}
+            className="w-full py-4 bg-gradient-to-r from-violet-600 via-indigo-600 to-purple-600 hover:from-violet-500 hover:to-indigo-500 text-white text-sm font-extrabold rounded-2xl transition flex items-center justify-center gap-2 shadow-lg shadow-violet-500/25 cursor-pointer disabled:opacity-50 active:scale-[0.99]"
           >
-            {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
-            <span>Đưa Tác Vụ Vào Hàng Đợi Phê Duyệt Ngay</span>
+            <Zap className="w-5 h-5 text-amber-300 fill-amber-300" />
+            <span>Kiểm Tra & Kích Hoạt Worker Chạy Ngay (1-Click)</span>
           </button>
         </div>
       </div>
+
+      {/* ===================================================================== */}
+      {/* 🛡️ CONFIRMATION MODAL (XÁC NHẬN AN TOÀN TRƯỚC KHI THỰC THI THẬT)       */}
+      {/* ===================================================================== */}
+      {isConfirmModalOpen && preparedPayload && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="max-w-xl w-full bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden p-6 sm:p-7 space-y-5">
+            {/* Header Modal */}
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 rounded-2xl">
+                  <ShieldCheck className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900 dark:text-slate-100">
+                    Xác Nhận Kích Hoạt Worker Tự Động
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Vui lòng kiểm tra lại thông số nghiệp vụ trước khi Worker can thiệp hệ thống.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsConfirmModalOpen(false)}
+                className="p-1 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Thông Tin Tóm Tắt Nghiệp Vụ */}
+            <div className="p-4 rounded-2xl bg-violet-50/70 dark:bg-violet-950/30 border border-violet-200/80 dark:border-violet-800/50 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-violet-900 dark:text-violet-200">
+                  {preparedPayload.summary.engineName}
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-200 dark:bg-violet-900 text-violet-800 dark:text-violet-200 font-mono font-bold">
+                  {preparedPayload.bot_type}
+                </span>
+              </div>
+
+              <div>
+                <div className="text-xs font-extrabold text-slate-800 dark:text-slate-200">
+                  {preparedPayload.summary.actionTitle}
+                </div>
+                <div className="text-xs text-violet-700 dark:text-violet-300 font-bold font-mono mt-0.5">
+                  👉 {preparedPayload.summary.targetEntity}
+                </div>
+              </div>
+
+              {preparedPayload.summary.detailsList.length > 0 && (
+                <div className="pt-2 border-t border-violet-200/60 dark:border-violet-800/40 space-y-1">
+                  {preparedPayload.summary.detailsList.map((dt, idx) => (
+                    <div key={idx} className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
+                      <span>{dt}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Khung Xem Trước JSON Payload */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-[11px] font-bold text-slate-600 dark:text-slate-400">
+                <span className="flex items-center gap-1">
+                  <Code2 className="w-3.5 h-3.5 text-violet-500" />
+                  <span>Tham Số Thực Thi (Payload JSON):</span>
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono">Tự động đồng bộ</span>
+              </div>
+              <pre className="p-3 bg-slate-950 text-slate-200 rounded-xl text-[11px] font-mono overflow-x-auto max-h-36 border border-slate-800 scrollbar-thin">
+                {JSON.stringify(preparedPayload.payload_data, null, 2)}
+              </pre>
+            </div>
+
+            {/* Nút Điều Khiển Trong Modal */}
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsConfirmModalOpen(false)}
+                disabled={submitting}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                Hủy Bỏ
+              </button>
+
+              <button
+                type="button"
+                onClick={handleConfirmExecute}
+                disabled={submitting}
+                className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-extrabold transition shadow-md shadow-violet-500/20 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Đang Khởi Chạy...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    <span>Xác Nhận & Chạy Ngay</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
