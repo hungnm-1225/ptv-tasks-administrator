@@ -112,7 +112,7 @@ async def get_cached_pending_orders(
         if distributor_code:
             query = query.eq("distributor_code", distributor_code)
             
-        res = query.limit(100).execute()
+        res = query.limit(5000).execute()
         return {
             "status": "success",
             "orders": res.data or [],
@@ -139,7 +139,7 @@ async def get_cached_pending_contracts(
         if distributor_code:
             query = query.eq("distributor_code", distributor_code)
             
-        res = query.limit(50).execute()
+        res = query.limit(5000).execute()
         return {
             "status": "success",
             "contracts": res.data or [],
