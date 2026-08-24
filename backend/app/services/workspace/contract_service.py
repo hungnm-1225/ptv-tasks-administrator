@@ -1,4 +1,5 @@
 # backend/app/services/workspace/contract_service.py
+import re
 import logging
 from typing import Dict, Any, List, Optional
 from playwright.async_api import async_playwright
@@ -25,8 +26,9 @@ class WorkspaceContractService(WorkspaceBaseService):
 
                 logger.info("📝 Partner mở: /partner-workspace/contract-po/create...")
                 await page.goto(f"{BASE_WORKSPACE_URL}/partner-workspace/contract-po/create", wait_until="networkidle", timeout=45000)
-                await page.wait_for_selector("h4:has-text('Create Contract/PO')", timeout=15000)
+                await page.wait_for_selector("h4:has-text('Create Contract/PO'), text=Create Contract/PO", timeout=15000)
 
+                # Chọn Contract Type
                 type_select = page.locator(".MuiGrid-item:has(label:has-text('Contract Type')) .MuiSelect-select, .MuiGrid-item:has(label:has-text('Contract Type')) div[role='combobox']").first
                 await type_select.wait_for(state="visible", timeout=10000)
                 await type_select.click()
@@ -38,7 +40,7 @@ class WorkspaceContractService(WorkspaceBaseService):
                 await page.wait_for_timeout(1000)
 
                 notes = contract_data.get("notes", "Auto-requested by PTV Automation Hub")
-                notes_input = page.locator("div:has(label:has-text('Contract Notes')) textarea").first
+                notes_input = page.locator("div:has(label:has-text('Contract Notes')) textarea, textarea[name='notes']").first
                 if await notes_input.count() > 0:
                     await notes_input.fill(notes)
 
@@ -77,9 +79,9 @@ class WorkspaceContractService(WorkspaceBaseService):
                         if await target_opt.count() > 0:
                             await target_opt.click()
                         else:
-                            await page.locator("ul[role='listbox'] li").first.click()
+                            await page.locator("ul[role='listbox'] li:not([data-value=''])").first.click()
                     else:
-                        await page.locator("ul[role='listbox'] li").first.click()
+                        await page.locator("ul[role='listbox'] li:not([data-value=''])").first.click()
 
                     await page.wait_for_timeout(500)
 
@@ -90,11 +92,17 @@ class WorkspaceContractService(WorkspaceBaseService):
                 submit_btn = page.locator("button:has-text('Create Contract/PO')").last
                 await submit_btn.click()
 
-                await page.wait_for_selector(".MuiDataGrid-row", timeout=30000)
+                # Bọc thép chờ redirect về danh sách
+                try:
+                    await page.wait_for_url("**/contract-po**", timeout=20000)
+                except Exception:
+                    pass
+
+                await page.wait_for_selector(".MuiDataGrid-root, .MuiDataGrid-row", timeout=25000)
                 await page.wait_for_timeout(2000)
 
                 first_row = page.locator(".MuiDataGrid-row").first
-                contract_num_id = await first_row.get_attribute("data-id")
+                contract_num_id = await first_row.get_attribute("data-id") if await first_row.count() > 0 else ""
                 code_elem = first_row.locator("[data-field='order_code'] .MuiBox-root, [data-field='order_code']").first
                 contract_full_code = (await code_elem.inner_text()).strip() if await code_elem.count() > 0 else (contract_num_id or "")
 
@@ -126,7 +134,7 @@ class WorkspaceContractService(WorkspaceBaseService):
 
                 logger.info("🏢 Distributor mở: /distributor-workspace/partner-contract-po...")
                 await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/partner-contract-po", wait_until="networkidle", timeout=45000)
-                await page.wait_for_selector(".MuiDataGrid-row", timeout=25000)
+                await page.wait_for_selector(".MuiDataGrid-root, .MuiDataGrid-row", timeout=25000)
                 await page.wait_for_timeout(1000)
 
                 target_row = None
@@ -146,16 +154,31 @@ class WorkspaceContractService(WorkspaceBaseService):
                 await info_btn.click()
                 await page.wait_for_timeout(500)
 
-                view_item = page.locator("li[role='menuitem']:has-text('View'), .MuiMenuItem-root:has-text('View')")
+                view_item = page.locator("li[role='menuitem']:has-text('View'), .MuiMenuItem-root:has-text('View')").first
                 if await view_item.count() > 0 and await view_item.is_visible():
                     await view_item.click()
 
                 await page.wait_for_selector("div[role='dialog']", timeout=15000)
 
+                # Chọn Pool Category License nếu có dropdown pool
+                pool_selects = page.locator("div[role='dialog'] .MuiSelect-select, div[role='dialog'] div[role='combobox']")
+                pool_cnt = await pool_selects.count()
+                for p_idx in range(pool_cnt):
+                    p_curr = pool_selects.nth(p_idx)
+                    try:
+                        await p_curr.click()
+                        await page.wait_for_timeout(400)
+                        opts = page.locator("ul[role='listbox'] li:not([data-value=''])")
+                        if await opts.count() > 0:
+                            await opts.first.click()
+                        await page.wait_for_timeout(500)
+                    except Exception:
+                        pass
+
                 approve_btn = page.locator("div[role='dialog'] button:has-text('Approve Order'), div[role='dialog'] button:has-text('Approve')")
 
                 if await approve_btn.count() > 0 and await approve_btn.is_visible():
-                    logger.info("✨ Kho đủ License! Bấm nút Approve Order...")
+                    logger.info("✨ Kho đủ License! Bấm nút Approve Contract...")
                     await approve_btn.click()
                     await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=15000)
                     await page.wait_for_timeout(2000)
@@ -207,7 +230,7 @@ class WorkspaceContractService(WorkspaceBaseService):
                 await page.wait_for_timeout(1000)
 
                 notes = contract_data.get("notes", "Auto-requested by PTV Automation Hub")
-                notes_input = page.locator("div:has(label:has-text('Contract Notes')) textarea").first
+                notes_input = page.locator("div:has(label:has-text('Contract Notes')) textarea, textarea[name='notes']").first
                 if await notes_input.count() > 0:
                     await notes_input.fill(notes)
 
@@ -245,9 +268,9 @@ class WorkspaceContractService(WorkspaceBaseService):
                         if await target_opt.count() > 0:
                             await target_opt.click()
                         else:
-                            await page.locator("ul[role='listbox'] li").first.click()
+                            await page.locator("ul[role='listbox'] li:not([data-value=''])").first.click()
                     else:
-                        await page.locator("ul[role='listbox'] li").first.click()
+                        await page.locator("ul[role='listbox'] li:not([data-value=''])").first.click()
 
                     await page.wait_for_timeout(500)
 
@@ -257,11 +280,16 @@ class WorkspaceContractService(WorkspaceBaseService):
                 submit_btn = page.locator("button:has-text('Create Contract/PO')").last
                 await submit_btn.click()
 
-                await page.wait_for_selector(".MuiDataGrid-row", timeout=30000)
+                try:
+                    await page.wait_for_url("**/contract-po**", timeout=20000)
+                except Exception:
+                    pass
+
+                await page.wait_for_selector(".MuiDataGrid-root, .MuiDataGrid-row", timeout=25000)
                 await page.wait_for_timeout(2000)
 
                 first_row = page.locator(".MuiDataGrid-row").first
-                contract_num_id = await first_row.get_attribute("data-id")
+                contract_num_id = await first_row.get_attribute("data-id") if await first_row.count() > 0 else ""
                 code_elem = first_row.locator("[data-field='order_code'] .MuiBox-root, [data-field='order_code']").first
                 contract_full_code = (await code_elem.inner_text()).strip() if await code_elem.count() > 0 else (contract_num_id or "")
 
@@ -294,7 +322,7 @@ class WorkspaceContractService(WorkspaceBaseService):
 
                 logger.info("👑 Mở: /sales-admin-workspace/dashboard...")
                 await page.goto(f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard", wait_until="networkidle", timeout=45000)
-                await page.wait_for_selector(".MuiDataGrid-row", timeout=25000)
+                await page.wait_for_selector(".MuiDataGrid-root, .MuiDataGrid-row", timeout=25000)
                 await page.wait_for_timeout(1000)
 
                 target_row = None
@@ -343,138 +371,5 @@ class WorkspaceContractService(WorkspaceBaseService):
             except Exception as e:
                 logger.error(f"❌ Lỗi Sales Admin Approve: {e}")
                 return {"status": "failed", "error": str(e)}
-            finally:
-                await browser.close()
-
-    async def fetch_partner_contracts(self, credentials: Dict[str, str], filter_pending: bool = False) -> Dict[str, Any]:
-        async with async_playwright() as p:
-            browser, context, page = await self._create_context(p)
-            try:
-                is_ok, login_err = await self.login_role(page, credentials.get("username", ""), credentials.get("password", ""), "Partner")
-                if not is_ok:
-                    return {"status": "failed", "error": login_err, "contracts": []}
-
-                await page.goto(f"{BASE_WORKSPACE_URL}/partner-workspace/contract-po", wait_until="networkidle", timeout=45000)
-                await page.wait_for_selector(".MuiDataGrid-root", timeout=25000)
-                await page.wait_for_timeout(1000)
-
-                row_selector = ".MuiDataGrid-row:has([data-field='status']:has-text('Pending Distributor Review'))" if filter_pending else ".MuiDataGrid-row"
-                rows = page.locator(row_selector)
-                count = await rows.count()
-                contracts = []
-
-                for i in range(count):
-                    row = rows.nth(i)
-                    code_elem = row.locator("[data-field='order_code'] .MuiBox-root, [data-field='order_code']").first
-                    type_elem = row.locator("[data-field='order_type'] .MuiChip-label, [data-field='order_type']").first
-                    date_elem = row.locator("[data-field='order_date']").first
-                    status_elem = row.locator("[data-field='status'] .MuiChip-label, [data-field='status']").first
-                    amount_elem = row.locator("[data-field='total_amount'] .MuiBox-root, [data-field='total_amount']").first
-                    data_id = await row.get_attribute("data-id")
-
-                    contract_code = (await code_elem.inner_text()).strip() if await code_elem.count() > 0 else (data_id or "")
-                    contract_type = (await type_elem.inner_text()).strip() if await type_elem.count() > 0 else "License"
-                    order_date = (await date_elem.inner_text()).strip() if await date_elem.count() > 0 else ""
-                    status_text = (await status_elem.inner_text()).strip() if await status_elem.count() > 0 else ""
-                    total_amount = (await amount_elem.inner_text()).strip() if await amount_elem.count() > 0 else "$0.00"
-
-                    if contract_code:
-                        contracts.append({
-                            "data_id": data_id,
-                            "contract_code": contract_code,
-                            "contract_type": contract_type,
-                            "order_date": order_date,
-                            "status": status_text,
-                            "total_amount": total_amount
-                        })
-
-                return {"status": "success", "contracts": contracts, "total": len(contracts)}
-
-            except Exception as e:
-                logger.error(f"❌ Lỗi quét Partner Contracts: {e}")
-                return {"status": "failed", "error": str(e), "contracts": []}
-            finally:
-                await browser.close()
-
-    async def fetch_distributor_pending_contracts(self, credentials: Dict[str, str]) -> Dict[str, Any]:
-        async with async_playwright() as p:
-            browser, context, page = await self._create_context(p)
-            try:
-                is_ok, login_err = await self.login_role(page, credentials.get("username", ""), credentials.get("password", ""), "Distributor")
-                if not is_ok:
-                    return {"status": "failed", "error": login_err, "contracts": []}
-
-                await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/partner-contract-po", wait_until="networkidle", timeout=45000)
-                await page.wait_for_selector(".MuiDataGrid-root", timeout=25000)
-                await page.wait_for_timeout(1000)
-
-                rows = page.locator(".MuiDataGrid-row:has([data-field='status']:has-text('Pending'))")
-                count = await rows.count()
-                pending_list = []
-
-                for i in range(count):
-                    row = rows.nth(i)
-                    code_elem = row.locator("[data-field='order_code'] .MuiBox-root, [data-field='order_code']").first
-                    status_elem = row.locator("[data-field='status']").first
-                    date_elem = row.locator("[data-field='order_date'], [data-field='created_at']").first
-                    data_id = await row.get_attribute("data-id")
-                    
-                    code = (await code_elem.inner_text()).strip() if await code_elem.count() > 0 else (data_id or "")
-                    status = (await status_elem.inner_text()).strip() if await status_elem.count() > 0 else "Pending"
-                    date = (await date_elem.inner_text()).strip() if await date_elem.count() > 0 else ""
-
-                    if code:
-                        pending_list.append({
-                            "data_id": data_id,
-                            "contract_code": code,
-                            "status": status,
-                            "date": date
-                        })
-
-                return {"status": "success", "contracts": pending_list, "total": len(pending_list)}
-
-            except Exception as e:
-                logger.error(f"❌ Lỗi quét Distributor Pending Contracts: {e}")
-                return {"status": "failed", "error": str(e), "contracts": []}
-            finally:
-                await browser.close()
-
-    async def fetch_sales_admin_pending_contracts(self, credentials: Dict[str, str]) -> Dict[str, Any]:
-        async with async_playwright() as p:
-            browser, context, page = await self._create_context(p)
-            try:
-                is_ok, login_err = await self.login_role(page, credentials.get("username", ""), credentials.get("password", ""), "Sales Admin")
-                if not is_ok:
-                    return {"status": "failed", "error": login_err, "contracts": []}
-
-                await page.goto(f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard", wait_until="networkidle", timeout=45000)
-                await page.wait_for_selector(".MuiDataGrid-root", timeout=25000)
-                await page.wait_for_timeout(1000)
-
-                rows = page.locator(".MuiDataGrid-row:has([data-field='status']:has-text('Pending'))")
-                count = await rows.count()
-                pending_list = []
-
-                for i in range(count):
-                    row = rows.nth(i)
-                    code_elem = row.locator("[data-field='order_code'] .MuiBox-root, [data-field='order_code']").first
-                    status_elem = row.locator("[data-field='status']").first
-                    data_id = await row.get_attribute("data-id")
-                    
-                    code = (await code_elem.inner_text()).strip() if await code_elem.count() > 0 else (data_id or "")
-                    status = (await status_elem.inner_text()).strip() if await status_elem.count() > 0 else "Pending"
-
-                    if code:
-                        pending_list.append({
-                            "data_id": data_id,
-                            "contract_code": code,
-                            "status": status
-                        })
-
-                return {"status": "success", "contracts": pending_list, "total": len(pending_list)}
-
-            except Exception as e:
-                logger.error(f"❌ Lỗi quét Sales Admin Pending Contracts: {e}")
-                return {"status": "failed", "error": str(e), "contracts": []}
             finally:
                 await browser.close()

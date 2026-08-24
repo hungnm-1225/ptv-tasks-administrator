@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractService, WorkspaceEnrollService):
-    """Bộ điều phối liên luồng: Trọn Gói 4-in-1 và các Sub-workflows độc lập."""
+    """Bộ điều phối liên luồng: Trọn Gói 4-in-1 và Chuỗi Liên Hoàn Leo Cấp Tự Động (Cascade Resolution)."""
 
     async def execute_full_license_hierarchy_chain(
         self,
@@ -74,50 +74,21 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
         order_code = school_res.get("order_code")
         log_step(f"✅ [BƯỚC 1] School đã tạo Order thành công: [{order_code}]")
 
-        # BƯỚC 2: Phân phối License
-        log_step(f"🤝 [BƯỚC 2 - LICENSE] Đang duyệt và cấp phép License cho [{order_code}]...")
-        partner_res = await self.partner_approve_school_order(partner_creds, order_code)
-
-        if partner_res.get("status") == "insufficient_pool":
-            log_step("⚠️ Kho Partner thiếu License! Đang tạo PRT Contract lên Distributor...")
-            prt_contract = await self.partner_create_contract(partner_creds, {
-                "notes": f"Fulfill School Order {order_code}",
-                "courses": order_details.get("courses", [])
-            })
-            if prt_contract.get("status") != "success":
-                return {"status": "failed", "step": "partner_create_contract", "error": prt_contract.get("error"), "logs": "\n".join(logs)}
-            
-            prt_code = prt_contract.get("contract_code")
-            log_step(f"✅ Đã tạo Contract Partner: [{prt_code}]")
-
-            dist_res = await self.distributor_approve_partner_contract(distributor_creds, prt_code)
-            if dist_res.get("status") == "insufficient_pool":
-                log_step("⚠️ Kho Distributor thiếu! Đang tạo DST Contract lên Sales Admin...")
-                dst_contract = await self.distributor_create_contract(distributor_creds, {
-                    "notes": f"Fulfill Partner Contract {prt_code} for School {order_code}",
-                    "courses": order_details.get("courses", [])
-                })
-                if dst_contract.get("status") != "success":
-                    return {"status": "failed", "step": "distributor_create_contract", "error": dst_contract.get("error"), "logs": "\n".join(logs)}
-
-                dst_code = dst_contract.get("contract_code")
-                log_step(f"✅ Đã tạo Contract DST: [{dst_code}]. Đang chuyển Sales Admin duyệt...")
-
-                admin_res = await self.admin_approve_distributor_contract(sales_admin_creds, dst_code)
-                if admin_res.get("status") != "success":
-                    return {"status": "failed", "step": "admin_approve_distributor_contract", "error": admin_res.get("error"), "logs": "\n".join(logs)}
-                log_step(f"🎉 Sales Admin đã duyệt thành công Contract [{dst_code}]!")
-
-                await self.distributor_approve_partner_contract(distributor_creds, prt_code)
-
-            log_step(f"🤝 Partner duyệt lại School Order [{order_code}]...")
-            final_partner_res = await self.partner_approve_school_order(partner_creds, order_code)
-            if final_partner_res.get("status") != "success":
-                return {"status": "failed", "step": "final_partner_approve", "error": final_partner_res.get("error"), "logs": "\n".join(logs)}
+        # BƯỚC 2: Phân phối License (Tự động leo ngọn nếu thiếu)
+        log_step(f"🤝 [BƯỚC 2 - LICENSE] Kích hoạt chuỗi phân phối License cho [{order_code}]...")
+        license_res = await self.execute_approve_school_order_standalone(
+            order_identifier=order_code,
+            partner_creds=partner_creds,
+            distributor_creds=distributor_creds,
+            sales_admin_creds=sales_admin_creds,
+            courses_needed=order_details.get("courses", [])
+        )
+        if license_res.get("status") != "success":
+            return {"status": "failed", "step": "license_cascade", "error": license_res.get("error"), "logs": "\n".join(logs)}
 
         log_step(f"✅ [BƯỚC 2] Đã duyệt và cấp phép License thành công cho [{order_code}]!")
 
-        # BƯỚC 3: Ghi danh LMS
+        # BƯỚC 3: Ghi danh LMS (nếu có danh sách email)
         student_emails = order_details.get("student_emails", [])
         if student_emails:
             first_course = order_details.get("courses", [{}])[0]
@@ -150,6 +121,11 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
         sales_admin_creds: Dict[str, str],
         courses_needed: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
+        """
+        Duyệt School Order đơn lẻ:
+        - Thử duyệt tại Partner.
+        - Nếu thiếu License -> Partner tạo PRT -> Distributor duyệt -> Nếu thiếu Distributor tạo DST -> Sales Admin duyệt -> Đổ ngược xuống hoàn tất!
+        """
         logs = []
         def log_step(msg: str):
             logger.info(msg)
@@ -167,6 +143,7 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
             log_step(f"❌ {err}")
             return {"status": "failed", "error": err, "logs": "\n".join(logs)}
 
+        # Kho thiếu -> Bóc tách môn học trong đơn
         if not courses_needed:
             log_step("🔍 Kho thiếu License! Đang mở Order Details đọc thông tin môn học & số lượng cần cấp bù...")
             detail_res = await self.fetch_school_order_detailed_courses(partner_creds, order_identifier)
@@ -175,6 +152,7 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
         if not courses_needed:
             courses_needed = [{"category": "SWRP", "course_name": None, "licenses": 50}]
 
+        # 1. Partner tạo PRT Contract
         log_step(f"📝 Tạo PRT Contract xin {len(courses_needed)} môn từ Distributor '{distributor_creds.get('name')}'...")
         prt_contract = await self.partner_create_contract(partner_creds, {
             "notes": f"Auto-topup to approve School Order {order_identifier}",
@@ -186,26 +164,17 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
         prt_code = prt_contract.get("contract_code")
         log_step(f"✅ Đã tạo Contract PRT: [{prt_code}]")
 
-        dist_res = await self.distributor_approve_partner_contract(distributor_creds, prt_code)
-        if dist_res.get("status") == "insufficient_pool":
-            log_step("⚠️ Kho Distributor cũng thiếu! Đang tạo DST Contract gửi Sales Admin...")
-            dst_contract = await self.distributor_create_contract(distributor_creds, {
-                "notes": f"Topup for PRT Contract {prt_code}",
-                "courses": courses_needed
-            })
-            if dst_contract.get("status") != "success":
-                return {"status": "failed", "error": dst_contract.get("error"), "logs": "\n".join(logs)}
+        # 2. Distributor duyệt PRT Contract (Tự động leo lên Sales Admin nếu Distributor cũng thiếu)
+        prt_resolve_res = await self.execute_approve_partner_contract_standalone(
+            contract_identifier=prt_code,
+            distributor_creds=distributor_creds,
+            sales_admin_creds=sales_admin_creds,
+            courses_needed=courses_needed
+        )
+        if prt_resolve_res.get("status") != "success":
+            return {"status": "failed", "error": prt_resolve_res.get("error"), "logs": "\n".join(logs)}
 
-            dst_code = dst_contract.get("contract_code")
-            log_step(f"✅ Đã tạo DST Contract: [{dst_code}]. Đang chuyển Sales Admin duyệt...")
-
-            admin_res = await self.admin_approve_distributor_contract(sales_admin_creds, dst_code)
-            if admin_res.get("status") != "success":
-                return {"status": "failed", "error": admin_res.get("error"), "logs": "\n".join(logs)}
-
-            log_step(f"🎉 Sales Admin đã duyệt [{dst_code}]. Distributor duyệt lại [{prt_code}]...")
-            await self.distributor_approve_partner_contract(distributor_creds, prt_code)
-
+        # 3. Partner duyệt lại School Order lần cuối
         log_step(f"🤝 Partner duyệt lại School Order [{order_identifier}] lần cuối...")
         final_res = await self.partner_approve_school_order(partner_creds, order_identifier)
         if final_res.get("status") != "success":
@@ -221,12 +190,17 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
         sales_admin_creds: Dict[str, str],
         courses_needed: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
+        """
+        Duyệt Partner Contract:
+        - Distributor thử duyệt.
+        - Nếu thiếu -> Distributor tạo DST -> Sales Admin duyệt -> Distributor duyệt lại PRT hoàn tất!
+        """
         logs = []
         def log_step(msg: str):
             logger.info(msg)
             logs.append(msg)
 
-        log_step(f"🚀 [SUB-FLOW] Duyệt Partner Contract đơn lẻ: [{contract_identifier}]")
+        log_step(f"🚀 [SUB-FLOW] Duyệt Partner Contract: [{contract_identifier}]")
 
         dist_res = await self.distributor_approve_partner_contract(distributor_creds, contract_identifier)
         if dist_res.get("status") == "success":
@@ -238,6 +212,7 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
             log_step(f"❌ {err}")
             return {"status": "failed", "error": err, "logs": "\n".join(logs)}
 
+        # 1. Distributor tạo DST Contract lên Sales Admin
         log_step("⚠️ Distributor thiếu License! Đang tạo DST Contract lên Sales Admin...")
         dst_contract = await self.distributor_create_contract(distributor_creds, {
             "notes": f"Auto-topup to approve PRT Contract {contract_identifier}",
@@ -249,10 +224,12 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
         dst_code = dst_contract.get("contract_code")
         log_step(f"✅ Đã tạo DST Contract: [{dst_code}]. Đang chuyển Sales Admin duyệt...")
 
+        # 2. Sales Admin duyệt DST Contract
         admin_res = await self.admin_approve_distributor_contract(sales_admin_creds, dst_code)
         if admin_res.get("status") != "success":
             return {"status": "failed", "error": admin_res.get("error"), "logs": "\n".join(logs)}
 
+        # 3. Distributor duyệt lại Partner Contract
         log_step(f"🎉 Sales Admin đã duyệt [{dst_code}]. Distributor duyệt lại Partner Contract [{contract_identifier}]...")
         final_res = await self.distributor_approve_partner_contract(distributor_creds, contract_identifier)
         if final_res.get("status") != "success":

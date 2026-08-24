@@ -109,11 +109,11 @@ class WorkspaceOrderService(WorkspaceBaseService):
                 await submit_dialog_btn.click()
 
                 await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=20000)
-                await page.wait_for_selector(".MuiDataGrid-row", timeout=20000)
+                await page.wait_for_selector(".MuiDataGrid-root, .MuiDataGrid-row", timeout=25000)
                 await page.wait_for_timeout(2000)
 
                 first_row = page.locator(".MuiDataGrid-row").first
-                order_num_id = await first_row.get_attribute("data-id")
+                order_num_id = await first_row.get_attribute("data-id") if await first_row.count() > 0 else ""
                 order_code_elem = first_row.locator("[data-field='school_order_id'] span, [data-field='school_order_id']").first
                 order_full_code = (await order_code_elem.inner_text()).strip() if await order_code_elem.count() > 0 else (order_num_id or "")
 
@@ -146,7 +146,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
 
                 logger.info("🤝 Partner mở /partner-workspace/order-management...")
                 await page.goto(f"{BASE_WORKSPACE_URL}/partner-workspace/order-management", wait_until="networkidle", timeout=45000)
-                await page.wait_for_selector(".MuiDataGrid-row", timeout=25000)
+                await page.wait_for_selector(".MuiDataGrid-root, .MuiDataGrid-row", timeout=25000)
                 await page.wait_for_timeout(1000)
 
                 target_row = None
@@ -171,6 +171,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
 
                 await page.wait_for_selector("div[role='dialog']:has-text('Order Details')", timeout=15000)
 
+                # Chọn Pool License cho tất cả các môn
                 pool_dropdowns = page.locator("div[role='dialog'] div:has-text('Pool License Selection') .MuiSelect-select, div[role='dialog'] div:has-text('Pool License Selection') div[role='combobox']")
                 pool_count = await pool_dropdowns.count()
                 if pool_count == 0:
@@ -226,57 +227,6 @@ class WorkspaceOrderService(WorkspaceBaseService):
             finally:
                 await browser.close()
 
-    async def fetch_partner_pending_school_orders(self, credentials: Dict[str, str]) -> Dict[str, Any]:
-        """Partner cào danh sách Order của Trường đang ở trạng thái 'Awaiting Partner'."""
-        async with async_playwright() as p:
-            browser, context, page = await self._create_context(p)
-            try:
-                is_ok, login_err = await self.login_role(page, credentials.get("username", ""), credentials.get("password", ""), "Partner")
-                if not is_ok:
-                    return {"status": "failed", "error": login_err, "orders": []}
-
-                logger.info("🔍 Partner đang quét danh sách Order tại /partner-workspace/order-management...")
-                await page.goto(f"{BASE_WORKSPACE_URL}/partner-workspace/order-management", wait_until="networkidle", timeout=45000)
-                await page.wait_for_selector(".MuiDataGrid-root", timeout=25000)
-                await page.wait_for_timeout(1000)
-
-                rows = page.locator(".MuiDataGrid-row:has([data-field='status_name']:has-text('Awaiting Partner'))")
-                count = await rows.count()
-                pending_orders = []
-
-                for i in range(count):
-                    row = rows.nth(i)
-                    order_id_elem = row.locator("[data-field='school_order_id'] span, [data-field='school_order_id']").first
-                    school_elem = row.locator("[data-field='school_name'] .MuiDataGrid-cellContent, [data-field='school_name']").first
-                    date_elem = row.locator("[data-field='created_at'] .MuiDataGrid-cellContent, [data-field='created_at']").first
-                    type_elem = row.locator("[data-field='type'] .MuiChip-label, [data-field='type']").first
-                    status_elem = row.locator("[data-field='status_name'] .MuiDataGrid-cellContent, [data-field='status_name']").first
-                    data_id = await row.get_attribute("data-id")
-
-                    order_code = (await order_id_elem.inner_text()).strip() if await order_id_elem.count() > 0 else (data_id or "")
-                    school_name = (await school_elem.inner_text()).strip() if await school_elem.count() > 0 else ""
-                    created_at = (await date_elem.inner_text()).strip() if await date_elem.count() > 0 else ""
-                    order_type = (await type_elem.inner_text()).strip() if await type_elem.count() > 0 else "Course"
-                    status_name = (await status_elem.inner_text()).strip() if await status_elem.count() > 0 else "Awaiting Partner"
-
-                    if order_code:
-                        pending_orders.append({
-                            "data_id": data_id,
-                            "order_code": order_code,
-                            "school_name": school_name,
-                            "created_at": created_at,
-                            "type": order_type,
-                            "status": status_name
-                        })
-
-                return {"status": "success", "orders": pending_orders, "total": len(pending_orders)}
-
-            except Exception as e:
-                logger.error(f"❌ Lỗi quét School Orders Pending: {e}")
-                return {"status": "failed", "error": str(e), "orders": []}
-            finally:
-                await browser.close()
-
     async def fetch_school_order_detailed_courses(
         self,
         credentials: Dict[str, str],
@@ -292,7 +242,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
 
                 logger.info(f"🔍 Đang mở chi tiết Order [{order_identifier}] để đọc khóa học...")
                 await page.goto(f"{BASE_WORKSPACE_URL}/partner-workspace/order-management", wait_until="networkidle", timeout=45000)
-                await page.wait_for_selector(".MuiDataGrid-row", timeout=25000)
+                await page.wait_for_selector(".MuiDataGrid-root, .MuiDataGrid-row", timeout=25000)
 
                 target_row = page.locator(
                     f".MuiDataGrid-row[data-id='{order_identifier}'], "
@@ -327,7 +277,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     student_text_elem = c_card.locator(".MuiGrid-item:has-text('No. of Student') p, .MuiGrid-item:has-text('No. of Student')").last
                     raw_student_text = (await student_text_elem.inner_text()).strip() if await student_text_elem.count() > 0 else "1"
                     digits = re.findall(r"\d+", raw_student_text)
-                    licenses = int(digits[-1]) if digits else 1
+                    licenses = int(digits[-1]) if digits else 50
 
                     start_elem = c_card.locator(".MuiGrid-item:has-text('Start Date') p, .MuiGrid-item:has-text('Start Date')").last
                     end_elem = c_card.locator(".MuiGrid-item:has-text('End Date') p, .MuiGrid-item:has-text('End Date')").last
