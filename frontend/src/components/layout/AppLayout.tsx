@@ -17,7 +17,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
 
       <div className="flex-1 flex flex-col min-w-0">
         <Header onToggleMobileNav={() => setIsMobileNavOpen((prev) => !prev)} isMobileNavOpen={isMobileNavOpen} />
-        <main className="p-4 sm:p-6 lg:p-8 flex-1 overflow-y-auto max-w-7xl w-full mx-auto animate-in fade-in duration-300">
+        <main className="p-4 sm:p-6 lg:p-8 flex-1 overflow-y-auto w-full mx-auto animate-in fade-in duration-300">
           {children || <Outlet />}
         </main>
       </div>
