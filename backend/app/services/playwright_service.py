@@ -78,7 +78,7 @@ class PlaywrightLMSService:
                 logger.info("🔐 Đang điền thông tin đăng nhập trên Pythaverse EID Keycloak...")
                 await page.fill("input#username", admin_user)
                 await page.fill("input#password", admin_pass)
-                await page.click("input#kc-login, button[type='submit']")
+                await page.click("input#kc-login, button[type='submit']", force=True)
                 await page.wait_for_load_state("networkidle", timeout=40000)
 
             # Kiểm tra đăng nhập thành công
@@ -97,7 +97,7 @@ class PlaywrightLMSService:
         try:
             enable_chk = modal_locator.locator("input#id_timeend_enabled, input[name='timeend[enabled]']").first
             if await enable_chk.count() > 0 and not await enable_chk.is_checked():
-                await enable_chk.check()
+                await enable_chk.check(force=True)
                 await asyncio.sleep(0.3)
 
             day_sel = modal_locator.locator("select#id_timeend_day, select[name='timeend[day]']").first
@@ -128,10 +128,10 @@ class PlaywrightLMSService:
             await page.wait_for_selector(".enrolusersbutton, input[value='Enrol users']", timeout=15000)
             await page.wait_for_timeout(800)
 
-            # Bấm nút Enrol users
+            # Bấm nút Enrol users (dùng force=True để không bị intercept)
             enrol_btn = page.locator(".enrolusersbutton input[value='Enrol users'], input[value='Enrol users']").first
             if await enrol_btn.count() > 0:
-                await enrol_btn.click()
+                await enrol_btn.click(force=True)
 
             for _ in range(3):
                 modal = page.locator(".modal.show, div[role='dialog']:has-text('Enrolment options'), .modal-dialog").first
@@ -245,13 +245,17 @@ class PlaywrightLMSService:
                             await role_select.select_option(value=role_value)
                             await page.wait_for_timeout(300)
 
-                        # Bung Show More để đặt ngày hết hạn nếu có (dùng .first để tránh strict mode violation)
-                        show_more_btn = modal.locator("a.moreless-toggler").first
-                        if await show_more_btn.count() > 0:
-                            aria_exp = await show_more_btn.get_attribute("aria-expanded")
-                            if aria_exp != "true":
-                                await show_more_btn.click()
-                                await page.wait_for_timeout(400)
+                        # 👉 BUNG SHOW MORE BẰNG JS & FORCE ĐỂ KHÔNG BỊ INTERCEPT
+                        try:
+                            await page.evaluate("""() => {
+                                const btn = document.querySelector(".modal.show a.moreless-toggler, div[role='dialog'] a.moreless-toggler");
+                                if (btn && btn.getAttribute("aria-expanded") !== "true") {
+                                    btn.click();
+                                }
+                            }""")
+                            await page.wait_for_timeout(400)
+                        except Exception as e_sm:
+                            logger.info(f"Show more toggler info: {e_sm}")
 
                         if date_info:
                             await self._set_moodle_datetime_selectors(modal, date_info)
@@ -261,7 +265,7 @@ class PlaywrightLMSService:
 
                         for email in emails:
                             if await search_user_input.count() > 0:
-                                await search_user_input.click()
+                                await search_user_input.click(force=True)
                                 await search_user_input.fill("")
                                 await search_user_input.type(email, delay=40)
                                 await page.wait_for_timeout(1800)
@@ -270,7 +274,7 @@ class PlaywrightLMSService:
                                 suggestion_item = page.locator(f"ul.form-autocomplete-suggestions li[role='option']:has-text('{email}')").first
                                 
                                 if await suggestion_item.count() > 0 and await suggestion_item.is_visible():
-                                    await suggestion_item.click()
+                                    await suggestion_item.click(force=True)
                                     await page.wait_for_timeout(600)
                                     new_selected_count += 1
                                     results["enrolled_new"].append({"email": email, "role": role_label})
@@ -295,7 +299,7 @@ class PlaywrightLMSService:
                         # Nếu có ít nhất 1 user mới được chọn -> Bấm Submit Enrol
                         if new_selected_count > 0:
                             save_btn = modal.locator(".modal-footer button[data-action='save'], button:has-text('Enrol selected users')").first
-                            await save_btn.click()
+                            await save_btn.click(force=True)
                             await page.wait_for_load_state("networkidle")
                             await page.wait_for_timeout(2000)
                             logger.info(f"✅ Đã submit ghi danh {new_selected_count} tài khoản mới thành công!")
@@ -303,7 +307,7 @@ class PlaywrightLMSService:
                             # Đóng modal an toàn
                             cancel_modal_btn = modal.locator(".modal-footer button[data-action='cancel'], button.close").first
                             if await cancel_modal_btn.count() > 0:
-                                await cancel_modal_btn.click()
+                                await cancel_modal_btn.click(force=True)
                                 await page.wait_for_timeout(500)
                     else:
                         emails_need_extend = emails
@@ -333,9 +337,9 @@ class PlaywrightLMSService:
                             # Bấm Apply filters 2 LẦN
                             apply_filter_btn = page.locator("button[data-filteraction='apply']").first
                             if await apply_filter_btn.count() > 0:
-                                await apply_filter_btn.click()
+                                await apply_filter_btn.click(force=True)
                                 await page.wait_for_timeout(700)
-                                await apply_filter_btn.click()
+                                await apply_filter_btn.click(force=True)
                                 await page.wait_for_load_state("networkidle")
                                 await page.wait_for_timeout(1500)
 
@@ -347,7 +351,7 @@ class PlaywrightLMSService:
                             if await user_row.count() > 0:
                                 edit_gear = user_row.locator("a.editenrollink[data-action='editenrolment']").first
                                 if await edit_gear.count() > 0:
-                                    await edit_gear.click()
+                                    await edit_gear.click(force=True)
                                     await page.wait_for_selector(".modal.show, .modal-dialog", timeout=8000)
                                     await page.wait_for_timeout(500)
 
@@ -364,7 +368,7 @@ class PlaywrightLMSService:
 
                                     # Save changes
                                     save_edit_btn = edit_modal.locator(".modal-footer button[data-action='save'], button:has-text('Save changes')").first
-                                    await save_edit_btn.click()
+                                    await save_edit_btn.click(force=True)
                                     await page.wait_for_load_state("networkidle")
                                     await page.wait_for_timeout(1000)
 
@@ -399,24 +403,24 @@ class PlaywrightLMSService:
                     if await group_option.count() == 0:
                         logger.info(f"➕ Tạo Group mới: [{group_name}]...")
                         create_group_btn = page.locator("input#showcreateorphangroupform, input[value='Create group']").first
-                        await create_group_btn.click()
+                        await create_group_btn.click(force=True)
                         await page.wait_for_load_state("networkidle")
 
                         await page.fill("input#id_name", group_name)
-                        await page.click("input#id_submitbutton, input[value='Save changes']")
+                        await page.click("input#id_submitbutton, input[value='Save changes']", force=True)
                         await page.wait_for_load_state("networkidle")
                         await page.wait_for_timeout(1000)
 
                     # Chọn Group vừa tạo/có sẵn
                     group_option = page.locator(f"select#groups option:has-text('{group_name}')").first
                     if await group_option.count() > 0:
-                        await group_option.click()
+                        await group_option.click(force=True)
                         await page.wait_for_timeout(400)
 
                         # Bấm nút Add/remove users
                         add_members_btn = page.locator("input#showaddmembersform, input[value='Add/remove users']").first
                         if await add_members_btn.count() > 0 and await add_members_btn.is_enabled():
-                            await add_members_btn.click()
+                            await add_members_btn.click(force=True)
                             await page.wait_for_load_state("networkidle")
                             await page.wait_for_timeout(800)
 
@@ -429,12 +433,12 @@ class PlaywrightLMSService:
 
                                     potential_opt = page.locator(f"select#addselect option:has-text('{u_email}')").first
                                     if await potential_opt.count() > 0:
-                                        await potential_opt.click()
+                                        await potential_opt.click(force=True)
                                         await page.wait_for_timeout(300)
 
                                         add_btn = page.locator("input#add, input[value*='Add']").first
                                         if await add_btn.count() > 0 and await add_btn.is_enabled():
-                                            await add_btn.click()
+                                            await add_btn.click(force=True)
                                             await page.wait_for_load_state("networkidle")
                                             await page.wait_for_timeout(600)
                                             results["group_members_added"].append(u_email)
@@ -443,7 +447,7 @@ class PlaywrightLMSService:
                             # Bấm Back to groups
                             back_btn = page.locator("input[name='cancel'][value='Back to groups']").first
                             if await back_btn.count() > 0:
-                                await back_btn.click()
+                                await back_btn.click(force=True)
                                 await page.wait_for_load_state("networkidle")
 
                             results["group_created"] = group_name
