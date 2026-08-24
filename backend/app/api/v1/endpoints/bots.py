@@ -1,12 +1,35 @@
 # backend/app/api/v1/endpoints/bots.py
+import re
 import uuid
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from typing import Dict, Any, List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from app.core.supabase import get_supabase_client
 from app.workers.bot_executor import execute_approved_bot_task
 
 router = APIRouter()
+
+# Định nghĩa múi giờ Việt Nam chuẩn GMT+7
+VN_TZ = timezone(timedelta(hours=7))
+
+def format_vn_time(val: Any) -> str:
+    """Chuyển đổi mọi định dạng thời gian (UTC ISO, datetime) sang chuỗi giờ Việt Nam chuẩn (GMT+7)."""
+    if not val:
+        return datetime.now(VN_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(val, str):
+        clean_str = val.replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(clean_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(VN_TZ).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return str(val)[:19].replace("T", " ")
+    elif isinstance(val, datetime):
+        if val.tzinfo is None:
+            val = val.replace(tzinfo=timezone.utc)
+        return val.astimezone(VN_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    return str(val)
 
 def is_valid_uuid(val: str) -> bool:
     """Kiểm tra xem chuỗi có phải là UUID hợp lệ không."""
@@ -15,6 +38,16 @@ def is_valid_uuid(val: str) -> bool:
         return True
     except (ValueError, AttributeError, TypeError):
         return False
+
+def clean_log_message(msg: str) -> str:
+    """Bóc tách bỏ timestamp và prefix tag trùng lặp đã bị lồng trong nội dung log."""
+    cleaned = msg.strip()
+    # Xóa timestamp đầu dòng dạng: [2026-08-24 11:42:34] hoặc [2026-08-24T11:42:34...]
+    cleaned = re.sub(r"^\[\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\]\s*", "", cleaned)
+    # Xóa các tag phụ lặp lại như [INFO], [ERROR], [SUCCESS], [worker_name]:
+    cleaned = re.sub(r"^\[(INFO|ERROR|SUCCESS|APPROVAL|WARNING|RETRY|DEBUG)\]\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^\[[\w\d_-]+\]:\s*", "", cleaned)
+    return cleaned.strip()
 
 
 @router.get("/status")
@@ -68,7 +101,7 @@ async def get_bot_workers_status() -> Dict[str, str]:
 
 @router.get("/logs")
 async def get_bot_terminal_logs() -> List[Dict[str, Any]]:
-    """Lấy danh sách log thực thi thật từ database."""
+    """Lấy danh sách log thực thi thật từ database với múi giờ Việt Nam và không trùng timestamp."""
     supabase = get_supabase_client()
     logs_output = []
     
@@ -85,7 +118,10 @@ async def get_bot_terminal_logs() -> List[Dict[str, Any]]:
             t_id_short = str(t.get("id"))[:8]
             b_type = t.get("bot_type") or "Worker"
             e_status = t.get("execution_status") or "queued"
-            time_str = (t.get("executed_at") or t.get("created_at") or datetime.now(timezone.utc).isoformat())[:19].replace("T", " ")
+            
+            # 🟢 Chuẩn hóa mốc thời gian sang giờ Việt Nam (GMT+7)
+            raw_time = t.get("executed_at") or t.get("created_at")
+            time_str = format_vn_time(raw_time)
             
             logs_output.append({
                 "timestamp": time_str,
@@ -99,12 +135,17 @@ async def get_bot_terminal_logs() -> List[Dict[str, Any]]:
                 for line in t["execution_logs"].split("\n"):
                     if line.strip():
                         level = "SUCCESS" if "success" in line.lower() else "ERROR" if "error" in line.lower() or "fail" in line.lower() else "INFO"
+                        # 🟢 Làm sạch nội dung log để không bị lặp lại giờ và tags
+                        cleaned_msg = clean_log_message(line)
+                        if not cleaned_msg:
+                            cleaned_msg = line.strip()
+
                         logs_output.append({
                             "timestamp": time_str,
                             "level": level,
                             "worker": b_type,
-                            "message": line.strip(),
-                            "raw_line": f"[{time_str}] [{level}] [{b_type}]: {line.strip()}"
+                            "message": cleaned_msg,
+                            "raw_line": f"[{time_str}] [{level}] [{b_type}]: {cleaned_msg}"
                         })
             elif e_status == "success":
                 logs_output.append({
@@ -124,7 +165,7 @@ async def get_bot_terminal_logs() -> List[Dict[str, Any]]:
                 })
                 
     except Exception as e:
-        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        now_str = format_vn_time(None)
         logs_output.append({
             "timestamp": now_str,
             "level": "ERROR",

@@ -135,12 +135,14 @@ export const BotCommanderPage: React.FC = () => {
   };
 
   const handleClearLogs = () => {
+    // 🟢 Định dạng giờ địa phương máy tính chuẩn YYYY-MM-DD HH:mm:ss
+    const nowLocal = new Date().toLocaleString('sv-SE', { hour12: false }).replace('T', ' ');
     setLogs([{
-      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      timestamp: nowLocal,
       level: 'INFO',
       worker: 'Console',
       message: 'Terminal logs cleared locally.',
-      raw_line: `[${new Date().toISOString().replace('T', ' ').slice(0, 19)}] [INFO] [Console]: Terminal cleared.`
+      raw_line: `[${nowLocal}] [INFO] [Console]: Terminal cleared.`
     }]);
     toast.info('Đã xóa màn hình console');
   };
