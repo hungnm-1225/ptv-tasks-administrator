@@ -25,7 +25,6 @@ import {
   GraduationCap,
   Calendar,
   UserCheck,
-  Edit3,
   UploadCloud,
   FileSpreadsheet,
   Filter,
@@ -121,14 +120,25 @@ export const AutomationStudioPage: React.FC = () => {
   const [scrapedPendingList, setScrapedPendingList] = useState<ScrapedPendingItem[]>([]);
   const [parsedOrderCourses, setParsedOrderCourses] = useState<any[]>([]);
 
-  // 👉 BỘ LỌC TRẠNG THÁI (Mặc định là 'pending')
+  // 👉 BỘ LỌC TRẠNG THÁI
   const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
 
-  // Metadata Phả hệ & Khóa học
+  // =========================================================================
+  // 🏢 METADATA WORKSPACE (Bảng workspace_courses & hierarchy_schools)
+  // =========================================================================
   const [schoolsList, setSchoolsList] = useState<HierarchySchoolItem[]>([]);
-  const [categoriesList, setCategoriesList] = useState<string[]>(['SWRP', 'IR', 'ASP', 'Other']);
+  const [workspaceCategoriesList, setWorkspaceCategoriesList] = useState<string[]>(['SWRP', 'IR', 'ASP', 'Other']);
   const [workspaceCoursesList, setWorkspaceCoursesList] = useState<CourseItem[]>([]);
+
+  // =========================================================================
+  // 🎓 METADATA LMS DIRECT (Bảng lms_courses)
+  // =========================================================================
+  const [lmsCategoriesList, setLmsCategoriesList] = useState<string[]>([]);
   const [lmsCoursesList, setLmsCoursesList] = useState<CourseItem[]>([]);
+  const [lmsCourseCategory, setLmsCourseCategory] = useState<string>('');
+  const [lmsCourseId, setLmsCourseId] = useState<number>(0);
+  const [lmsCourseName, setLmsCourseName] = useState<string>('');
+  const [lmsGroupName, setLmsGroupName] = useState<string>('');
 
   // Đối tượng được chọn theo 3 cấp
   const [selectedSchool, setSelectedSchool] = useState<HierarchySchoolItem | null>(null);
@@ -157,7 +167,7 @@ export const AutomationStudioPage: React.FC = () => {
   nextYear.setFullYear(today.getFullYear() + 1);
   nextYear.setDate(nextYear.getDate() - 1);
 
-  // Khóa học được chọn khi Tạo & Duyệt
+  // Khóa học được chọn khi Tạo & Duyệt (Workspace)
   const [selectedCourses, setSelectedCourses] = useState<OrderCourseSelection[]>([
     {
       category: 'SWRP',
@@ -170,45 +180,9 @@ export const AutomationStudioPage: React.FC = () => {
     },
   ]);
 
-  // =========================================================================
-  // LMS ENROLL STATE (Đọc từ bảng lms_courses)
-  // =========================================================================
-  const [lmsCourseCategory, setLmsCourseCategory] = useState<string>('SWRP');
-  const [lmsCourseId, setLmsCourseId] = useState<number>(654);
-  const [lmsCourseName, setLmsCourseName] = useState<string>('SWRP 9: LEANBOT Programming Applications with IoT [V2] (EN)');
+  // Thời hạn LMS Enroll
   const [lmsStartDate, setLmsStartDate] = useState<string>(getFormattedDate(today));
   const [lmsEndDate, setLmsEndDate] = useState<string>(getFormattedDate(nextYear));
-
-  // Thêm/Cập nhật state group name & data
-  const [lmsGroupName, setLmsGroupName] = useState<string>('');
-
-  // Đảm bảo fetch API gọi đúng endpoint Moodle lms_courses:
-  useEffect(() => {
-    const fetchLmsCourses = async () => {
-      try {
-        // 1. Lấy danh mục categories của riêng LMS
-        const cats = await fetchApi<string[]>('/courses/lms/categories');
-        if (cats && cats.length > 0) {
-          setCategoriesList(cats);
-          setLmsCourseCategory(cats[0]);
-        }
-
-        // 2. Lấy toàn bộ danh sách khóa học lms_courses
-        const res = await fetchApi<any[]>('/courses/lms');
-        if (res) {
-          setLmsCoursesList(res);
-          if (res.length > 0) {
-            setLmsCourseId(res[0].course_id);
-            setLmsCourseName(res[0].course_name);
-          }
-        }
-      } catch (err) {
-        console.error('Lỗi nạp khóa học LMS:', err);
-      }
-    };
-
-    fetchLmsCourses();
-  }, []);
 
   // Role Mode: 'multi_role' (3 ô riêng) | 'same_role' (1 vai trò chung)
   const [lmsRoleMode, setLmsRoleMode] = useState<'same_role' | 'multi_role'>('multi_role');
@@ -236,17 +210,21 @@ export const AutomationStudioPage: React.FC = () => {
   const [githubAssignee, setGithubAssignee] = useState<string>('nguyenthetrung5-PTV');
   const [submitting, setSubmitting] = useState<boolean>(false);
 
-  // Nạp Metadata
+  // =========================================================================
+  // 🔄 NẠP METADATA SONG SONG (Workspace & LMS riêng biệt)
+  // =========================================================================
   useEffect(() => {
-    const loadMetadata = async () => {
+    const loadAllMetadata = async () => {
       try {
-        const [schools, cats, wsCourses, lmsCourses] = await Promise.all([
-          fetchApi<HierarchySchoolItem[]>('/workspace/hierarchy-schools'),
-          fetchApi<string[]>('/workspace/categories'),
-          fetchApi<CourseItem[]>('/workspace/courses'),
+        const [schools, wsCats, wsCourses, lmsCats, lmsCourses] = await Promise.all([
+          fetchApi<HierarchySchoolItem[]>('/workspace/hierarchy-schools').catch(() => []),
+          fetchApi<string[]>('/workspace/categories').catch(() => ['SWRP', 'IR', 'ASP', 'Other']),
+          fetchApi<CourseItem[]>('/workspace/courses').catch(() => []),
+          fetchApi<string[]>('/courses/lms/categories').catch(() => []),
           fetchApi<CourseItem[]>('/courses/lms').catch(() => []),
         ]);
 
+        // 1. Gán Workspace
         setSchoolsList(schools || []);
         if (schools && schools.length > 0) {
           setSelectedSchool(schools[0]);
@@ -255,20 +233,29 @@ export const AutomationStudioPage: React.FC = () => {
           setEntitySearchQuery(`${schools[0].school_name} (${schools[0].school_code})`);
         }
 
-        if (cats && cats.length > 0) setCategoriesList(cats);
+        if (wsCats && wsCats.length > 0) setWorkspaceCategoriesList(wsCats);
         setWorkspaceCoursesList(wsCourses || []);
+
+        // 2. Gán LMS (Chuẩn hóa độc lập)
+        if (lmsCats && lmsCats.length > 0) {
+          setLmsCategoriesList(lmsCats);
+          setLmsCourseCategory(lmsCats[0]);
+        }
         setLmsCoursesList(lmsCourses || []);
 
         if (lmsCourses && lmsCourses.length > 0) {
-          setLmsCourseId(lmsCourses[0].course_id);
-          setLmsCourseName(lmsCourses[0].course_name);
-          setLmsCourseCategory(lmsCourses[0].category || 'SWRP');
+          const firstCat = lmsCats && lmsCats.length > 0 ? lmsCats[0] : lmsCourses[0].category;
+          const matchFirst = lmsCourses.filter((c) => c.category === firstCat);
+          const activeFirst = matchFirst.length > 0 ? matchFirst[0] : lmsCourses[0];
+          setLmsCourseId(activeFirst.course_id);
+          setLmsCourseName(activeFirst.course_name);
+          setLmsCourseCategory(activeFirst.category);
         }
       } catch (e) {
         console.warn('Lỗi nạp metadata:', e);
       }
     };
-    loadMetadata();
+    loadAllMetadata();
   }, []);
 
   // Đóng Dropdown khi click ra ngoài
@@ -359,10 +346,10 @@ export const AutomationStudioPage: React.FC = () => {
     setParsedOrderCourses([]);
     try {
       if (approveSubFlow === 'approve_school_order') {
-        // Tải danh sách đơn hàng trường (không bị chặn bởi trường 000)
-        const filterParam = selectedSchool && !selectedSchool.school_name.includes('000 SCHOOL')
-          ? `?school_name=${encodeURIComponent(selectedSchool.school_name)}`
-          : '';
+        const filterParam =
+          selectedSchool && !selectedSchool.school_name.includes('000 SCHOOL')
+            ? `?school_name=${encodeURIComponent(selectedSchool.school_name)}`
+            : '';
 
         const res = await fetchApi<any>(`/workspace/cached-pending-orders${filterParam}`);
         const orders = res?.orders || [];
@@ -416,7 +403,7 @@ export const AutomationStudioPage: React.FC = () => {
     }
   };
 
-  // Lọc danh sách Order/Contract hiển thị theo trạng thái (Pending / Approved / Rejected / All)
+  // Lọc danh sách Order/Contract hiển thị theo trạng thái
   const filteredCacheList = useMemo(() => {
     if (statusFilter === 'all') return scrapedPendingList;
     return scrapedPendingList.filter((item) => {
@@ -599,10 +586,11 @@ export const AutomationStudioPage: React.FC = () => {
           category: lmsCourseCategory,
           start_date: lmsStartDate,
           end_date: lmsEndDate,
+          group_name: lmsGroupName.trim() || undefined,
           role_mode: lmsRoleMode,
-          students: studentsList,
-          non_editing_teachers: teachersList,
-          managers: managersList,
+          student_emails: studentsList,
+          teacher_emails: teachersList,
+          manager_emails: managersList,
           auto_renew_existing: true,
         };
       }
@@ -1019,7 +1007,7 @@ export const AutomationStudioPage: React.FC = () => {
                     </div>
                   )}
 
-                  {/* 👉 DANH SÁCH TỪ CACHE KÈM BỘ LỌC TRẠNG THÁI */}
+                  {/* DANH SÁCH TỪ CACHE KÈM BỘ LỌC TRẠNG THÁI */}
                   {scrapedPendingList.length > 0 && (
                     <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-700">
                       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -1262,7 +1250,7 @@ export const AutomationStudioPage: React.FC = () => {
                               }}
                               className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-semibold cursor-pointer outline-none"
                             >
-                              {categoriesList.map((cat) => (
+                              {workspaceCategoriesList.map((cat) => (
                                 <option key={cat} value={cat}>
                                   {cat}
                                 </option>
@@ -1353,7 +1341,7 @@ export const AutomationStudioPage: React.FC = () => {
             )}
 
             {/* ============================================================= */}
-            {/* 👉 MỤC 3: TẠO TÀI KHOẢN HÀNG LOẠT (KHUNG NỘP FILE EXCEL .XLSX) */}
+            {/* MỤC 3: TẠO TÀI KHOẢN HÀNG LOẠT (KHUNG NỘP FILE EXCEL .XLSX)     */}
             {/* ============================================================= */}
             {workspaceMainCategory === 'bulk_accounts' && (
               <div className="p-6 bg-white dark:bg-slate-800/90 rounded-3xl border border-violet-200 dark:border-slate-700 space-y-4 shadow-2xs">
@@ -1438,7 +1426,7 @@ export const AutomationStudioPage: React.FC = () => {
                         </span>
                       </div>
                       <div className="text-xs text-slate-500 dark:text-slate-400">
-                        Dữ liệu khóa học được đồng bộ chuẩn xác từ bảng <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">lms_courses</span>.
+                        Dữ liệu khóa học được đồng bộ chuẩn xác từ bảng <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">lms_courses</span> ({lmsCoursesList.length} môn).
                       </div>
                     </div>
                   </div>
@@ -1447,7 +1435,9 @@ export const AutomationStudioPage: React.FC = () => {
                 {/* Chọn Khóa Học LMS */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">Phân loại (Category):</label>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase">
+                      Phân loại ({lmsCategoriesList.length} Categories):
+                    </label>
                     <select
                       value={lmsCourseCategory}
                       onChange={(e) => {
@@ -1459,9 +1449,9 @@ export const AutomationStudioPage: React.FC = () => {
                           setLmsCourseName(match[0].course_name);
                         }
                       }}
-                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-semibold outline-none"
+                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-semibold outline-none truncate cursor-pointer"
                     >
-                      {categoriesList.map((cat) => (
+                      {lmsCategoriesList.map((cat) => (
                         <option key={cat} value={cat}>
                           {cat}
                         </option>
@@ -1471,7 +1461,7 @@ export const AutomationStudioPage: React.FC = () => {
 
                   <div className="sm:col-span-2">
                     <label className="text-[10px] font-bold text-slate-500 uppercase">
-                      Chọn khóa học LMS ({lmsCoursesList.filter((c) => c.category === lmsCourseCategory).length} môn):
+                      Chọn khóa học LMS ({lmsCoursesList.filter((c) => c.category === lmsCourseCategory).length} môn trong danh mục):
                     </label>
                     <select
                       value={lmsCourseId}
@@ -1481,7 +1471,7 @@ export const AutomationStudioPage: React.FC = () => {
                         const target = lmsCoursesList.find((c) => c.course_id === cId);
                         if (target) setLmsCourseName(target.course_name);
                       }}
-                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-semibold outline-none truncate"
+                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-semibold outline-none truncate cursor-pointer"
                     >
                       {lmsCoursesList
                         .filter((c) => c.category === lmsCourseCategory)
@@ -1584,7 +1574,7 @@ export const AutomationStudioPage: React.FC = () => {
                         <select
                           value={lmsSingleRole}
                           onChange={(e) => setLmsSingleRole(e.target.value as any)}
-                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-bold outline-none"
+                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-bold outline-none cursor-pointer"
                         >
                           <option value="student">🎓 Học Viên (Student)</option>
                           <option value="non_editing_teacher">👨‍🏫 Giáo Viên Trợ Giảng (Non-editing Teacher)</option>

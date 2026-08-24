@@ -21,7 +21,7 @@ import {
   FileCode,
   UploadCloud,
   X,
-  Trash2
+  Copy
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
@@ -56,6 +56,171 @@ const IMPACTED_SYSTEMS = [
   'PContest',
   'Support Helpdesk',
 ];
+
+// 🔥 BỘ RENDER MARKDOWN CHUẨN GITHUB (GFM RENDERER TÍCH HỢP)
+const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
+  if (!content.trim()) {
+    return <div className="text-slate-400 italic text-xs py-8 text-center">Chưa có nội dung để xem trước...</div>;
+  }
+
+  // Parse inline styles: bold, inline code, links
+  const renderInline = (text: string) => {
+    // Regex bắt link [text](url)
+    const parts = text.split(/(\[.*?\]\(.*?\)|\*\*.*?\*\*|`.*?`)/g);
+
+    return parts.map((part, index) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return <strong key={index} className="font-bold text-slate-900 dark:text-slate-100">{part.slice(2, -2)}</strong>;
+      }
+      if (part.startsWith('`') && part.endsWith('`')) {
+        return (
+          <code key={index} className="px-1.5 py-0.5 mx-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-violet-600 dark:text-violet-400 font-mono text-[11px] border border-slate-200 dark:border-slate-700">
+            {part.slice(1, -1)}
+          </code>
+        );
+      }
+      const linkMatch = part.match(/^\[(.*?)\]\((.*?)\)$/);
+      if (linkMatch) {
+        return (
+          <a key={index} href={linkMatch[2]} target="_blank" rel="noreferrer" className="text-sky-600 dark:text-sky-400 underline hover:text-sky-500 font-medium inline-flex items-center gap-0.5">
+            <span>{linkMatch[1]}</span>
+            <ExternalLink className="w-2.5 h-2.5 inline" />
+          </a>
+        );
+      }
+      return part;
+    });
+  };
+
+  const lines = content.split('\n');
+  const renderedElements: React.ReactNode[] = [];
+  let inCodeBlock = false;
+  let codeBlockContent: string[] = [];
+
+  lines.forEach((line, idx) => {
+    // Xử lý Code Block (``` ... ```)
+    if (line.trim().startsWith('```')) {
+      if (inCodeBlock) {
+        renderedElements.push(
+          <div key={`code-${idx}`} className="my-3 rounded-xl bg-slate-900 text-slate-100 p-3.5 font-mono text-xs overflow-x-auto border border-slate-800 shadow-inner">
+            <pre>{codeBlockContent.join('\n')}</pre>
+          </div>
+        );
+        codeBlockContent = [];
+        inCodeBlock = false;
+      } else {
+        inCodeBlock = true;
+      }
+      return;
+    }
+
+    if (inCodeBlock) {
+      codeBlockContent.push(line);
+      return;
+    }
+
+    // Xử lý Ảnh Markdown: ![alt](url) hoặc - ![alt](url)
+    const imgMatch = line.trim().match(/^-?\s*!\[(.*?)\]\((.*?)\)$/);
+    if (imgMatch) {
+      const altText = imgMatch[1] || 'Hình ảnh bằng chứng';
+      const imgUrl = imgMatch[2];
+      renderedElements.push(
+        <div key={idx} className="my-3.5 space-y-1.5">
+          <div className="p-1 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden shadow-xs inline-block max-w-full">
+            <img
+              src={imgUrl}
+              alt={altText}
+              className="max-h-96 max-w-full rounded-xl object-contain hover:scale-[1.01] transition-transform cursor-pointer"
+              onClick={() => window.open(imgUrl, '_blank')}
+            />
+          </div>
+          <div className="text-[11px] text-slate-500 flex items-center gap-1.5 font-mono">
+            <ImageIcon className="w-3 h-3 text-emerald-500" />
+            <span>{altText}</span>
+            <a href={imgUrl} target="_blank" rel="noreferrer" className="text-violet-500 hover:underline">
+              [Mở tab mới]
+            </a>
+          </div>
+        </div>
+      );
+      return;
+    }
+
+    // Tiêu đề ###
+    if (line.startsWith('### ')) {
+      renderedElements.push(
+        <h3 key={idx} className="text-base font-bold text-slate-900 dark:text-slate-100 mt-4 mb-2 pb-1 border-b border-slate-200 dark:border-slate-800">
+          {renderInline(line.replace('### ', ''))}
+        </h3>
+      );
+      return;
+    }
+
+    // Tiêu đề ##
+    if (line.startsWith('## ')) {
+      renderedElements.push(
+        <h2 key={idx} className="text-lg font-bold text-slate-900 dark:text-slate-100 mt-5 mb-2.5 pb-1 border-b border-slate-200 dark:border-slate-800">
+          {renderInline(line.replace('## ', ''))}
+        </h2>
+      );
+      return;
+    }
+
+    // Đường kẻ ngang ---
+    if (line.trim() === '---' || line.trim() === '***') {
+      renderedElements.push(<hr key={idx} className="my-4 border-slate-200 dark:border-slate-800" />);
+      return;
+    }
+
+    // Blockquote >
+    if (line.startsWith('> ')) {
+      renderedElements.push(
+        <blockquote key={idx} className="my-2 pl-3 py-1 border-l-4 border-violet-500 bg-violet-50/50 dark:bg-violet-950/20 text-slate-700 dark:text-slate-300 rounded-r-lg text-xs italic">
+          {renderInline(line.replace('> ', ''))}
+        </blockquote>
+      );
+      return;
+    }
+
+    // Danh sách gạch đầu dòng -
+    if (line.trim().startsWith('- ')) {
+      renderedElements.push(
+        <div key={idx} className="flex items-start gap-2 my-1 text-xs text-slate-800 dark:text-slate-200">
+          <span className="text-violet-500 font-bold mt-0.5">•</span>
+          <div className="flex-1 leading-relaxed">{renderInline(line.trim().replace('- ', ''))}</div>
+        </div>
+      );
+      return;
+    }
+
+    // Danh sách số 1. 2.
+    const numMatch = line.trim().match(/^(\d+)\.\s+(.*)$/);
+    if (numMatch) {
+      renderedElements.push(
+        <div key={idx} className="flex items-start gap-2 my-1 text-xs text-slate-800 dark:text-slate-200">
+          <span className="text-violet-600 dark:text-violet-400 font-bold font-mono text-[11px]">{numMatch[1]}.</span>
+          <div className="flex-1 leading-relaxed">{renderInline(numMatch[2])}</div>
+        </div>
+      );
+      return;
+    }
+
+    // Dòng trống
+    if (!line.trim()) {
+      renderedElements.push(<div key={idx} className="h-2" />);
+      return;
+    }
+
+    // Đoạn văn thông thường
+    renderedElements.push(
+      <p key={idx} className="text-xs text-slate-800 dark:text-slate-200 leading-relaxed my-1">
+        {renderInline(line)}
+      </p>
+    );
+  });
+
+  return <div className="space-y-0.5 font-sans">{renderedElements}</div>;
+};
 
 export const GithubReporterPage: React.FC = () => {
   const location = useLocation();
@@ -164,14 +329,13 @@ export const GithubReporterPage: React.FC = () => {
     const newBody = `${textBefore}${markdownText}${textAfter}`;
     setBody(newBody);
 
-    // Di chuyển con trỏ sau text vừa chèn
     setTimeout(() => {
       textarea.focus();
       textarea.setSelectionRange(startPos + markdownText.length, startPos + markdownText.length);
     }, 50);
   };
 
-  // 🔥 BẮT SỰ KIỆN PASTE (CTRL + V) ĐỂ UPLOAD ẢNH TỪ CLIPBOARD
+  // 🔥 BẮT SỰ KIỆN PASTE (CTRL + V) TỪ FASTSTONE CAPTURE / CLIPBOARD
   const handlePasteOnEditor = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const clipboardItems = e.clipboardData?.items;
     if (!clipboardItems) return;
@@ -179,12 +343,12 @@ export const GithubReporterPage: React.FC = () => {
     for (let i = 0; i < clipboardItems.length; i++) {
       const item = clipboardItems[i];
       if (item.type.indexOf('image') !== -1) {
-        e.preventDefault(); // Tránh dán chuỗi nhị phân rác
+        e.preventDefault();
         const file = item.getAsFile();
         if (!file) continue;
 
         setUploadingMedia(true);
-        const toastId = toast.loading('Đang upload ảnh chụp từ Clipboard lên Cloud...');
+        const toastId = toast.loading('Đang upload ảnh chụp FastStone lên Cloud...');
 
         try {
           const uploaded = await uploadFileToSupabase(file);
@@ -205,7 +369,7 @@ export const GithubReporterPage: React.FC = () => {
     }
   };
 
-  // 🔥 CHỌN TỆP ĐÍNH KÈM THỦ CÔNG (ẢNH, LOG, .TXT, .MD, .JSON)
+  // 🔥 CHỌN TỆP ĐÍNH KÈM THỦ CÔNG
   const handleManualFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -220,7 +384,6 @@ export const GithubReporterPage: React.FC = () => {
         const uploaded = await uploadFileToSupabase(file);
         newItems.push(uploaded);
 
-        // Tự chèn vào markdown
         if (uploaded.isImage) {
           insertMarkdownAtCursor(`\n![${uploaded.filename}](${uploaded.url})\n`);
         } else {
@@ -241,7 +404,7 @@ export const GithubReporterPage: React.FC = () => {
 
   const handleRemoveAttachment = (index: number) => {
     setAttachments((prev) => prev.filter((_, idx) => idx !== index));
-    toast.info('Đã gỡ tệp khỏi danh sách (Nội dung trong Markdown không bị xóa tự động).');
+    toast.info('Đã gỡ tệp khỏi danh sách quản lý.');
   };
 
   // 🔥 GỌI GEMINI AI TẠO TEMPLATE CHUẨN CLAUDE CODE
@@ -520,7 +683,7 @@ export const GithubReporterPage: React.FC = () => {
           </div>
 
           <p className="text-[11px] text-slate-500 dark:text-slate-400">
-            💡 <strong>Mẹo hay:</strong> Bạn có thể chụp ảnh màn hình rồi bấm <strong>Ctrl + V</strong> trực tiếp vào ô soạn thảo Markdown bên dưới để chèn ảnh tự động!
+            💡 <strong>Mẹo hay:</strong> Bạn có thể chụp ảnh màn hình bằng FastStone rồi bấm <strong>Ctrl + V</strong> trực tiếp vào ô soạn thảo Markdown bên dưới để chèn ảnh tự động!
           </p>
 
           {/* Danh sách tệp đã đính kèm */}
@@ -633,8 +796,8 @@ export const GithubReporterPage: React.FC = () => {
               className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-xs font-mono text-slate-900 dark:text-slate-100 outline-none focus:border-violet-500 leading-relaxed"
             />
           ) : (
-            <div className="w-full bg-slate-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 rounded-xl p-4 text-xs text-slate-800 dark:text-slate-200 min-h-64 whitespace-pre-wrap font-sans leading-relaxed">
-              {body ? body : <span className="text-slate-400 italic">Chưa có nội dung xem trước...</span>}
+            <div className="w-full bg-slate-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 min-h-64 shadow-inner overflow-x-auto">
+              <MarkdownRenderer content={body} />
             </div>
           )}
         </div>

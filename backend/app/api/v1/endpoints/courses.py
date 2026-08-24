@@ -1,10 +1,14 @@
 # backend/app/api/v1/endpoints/courses.py
+import logging
 from fastapi import APIRouter, HTTPException, Query
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, model_validator
 from app.core.supabase import get_supabase_client
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
 
 class CourseSchema(BaseModel):
     course_id: int
@@ -20,6 +24,7 @@ class CourseSchema(BaseModel):
             self.lms_url = f"https://learn.pythaverse.space/course/view.php?id={self.course_id}"
         return self
 
+
 class CourseUpdateSchema(BaseModel):
     course_id: Optional[int] = None
     category: Optional[str] = None
@@ -28,13 +33,23 @@ class CourseUpdateSchema(BaseModel):
     lms_url: Optional[str] = None
 
 
+class BulkCoursesPayload(BaseModel):
+    courses: List[CourseSchema]
+
+
+class RenameCategoryPayload(BaseModel):
+    old_category: str
+    new_category: str
+
+
 def get_table_name(course_type: str) -> str:
     """Xác định bảng Supabase theo loại: 'lms' hoặc 'workspace'."""
-    return "lms_courses" if course_type == "lms" else "workspace_courses"
+    clean_type = (course_type or "").strip().lower()
+    return "lms_courses" if clean_type == "lms" else "workspace_courses"
 
 
 # -------------------------------------------------------------------
-# 1. LẤY DANH SÁCH KHÓA HỌC (Có Search & Filter Category)
+# 1. LẤY DANH SÁCH KHÓA HỌC (Hỗ trợ Search, Filter Category & Bypass 1000 limit)
 # -------------------------------------------------------------------
 @router.get("/{course_type}")
 async def list_courses(
@@ -45,25 +60,30 @@ async def list_courses(
     table = get_table_name(course_type)
     supabase = get_supabase_client()
     
-    query = supabase.table(table).select("*").order("category", desc=False).order("course_id", desc=False)
-    
-    if category and category != "all":
-        query = query.eq("category", category)
+    try:
+        # Lấy tối đa 5000 bản ghi để không bị cắt cụt danh mục lớn
+        query = supabase.table(table).select("*").range(0, 4999).order("category", desc=False).order("course_id", desc=False)
         
-    res = query.execute()
-    data = res.data or []
-    
-    if search:
-        s_lower = search.strip().lower()
-        data = [
-            c for c in data 
-            if s_lower in str(c.get("course_id", "")).lower() 
-            or s_lower in str(c.get("course_name", "")).lower()
-            or s_lower in str(c.get("sku", "") or "").lower()
-            or s_lower in str(c.get("category", "")).lower()
-        ]
+        if category and category.strip() != "" and category.lower() != "all" and category.lower() != "tất cả":
+            query = query.eq("category", category.strip())
+            
+        res = query.execute()
+        data = res.data or []
         
-    return data
+        if search:
+            s_lower = search.strip().lower()
+            data = [
+                c for c in data 
+                if s_lower in str(c.get("course_id", "")).lower() 
+                or s_lower in str(c.get("course_name", "") or "").lower()
+                or s_lower in str(c.get("sku", "") or "").lower()
+                or s_lower in str(c.get("category", "") or "").lower()
+            ]
+            
+        return data
+    except Exception as e:
+        logger.error(f"❌ Lỗi lấy danh sách khóa học {table}: {e}")
+        return []
 
 
 # -------------------------------------------------------------------
@@ -73,10 +93,23 @@ async def list_courses(
 async def get_categories(course_type: str) -> List[str]:
     table = get_table_name(course_type)
     supabase = get_supabase_client()
-    res = supabase.table(table).select("category").execute()
     
-    cats = sorted(list({row["category"] for row in (res.data or []) if row.get("category")}))
-    return cats
+    try:
+        res = supabase.table(table).select("category").range(0, 4999).execute()
+        raw_data = res.data or []
+        
+        # Lọc danh mục duy nhất, loại bỏ chuỗi rỗng
+        categories_set = set()
+        for row in raw_data:
+            cat = row.get("category")
+            if cat and str(cat).strip():
+                categories_set.add(str(cat).strip())
+                
+        cats = sorted(list(categories_set))
+        return cats
+    except Exception as e:
+        logger.error(f"❌ Lỗi lấy categories từ {table}: {e}")
+        return []
 
 
 # -------------------------------------------------------------------
@@ -123,16 +156,9 @@ async def delete_course(course_type: str, course_db_id: str):
     res = supabase.table(table).delete().eq("id", course_db_id).execute()
     return {"status": "success", "message": "Đã xóa khóa học thành công."}
 
-class BulkCoursesPayload(BaseModel):
-    courses: List[CourseSchema]
-
-
-class RenameCategoryPayload(BaseModel):
-    old_category: str
-    new_category: str
 
 # -------------------------------------------------------------------
-# 6. NHẬP NHANH / BULK UPSERT HÀNG LOẠT KHÓA HỌC (ĐÃ TỐI ƯU CHỐNG LỖI)
+# 6. NHẬP NHANH / BULK UPSERT HÀNG LOẠT KHÓA HỌC
 # -------------------------------------------------------------------
 @router.post("/{course_type}/bulk-upsert")
 async def bulk_upsert_courses(course_type: str, payload: BulkCoursesPayload):
@@ -142,7 +168,7 @@ async def bulk_upsert_courses(course_type: str, payload: BulkCoursesPayload):
     if not payload.courses:
         raise HTTPException(status_code=400, detail="Danh sách khóa học rỗng.")
         
-    # 🛡️ 1. Tự động khử trùng lặp Course ID trong danh sách 285 dòng (giữ lại bản ghi mới nhất)
+    # Khử trùng lặp Course ID trong file upload
     unique_records_map = {}
     for c in payload.courses:
         data = c.model_dump()
@@ -153,7 +179,6 @@ async def bulk_upsert_courses(course_type: str, payload: BulkCoursesPayload):
     records = list(unique_records_map.values())
 
     try:
-        # 🚀 2. Chia Batch 50 bản ghi để gửi lên Supabase mượt mà, không lo timeout
         batch_size = 50
         for i in range(0, len(records), batch_size):
             chunk = records[i:i + batch_size]
@@ -165,7 +190,7 @@ async def bulk_upsert_courses(course_type: str, payload: BulkCoursesPayload):
             "message": f"Đã đồng bộ thành công {len(records)} khóa học vào {table}!"
         }
     except Exception as ex:
-        print(f"Lỗi Bulk Upsert {table}: {ex}")
+        logger.error(f"Lỗi Bulk Upsert {table}: {ex}")
         raise HTTPException(status_code=500, detail=f"Lỗi cơ sở dữ liệu Supabase: {str(ex)}")
 
 
@@ -177,8 +202,8 @@ async def rename_category(course_type: str, payload: RenameCategoryPayload):
     table = get_table_name(course_type)
     supabase = get_supabase_client()
     
-    old_cat = payload.old_category.strip().upper()
-    new_cat = payload.new_category.strip().upper()
+    old_cat = payload.old_category.strip()
+    new_cat = payload.new_category.strip()
     
     if not old_cat or not new_cat:
         raise HTTPException(status_code=400, detail="Tên danh mục không được để trống.")
@@ -205,11 +230,10 @@ async def delete_category(
 ):
     table = get_table_name(course_type)
     supabase = get_supabase_client()
-    cat_clean = category_name.strip().upper()
+    cat_clean = category_name.strip()
     
-    if target_category and target_category.strip().upper() != cat_clean:
-        # Gộp sang category khác
-        target_clean = target_category.strip().upper()
+    if target_category and target_category.strip() != cat_clean:
+        target_clean = target_category.strip()
         res = supabase.table(table)\
             .update({"category": target_clean})\
             .eq("category", cat_clean)\
@@ -219,7 +243,6 @@ async def delete_category(
             "message": f"Đã gộp tất cả khóa học từ '{cat_clean}' sang '{target_clean}'."
         }
     else:
-        # Xóa toàn bộ khóa học thuộc category này
         res = supabase.table(table)\
             .delete()\
             .eq("category", cat_clean)\
