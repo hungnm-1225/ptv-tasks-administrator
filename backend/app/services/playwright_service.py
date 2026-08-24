@@ -135,7 +135,7 @@ class PlaywrightLMSService:
             logger.warning(f"⚠️ Lỗi khi chọn ngày tháng Moodle: {e}")
 
     async def _open_enrol_modal_safely(self, page: Page):
-        """Kích hoạt mở Modal Enrol Users an toàn."""
+        """Kích hoạt mở Modal Enrol Users bọc thép an toàn tuyệt đối."""
         try:
             await page.wait_for_selector(".enrolusersbutton, input[value='Enrol users']", timeout=15000)
             await page.wait_for_timeout(1000)
@@ -174,9 +174,9 @@ class PlaywrightLMSService:
         """
         Luồng nghiệp vụ xử lý chính:
         1. Duyệt từng nhóm Role: Non-editing teacher (7), Manager (1), Student (9).
-        2. Thử Enroll mới hàng loạt trong Modal 'Enrol users'.
-        3. Với các user không có trong gợi ý (đã có trong khóa) -> Lọc ngoài bảng Participants từng email một -> Bấm ⚙️ để Gia hạn (Extend End Date).
-        4. Xóa filter sạch sẽ sau mỗi lần tìm kiếm.
+        2. Mở Modal 'Enrol users' -> Tìm kiếm & chọn hàng loạt User qua Autocomplete.
+        3. Với các user không tìm thấy trong Modal -> Lọc ngoài bảng Participants từng email một -> Bấm ⚙️ để Gia hạn (Extend).
+        4. Xóa filter sau mỗi lần tìm kiếm.
         5. Nếu có group_name -> Mở trang Groups -> Tạo group và Add tất cả user thành công vào group.
         """
         course_id = str(payload.get("course_id", "")).strip()
@@ -186,7 +186,7 @@ class PlaywrightLMSService:
 
         date_info = self._parse_date_components(end_date_str) if end_date_str else None
 
-        # Thu thập danh sách email an toàn từ payload
+        # Thu thập danh sách email an toàn
         students = self._sanitize_emails(payload.get("student_emails", payload.get("students", [])))
         teachers = self._sanitize_emails(payload.get("teacher_emails", payload.get("non_editing_teachers", [])))
         managers = self._sanitize_emails(payload.get("manager_emails", payload.get("managers", [])))
@@ -282,22 +282,47 @@ class PlaywrightLMSService:
                             if await search_user_input.count() > 0:
                                 await search_user_input.click(force=True)
                                 await search_user_input.fill("")
-                                await search_user_input.type(email, delay=30)
-                                await page.wait_for_timeout(1800)
+                                await search_user_input.type(email, delay=40)
+                                await page.wait_for_timeout(2000)
 
-                                # Tìm dropdown gợi ý
-                                suggestion_item = page.locator(f"ul.form-autocomplete-suggestions li[role='option']:has-text('{email}')").first
-                                
-                                if await suggestion_item.count() > 0 and await suggestion_item.is_visible():
-                                    await suggestion_item.click(force=True)
-                                    await page.wait_for_timeout(500)
+                                # 👉 FORCE CLICK TRỰC TIẾP QUA JAVASCRIPT ĐỂ CHỌN ITEM AUTOCOMPLETE
+                                selected_via_js = await page.evaluate("""(targetEmail) => {
+                                    const items = document.querySelectorAll("ul.form-autocomplete-suggestions li[role='option']");
+                                    for (let item of items) {
+                                        if (item.innerText.toLowerCase().includes(targetEmail.toLowerCase())) {
+                                            item.click();
+                                            return true;
+                                        }
+                                    }
+                                    // Nếu chỉ có 1 item duy nhất đang hiện, click luôn
+                                    if (items.length === 1 && !items[0].innerText.toLowerCase().includes("no suggestions")) {
+                                        items[0].click();
+                                        return true;
+                                    }
+                                    return false;
+                                }""", email)
+
+                                if selected_via_js:
+                                    await page.wait_for_timeout(600)
                                     new_selected_count += 1
                                     results["enrolled_new"].append({"email": email, "role": role_label})
-                                    logger.info(f"➕ Đã chọn để ghi danh MỚI: {email} ({role_label})")
+                                    logger.info(f"➕ Đã chọn để ghi danh MỚI (via JS): {email} ({role_label})")
                                 else:
-                                    # Không thấy trong gợi ý (có thể đã có trong khóa học -> cần đi gia hạn)
-                                    logger.info(f"ℹ️ Không có trong gợi ý Enrol mới, chuyển sang kiểm tra Gia hạn: {email}")
-                                    emails_need_extend.append(email)
+                                    # Thử fallback qua bàn phím ArrowDown + Enter
+                                    await page.keyboard.press("ArrowDown")
+                                    await page.wait_for_timeout(200)
+                                    await page.keyboard.press("Enter")
+                                    await page.wait_for_timeout(400)
+
+                                    # Kiểm tra xem có thẻ badge selection nào xuất hiện chưa
+                                    badge_count = await modal.locator(f"#fitem_id_userlist .form-autocomplete-selection span[role='option']:has-text('{email}')").count()
+                                    if badge_count > 0:
+                                        new_selected_count += 1
+                                        results["enrolled_new"].append({"email": email, "role": role_label})
+                                        logger.info(f"➕ Đã chọn để ghi danh MỚI (via Enter): {email} ({role_label})")
+                                    else:
+                                        logger.info(f"ℹ️ Không có trong gợi ý Enrol mới, chuyển sang kiểm tra Gia hạn: {email}")
+                                        emails_need_extend.append(email)
 
                         # Nếu có ít nhất 1 user mới được chọn -> Bấm Submit Enrol
                         if new_selected_count > 0:
@@ -360,7 +385,6 @@ class PlaywrightLMSService:
                                 user_row = page.locator(f"table#participants tbody tr:has(td.c2:has-text('{email}'))").first
 
                             if await user_row.count() > 0:
-                                # Bấm vào icon bánh răng ⚙️ (Edit enrolment)
                                 edit_gear = user_row.locator("a.editenrollink[data-action='editenrolment']").first
                                 if await edit_gear.count() > 0:
                                     await edit_gear.click(force=True)
@@ -369,20 +393,20 @@ class PlaywrightLMSService:
 
                                     edit_modal = page.locator(".modal.show, .modal-dialog").first
 
-                                    # Đổi Status sang Active (0)
+                                    # Đổi Status Active (0)
                                     status_select = edit_modal.locator("select#id_status").first
                                     if await status_select.count() > 0:
                                         await status_select.select_option(value="0")
 
-                                    # 🟢 CẬP NHẬT CHÍNH XÁC NGÀY HẾT HẠN (ENROLMENT ENDS)
+                                    # Cập nhật hạn
                                     if date_info:
                                         await self._set_moodle_datetime_selectors(edit_modal, date_info)
 
-                                    # Bấm Save changes
+                                    # Save changes
                                     save_edit_btn = edit_modal.locator(".modal-footer button[data-action='save'], button:has-text('Save changes')").first
                                     await save_edit_btn.click(force=True)
                                     await page.wait_for_load_state("networkidle")
-                                    await page.wait_for_timeout(1200)
+                                    await page.wait_for_timeout(1000)
 
                                     logger.info(f"🔄 ĐÃ GIA HẠN THÀNH CÔNG cho tài khoản: {email} ({role_label}) đến ngày {end_date_str}")
                                     results["extended_access"].append({
