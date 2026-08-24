@@ -41,15 +41,19 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
     if payload_data is None or not isinstance(payload_data, dict):
         payload_data = {}
 
-    logger.info(f"🚀 Bắt đầu thực thi Task Bot: [{bot_type}] | Action: {payload_data.get('action')}")
+    action = payload_data.get("action", "")
+    logger.info(f"🚀 Bắt đầu thực thi Task Bot: [{bot_type}] | Action: {action}")
     
     try:
         # =====================================================================
         # 1. NHÓM TASK WORKSPACE RPA (HỆ THỐNG PHẢ HỆ & PHÂN PHỐI LICENSE)
         # =====================================================================
         if bot_type == "workspace_rpa":
-            action = payload_data.get("action", "pipeline_end_to_end")
-            
+            # Bẫy trường hợp task sinh từ Tab 4 nhưng bot_type vẫn là workspace_rpa
+            if action == "direct_moodle_lms_enroll":
+                logger.info("🎓 Điều hướng sang Playwright LMS Direct Enroller...")
+                return await playwright_lms_service.enroll_users_pipeline(payload_data)
+
             # Bóc tách thông tin phả hệ
             hierarchy = payload_data.get("hierarchy") or {}
             school_name = (
@@ -231,7 +235,7 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
                     download_dir=payload_data.get("download_dir", "/tmp/results")
                 )
 
-            # --- L. School Ghi danh học viên & Group ---
+            # --- L. School Ghi danh học viên & Group (Chính ngạch Workspace) ---
             elif action == "school_enroll_users":
                 return await workspace_playwright_service.school_enroll_users_and_groups(
                     credentials=school_creds or {},
@@ -243,22 +247,25 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
                     student_emails=payload_data.get("student_emails", []),
                     teacher_emails=payload_data.get("teacher_emails", [])
                 )
-            elif bot_type in ["lms_playwright", "lms_git_provisioning", "lms_enroll"]:
-                logger.info("🎓 Kích hoạt Playwright LMS Direct Enroller...")
-                result = await playwright_lms_service.enroll_users_pipeline(payload_data)
-                return result
 
             else:
                 return {"status": "failed", "error": f"Action '{action}' chưa được định nghĩa trong Workspace RPA."}
 
         # =====================================================================
-        # 2. NHÓM TASK KEYCLOAK IDENTITY BOT
+        # 2. NHÓM TASK LMS PLAYWRIGHT DIRECT (TIỂU NGẠCH / MOODLE DIRECT ENROLLER)
+        # =====================================================================
+        elif bot_type in ["lms_playwright", "lms_git_provisioning", "lms_enroll"]:
+            logger.info("🎓 Kích hoạt Playwright LMS Direct Enroller...")
+            return await playwright_lms_service.enroll_users_pipeline(payload_data)
+
+        # =====================================================================
+        # 3. NHÓM TASK KEYCLOAK IDENTITY BOT
         # =====================================================================
         elif bot_type == "keycloak_api":
             return await keycloak_service.execute_account_action(payload_data)
 
         # =====================================================================
-        # 3. NHÓM TASK GITHUB DISPATCHER
+        # 4. NHÓM TASK GITHUB DISPATCHER
         # =====================================================================
         elif bot_type == "github_issue_creator":
             return await github_service.create_issue(payload_data)
