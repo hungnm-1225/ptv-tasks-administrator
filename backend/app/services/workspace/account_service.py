@@ -10,14 +10,17 @@ logger = logging.getLogger(__name__)
 
 
 class WorkspaceAccountService(WorkspaceBaseService):
-    """Xử lý nộp file batch tạo tài khoản học sinh/giáo viên và Smart Polling kết quả."""
+    """Xử lý nộp file batch tạo tài khoản học sinh/giáo viên và Hybrid Fast-Check."""
 
     async def submit_account_creation_batch(
         self,
         credentials: Dict[str, str],
         upload_file_path: str,
-        record_count: int
+        record_count: int,
+        download_dir: str = "/tmp/ptv_results"
     ) -> Dict[str, Any]:
+        os.makedirs(download_dir, exist_ok=True)
+
         async with async_playwright() as p:
             browser, context, page = await self._create_context(p)
             try:
@@ -30,7 +33,7 @@ class WorkspaceAccountService(WorkspaceBaseService):
 
                 file_input = page.locator("input[type='file']")
                 await file_input.set_input_files(upload_file_path)
-                await page.wait_for_timeout(3000)
+                await page.wait_for_timeout(2500)
 
                 upload_btn = page.locator("//button[normalize-space()='Upload']")
                 await upload_btn.wait_for(state="visible", timeout=10000)
@@ -54,14 +57,51 @@ class WorkspaceAccountService(WorkspaceBaseService):
                     id_cell = first_row.locator("[data-field='id'] .MuiDataGrid-cellContent").first
                     request_id = (await id_cell.inner_text()).strip()
 
-                wait_seconds = record_count * 40
-                logger.info(f"🎉 BẮT ĐƯỢC REQUEST ID: [ #{request_id} ]")
+                logger.info(f"🎉 BẮT ĐƯỢC REQUEST ID: [ #{request_id} ] (Dự kiến: {record_count * 10}s)")
 
+                # =============================================================
+                # 🚀 FAST-PATH: Kiểm tra nhanh tại chỗ nếu batch vừa phải (<= 30 tài khoản)
+                # =============================================================
+                if record_count <= 30:
+                    logger.info(f"⚡ [Fast-Path] Đang chờ 12s để thử lấy kết quả ngay cho Request #{request_id}...")
+                    await page.wait_for_timeout(12000)
+                    
+                    # Refresh trang nhẹ nhàng để cập nhật trạng thái mới nhất
+                    await page.reload(wait_until="networkidle")
+                    await page.wait_for_selector(".MuiDataGrid-row", timeout=20000)
+
+                    target_row = page.locator(f".MuiDataGrid-row[data-id='{request_id}'], .MuiDataGrid-row:has([data-field='id']:has-text('{request_id}'))").first
+                    if await target_row.count() > 0:
+                        status_cell = target_row.locator("[data-field='status'] .MuiDataGrid-cellContent").first
+                        status_text = (await status_cell.inner_text()).strip().lower()
+
+                        if any(w in status_text for w in ["done", "completed", "success"]):
+                            logger.info(f"✨ [Fast-Path SUCCESS] Request #{request_id} đã hoàn tất tức thì! Đang tải file kết quả...")
+                            action_btn = target_row.locator("[data-field='actions'] button").first
+                            await action_btn.click()
+                            await page.wait_for_timeout(1000)
+
+                            async with page.expect_download() as download_info:
+                                export_item = page.locator("text=Export, li:has-text('Export')").first
+                                await export_item.click()
+
+                            download = await download_info.value
+                            download_file_path = os.path.join(download_dir, f"RESULT_{request_id}_{download.suggested_filename}")
+                            await download.save_as(download_file_path)
+
+                            return {
+                                "status": "completed",
+                                "request_id": request_id,
+                                "result_file_path": download_file_path,
+                                "fast_path": True
+                            }
+
+                # Nếu chưa xong, nhả về để Cronjob tiếp quản
                 return {
                     "status": "submitted",
                     "request_id": request_id,
                     "record_count": record_count,
-                    "estimated_wait_seconds": wait_seconds
+                    "estimated_wait_seconds": record_count * 10
                 }
 
             except Exception as e:
@@ -76,6 +116,7 @@ class WorkspaceAccountService(WorkspaceBaseService):
         request_id: str,
         download_dir: str
     ) -> Dict[str, Any]:
+        os.makedirs(download_dir, exist_ok=True)
         async with async_playwright() as p:
             browser, context, page = await self._create_context(p)
             try:

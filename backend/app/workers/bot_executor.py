@@ -208,24 +208,96 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
                     justification=payload_data.get("justification")
                 )
 
-            # --- J. Tạo tài khoản hàng loạt (Pha 1) ---
+            # --- J. Tạo tài khoản hàng loạt (Hỗ trợ COF & Accounts 7 cột + Fast-Path) ---
             elif action == "bulk_account_creation":
+                from app.services.cof_excel_service import COFExcelService
+                from app.core.supabase import get_supabase_client
+
                 file_path = payload_data.get("upload_file_path")
                 if not file_path and payload_data.get("attachment_url"):
-                    logger.info("📥 Đang tải attachment file về làm file nộp batch...")
+                    logger.info("📥 Đang tải file tài khoản về từ Supabase Storage...")
                     file_path = await download_file_to_temp(payload_data["attachment_url"])
 
                 if not file_path:
-                    return {"status": "failed", "error": "Thiếu file accounts.xlsx hoặc attachment_url hợp lệ"}
+                    return {"status": "failed", "error": "Thiếu file Excel (.xlsx) hoặc attachment_url hợp lệ."}
 
                 if not school_creds:
-                    return {"status": "failed", "error": f"Không tìm thấy tài khoản trường '{school_name}'"}
+                    return {"status": "failed", "error": f"Không tìm thấy tài khoản trường '{school_name}' trong Két Sắt."}
 
-                return await workspace_playwright_service.submit_account_creation_batch(
+                # 1. Tự động nhận diện & bóc tách file
+                temp_dir = "/tmp/ptv_accounts"
+                os.makedirs(temp_dir, exist_ok=True)
+                ready_file, student_c, teacher_c, total_c, is_cof, parsed_data = COFExcelService.detect_and_process_excel(file_path, temp_dir)
+
+                logger.info(f"📊 Thống kê: {student_c} học sinh, {teacher_c} giáo viên (Tổng: {total_c}) | Là COF: {is_cof}")
+
+                # 2. Nộp batch lên School Workspace (Kèm Fast-Path check)
+                submit_res = await workspace_playwright_service.submit_account_creation_batch(
                     credentials=school_creds,
-                    upload_file_path=file_path,
-                    record_count=payload_data.get("record_count", 1)
+                    upload_file_path=ready_file,
+                    record_count=total_c
                 )
+
+                if submit_res.get("status") == "failed":
+                    return submit_res
+
+                req_id = submit_res.get("request_id")
+                payload_data["request_id"] = req_id
+                payload_data["student_count"] = student_c
+                payload_data["teacher_count"] = teacher_c
+                payload_data["total_count"] = total_c
+                payload_data["is_cof_file"] = is_cof
+                payload_data["cof_file_path"] = file_path if is_cof else None
+
+                # 3. Nếu Fast-Path xong ngay lập tức
+                if submit_res.get("fast_path") and submit_res.get("result_file_path"):
+                    result_local_path = submit_res["result_file_path"]
+                    
+                    # Nếu là file COF -> ghi kết quả ngược vào COF
+                    if is_cof:
+                        out_cof = os.path.join(temp_dir, f"COMPLETED_{os.path.basename(file_path)}")
+                        COFExcelService.write_results_back_to_cof(
+                            original_cof_path=file_path,
+                            result_excel_path=result_local_path,
+                            students_all=parsed_data.get("students_all", []),
+                            students_to_create=parsed_data.get("students_to_create", []),
+                            teachers_all=parsed_data.get("teachers_all", []),
+                            teachers_to_create=parsed_data.get("teachers_to_create", []),
+                            output_cof_path=out_cof
+                        )
+                        final_upload_file = out_cof
+                    else:
+                        final_upload_file = result_local_path
+
+                    # Tải file kết quả lên Supabase Storage
+                    supabase = get_supabase_client()
+                    dest_name = f"results/RESULT_{req_id}_{os.path.basename(final_upload_file)}"
+                    with open(final_upload_file, "rb") as f_res:
+                        supabase.storage.from_("ticket-attachments").upload(
+                            dest_name, f_res, file_options={"content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "upsert": "true"}
+                        )
+                    public_res_url = supabase.storage.from_("ticket-attachments").get_public_url(dest_name)
+
+                    summary_msg = (
+                        f"🎉 [FAST-PATH HOÀN TẤT] Tạo thành công {total_c} tài khoản (Học sinh: {student_c}, Giáo viên: {teacher_c})!\n"
+                        f"📥 Tải file kết quả: {public_res_url}"
+                    )
+                    return {
+                        "status": "success",
+                        "message": summary_msg,
+                        "request_id": req_id,
+                        "result_file_url": public_res_url,
+                        "student_count": student_c,
+                        "teacher_count": teacher_c,
+                        "total_count": total_c
+                    }
+
+                # Nếu chưa xong ngay -> Báo chuyển sang chế độ Polling
+                return {
+                    "status": "submitted",
+                    "message": f"Đã nộp thành công file batch ({total_c} tài khoản) với Mã Request #{req_id}. Đang xếp hàng xử lý ngầm.",
+                    "request_id": req_id
+                }
 
             # --- K. Kiểm tra tiến độ & tải kết quả (Pha 2) ---
             elif action == "check_account_batch":

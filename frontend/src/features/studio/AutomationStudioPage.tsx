@@ -39,6 +39,7 @@ import {
 import { fetchApi } from '../../lib/api';
 import { BotType } from '../../types';
 import { toast } from 'sonner';
+import { supabase } from '@/lib/supabase';
 
 interface HierarchySchoolItem {
   school_id: string;
@@ -657,19 +658,25 @@ export const AutomationStudioPage: React.FC = () => {
           toast.error('Vui lòng chọn file Excel (.xlsx) chứa danh sách tài khoản!');
           return;
         }
+        if (!selectedSchool) {
+          toast.error('Vui lòng chọn trường học áp dụng ở ô tìm kiếm phía trên!');
+          return;
+        }
+
         payload = {
           action: 'bulk_account_creation',
-          school_name: selectedSchool?.school_name,
-          school_code: selectedSchool?.school_code,
+          school_name: selectedSchool.school_name,
+          school_code: selectedSchool.school_code,
           filename: uploadedAccountsFile.name,
           file_size_kb: Math.round(uploadedAccountsFile.size / 1024),
         };
 
-        summary.actionTitle = 'Tạo Tài Khoản Hàng Loạt Từ File Excel (Pha 1)';
-        summary.targetEntity = selectedSchool?.school_name || 'Chưa chọn trường';
+        summary.actionTitle = 'Tạo Tài Khoản Hàng Loạt Từ File Excel (Hybrid Fast-Check)';
+        summary.targetEntity = selectedSchool.school_name;
         summary.detailsList = [
           `File tải lên: ${uploadedAccountsFile.name} (${Math.round(uploadedAccountsFile.size / 1024)} KB)`,
-          `Trường thụ hưởng: ${selectedSchool?.school_name || 'N/A'}`,
+          `Trường thụ hưởng: ${selectedSchool.school_name} (Mã: ${selectedSchool.school_code})`,
+          `Chế độ: Tự động trích xuất + Kiểm tra nhanh 15s (Tải file kết quả ngay khi xong)`,
         ];
       } else if (workspaceMainCategory === 'lms_enroll') {
         actualBotType = 'lms_playwright';
@@ -787,13 +794,33 @@ export const AutomationStudioPage: React.FC = () => {
 
     setSubmitting(true);
     try {
+      let finalPayloadData = { ...preparedPayload.payload_data };
+
+      // 🟢 Nếu là tạo tài khoản hàng loạt, upload file lên Supabase Storage trước
+      if (workspaceMainCategory === 'bulk_accounts' && uploadedAccountsFile) {
+        toast.info('Đang tải file Excel lên hệ thống lưu trữ...');
+        const cleanFileName = `studio_accounts/${Date.now()}_${uploadedAccountsFile.name.replace(/\s+/g, '_')}`;
+
+        const { error: uploadErr } = await supabase.storage
+          .from('ticket-attachments')
+          .upload(cleanFileName, uploadedAccountsFile, { upsert: true });
+
+        if (uploadErr) throw new Error(`Lỗi upload file: ${uploadErr.message}`);
+
+        const { data: publicUrlData } = supabase.storage
+          .from('ticket-attachments')
+          .getPublicUrl(cleanFileName);
+
+        finalPayloadData.attachment_url = publicUrlData.publicUrl;
+      }
+
       await fetchApi('/tasks', {
         method: 'POST',
         body: JSON.stringify({
           ticket_id: null,
           bot_type: preparedPayload.bot_type,
-          payload_data: preparedPayload.payload_data,
-          run_immediately: true, // 🟢 Cờ kích hoạt chạy Worker ngay lập tức!
+          payload_data: finalPayloadData,
+          run_immediately: true,
           approval_status: 'approved',
         }),
       });
@@ -804,14 +831,14 @@ export const AutomationStudioPage: React.FC = () => {
         <div className="space-y-1">
           <div className="font-bold flex items-center gap-1.5 text-emerald-400">
             <CheckCircle2 className="w-4 h-4" />
-            <span>Đã kích hoạt Worker thành công!</span>
+            <span>Đã kích hoạt Worker tạo tài khoản!</span>
           </div>
-          <div className="text-xs text-slate-300">Tác vụ đang được thực thi ngầm dưới nền.</div>
+          <div className="text-xs text-slate-300">Bot đang nộp batch và chạy Fast-Check dưới nền.</div>
           <button
             onClick={() => navigate('/bots')}
             className="text-violet-400 hover:text-violet-300 underline text-xs font-semibold cursor-pointer block mt-1 transition"
           >
-            Mở Bot Command Center xem Live Terminal ➔
+            Mở Bot Command Center xem Live Terminal & Tải kết quả ➔
           </button>
         </div>,
         { duration: 6000 }

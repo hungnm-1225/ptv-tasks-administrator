@@ -1,11 +1,12 @@
 # backend/app/services/cof_excel_service.py
 import os
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 import openpyxl
 from openpyxl.styles import PatternFill, Font
 
 logger = logging.getLogger(__name__)
+
 
 class COFExcelService:
     """Service chuyên trách bóc tách, chuẩn hóa dữ liệu COF và sinh file accounts.xlsx."""
@@ -33,9 +34,9 @@ class COFExcelService:
 
         if len(parts) == 3:
             try:
-                if len(parts[0]) == 4: # YYYY/MM/DD
+                if len(parts[0]) == 4:  # YYYY/MM/DD
                     return f"{int(parts[2])}/{int(parts[1])}/{int(parts[0])}"
-                elif len(parts[2]) == 4: # DD/MM/YYYY hoặc D/M/YYYY
+                elif len(parts[2]) == 4:  # DD/MM/YYYY hoặc D/M/YYYY
                     return f"{int(parts[0])}/{int(parts[1])}/{int(parts[2])}"
             except ValueError:
                 pass
@@ -238,6 +239,46 @@ class COFExcelService:
         wb.close()
         logger.info(f"💾 Đã tạo file Template Form ({count} tài khoản) tại: {output_path}")
         return count
+
+    @classmethod
+    def detect_and_process_excel(cls, file_path: str, temp_dir: str) -> Tuple[str, int, int, int, bool, Dict[str, Any]]:
+        """
+        Tự động nhận diện file tải lên là:
+        1. File COF 3 Tabs -> Bóc tách sinh accounts.xlsx
+        2. File Accounts 7 cột -> Lấy dùng trực tiếp
+        Trả về: (path_accounts_file, student_count, teacher_count, total_count, is_cof_file, cof_parsed_data)
+        """
+        wb = openpyxl.load_workbook(file_path, data_only=True)
+        sheets_lower = [s.lower() for s in wb.sheetnames]
+        is_cof = any("student" in s or "curriculum" in s or "cof" in s for s in sheets_lower)
+
+        if is_cof:
+            wb.close()
+            parsed = cls.parse_cof_file(file_path)
+            students = parsed.get("students_to_create", [])
+            teachers = parsed.get("teachers_to_create", [])
+            all_accounts = students + teachers
+            
+            output_acc_path = os.path.join(temp_dir, f"ready_accounts_{os.path.basename(file_path)}")
+            total_count = cls.generate_accounts_excel(all_accounts, output_acc_path)
+            return output_acc_path, len(students), len(teachers), total_count, True, parsed
+        else:
+            # File dạng accounts.xlsx trực tiếp
+            ws = wb.active
+            students_c = 0
+            teachers_c = 0
+            for r in range(6, ws.max_row + 1):
+                fn = cls._clean_str(ws.cell(row=r, column=2).value)
+                role = cls._clean_str(ws.cell(row=r, column=7).value).lower()
+                if not fn:
+                    continue
+                if "teacher" in role or "gv" in role or "giáo viên" in role:
+                    teachers_c += 1
+                else:
+                    students_c += 1
+            wb.close()
+            total_c = students_c + teachers_c
+            return file_path, students_c, teachers_c, total_c, False, {}
 
     @classmethod
     def write_results_back_to_cof(

@@ -56,6 +56,7 @@ async def poll_workspace_long_tasks():
         request_id = payload.get("request_id")
         school_creds = payload.get("school_credentials", {})
         download_dir = "/tmp/ptv_results"
+        os.makedirs(download_dir, exist_ok=True)
 
         now_vn = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).strftime("%Y-%m-%d %H:%M:%S")
         logger.info(f"🔍 [{now_vn}] Đang kiểm tra tiến độ Request #{request_id} cho Task #{task_id[:8]}...")
@@ -71,9 +72,10 @@ async def poll_workspace_long_tasks():
         if status == "completed":
             downloaded_file = check_res["result_file_path"]
             cof_input_path = payload.get("cof_file_path")
-            output_cof_path = f"/tmp/ptv_results/COMPLETED_{os.path.basename(cof_input_path or 'result.xlsx')}"
+            final_file_to_upload = downloaded_file
 
             if cof_input_path and os.path.exists(cof_input_path):
+                output_cof_path = f"/tmp/ptv_results/COMPLETED_{os.path.basename(cof_input_path)}"
                 COFExcelService.write_results_back_to_cof(
                     original_cof_path=cof_input_path,
                     result_excel_path=downloaded_file,
@@ -83,11 +85,35 @@ async def poll_workspace_long_tasks():
                     teachers_to_create=payload.get("teachers_to_create", []),
                     output_cof_path=output_cof_path
                 )
+                final_file_to_upload = output_cof_path
 
-            new_log = f"\n[{now_vn}] [SUCCESS] [workspace_rpa]: Hoàn thành tạo tài khoản (Request #{request_id}). Đã đồng bộ kết quả vào COF."
+            # Tải file kết quả lên Supabase Storage
+            storage_path = f"results/RESULT_{request_id}_{os.path.basename(final_file_to_upload)}"
+            try:
+                with open(final_file_to_upload, "rb") as f_up:
+                    supabase.storage.from_("ticket-attachments").upload(
+                        storage_path, f_up, file_options={"content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "upsert": "true"}
+                    )
+                result_url = supabase.storage.from_("ticket-attachments").get_public_url(storage_path)
+            except Exception as up_err:
+                logger.error(f"Lỗi tải kết quả lên Storage: {up_err}")
+                result_url = "N/A"
+
+            student_c = payload.get("student_count", 0)
+            teacher_c = payload.get("teacher_count", 0)
+            total_c = payload.get("total_count", 0)
+
+            new_log = (
+                f"\n[{now_vn}] [SUCCESS] [workspace_rpa]: Hoàn thành tạo tài khoản (Request #{request_id}).\n"
+                f"📊 Thống kê: {total_c} tài khoản (Học sinh: {student_c}, Giáo viên: {teacher_c})\n"
+                f"📥 Link tải file kết quả: {result_url}"
+            )
+
+            payload["result_file_url"] = result_url
 
             supabase.table("bot_automation_tasks").update({
                 "execution_status": "success",
+                "payload_data": payload,
                 "execution_logs": (task.get("execution_logs") or "") + new_log,
                 "executed_at": now_iso
             }).eq("id", task_id).execute()
