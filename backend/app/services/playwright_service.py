@@ -15,12 +15,11 @@ MOODLE_BASE_URL = "https://learn.pythaverse.space"
 class PlaywrightLMSService:
     """
     Playwright Worker tự động hóa 100% trên Moodle PLearn (learn.pythaverse.space):
-    - Đăng nhập Keycloak OpenID Connect SSO.
-    - Mở Modal Enrol users (chờ AMD module sẵn sàng).
-    - Tìm và Enrol từng email theo đúng Role.
-    - Fallback: Nếu user đã có trong khóa học -> Lọc ngoài bảng Participants từng email một -> Bấm Apply filter 2 lần -> Bấm ⚙️ Edit enrolment để Gia hạn (Extend).
-    - Xóa filter sau mỗi lần tìm kiếm.
-    - Tự động tạo Group và Add members vào nhóm nếu có group_name.
+    - Đăng nhập Keycloak OpenID Connect SSO an toàn chống crash navigation context.
+    - Ghi danh tài khoản mới (Enrol users) theo Role (Student, Non-editing teacher, Manager).
+    - Gia hạn ngày truy cập (Extend access via Edit enrolment ⚙️) nếu tài khoản đã tồn tại.
+    - Cập nhật chính xác ngày kết thúc (Enrolment ends) theo đúng tham số payload.
+    - Quản lý Group: Tự động tạo Group và Add học viên vào nhóm.
     """
 
     def _sanitize_emails(self, email_list: Any) -> List[str]:
@@ -66,21 +65,28 @@ class PlaywrightLMSService:
         }
 
     async def _login_moodle_sso(self, page: Page) -> bool:
-        """Đăng nhập Moodle qua Keycloak SSO theo đúng form HTML thực tế."""
+        """Đăng nhập Moodle qua Keycloak SSO, bọc thép chống Execution context destroyed."""
         try:
             admin_user = settings.TEST_ADMIN_USER or "adminworkspace"
             admin_pass = settings.TEST_ADMIN_PASS or settings.KEYCLOAK_ADMIN_PASS or ""
 
             logger.info("🔑 Đang mở cổng đăng nhập Moodle PLearn...")
-            await page.goto(f"{MOODLE_BASE_URL}/login/index.php", wait_until="networkidle", timeout=40000)
+            await page.goto(f"{MOODLE_BASE_URL}/login/index.php", wait_until="domcontentloaded", timeout=40000)
+            await page.wait_for_timeout(1000)
 
             # Nếu bị redirect sang Keycloak EID (eid.pythaverse.space)
             if "eid.pythaverse.space" in page.url or await page.locator("input#username, input[name='username']").count() > 0:
                 logger.info("🔐 Đang điền thông tin đăng nhập trên Pythaverse EID Keycloak...")
                 await page.fill("input#username", admin_user)
                 await page.fill("input#password", admin_pass)
-                await page.click("input#kc-login, button[type='submit']", force=True)
-                await page.wait_for_load_state("networkidle", timeout=40000)
+
+                # Bấm submit và CHỜ redirect hoàn tất về learn.pythaverse.space
+                async with page.expect_navigation(timeout=40000, wait_until="networkidle"):
+                    await page.click("input#kc-login, button[type='submit']", force=True)
+
+            # Đợi trang đích ổn định
+            await page.wait_for_load_state("networkidle", timeout=30000)
+            await page.wait_for_timeout(1500)
 
             # Kiểm tra đăng nhập thành công
             if await page.locator(".usermenu, a[title='User menu'], .userinitials").count() > 0 or "login" not in page.url:
@@ -93,62 +99,64 @@ class PlaywrightLMSService:
             logger.error(f"❌ Lỗi Exception khi đăng nhập Moodle SSO: {e}")
             return False
 
-    async def _set_moodle_datetime_selectors(self, modal_locator, date_info: Dict[str, str]):
-        """Helper điền các dropdown ngày tháng năm trong modal Moodle."""
+    async def _set_moodle_datetime_selectors(self, page_or_modal, date_info: Dict[str, str]):
+        """Helper kích hoạt checkbox Enable và chọn ngày/tháng/năm chính xác trong form Moodle."""
         try:
-            enable_chk = modal_locator.locator("input#id_timeend_enabled, input[name='timeend[enabled]']").first
-            if await enable_chk.count() > 0 and not await enable_chk.is_checked():
-                await enable_chk.check(force=True)
-                await asyncio.sleep(0.3)
+            # 1. Kích hoạt Checkbox Enable cho Enrolment ends
+            enable_chk = page_or_modal.locator("input#id_timeend_enabled, input[name='timeend[enabled]']").first
+            if await enable_chk.count() > 0:
+                if not await enable_chk.is_checked():
+                    await enable_chk.check(force=True)
+                    await asyncio.sleep(0.4)
 
-            day_sel = modal_locator.locator("select#id_timeend_day, select[name='timeend[day]']").first
+            # 2. Điền Select Day, Month, Year
+            day_sel = page_or_modal.locator("select#id_timeend_day, select[name='timeend[day]']").first
             if await day_sel.count() > 0:
                 await day_sel.select_option(date_info["day"])
 
-            month_sel = modal_locator.locator("select#id_timeend_month, select[name='timeend[month]']").first
+            month_sel = page_or_modal.locator("select#id_timeend_month, select[name='timeend[month]']").first
             if await month_sel.count() > 0:
                 await month_sel.select_option(date_info["month"])
 
-            year_sel = modal_locator.locator("select#id_timeend_year, select[name='timeend[year]']").first
+            year_sel = page_or_modal.locator("select#id_timeend_year, select[name='timeend[year]']").first
             if await year_sel.count() > 0:
                 await year_sel.select_option(date_info["year"])
 
-            hour_sel = modal_locator.locator("select#id_timeend_hour, select[name='timeend[hour]']").first
+            hour_sel = page_or_modal.locator("select#id_timeend_hour, select[name='timeend[hour]']").first
             if await hour_sel.count() > 0:
                 await hour_sel.select_option(date_info["hour"])
 
-            min_sel = modal_locator.locator("select#id_timeend_minute, select[name='timeend[minute]']").first
+            min_sel = page_or_modal.locator("select#id_timeend_minute, select[name='timeend[minute]']").first
             if await min_sel.count() > 0:
                 await min_sel.select_option(date_info["minute"])
+
+            logger.info(f"📅 Đã đặt ngày hết hạn: {date_info['day']}/{date_info['month']}/{date_info['year']}")
         except Exception as e:
-            logger.warning(f"⚠️ Lỗi khi chọn ngày tháng: {e}")
+            logger.warning(f"⚠️ Lỗi khi chọn ngày tháng Moodle: {e}")
 
     async def _open_enrol_modal_safely(self, page: Page):
-        """Kích hoạt mở Modal Enrol Users bọc thép an toàn tuyệt đối."""
+        """Kích hoạt mở Modal Enrol Users an toàn."""
         try:
-            # Chờ Moodle nạp hoàn tất các module JS
-            await page.wait_for_load_state("networkidle")
-            await page.wait_for_timeout(1500)
+            await page.wait_for_selector(".enrolusersbutton, input[value='Enrol users']", timeout=15000)
+            await page.wait_for_timeout(1000)
 
-            # Cách 1: Click trực tiếp vào nút Enrol users
+            # Click nút Enrol users
             enrol_btn = page.locator(".enrolusersbutton input[value='Enrol users'], #enrolusersbutton-1 input").first
             if await enrol_btn.count() > 0:
                 await enrol_btn.click(force=True)
                 await page.wait_for_timeout(1500)
 
-            # Kiểm tra modal
+            # Kiểm tra modal xuất hiện
             modal = page.locator(".modal.show, div[role='dialog']:has-text('Enrolment options'), .modal-dialog").first
             if await modal.count() > 0 and await modal.is_visible():
-                logger.info("✨ Đã mở thành công Enrol users modal (Click Direct)!")
+                logger.info("✨ Đã mở thành công Enrol users modal!")
                 return modal
 
-            # Cách 2: Trigger qua JavaScript click sự kiện chuẩn
-            logger.info("🔄 Thử trigger mở Modal qua JavaScript Event...")
+            # Trigger bằng JS nếu chưa lên
+            logger.info("🔄 Trigger mở Modal qua JavaScript Event...")
             await page.evaluate("""() => {
                 const btn = document.querySelector(".enrolusersbutton input[value='Enrol users'], #enrolusersbutton-1 input");
-                if (btn) {
-                    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-                }
+                if (btn) btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
             }""")
             await page.wait_for_timeout(2000)
 
@@ -157,7 +165,6 @@ class PlaywrightLMSService:
                 logger.info("✨ Đã mở thành công Enrol users modal (JS Event)!")
                 return modal
 
-            logger.warning("⚠️ Không thể mở modal Enrol users sau 2 cách.")
             return None
         except Exception as e:
             logger.warning(f"⚠️ Lỗi khi mở Enrol users modal: {e}")
@@ -167,9 +174,9 @@ class PlaywrightLMSService:
         """
         Luồng nghiệp vụ xử lý chính:
         1. Duyệt từng nhóm Role: Non-editing teacher (7), Manager (1), Student (9).
-        2. Mở Modal 'Enrol users' -> Tìm kiếm & chọn hàng loạt User qua Autocomplete.
-        3. Với các user không tìm thấy trong Modal -> Lọc ngoài bảng Participants từng email một -> Bấm Apply filter 2 lần -> Bấm ⚙️ để Gia hạn (Extend).
-        4. Xóa filter sau mỗi lần tìm kiếm.
+        2. Thử Enroll mới hàng loạt trong Modal 'Enrol users'.
+        3. Với các user không có trong gợi ý (đã có trong khóa) -> Lọc ngoài bảng Participants từng email một -> Bấm ⚙️ để Gia hạn (Extend End Date).
+        4. Xóa filter sạch sẽ sau mỗi lần tìm kiếm.
         5. Nếu có group_name -> Mở trang Groups -> Tạo group và Add tất cả user thành công vào group.
         """
         course_id = str(payload.get("course_id", "")).strip()
@@ -179,7 +186,7 @@ class PlaywrightLMSService:
 
         date_info = self._parse_date_components(end_date_str) if end_date_str else None
 
-        # 🟢 Thu thập danh sách email an toàn
+        # Thu thập danh sách email an toàn từ payload
         students = self._sanitize_emails(payload.get("student_emails", payload.get("students", [])))
         teachers = self._sanitize_emails(payload.get("teacher_emails", payload.get("non_editing_teachers", [])))
         managers = self._sanitize_emails(payload.get("manager_emails", payload.get("managers", [])))
@@ -276,33 +283,21 @@ class PlaywrightLMSService:
                                 await search_user_input.click(force=True)
                                 await search_user_input.fill("")
                                 await search_user_input.type(email, delay=30)
-                                await page.wait_for_timeout(2000)
+                                await page.wait_for_timeout(1800)
 
-                                # Tìm dropdown gợi ý (Moodle render text có cả họ tên lẫn email)
+                                # Tìm dropdown gợi ý
                                 suggestion_item = page.locator(f"ul.form-autocomplete-suggestions li[role='option']:has-text('{email}')").first
                                 
                                 if await suggestion_item.count() > 0 and await suggestion_item.is_visible():
                                     await suggestion_item.click(force=True)
-                                    await page.wait_for_timeout(600)
+                                    await page.wait_for_timeout(500)
                                     new_selected_count += 1
                                     results["enrolled_new"].append({"email": email, "role": role_label})
                                     logger.info(f"➕ Đã chọn để ghi danh MỚI: {email} ({role_label})")
                                 else:
-                                    # Thử bấm phím ArrowDown -> Enter để chọn gợi ý active
-                                    await page.keyboard.press("ArrowDown")
-                                    await page.wait_for_timeout(200)
-                                    await page.keyboard.press("Enter")
-                                    await page.wait_for_timeout(400)
-
-                                    # Kiểm tra xem có được thêm vào tag selection chưa
-                                    selected_badge = modal.locator(f"#fitem_id_userlist .form-autocomplete-selection span[role='option']:has-text('{email}')").first
-                                    if await selected_badge.count() > 0:
-                                        new_selected_count += 1
-                                        results["enrolled_new"].append({"email": email, "role": role_label})
-                                        logger.info(f"➕ Đã chọn để ghi danh MỚI (qua Enter): {email} ({role_label})")
-                                    else:
-                                        logger.info(f"ℹ️ Không có trong gợi ý Enrol mới, chuyển sang kiểm tra Gia hạn: {email}")
-                                        emails_need_extend.append(email)
+                                    # Không thấy trong gợi ý (có thể đã có trong khóa học -> cần đi gia hạn)
+                                    logger.info(f"ℹ️ Không có trong gợi ý Enrol mới, chuyển sang kiểm tra Gia hạn: {email}")
+                                    emails_need_extend.append(email)
 
                         # Nếu có ít nhất 1 user mới được chọn -> Bấm Submit Enrol
                         if new_selected_count > 0:
@@ -365,6 +360,7 @@ class PlaywrightLMSService:
                                 user_row = page.locator(f"table#participants tbody tr:has(td.c2:has-text('{email}'))").first
 
                             if await user_row.count() > 0:
+                                # Bấm vào icon bánh răng ⚙️ (Edit enrolment)
                                 edit_gear = user_row.locator("a.editenrollink[data-action='editenrolment']").first
                                 if await edit_gear.count() > 0:
                                     await edit_gear.click(force=True)
@@ -373,22 +369,22 @@ class PlaywrightLMSService:
 
                                     edit_modal = page.locator(".modal.show, .modal-dialog").first
 
-                                    # Đổi Status Active (0)
+                                    # Đổi Status sang Active (0)
                                     status_select = edit_modal.locator("select#id_status").first
                                     if await status_select.count() > 0:
                                         await status_select.select_option(value="0")
 
-                                    # Cập nhật hạn
+                                    # 🟢 CẬP NHẬT CHÍNH XÁC NGÀY HẾT HẠN (ENROLMENT ENDS)
                                     if date_info:
                                         await self._set_moodle_datetime_selectors(edit_modal, date_info)
 
-                                    # Save changes
+                                    # Bấm Save changes
                                     save_edit_btn = edit_modal.locator(".modal-footer button[data-action='save'], button:has-text('Save changes')").first
                                     await save_edit_btn.click(force=True)
                                     await page.wait_for_load_state("networkidle")
-                                    await page.wait_for_timeout(1000)
+                                    await page.wait_for_timeout(1200)
 
-                                    logger.info(f"🔄 ĐÃ GIA HẠN THÀNH CÔNG cho tài khoản: {email} ({role_label})")
+                                    logger.info(f"🔄 ĐÃ GIA HẠN THÀNH CÔNG cho tài khoản: {email} ({role_label}) đến ngày {end_date_str}")
                                     results["extended_access"].append({
                                         "email": email,
                                         "role": role_label,
