@@ -3,7 +3,7 @@ import os
 import json
 import logging
 from fastapi import APIRouter, HTTPException
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
 import google.generativeai as genai
 from app.services.github_service import github_service
@@ -12,7 +12,7 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Danh sách Model Gemini chuẩn của hệ thống
+# Danh sách Model Gemini chuẩn của hệ thống (Fallback 10 tầng)
 GEMINI_MODELS = [
     "gemini-3.7-flash",
     "gemini-3.6-flash",
@@ -46,6 +46,12 @@ def load_system_knowledge(system_name: str) -> str:
         logger.warning(f"Không thể load knowledge_base: {e}")
     return f"- Tên phân hệ: {system_name} (Hệ sinh thái Pythaverse)"
 
+
+class AttachmentItem(BaseModel):
+    filename: str
+    url: str
+
+
 class GenerateBugPromptRequest(BaseModel):
     ticket_id: Optional[str] = None
     subject: str = ""
@@ -54,7 +60,9 @@ class GenerateBugPromptRequest(BaseModel):
     sender: str = "hung.nguyenmanh@dtt.vn"
     impacted_system: str = "Workspace"
     priority: str = "Urgent"
-    qa_notes: Optional[str] = ""  # 🎯 Ghi chú điều tra chuyên sâu của QA
+    qa_notes: Optional[str] = ""  # Ghi chú khảo sát thực tế & telemetry của QA
+    attachments: Optional[List[AttachmentItem]] = []  # Tệp đính kèm / ảnh lỗi
+
 
 @router.post("/create-issue")
 async def create_github_issue(payload: Dict[str, Any]):
@@ -62,98 +70,101 @@ async def create_github_issue(payload: Dict[str, Any]):
     res = await github_service.create_issue(payload)
     return res
 
+
 @router.post("/ai-generate-template")
 async def ai_generate_bug_template(req: GenerateBugPromptRequest):
-    """Gọi Gemini AI kết hợp Kiến thức Domain Pythaverse + Ghi chú QA để viết Bug Report chuẩn xác."""
-    
+    """
+    Gọi Gemini AI kết hợp Domain Knowledge Pythaverse + Ghi chú QA thực tế.
+    QUY TẮC ĐẶC BIỆT: CHỈ BÁO CÁO SỰ CỐ VÀ DỮ LIỆU THỰC TẾ (LOGS, ERROR CODE, REPRODUCTION).
+    TUYỆT ĐỐI KHÔNG SUY DIỄN NGUYÊN NHÂN VÀ KHÔNG ĐƯA RA GIẢI PHÁP SỬA LỖI.
+    """
     if not settings.GEMINI_API_KEY:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY chưa được cấu hình.")
 
-    # Lấy kiến trúc hệ thống tương ứng
     system_tech_context = load_system_knowledge(req.impacted_system)
 
-    prompt = f"""
-Bạn là Chuyên gia Lead QA & Automation của Công ty Công nghệ DTT (Hệ sinh thái Pythaverse).
-Nhiệm vụ: Viết một bản Báo Cáo Lỗi (Bug Report) KỸ THUẬT CHUYÊN SÂU bằng tiếng Việt theo ĐÚNG CẤU TRÚC MARKDOWN quy định.
+    # Xử lý danh sách attachments thành markdown images / links
+    attachments_markdown = ""
+    if req.attachments and len(req.attachments) > 0:
+        attachments_markdown = "\n".join([
+            f"- ![{att.filename}]({att.url})" if any(att.filename.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp'])
+            else f"- [📄 {att.filename}]({att.url})"
+            for att in req.attachments
+        ])
+    else:
+        attachments_markdown = "*(Không có tệp đính kèm)*"
 
-=== 1. KIẾN THỨC KIẾN TRÚC HỆ THỐNG NỘI BỘ (GROUND TRUTH CONTEXT) ===
+    prompt = f"""
+Bạn là Chuyên gia QA Kỹ thuật cấp cao tại Công ty Công nghệ DTT (Hệ sinh thái Pythaverse).
+Nhiệm vụ: Soạn thảo một bản BÁO CÁO LỖI (BUG REPORT) KỸ THUẬT CHÍNH XÁC, THUẦN DỮ LIỆU THỰC NGHIỆM cho AI Coding Agent (Claude Code) xử lý mã nguồn.
+
+=== QUY TẮC BẮT BUỘC (VI PHẠM SẼ BỊ TỪ CHỐI) ===
+1. TUYỆT ĐỐI KHÔNG phân tích nguyên nhân gốc rễ (No Root Cause Analysis / No Hypothesis).
+2. TUYỆT ĐỐI KHÔNG đề xuất giải pháp sửa chữa code (No Proposed Fix / No Solution Hints). AI Coding Agent sẽ tự đọc source code và tìm cách giải quyết.
+3. CHỈ tập trung vào: Môi trường, Các bước tái hiện, Dữ liệu thực tế nhận về (HTTP code, Error log, Payload) và Ảnh chụp đính kèm.
+
+=== 1. KIẾN TRÚC HỆ THỐNG NỘI BỘ ===
 {system_tech_context}
 
-=== 2. THÔNG TIN SỰ CỐ TỪ NGƯỜI DÙNG ===
-- Mã Ticket: #{req.ticket_id or 'N/A'} (Nguồn: {req.source.upper()})
-- Người báo cáo: {req.sender}
+=== 2. THÔNG TIN BÁO CÁO GỐC ===
+- Nguồn: {req.source.upper()} | Mã Ticket: #{req.ticket_id or 'N/A'}
+- Người gửi: {req.sender}
 - Tiêu đề gốc: {req.subject}
 - Nội dung gốc:
 \"\"\"
 {req.raw_content or req.subject}
 \"\"\"
 
-=== 3. GHI CHÚ KHẢO SÁT & ĐIỀU TRA CỦA QA LEAD (QUAN TRỌNG NHẤT) ===
-\"{req.qa_notes or 'Chưa có ghi chú bổ sung, hãy tự suy luận dựa theo kiến trúc hệ thống và nội dung ticket.'}\"
+=== 3. DỮ LIỆU THỰC NGHIỆM & GHI CHÚ TỪ QA LEAD ===
+\"{req.qa_notes or 'Không có ghi chú thêm.'}\"
 
-=== YÊU CẦU BẮT BUỘC ĐỐI VỚI AI ===
-1. PHẢI kết hợp kiến trúc nền tảng (ví dụ Moodle LMS, Keycloak, Gitea, App Inventor Companion Bluetooth, Order/Contract Workspace) vào nội dung báo cáo.
-2. Các bước tái hiện (Steps to Reproduce) phải viết logic, chuẩn xác theo giao diện và flow kỹ thuật của hệ thống đó.
-3. Kết quả thực tế & Mong đợi phải làm nổi bật nguyên nhân kỹ thuật mà QA đã ghi chú.
-4. Bằng chứng kỹ thuật (HTTP status, API endpoint, Payload) phải khớp với domain và endpoint của hệ thống được báo cáo.
+=== 4. TỆP ĐÍNH KÈM SẴN CÓ ===
+{attachments_markdown}
 
-=== CẤU TRÚC MARKDOWN BẮT BUỘC TRẢ VỀ ===
-### [BUG][{req.priority.upper()}] <Tiêu đề kỹ thuật ngắn gọn, chuẩn xác>
+=== CẤU TRÚC MARKDOWN BẮT BUỘC PHẢI TRẢ VỀ ===
+### [BUG][{req.priority.upper()}] <Mô tả ngắn gọn, chính xác hiện tượng lỗi>
 
-**📌 MÔ TẢ TỔNG QUAN (METADATA)**
-- **Người báo cáo (Reported By):** {req.sender} (Qua Hùng QA)
-- **Mức độ ưu tiên (Priority/Severity):** [{req.priority}]
-- **Vai trò bị ảnh hưởng (Affected Roles):** [Admin / Partner / School / Teacher / Student]
+**📌 THÔNG TIN SỰ CỐ (METADATA)**
 - **Hệ thống liên quan (Impacted System):** [{req.impacted_system}]
-
----
-
-**🌐 MÔI TRƯỜNG & ĐƯỜNG DẪN (ENVIRONMENT & ABSOLUTE URLS)**
-- **URL bị lỗi (Absolute URL):** `https://{req.impacted_system.lower().replace(' ', '')}.pythaverse.space` (hoặc URL chuẩn của phân hệ)
-- **So sánh Môi trường (QA vs Prod):**
-  - **Môi trường QA (`qa.pythaverse.space`):** [Bị lỗi]
-  - **Môi trường Production (`pythaverse.space`):** [Bị lỗi]
-
----
-
-**📝 ĐIỀU KIỆN TIÊN QUYẾT & DỮ LIỆU TEST (PREREQUISITES & TEST DATA)**
-- **Tài khoản test (Credentials):** `hung.nguyenmanh@dtt.vn`
-- **Định danh thực thể:** Ticket #{req.ticket_id or 'N/A'}, School_ID / Course_ID
-- **Link báo cáo từ người dùng (User Report Link):** Link {req.source.upper()} #{req.ticket_id or ''}
+- **Mức độ ưu tiên (Priority):** [{req.priority}]
+- **Người báo cáo:** {req.sender} (Ticket #{req.ticket_id or 'N/A'})
+- **Môi trường ghi nhận (Environment):** `https://{req.impacted_system.lower().replace(' ', '')}.pythaverse.space` (hoặc URL phân hệ thực tế)
 
 ---
 
 **👣 CÁC BƯỚC TÁI HIỆN (STEPS TO REPRODUCE)**
-1. <Bước 1 cụ thể>
-2. <Bước 2 cụ thể>
-3. <Bước 3 cụ thể>
-4. Quan sát phản hồi của hệ thống.
+1. <Bước 1>
+2. <Bước 2>
+3. <Bước 3>
+4. Quan sát phản hồi lỗi nhận được.
 
 ---
 
-**⚖️ KẾT QUẢ THỰC TẾ VS MONG ĐỢI (EXPECTED VS ACTUAL)**
-- **Kết quả mong đợi (Expected Results):** <Mô tả trạng thái đúng tiêu chuẩn>
-- **Kết quả thực tế (Actual Results):** <Mô tả chi tiết lỗi, tích hợp ghi chú khảo sát của QA>
+**⚖️ KẾT QUẢ THỰC TẾ & MONG ĐỢI (ACTUAL VS EXPECTED)**
+- **Hành vi mong đợi (Expected):** <Mô tả hành vi đúng chuẩn của hệ thống>
+- **Hành vi thực tế (Actual):** <Mô tả chính xác lỗi xảy ra, thông báo lỗi UI hiển thị>
 
 ---
 
-**🔍 BẰNG CHỨNG KỸ THUẬT (TECHNICAL EVIDENCE & LOGS)**
-- **HTTP Status Code:** 500 Internal Server Error / 400 Bad Request
-- **API Endpoint:** `https://...` (sử dụng endpoint thực tế từ kiến trúc)
-- **Payload gửi đi (Request Payload):** 
-```json
-{{
-  "system": "{req.impacted_system}",
-  "action": "debug_inspection"
-}}
+**🔍 DỮ LIỆU LỖI & BẰNG CHỨNG KỸ THUẬT (RAW TELEMETRY & LOGS)**
+- **API Endpoint:** `<Điền endpoint thực tế nếu có, ví dụ /api/v1/... hoặc để N/A>`
+- **HTTP Status / Error Code:** `<Mã lỗi HTTP hoặc Exception>`
+- **Raw Log / Error Trace / Payload:**
+```
+<Trích dẫn nguyên văn log lỗi, request/response payload hoặc ghi chú của QA>
 ```
 
-CHÚ Ý: Chỉ trả về nội dung Markdown thuần, KHÔNG thêm lời chào mở đầu hay kết thúc.
+---
+
+**📷 HÌNH ẢNH & TỆP ĐÍNH KÈM (MEDIA & ATTACHMENTS)**
+{attachments_markdown}
+
+---
+*Báo cáo được tự động khởi tạo bởi Pythaverse QA Dispatcher.*
 """
 
     try:
         genai.configure(api_key=settings.GEMINI_API_KEY)
-        
         ai_response_text = ""
         last_error = ""
 
@@ -163,7 +174,7 @@ CHÚ Ý: Chỉ trả về nội dung Markdown thuần, KHÔNG thêm lời chào 
                 res = model.generate_content(prompt)
                 if res and res.text:
                     ai_response_text = res.text.strip()
-                    logger.info(f"✅ Gemini Model [{m_name}] đã sinh Bug Template thành công.")
+                    logger.info(f"✅ Gemini Model [{m_name}] đã sinh Bug Template chuẩn xác.")
                     break
             except Exception as err:
                 last_error = str(err)

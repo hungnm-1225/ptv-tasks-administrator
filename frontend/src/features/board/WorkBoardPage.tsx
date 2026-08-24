@@ -21,9 +21,11 @@ import {
     Palette,
     Layers,
     FolderPlus,
-    AlertTriangle
+    AlertTriangle,
+    UploadCloud
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { supabase } from '../../lib/supabase';
 import { fetchApi } from '../../lib/api';
 import { BoardItem, BoardColumnItem, BoardCardItem, BoardSubtask } from '../../types';
 
@@ -141,7 +143,79 @@ export const WorkBoardPage: React.FC = () => {
     const [quickAddColId, setQuickAddColId] = useState<string | null>(null);
     const [quickAddTitle, setQuickAddTitle] = useState<string>('');
 
+    // Upload background
+    const [isUploadingBg, setIsUploadingBg] = useState<boolean>(false);
     const bgFileInputRef = useRef<HTMLInputElement>(null);
+
+    const handleUploadBgFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !activeBoardId) return;
+
+        // Kiểm tra định dạng ảnh
+        if (!file.type.startsWith('image/')) {
+            toast.warning('Vui lòng chọn file hình ảnh (PNG, JPG, WEBP)!');
+            return;
+        }
+
+        // Giới hạn dung lượng 5MB
+        if (file.size > 5 * 1024 * 1024) {
+            toast.warning('Dung lượng ảnh tối đa là 5MB.');
+            return;
+        }
+
+        setIsUploadingBg(true);
+        const toastId = toast.loading('Đang tải ảnh lên Supabase Storage...');
+
+        try {
+            const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+            const filePath = `board_backgrounds/bg_${Date.now()}_${cleanFileName}`;
+
+            // 1. Upload lên bucket ticket-attachments
+            const { error: uploadError } = await supabase.storage
+                .from('ticket-attachments')
+                .upload(filePath, file, { cacheControl: '3600', upsert: true });
+
+            if (uploadError) throw uploadError;
+
+            // 2. Lấy Public URL chính chủ
+            const { data } = supabase.storage
+                .from('ticket-attachments')
+                .getPublicUrl(filePath);
+
+            const publicUrl = data.publicUrl;
+
+            // 3. Cập nhật URL vào Board
+            await fetchApi(`/board/boards/${activeBoardId}`, {
+                method: 'PUT',
+                body: JSON.stringify({ background_url: publicUrl })
+            });
+
+            setBoards(prev => prev.map(b => b.id === activeBoardId ? { ...b, background_url: publicUrl } : b));
+            toast.success('Đã tải và áp dụng ảnh nền thành công!', { id: toastId });
+            setIsBgSettingsOpen(false);
+        } catch (err: any) {
+            toast.error('Lỗi upload ảnh nền: ' + (err.message || err), { id: toastId });
+        } finally {
+            setIsUploadingBg(false);
+            if (bgFileInputRef.current) bgFileInputRef.current.value = '';
+        }
+    };
+
+    // 🟢 Hàm xóa ảnh nền (về mặc định)
+    const handleRemoveBackground = async () => {
+        if (!activeBoardId) return;
+        try {
+            await fetchApi(`/board/boards/${activeBoardId}`, {
+                method: 'PUT',
+                body: JSON.stringify({ background_url: null })
+            });
+            setBoards(prev => prev.map(b => b.id === activeBoardId ? { ...b, background_url: null } : b));
+            toast.success('Đã đặt lại hình nền mặc định!');
+            setIsBgSettingsOpen(false);
+        } catch (err: any) {
+            toast.error('Lỗi khi xóa hình nền: ' + (err.message || err));
+        }
+    };
 
     // 1. Tải danh sách Boards
     const loadBoards = useCallback(async () => {
@@ -704,59 +778,90 @@ export const WorkBoardPage: React.FC = () => {
             )}
 
             {/* ==================================================================== */}
-            {/* MODAL 2: TÙY CHỈNH BACKGROUND BOARD                                 */}
+            {/* MODAL 2: TÙY CHỈNH HÌNH NỀN BOARD (UPLOAD TRỰC TIẾP LÊN SUPABASE)    */}
             {/* ==================================================================== */}
             {isBgSettingsOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
-                    <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 text-xs text-slate-200">
-                        <h3 className="text-base font-bold text-white mb-3 flex items-center gap-2">
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 text-xs text-slate-200 relative shadow-2xl">
+                        <button
+                            onClick={() => setIsBgSettingsOpen(false)}
+                            className="absolute right-4 top-4 text-slate-400 hover:text-white"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+
+                        <h3 className="text-base font-bold text-white mb-2 flex items-center gap-2">
                             <ImageIcon className="w-5 h-5 text-emerald-400" />
                             Tùy Chỉnh Hình Nền Board
                         </h3>
+                        <p className="text-[11px] text-slate-400 mb-4">
+                            Tải ảnh từ máy tính để lưu trữ trực tiếp trên Supabase Storage.
+                        </p>
 
                         <div className="space-y-4">
+                            {/* Khu vực Upload Ảnh Từ Máy */}
                             <div>
-                                <label className="block font-semibold mb-2">Hình nền mẫu sẵn:</label>
-                                <div className="grid grid-cols-2 gap-2">
-                                    {PRESET_WALLPAPERS.map(wp => (
-                                        <div
-                                            key={wp.name}
-                                            onClick={() => handleSaveBackground(wp.value)}
-                                            className="p-3 rounded-xl border border-slate-700 hover:border-emerald-400 cursor-pointer bg-slate-800 text-center font-medium transition-all"
-                                        >
-                                            {wp.name}
+                                <input
+                                    type="file"
+                                    ref={bgFileInputRef}
+                                    onChange={handleUploadBgFile}
+                                    accept="image/png, image/jpeg, image/jpg, image/webp"
+                                    className="hidden"
+                                />
+
+                                <div
+                                    onClick={() => !isUploadingBg && bgFileInputRef.current?.click()}
+                                    className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all ${isUploadingBg
+                                        ? 'border-violet-500 bg-violet-950/20 opacity-60 cursor-wait'
+                                        : 'border-slate-700 hover:border-emerald-400 bg-slate-800/60 hover:bg-slate-800'
+                                        }`}
+                                >
+                                    {isUploadingBg ? (
+                                        <div className="flex flex-col items-center gap-2">
+                                            <Loader2 className="w-8 h-8 text-violet-400 animate-spin" />
+                                            <span className="text-xs font-semibold text-violet-300">Đang lưu vào Supabase...</span>
                                         </div>
-                                    ))}
+                                    ) : (
+                                        <div className="flex flex-col items-center gap-2">
+                                            <UploadCloud className="w-8 h-8 text-emerald-400" />
+                                            <span className="text-xs font-semibold text-slate-100">Bấm để chọn ảnh từ máy tính</span>
+                                            <span className="text-[10px] text-slate-400">Hỗ trợ PNG, JPG, WEBP (Tối đa 5MB)</span>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
-                            <div>
-                                <label className="block font-semibold mb-1">Hoặc dán URL ảnh nền:</label>
-                                <div className="flex gap-2">
-                                    <input
-                                        type="url"
-                                        defaultValue={activeBoard?.background_url || ''}
-                                        id="custom-bg-input"
-                                        placeholder="https://..."
-                                        className="flex-1 p-2 bg-slate-800 border border-slate-700 rounded-xl text-white outline-none text-[11px]"
-                                    />
+                            {/* Xem trước ảnh hiện tại (nếu có) */}
+                            {activeBoard?.background_url && (
+                                <div className="p-3 bg-slate-800/80 rounded-xl border border-slate-700 flex items-center justify-between">
+                                    <div className="flex items-center gap-2.5">
+                                        <img
+                                            src={activeBoard.background_url}
+                                            alt="Current background"
+                                            className="w-12 h-8 rounded object-cover border border-slate-600"
+                                        />
+                                        <span className="text-[11px] text-slate-300 font-medium truncate max-w-[180px]">
+                                            Ảnh nền đang dùng
+                                        </span>
+                                    </div>
+
                                     <button
-                                        onClick={() => {
-                                            const input = document.getElementById('custom-bg-input') as HTMLInputElement;
-                                            if (input) handleSaveBackground(input.value.trim());
-                                        }}
-                                        className="px-3 py-2 bg-emerald-600 text-white font-semibold rounded-xl hover:bg-emerald-700"
+                                        type="button"
+                                        onClick={handleRemoveBackground}
+                                        className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-900/40 hover:bg-rose-900/60 text-rose-300 rounded-lg transition-colors text-[11px]"
                                     >
-                                        Lưu
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                        Xóa ảnh
                                     </button>
                                 </div>
-                            </div>
+                            )}
                         </div>
 
-                        <div className="flex justify-end pt-4 mt-3 border-t border-slate-800">
+                        <div className="flex justify-end pt-4 mt-4 border-t border-slate-800">
                             <button
+                                type="button"
                                 onClick={() => setIsBgSettingsOpen(false)}
-                                className="px-4 py-2 bg-slate-800 rounded-xl text-slate-300"
+                                className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl hover:bg-slate-700"
                             >
                                 Đóng
                             </button>

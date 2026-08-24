@@ -1,5 +1,5 @@
 // frontend/src/features/github/GithubReporterPage.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
   Github,
@@ -15,11 +15,24 @@ import {
   Check,
   ExternalLink,
   Ticket as TicketIcon,
-  Wrench
+  Wrench,
+  Paperclip,
+  Image as ImageIcon,
+  FileCode,
+  UploadCloud,
+  X,
+  Trash2
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
+import { supabase } from '../../lib/supabase';
 import { GithubIssueResponse, InboxTicket } from '../../types';
 import { toast } from 'sonner';
+
+interface UploadedMediaItem {
+  filename: string;
+  url: string;
+  isImage: boolean;
+}
 
 const AVAILABLE_ASSIGNEES = [
   { username: 'nguyenthetrung5-PTV', label: 'nguyenthetrung5-PTV (AI Coder)' },
@@ -51,59 +64,200 @@ export const GithubReporterPage: React.FC = () => {
   const [repo, setRepo] = useState<string>('PTV-TechHub/Pythaverse2026');
   const [title, setTitle] = useState<string>('');
   const [body, setBody] = useState<string>('');
-  const [qaNotes, setQaNotes] = useState<string>(''); // 🎯 Ghi chú khảo sát của QA
+  const [qaNotes, setQaNotes] = useState<string>('');
   const [selectedAssignees, setSelectedAssignees] = useState<string[]>(['nguyenthetrung5-PTV', 'thetrungdtt']);
   const [selectedLabels, setSelectedLabels] = useState<string[]>(['bug']);
   const [priority, setPriority] = useState<string>('Urgent');
   const [system, setSystem] = useState<string>('Workspace');
 
+  // Media / Attachments State
+  const [attachments, setAttachments] = useState<UploadedMediaItem[]>([]);
+  const [uploadingMedia, setUploadingMedia] = useState<boolean>(false);
+
   const [activeTab, setActiveTab] = useState<'write' | 'preview'>('write');
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [aiGenerating, setAiGenerating] = useState<boolean>(false);
 
-  // Nhận diện Ticket truyền từ Inbox sang
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Nhận diện Ticket truyền từ Inbox sang & tự động trích xuất attachments sẵn có
   useEffect(() => {
     if (incomingTicket) {
       setTitle(`### [BUG][${priority.toUpperCase()}] ${incomingTicket.subject}`);
 
-      // Đoán hệ thống dựa theo category
+      // Gợi ý hệ thống theo category
       if (incomingTicket.category === 'account_keycloak') setSystem('Keycloak (Auth IDP)');
       else if (incomingTicket.category === 'lms_enroll') setSystem('PLearn (LMS)');
-      else if (incomingTicket.subject?.toLowerCase().includes('companion') || incomingTicket.subject?.toLowerCase().includes('leanbot')) {
+      else if (
+        incomingTicket.subject?.toLowerCase().includes('companion') ||
+        incomingTicket.subject?.toLowerCase().includes('leanbot')
+      ) {
         setSystem('Leanbot / Hardware');
       }
 
       if (incomingTicket.source === 'google_form' && !selectedLabels.includes('from-feedback')) {
-        setSelectedLabels(prev => [...prev, 'from-feedback']);
+        setSelectedLabels((prev) => [...prev, 'from-feedback']);
+      }
+
+      // Trích xuất đính kèm có sẵn từ ticket
+      const ticketAtts: any[] = incomingTicket.attachments || incomingTicket.metadata?.attachments || [];
+      if (ticketAtts.length > 0) {
+        const mapped: UploadedMediaItem[] = ticketAtts.map((att) => ({
+          filename: att.filename || 'attachment',
+          url: att.url,
+          isImage: /\.(png|jpg|jpeg|gif|webp)$/i.test(att.filename || att.url)
+        }));
+        setAttachments(mapped);
       }
     }
   }, [incomingTicket]);
 
   const toggleAssignee = (username: string) => {
-    setSelectedAssignees(prev =>
-      prev.includes(username) ? prev.filter(u => u !== username) : [...prev, username]
+    setSelectedAssignees((prev) =>
+      prev.includes(username) ? prev.filter((u) => u !== username) : [...prev, username]
     );
   };
 
   const toggleLabel = (labelName: string) => {
-    setSelectedLabels(prev =>
-      prev.includes(labelName) ? prev.filter(l => l !== labelName) : [...prev, labelName]
+    setSelectedLabels((prev) =>
+      prev.includes(labelName) ? prev.filter((l) => l !== labelName) : [...prev, labelName]
     );
   };
 
-  // 🔥 GỌI API GEMINI VỚI ĐẦY ĐỦ DOMAIN KNOWLEDGE & QA NOTES
+  // 🔥 UPLOAD TRỰC TIẾP LÊN SUPABASE STORAGE
+  const uploadFileToSupabase = async (file: File): Promise<UploadedMediaItem> => {
+    const isImage = file.type.startsWith('image/') || /\.(png|jpg|jpeg|gif|webp)$/i.test(file.name);
+    const cleanName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const filePath = `github/${Date.now()}_${cleanName}`;
+
+    const { error } = await supabase.storage
+      .from('ticket-attachments')
+      .upload(filePath, file, {
+        contentType: file.type || 'application/octet-stream',
+        upsert: true
+      });
+
+    if (error) throw error;
+
+    const { data } = supabase.storage.from('ticket-attachments').getPublicUrl(filePath);
+    return {
+      filename: file.name,
+      url: data.publicUrl,
+      isImage
+    };
+  };
+
+  // 🔥 CHÈN CÚ PHÁP MARKDOWN VÀO VỊ TRÍ CON TRỎ TRONG TEXTAREA
+  const insertMarkdownAtCursor = (markdownText: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      setBody((prev) => (prev ? `${prev}\n\n${markdownText}` : markdownText));
+      return;
+    }
+
+    const startPos = textarea.selectionStart;
+    const endPos = textarea.selectionEnd;
+    const textBefore = body.substring(0, startPos);
+    const textAfter = body.substring(endPos, body.length);
+
+    const newBody = `${textBefore}${markdownText}${textAfter}`;
+    setBody(newBody);
+
+    // Di chuyển con trỏ sau text vừa chèn
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(startPos + markdownText.length, startPos + markdownText.length);
+    }, 50);
+  };
+
+  // 🔥 BẮT SỰ KIỆN PASTE (CTRL + V) ĐỂ UPLOAD ẢNH TỪ CLIPBOARD
+  const handlePasteOnEditor = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const clipboardItems = e.clipboardData?.items;
+    if (!clipboardItems) return;
+
+    for (let i = 0; i < clipboardItems.length; i++) {
+      const item = clipboardItems[i];
+      if (item.type.indexOf('image') !== -1) {
+        e.preventDefault(); // Tránh dán chuỗi nhị phân rác
+        const file = item.getAsFile();
+        if (!file) continue;
+
+        setUploadingMedia(true);
+        const toastId = toast.loading('Đang upload ảnh chụp từ Clipboard lên Cloud...');
+
+        try {
+          const uploaded = await uploadFileToSupabase(file);
+          setAttachments((prev) => [...prev, uploaded]);
+
+          const imageMarkdown = `\n![${uploaded.filename}](${uploaded.url})\n`;
+          insertMarkdownAtCursor(imageMarkdown);
+
+          toast.success('Đã chèn ảnh chụp màn hình vào Markdown!', { id: toastId });
+        } catch (err) {
+          console.error(err);
+          toast.error('Lỗi upload ảnh clipboard: ' + (err as Error).message, { id: toastId });
+        } finally {
+          setUploadingMedia(false);
+        }
+        break;
+      }
+    }
+  };
+
+  // 🔥 CHỌN TỆP ĐÍNH KÈM THỦ CÔNG (ẢNH, LOG, .TXT, .MD, .JSON)
+  const handleManualFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setUploadingMedia(true);
+    const toastId = toast.loading(`Đang tải lên ${files.length} tệp đính kèm...`);
+
+    try {
+      const newItems: UploadedMediaItem[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const uploaded = await uploadFileToSupabase(file);
+        newItems.push(uploaded);
+
+        // Tự chèn vào markdown
+        if (uploaded.isImage) {
+          insertMarkdownAtCursor(`\n![${uploaded.filename}](${uploaded.url})\n`);
+        } else {
+          insertMarkdownAtCursor(`\n- [📄 ${uploaded.filename}](${uploaded.url})\n`);
+        }
+      }
+
+      setAttachments((prev) => [...prev, ...newItems]);
+      toast.success(`Đã đính kèm thành công ${newItems.length} tệp!`, { id: toastId });
+    } catch (err) {
+      console.error(err);
+      toast.error('Lỗi upload tệp: ' + (err as Error).message, { id: toastId });
+    } finally {
+      setUploadingMedia(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveAttachment = (index: number) => {
+    setAttachments((prev) => prev.filter((_, idx) => idx !== index));
+    toast.info('Đã gỡ tệp khỏi danh sách (Nội dung trong Markdown không bị xóa tự động).');
+  };
+
+  // 🔥 GỌI GEMINI AI TẠO TEMPLATE CHUẨN CLAUDE CODE
   const handleAiAutoFill = async () => {
     setAiGenerating(true);
     try {
       const payload = {
         ticket_id: incomingTicket?.source_id || '',
-        subject: incomingTicket?.subject || title.replace(/^###\s*\[BUG\]\[\w+\]\s*/i, '').trim() || "Sự cố hệ thống",
+        subject: incomingTicket?.subject || title.replace(/^###\s*\[BUG\]\[\w+\]\s*/i, '').trim() || 'Sự cố hệ thống',
         raw_content: incomingTicket?.raw_content || incomingTicket?.ai_summary || body || title,
         source: incomingTicket?.source || 'osticket',
         sender: incomingTicket?.sender_email || incomingTicket?.submitter_name || 'hung.nguyenmanh@dtt.vn',
         impacted_system: system,
         priority: priority,
-        qa_notes: qaNotes // Gửi kèm ghi chú khảo sát của QA
+        qa_notes: qaNotes,
+        attachments: attachments.map((a) => ({ filename: a.filename, url: a.url }))
       };
 
       const res = await fetchApi<{ title: string; body: string }>('/github/ai-generate-template', {
@@ -114,7 +268,7 @@ export const GithubReporterPage: React.FC = () => {
       if (res?.title) setTitle(res.title);
       if (res?.body) setBody(res.body);
 
-      toast.success('Gemini AI đã phân tích kiến trúc & soạn thảo Bug Report chuẩn xác!');
+      toast.success('Gemini đã soạn Bug Report chuẩn dữ liệu thực tế cho Claude Code!');
     } catch (err) {
       console.error('Lỗi gọi AI:', err);
       toast.error('Lỗi kết nối Gemini AI: ' + (err as Error).message);
@@ -139,15 +293,21 @@ export const GithubReporterPage: React.FC = () => {
           title,
           body,
           assignees: selectedAssignees,
-          labels: selectedLabels
-        }),
+          labels: selectedLabels,
+          ticket_id: incomingTicket?.id
+        })
       });
 
       if (res.status === 'success' && res.issue_url) {
         toast.success(
           <div className="space-y-1">
             <div className="font-bold">Đã tạo GitHub Issue #{res.issue_number} thành công!</div>
-            <a href={res.issue_url} target="_blank" rel="noreferrer" className="text-violet-400 underline text-xs flex items-center gap-1">
+            <a
+              href={res.issue_url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-violet-400 underline text-xs flex items-center gap-1"
+            >
               <span>Mở Issue trên GitHub</span>
               <ExternalLink className="w-3 h-3" />
             </a>
@@ -156,6 +316,7 @@ export const GithubReporterPage: React.FC = () => {
         setTitle('');
         setBody('');
         setQaNotes('');
+        setAttachments([]);
       } else {
         toast.error(`Lỗi từ GitHub API: ${res.message || 'Không thể tạo issue'}`);
       }
@@ -175,26 +336,35 @@ export const GithubReporterPage: React.FC = () => {
           <span>GitHub Issue Dispatcher</span>
         </h2>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          Soạn thảo và điều phối Bug Report chuẩn QA DTT vào Private Repository <code className="text-violet-600 dark:text-violet-400 font-mono font-semibold">PTV-TechHub/Pythaverse2026</code>.
+          Soạn thảo và điều phối Bug Report chuẩn QA DTT vào Private Repository{' '}
+          <code className="text-violet-600 dark:text-violet-400 font-mono font-semibold">
+            PTV-TechHub/Pythaverse2026
+          </code>
+          .
         </p>
       </div>
 
       {/* Banner thông báo nếu nhận từ Ticket */}
       {incomingTicket && (
-        <div className="p-4 rounded-2xl bg-violet-50/80 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-800/50 flex items-center justify-between gap-3">
+        <div className="p-4 rounded-2xl bg-violet-50/80 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-800/50 flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2.5 text-xs text-violet-900 dark:text-violet-200">
             <TicketIcon className="w-4 h-4 text-violet-600 dark:text-violet-400 shrink-0" />
-            <span>Đang tạo Bug Report từ Ticket: <strong className="font-semibold">{incomingTicket.subject}</strong> ({incomingTicket.source.toUpperCase()})</span>
+            <span>
+              Đang tạo Bug Report từ Ticket: <strong className="font-semibold">{incomingTicket.subject}</strong> (
+              {incomingTicket.source.toUpperCase()})
+            </span>
           </div>
           <span className="px-2 py-0.5 bg-violet-200/80 dark:bg-violet-500/20 text-violet-800 dark:text-violet-300 text-[10px] font-bold rounded-md uppercase">
-            Auto Context Loaded
+            Auto Context & Media Loaded
           </span>
         </div>
       )}
 
       {/* Form Container */}
-      <form onSubmit={handleSubmit} className="bg-white dark:bg-slate-800 p-6 sm:p-7 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-5 shadow-xs">
-
+      <form
+        onSubmit={handleSubmit}
+        className="bg-white dark:bg-slate-800 p-6 sm:p-7 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-5 shadow-xs"
+      >
         {/* Row 1: Target Repo */}
         <div className="space-y-1.5">
           <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Target Repository</label>
@@ -208,7 +378,6 @@ export const GithubReporterPage: React.FC = () => {
 
         {/* Row 2: Metadata Config (Priority, System, Assignees) */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 rounded-xl bg-slate-50/80 dark:bg-slate-900/60 border border-slate-200/60 dark:border-slate-700/50">
-
           {/* Priority */}
           <div className="space-y-1.5">
             <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 flex items-center gap-1">
@@ -238,8 +407,10 @@ export const GithubReporterPage: React.FC = () => {
               onChange={(e) => setSystem(e.target.value)}
               className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2 text-xs text-slate-800 dark:text-slate-200 outline-none cursor-pointer font-medium"
             >
-              {IMPACTED_SYSTEMS.map(s => (
-                <option key={s} value={s}>{s}</option>
+              {IMPACTED_SYSTEMS.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
               ))}
             </select>
           </div>
@@ -251,7 +422,7 @@ export const GithubReporterPage: React.FC = () => {
               <span>Người phụ trách:</span>
             </label>
             <div className="flex flex-wrap gap-1.5">
-              {AVAILABLE_ASSIGNEES.map(a => {
+              {AVAILABLE_ASSIGNEES.map((a) => {
                 const isSelected = selectedAssignees.includes(a.username);
                 return (
                   <button
@@ -279,7 +450,7 @@ export const GithubReporterPage: React.FC = () => {
             <span>Nhãn phân loại:</span>
           </label>
           <div className="flex flex-wrap gap-1.5">
-            {AVAILABLE_LABELS.map(l => {
+            {AVAILABLE_LABELS.map((l) => {
               const isSelected = selectedLabels.includes(l.name);
               return (
                 <button
@@ -299,21 +470,92 @@ export const GithubReporterPage: React.FC = () => {
           </div>
         </div>
 
-        {/* 🎯 Ô NHẬP GHI CHÚ KHẢO SÁT CỦA QA */}
+        {/* 🎯 Ô NHẬP GHI CHÚ KHẢO SÁT & TELEMETRY CỦA QA */}
         <div className="space-y-1.5 p-4 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-800/40">
           <div className="flex items-center justify-between">
             <label className="text-xs font-bold text-amber-900 dark:text-amber-300 flex items-center gap-1.5">
               <Wrench className="w-3.5 h-3.5 text-amber-600" />
-              <span>Ghi chú/Log</span>
+              <span>Ghi chú Telemetry / Error Log Thực Tế:</span>
             </label>
+            <span className="text-[10px] text-amber-700 dark:text-amber-400">
+              Cung cấp mã lỗi, HTTP status, endpoint để Claude Code đọc
+            </span>
           </div>
           <input
             type="text"
-            placeholder="VD: Đã test: Companion v2.60 lệch với server compiler / Moodle API trả về 403 Forbidden ở endpoint enrol_manual..."
+            placeholder="VD: Moodle API trả về 403 Forbidden ở endpoint enrol_manual_enrol_users / Payload request: {user_id: 123}..."
             value={qaNotes}
             onChange={(e) => setQaNotes(e.target.value)}
             className="w-full bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 outline-none focus:border-amber-500 placeholder-slate-400"
           />
+        </div>
+
+        {/* 📎 KHU VỰC QUẢN LÝ TỆP ĐÍNH KÈM & HÌNH ẢNH */}
+        <div className="space-y-2 p-4 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
+              <Paperclip className="w-4 h-4 text-violet-600" />
+              <span>Tệp Đính Kèm & Ảnh Lỗi ({attachments.length}):</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/*,.log,.txt,.json,.md,.pdf"
+                onChange={handleManualFileUpload}
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingMedia}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300 border border-violet-200 dark:border-violet-800 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
+              >
+                {uploadingMedia ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UploadCloud className="w-3.5 h-3.5" />}
+                <span>Đính Kèm Tệp / Ảnh</span>
+              </button>
+            </div>
+          </div>
+
+          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+            💡 <strong>Mẹo hay:</strong> Bạn có thể chụp ảnh màn hình rồi bấm <strong>Ctrl + V</strong> trực tiếp vào ô soạn thảo Markdown bên dưới để chèn ảnh tự động!
+          </p>
+
+          {/* Danh sách tệp đã đính kèm */}
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-200/60 dark:border-slate-700/50">
+              {attachments.map((file, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center gap-1.5 px-2.5 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs shadow-2xs group"
+                >
+                  {file.isImage ? (
+                    <ImageIcon className="w-3.5 h-3.5 text-emerald-500" />
+                  ) : (
+                    <FileCode className="w-3.5 h-3.5 text-violet-500" />
+                  )}
+                  <a
+                    href={file.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium text-slate-700 dark:text-slate-300 hover:text-violet-600 truncate max-w-[180px]"
+                  >
+                    {file.filename}
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveAttachment(idx)}
+                    className="text-slate-400 hover:text-rose-500 transition p-0.5 rounded cursor-pointer"
+                    title="Xóa tệp này"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Nút AI Soạn Thảo */}
@@ -326,12 +568,12 @@ export const GithubReporterPage: React.FC = () => {
           {aiGenerating ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Gemini Đang Kết Hợp Kiến Trúc Pythaverse & Ghi Chú QA...</span>
+              <span>Gemini Đang Tổng Hợp Telemetry Logs & Tạo Bug Template Cho Claude Code...</span>
             </>
           ) : (
             <>
               <Sparkles className="w-4 h-4 text-violet-200" />
-              <span>AI Soạn Mẫu Chuẩn QA DTT (Theo Domain & Ghi Chú)</span>
+              <span>AI Soạn Bug Report Chuẩn Telemetry (Dành Riêng Cho Claude Code)</span>
             </>
           )}
         </button>
@@ -351,7 +593,9 @@ export const GithubReporterPage: React.FC = () => {
         {/* Body Editor with Tabs (Write / Preview) */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Nội Dung Chi Tiết (Markdown)</label>
+            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+              Nội Dung Chi Tiết (Markdown)
+            </label>
             <div className="flex bg-slate-100 dark:bg-slate-700/60 p-0.5 rounded-lg text-[11px]">
               <button
                 type="button"
@@ -362,7 +606,7 @@ export const GithubReporterPage: React.FC = () => {
                   }`}
               >
                 <Edit3 className="w-3 h-3" />
-                <span>Soạn Thảo</span>
+                <span>Soạn Thảo (Hỗ trợ Ctrl+V ảnh)</span>
               </button>
               <button
                 type="button"
@@ -373,16 +617,18 @@ export const GithubReporterPage: React.FC = () => {
                   }`}
               >
                 <Eye className="w-3 h-3" />
-                <span>Xem Trước</span>
+                <span>Xem Trước Render</span>
               </button>
             </div>
           </div>
 
           {activeTab === 'write' ? (
             <textarea
-              rows={13}
-              placeholder="Nội dung Markdown mô tả chi tiết các bước tái hiện, môi trường..."
+              ref={textareaRef}
+              rows={14}
+              placeholder="Nội dung Markdown mô tả chi tiết các bước tái hiện, telemetry logs... Bạn có thể bấm Ctrl+V để dán ảnh trực tiếp vào đây."
               value={body}
+              onPaste={handlePasteOnEditor}
               onChange={(e) => setBody(e.target.value)}
               className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-xs font-mono text-slate-900 dark:text-slate-100 outline-none focus:border-violet-500 leading-relaxed"
             />
