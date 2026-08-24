@@ -39,7 +39,7 @@ import {
 import { fetchApi } from '../../lib/api';
 import { BotType } from '../../types';
 import { toast } from 'sonner';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '../../lib/supabase';
 
 interface HierarchySchoolItem {
   school_id: string;
