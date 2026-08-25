@@ -192,8 +192,8 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
     ) -> Dict[str, Any]:
         """
         Duyệt Partner Contract:
-        - Distributor thử duyệt.
-        - Nếu thiếu -> Distributor tạo DST -> Sales Admin duyệt -> Distributor duyệt lại PRT hoàn tất!
+        - TỐI ƯU 1-SESSION: Distributor kiểm tra kho, nếu thiếu thì tự động tạo DST Contract luôn trong 1 phiên!
+        - Sau đó Sales Admin duyệt DST -> Distributor duyệt lại PRT hoàn tất!
         """
         logs = []
         def log_step(msg: str):
@@ -202,41 +202,45 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
 
         log_step(f"🚀 [SUB-FLOW] Duyệt Partner Contract: [{contract_identifier}]")
 
-        dist_res = await self.distributor_approve_partner_contract(distributor_creds, contract_identifier)
+        # Gọi hàm duyệt (có bật auto_create_dst_if_short=True chạy 1 phiên)
+        dist_res = await self.distributor_approve_partner_contract(
+            credentials=distributor_creds,
+            contract_identifier=contract_identifier,
+            auto_create_dst_if_short=True,
+            courses_needed=courses_needed
+        )
+
         if dist_res.get("status") == "success":
             log_step(f"✅ Distributor đã duyệt thành công Contract [{contract_identifier}]!")
             return {"status": "success", "contract_code": contract_identifier, "logs": "\n".join(logs)}
 
-        if dist_res.get("status") != "insufficient_pool":
-            err = dist_res.get("error", "Lỗi duyệt Partner Contract")
-            log_step(f"❌ {err}")
-            return {"status": "failed", "error": err, "logs": "\n".join(logs)}
+        # Nếu đã tự động tạo xong DST Contract trong cùng 1 phiên
+        if dist_res.get("status") == "insufficient_pool_created_dst":
+            dst_code = dist_res.get("dst_contract_code")
+            log_step(f"⚡ [1-SESSION] Đã tạo xong DST Contract [{dst_code}]. Đang chuyển Sales Admin duyệt...")
 
-        # 1. Distributor tạo DST Contract lên Sales Admin
-        log_step("⚠️ Distributor thiếu License! Đang tạo DST Contract lên Sales Admin...")
-        dst_contract = await self.distributor_create_contract(distributor_creds, {
-            "notes": f"Auto-topup to approve PRT Contract {contract_identifier}",
-            "courses": courses_needed or [{"category": "SWRP", "course_name": None, "licenses": 100}]
-        })
-        if dst_contract.get("status") != "success":
-            return {"status": "failed", "error": dst_contract.get("error"), "logs": "\n".join(logs)}
+            # 1. Sales Admin duyệt DST Contract
+            admin_res = await self.admin_approve_distributor_contract(sales_admin_creds, dst_code)
+            if admin_res.get("status") != "success":
+                return {"status": "failed", "error": admin_res.get("error"), "logs": "\n".join(logs)}
 
-        dst_code = dst_contract.get("contract_code")
-        log_step(f"✅ Đã tạo DST Contract: [{dst_code}]. Đang chuyển Sales Admin duyệt...")
+            # 2. Distributor duyệt lại Partner Contract (kho đã đủ License)
+            log_step(f"🎉 Sales Admin đã cấp phép [{dst_code}]. Distributor duyệt lại Partner Contract [{contract_identifier}]...")
+            final_res = await self.distributor_approve_partner_contract(
+                credentials=distributor_creds,
+                contract_identifier=contract_identifier,
+                auto_create_dst_if_short=False
+            )
+            if final_res.get("status") != "success":
+                return {"status": "failed", "error": final_res.get("error"), "logs": "\n".join(logs)}
 
-        # 2. Sales Admin duyệt DST Contract
-        admin_res = await self.admin_approve_distributor_contract(sales_admin_creds, dst_code)
-        if admin_res.get("status") != "success":
-            return {"status": "failed", "error": admin_res.get("error"), "logs": "\n".join(logs)}
+            log_step(f"🏁 ĐÃ DUYỆT THÀNH CÔNG PARTNER CONTRACT: [{contract_identifier}]!")
+            return {"status": "success", "contract_code": contract_identifier, "logs": "\n".join(logs)}
 
-        # 3. Distributor duyệt lại Partner Contract
-        log_step(f"🎉 Sales Admin đã duyệt [{dst_code}]. Distributor duyệt lại Partner Contract [{contract_identifier}]...")
-        final_res = await self.distributor_approve_partner_contract(distributor_creds, contract_identifier)
-        if final_res.get("status") != "success":
-            return {"status": "failed", "error": final_res.get("error"), "logs": "\n".join(logs)}
-
-        log_step(f"🏁 ĐÃ DUYỆT THÀNH CÔNG PARTNER CONTRACT: [{contract_identifier}]!")
-        return {"status": "success", "contract_code": contract_identifier, "logs": "\n".join(logs)}
+        # Nếu lỗi khác
+        err = dist_res.get("error", "Lỗi duyệt Partner Contract")
+        log_step(f"❌ {err}")
+        return {"status": "failed", "error": err, "logs": "\n".join(logs)}
 
     async def execute_partner_create_and_approve_chain(
         self,
