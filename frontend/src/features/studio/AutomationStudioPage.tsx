@@ -184,17 +184,7 @@ export const AutomationStudioPage: React.FC = () => {
   nextYear.setDate(nextYear.getDate() - 1);
 
   // Danh sách môn học khi Tạo mới
-  const [selectedCourses, setSelectedCourses] = useState<OrderCourseSelection[]>([
-    {
-      category: 'SWRP',
-      course_id: 654,
-      course_name: 'SWRP 9: LEANBOT Programming Applications with IoT [V2] (EN)',
-      lms_url: 'https://learn.pythaverse.space/course/view.php?id=654',
-      licenses: 50,
-      start_date: getFormattedDate(today),
-      end_date: getFormattedDate(nextYear),
-    },
-  ]);
+  const [selectedCourses, setSelectedCourses] = useState<OrderCourseSelection[]>([]);
 
   // Thời hạn LMS Enroll
   const [lmsStartDate, setLmsStartDate] = useState<string>(getFormattedDate(today));
