@@ -31,7 +31,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                 await create_order_btn.wait_for(state="visible", timeout=15000)
                 await create_order_btn.click()
 
-                await page.wait_for_selector("div[role='dialog']:has-text('Create New Order')", timeout=15000)
+                await page.wait_for_selector("div[role='dialog']:has-text('Create')", timeout=15000)
 
                 contact_info = order_data.get("contact_info", "Admin Automation Hub (operation@pythaverse.space)")
                 contact_input = page.locator("div[role='dialog'] input[placeholder*='contact information'], div[role='dialog'] input[type='text']").first

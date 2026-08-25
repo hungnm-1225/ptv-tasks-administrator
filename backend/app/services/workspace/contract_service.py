@@ -26,7 +26,7 @@ class WorkspaceContractService(WorkspaceBaseService):
 
                 logger.info("📝 Partner mở: /partner-workspace/contract-po/create...")
                 await page.goto(f"{BASE_WORKSPACE_URL}/partner-workspace/contract-po/create", wait_until="networkidle", timeout=45000)
-                await page.wait_for_selector("h4:has-text('Create Contract/PO'), text=Create Contract/PO", timeout=15000)
+                await page.wait_for_selector("h4:has-text('Create Contract/PO'), :text('Create Contract/PO')", timeout=15000)
 
                 # Chọn Contract Type
                 type_select = page.locator(".MuiGrid-item:has(label:has-text('Contract Type')) .MuiSelect-select, .MuiGrid-item:has(label:has-text('Contract Type')) div[role='combobox']").first
@@ -155,8 +155,8 @@ class WorkspaceContractService(WorkspaceBaseService):
                 await page.wait_for_timeout(500)
 
                 view_item = page.locator("li[role='menuitem']:has-text('View'), .MuiMenuItem-root:has-text('View')").first
-                if await view_item.count() > 0 and await view_item.is_visible():
-                    await view_item.click()
+                await view_item.wait_for(state="visible", timeout=7000)
+                await view_item.click()
 
                 await page.wait_for_selector("div[role='dialog']", timeout=15000)
 
@@ -219,7 +219,7 @@ class WorkspaceContractService(WorkspaceBaseService):
 
                 logger.info("📝 Distributor mở: /distributor-workspace/contract-po/create...")
                 await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/contract-po/create", wait_until="networkidle", timeout=45000)
-                await page.wait_for_selector("h4:has-text('Create Contract/PO'), text=Create Contract/PO", timeout=15000)
+                await page.wait_for_selector("h4:has-text('Create Contract/PO'), :text('Create Contract/PO')", timeout=15000)
 
                 type_select = page.locator(".MuiGrid-item:has(label:has-text('Contract Type')) .MuiSelect-select, .MuiGrid-item:has(label:has-text('Contract Type')) div[role='combobox']").first
                 await type_select.click()

@@ -1,5 +1,5 @@
 // frontend/src/features/tasks/TaskManagementPage.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   CheckCircle2,
   Clock,
@@ -19,7 +19,18 @@ import {
   Lock,
   Sliders,
   FileText,
-  Zap
+  Zap,
+  Download,
+  Building2,
+  GraduationCap,
+  Github,
+  Mail,
+  Search,
+  Filter,
+  ArrowUpDown,
+  RotateCw,
+  ExternalLink,
+  Tag,
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { BotAutomationTask } from '../../types';
@@ -32,27 +43,50 @@ const extractCleanEmail = (raw: any): string => {
   return match ? match[0].trim().toLowerCase() : raw.replace(/["'<>]/g, '').trim().toLowerCase();
 };
 
+// Helper định dạng giờ Việt Nam chuẩn
+const formatVNDateTime = (isoString?: string) => {
+  if (!isoString) return '---';
+  try {
+    const d = new Date(isoString);
+    return d.toLocaleString('vi-VN', {
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  } catch {
+    return isoString;
+  }
+};
+
 export const TaskManagementPage: React.FC = () => {
   const [tasks, setTasks] = useState<BotAutomationTask[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'all'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'all'>('all');
+  const [selectedBotFilter, setSelectedBotFilter] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+
   const [selectedTask, setSelectedTask] = useState<BotAutomationTask | null>(null);
-  const [viewLogTask, setViewLogTask] = useState<BotAutomationTask | null>(null);
+  const [detailModalTask, setDetailModalTask] = useState<BotAutomationTask | null>(null);
   const [modalMode, setModalMode] = useState<'form' | 'json'>('form');
 
   // State cho Visual Form Điều Khiển Keycloak
   const [kcIdentifiersText, setKcIdentifiersText] = useState<string>('');
   const [kcActionType, setKcActionType] = useState<string>('bulk_both');
-  const [kcTargetStatus, setKcTargetStatus] = useState<string>('enabled'); // 'enabled' | 'disabled' | 'keep'
-  const [kcPasswordOption, setKcPasswordOption] = useState<string>('email_lowercase'); // 'email_lowercase' | 'default_secure' | 'custom'
+  const [kcTargetStatus, setKcTargetStatus] = useState<string>('enabled');
+  const [kcPasswordOption, setKcPasswordOption] = useState<string>('email_lowercase');
   const [kcCustomPassword, setKcCustomPassword] = useState<string>('');
   const [kcTemporary, setKcTemporary] = useState<boolean>(false);
 
   const [jsonPayload, setJsonPayload] = useState<string>('');
   const [approving, setApproving] = useState<boolean>(false);
   const [rejecting, setRejecting] = useState<boolean>(false);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
 
-  const loadTasks = async () => {
+  const loadTasks = async (showToast = false) => {
     setLoading(true);
     try {
       let endpoint = '/tasks';
@@ -61,6 +95,7 @@ export const TaskManagementPage: React.FC = () => {
       }
       const data = await fetchApi<BotAutomationTask[]>(endpoint);
       setTasks(data || []);
+      if (showToast) toast.success('Đã làm mới danh sách tác vụ!');
     } catch (err) {
       console.error('Lỗi khi tải danh sách tác vụ:', err);
       toast.error('Không thể nạp danh sách tác vụ bot: ' + (err as Error).message);
@@ -71,14 +106,82 @@ export const TaskManagementPage: React.FC = () => {
 
   useEffect(() => {
     loadTasks();
+    const interval = setInterval(() => {
+      loadTasks();
+    }, 15000);
+    return () => clearInterval(interval);
   }, [activeTab]);
+
+  // Bóc tách thông tin nghiệp vụ chi tiết cho từng Task
+  const getTaskBusinessInfo = (task: BotAutomationTask) => {
+    const payload = task.payload_data || {};
+    const botType = task.bot_type;
+    const action = payload.action || payload.action_type || '';
+
+    let title = 'Tác vụ tự động hóa';
+    let subtitle = '';
+    let target = '';
+    let icon = Zap;
+    let badgeColor = 'bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300 border-violet-200 dark:border-violet-800';
+
+    if (botType === 'workspace_rpa' || botType === 'lms_playwright') {
+      icon = Building2;
+      badgeColor = 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800';
+
+      if (action === 'bulk_account_creation') {
+        const school = payload.school_name || 'Trường học';
+        const count = payload.total_count || payload.record_count || 'Nhiều';
+        title = `Tạo tài khoản hàng loạt (${count} tài khoản)`;
+        subtitle = school;
+        target = payload.request_id ? `Mã Batch: #REQ-${payload.request_id}` : payload.filename || 'accounts.xlsx';
+      } else if (action === 'approve_school_order_standalone') {
+        title = `Duyệt School Order [${payload.order_code || 'N/A'}]`;
+        subtitle = payload.school_name || payload.partner_name || 'Trường học';
+      } else if (action === 'approve_partner_contract_standalone') {
+        title = `Duyệt Hợp Đồng PRT [${payload.contract_code || 'N/A'}]`;
+        subtitle = `Đối tác: ${payload.partner_name || 'N/A'}`;
+      } else if (action === 'admin_approve_contract') {
+        title = `Sales Admin Duyệt Contract DST [${payload.contract_code || 'N/A'}]`;
+        subtitle = `Nhà phân phối: ${payload.distributor_name || 'N/A'}`;
+      } else if (action === 'pipeline_end_to_end') {
+        title = `Chuỗi Toàn Trình 4 Cấp (End-to-End)`;
+        subtitle = payload.school_name || 'Trường học';
+      } else if (action === 'direct_moodle_lms_enroll') {
+        icon = GraduationCap;
+        title = `Ghi danh PLearn LMS: ${payload.course_name || 'Khóa học'}`;
+        const totalUsers = (payload.student_emails?.length || 0) + (payload.teacher_emails?.length || 0) + (payload.manager_emails?.length || 0);
+        subtitle = `Tổng ${totalUsers || 'Nhiều'} người dùng | Hạn: ${payload.end_date || '1 năm'}`;
+      } else {
+        title = `Workspace RPA: ${action || 'Thực thi nghiệp vụ'}`;
+        subtitle = payload.school_name || '';
+      }
+    } else if (botType === 'keycloak_api') {
+      icon = Key;
+      badgeColor = 'bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200 dark:border-amber-800';
+      const email = payload.target_email || payload.identifier || (payload.identifiers && payload.identifiers[0]) || 'User';
+      title = `Quản trị Keycloak: ${email}`;
+      const actions = payload.actions || [];
+      subtitle = actions.length > 0 ? actions.join(' | ') : 'Reset pass / Xác thực / Trạng thái';
+    } else if (botType === 'github_issue_creator') {
+      icon = Github;
+      badgeColor = 'bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 border-purple-200 dark:border-purple-800';
+      title = `Tạo GitHub Issue: ${payload.title || 'Báo cáo sự cố'}`;
+      subtitle = `Người phụ trách: @${payload.assignees?.join(', ') || 'QA Lead'}`;
+    } else if (botType === 'feedback_doc_triage' || botType === 'google_doc_comment') {
+      icon = FileText;
+      badgeColor = 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border-blue-200 dark:border-blue-800';
+      title = `Ghi chú Google Doc & Phân công (Dòng #${payload.row_index || 2})`;
+      subtitle = payload.assignee_email ? `Gán việc: ${payload.assignee_email}` : '';
+    }
+
+    return { title, subtitle, target, icon, badgeColor };
+  };
 
   // Khởi tạo dữ liệu khi mở Modal Review
   const handleOpenReview = (task: BotAutomationTask) => {
     setSelectedTask(task);
     const payload = task.payload_data || {};
 
-    // 1. Phân giải danh sách tài khoản
     let emails: string[] = [];
     if (payload.identifiers && Array.isArray(payload.identifiers)) {
       emails = payload.identifiers.map(extractCleanEmail);
@@ -90,7 +193,6 @@ export const TaskManagementPage: React.FC = () => {
     }
     setKcIdentifiersText(emails.filter(Boolean).join('\n'));
 
-    // 2. Phân giải hành động & cấu hình
     const action = payload.action_type || payload.action || 'bulk_both';
     setKcActionType(action);
 
@@ -109,12 +211,10 @@ export const TaskManagementPage: React.FC = () => {
     setKcCustomPassword(payload.new_password || payload.temp_pass || '');
     setKcTemporary(Boolean(payload.temporary));
 
-    // Khởi tạo JSON thô
     setJsonPayload(JSON.stringify(payload, null, 2));
     setModalMode(task.bot_type === 'keycloak_api' ? 'form' : 'json');
   };
 
-  // Đồng bộ từ Form sang JSON trước khi Approve
   const buildFinalPayload = () => {
     if (selectedTask?.bot_type === 'keycloak_api' && modalMode === 'form') {
       const emailList = kcIdentifiersText
@@ -189,166 +289,353 @@ export const TaskManagementPage: React.FC = () => {
     }
   };
 
-  const renderStatusBadge = (approval: string, execution: string) => {
+  const handleRetryTask = async (taskId: string) => {
+    setRetryingId(taskId);
+    try {
+      await fetchApi(`/bots/${taskId}/retry`, { method: 'POST' });
+      toast.success(`Đã đưa tác vụ #${taskId.slice(0, 8)} vào hàng đợi chạy lại!`);
+      await loadTasks();
+    } catch (err) {
+      toast.error('Lỗi khi kích hoạt chạy lại: ' + (err as Error).message);
+    } finally {
+      setRetryingId(null);
+    }
+  };
+
+  // Render Badge trạng thái chi tiết
+  const renderStatusBadge = (approval: string, execution: string, payload: any) => {
     if (approval === 'pending') {
       return (
-        <span className="px-2.5 py-1 bg-amber-50 text-amber-800 border border-amber-200/80 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30 text-[10px] font-semibold rounded-lg inline-flex items-center gap-1 shadow-2xs">
-          <Clock className="w-3 h-3" /> PENDING
+        <span className="px-2.5 py-1 bg-amber-50 text-amber-800 border border-amber-200/80 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30 text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-2xs">
+          <Clock className="w-3 h-3" /> CHỜ PHÊ DUYỆT
         </span>
       );
     } else if (approval === 'approved') {
       if (execution === 'success') {
         return (
-          <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200/80 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30 text-[10px] font-semibold rounded-lg inline-flex items-center gap-1 shadow-2xs">
-            <CheckCircle2 className="w-3 h-3" /> SUCCESS
+          <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200/80 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30 text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-2xs">
+            <CheckCircle2 className="w-3 h-3" /> THÀNH CÔNG
           </span>
         );
       } else if (execution === 'failed') {
         return (
-          <span className="px-2.5 py-1 bg-rose-50 text-rose-700 border border-rose-200/80 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 text-[10px] font-semibold rounded-lg inline-flex items-center gap-1 shadow-2xs">
-            <AlertTriangle className="w-3 h-3" /> FAILED
+          <span className="px-2.5 py-1 bg-rose-50 text-rose-700 border border-rose-200/80 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-2xs">
+            <AlertTriangle className="w-3 h-3" /> THẤT BẠI
+          </span>
+        );
+      } else if (execution === 'waiting_poll') {
+        return (
+          <span className="px-2.5 py-1 bg-orange-50 text-orange-700 border border-orange-200/80 dark:bg-orange-500/15 dark:text-orange-300 dark:border-orange-500/30 text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-2xs">
+            <Clock className="w-3 h-3 animate-spin" /> {payload?.request_id ? `ĐỢI BATCH #${payload.request_id}` : 'ĐANG ĐỢI POLLING'}
           </span>
         );
       }
       return (
-        <span className="px-2.5 py-1 bg-sky-50 text-sky-700 border border-sky-200/80 dark:bg-sky-500/15 dark:text-sky-300 dark:border-sky-500/30 text-[10px] font-semibold rounded-lg inline-flex items-center gap-1 shadow-2xs">
-          <Loader2 className="w-3 h-3 animate-spin" /> RUNNING
+        <span className="px-2.5 py-1 bg-sky-50 text-sky-700 border border-sky-200/80 dark:bg-sky-500/15 dark:text-sky-300 dark:border-sky-500/30 text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-2xs">
+          <Loader2 className="w-3 h-3 animate-spin" /> ĐANG XỬ LÝ
         </span>
       );
     } else {
       return (
-        <span className="px-2.5 py-1 bg-slate-100 text-slate-700 border border-slate-200 dark:bg-slate-700 dark:text-slate-300 text-[10px] font-semibold rounded-lg inline-flex items-center gap-1">
-          <XCircle className="w-3 h-3" /> REJECTED
+        <span className="px-2.5 py-1 bg-slate-100 text-slate-700 border border-slate-200 dark:bg-slate-700 dark:text-slate-300 text-[10px] font-bold rounded-lg inline-flex items-center gap-1">
+          <XCircle className="w-3 h-3" /> BỊ TỪ CHỐI
         </span>
       );
     }
   };
 
+  // Lọc tác vụ theo Search và Dropdown
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((t) => {
+      // 1. Lọc theo tab trạng thái
+      if (activeTab === 'pending' && t.approval_status !== 'pending') return false;
+      if (activeTab === 'approved' && t.approval_status !== 'approved') return false;
+
+      // 2. Lọc theo Bot Type
+      if (selectedBotFilter !== 'all' && t.bot_type !== selectedBotFilter) return false;
+
+      // 3. Lọc theo từ khóa tìm kiếm
+      const query = searchQuery.trim().toLowerCase();
+      if (query) {
+        const tId = (t.id || '').toLowerCase();
+        const bType = (t.bot_type || '').toLowerCase();
+        const pStr = JSON.stringify(t.payload_data || {}).toLowerCase();
+        const subject = (t.inbox_tickets?.subject || '').toLowerCase();
+        const sender = (t.inbox_tickets?.sender_email || '').toLowerCase();
+
+        const match =
+          tId.includes(query) ||
+          bType.includes(query) ||
+          pStr.includes(query) ||
+          subject.includes(query) ||
+          sender.includes(query);
+
+        if (!match) return false;
+      }
+
+      return true;
+    });
+  }, [tasks, activeTab, selectedBotFilter, searchQuery]);
+
   return (
-    <div className="space-y-6">
-      {/* Title */}
+    <div className="space-y-6 max-w-7xl mx-auto pb-12">
+      {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">Task & Bot Automation Hub</h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Cổng Human-in-the-Loop: Phê duyệt trực quan và tùy chỉnh tham số Bot Worker trước khi thực thi.
-          </p>
+          <div className="flex items-center gap-2.5">
+            <div className="p-2.5 bg-gradient-to-br from-violet-600 to-indigo-600 text-white rounded-2xl shadow-md shadow-violet-500/20">
+              <CheckSquare className="w-6 h-6" />
+            </div>
+            <div>
+              <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight">
+                Task & Bot Automation Hub
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+                Cổng điều phối và theo dõi tiến trình thực thi của toàn bộ hệ thống Bot Workers.
+              </p>
+            </div>
+          </div>
         </div>
 
         <button
-          onClick={loadTasks}
+          onClick={() => loadTasks(true)}
           disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-300 shadow-xs cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 transition"
+          className="flex items-center gap-1.5 px-4 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/50 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 shadow-2xs transition cursor-pointer"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          <span>Làm mới</span>
+          <span>Làm Mới Danh Sách</span>
         </button>
       </div>
 
-      {/* Tabs */}
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() => setActiveTab('pending')}
-          className={`px-3.5 py-1.5 rounded-xl text-xs font-medium transition cursor-pointer ${activeTab === 'pending'
-            ? 'bg-amber-50 text-amber-800 border border-amber-200/80 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30 font-semibold shadow-xs'
-            : 'bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/60 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-            }`}
-        >
-          ⏳ Chờ Phê Duyệt
-        </button>
-        <button
-          onClick={() => setActiveTab('approved')}
-          className={`px-3.5 py-1.5 rounded-xl text-xs font-medium transition cursor-pointer ${activeTab === 'approved'
-            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/80 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30 font-semibold shadow-xs'
-            : 'bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/60 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-            }`}
-        >
-          ✓ Đã Phê Duyệt & Thực Thi
-        </button>
-        <button
-          onClick={() => setActiveTab('all')}
-          className={`px-3.5 py-1.5 rounded-xl text-xs font-medium transition cursor-pointer ${activeTab === 'all'
-            ? 'bg-violet-50 text-violet-700 border border-violet-200/80 dark:bg-violet-500/15 dark:text-violet-300 dark:border-violet-500/30 font-semibold shadow-xs'
-            : 'bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/60 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-            }`}
-        >
-          Tất Cả Tác Vụ
-        </button>
-      </div>
-
-      {/* Task Table */}
-      {loading ? (
-        <div className="flex flex-col items-center justify-center py-20 text-slate-500 dark:text-slate-400 gap-3">
-          <Loader2 className="w-7 h-7 animate-spin text-violet-600 dark:text-violet-400" />
-          <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Đang nạp danh sách tác vụ...</span>
+      {/* Bộ Điều Khiển Lọc & Tìm Kiếm */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-3.5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
+        {/* Tabs Trạng Thái */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+          {[
+            { id: 'all', label: 'Tất Cả Tác Vụ' },
+            { id: 'pending', label: '⏳ Chờ Phê Duyệt' },
+            { id: 'approved', label: '✓ Đã Duyệt & Thực Thi' },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as any)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${activeTab === tab.id
+                ? 'bg-violet-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
-      ) : tasks.length === 0 ? (
-        <div className="bg-white dark:bg-slate-800 p-12 text-center rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-3 shadow-xs">
-          <CheckSquare className="w-10 h-10 mx-auto text-slate-400 dark:text-slate-500" />
-          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">Không có tác vụ nào trong danh sách</h3>
+
+        {/* Ô Tìm Kiếm & Dropdown Loại Bot */}
+        <div className="flex items-center gap-2">
+          {/* Lọc loại Bot */}
+          <select
+            value={selectedBotFilter}
+            onChange={(e) => setSelectedBotFilter(e.target.value)}
+            className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none cursor-pointer"
+          >
+            <option value="all">Tất cả Phân Hệ</option>
+            <option value="workspace_rpa">🏢 Workspace RPA</option>
+            <option value="lms_playwright">🎓 PLearn LMS</option>
+            <option value="keycloak_api">🔑 Keycloak IDP</option>
+            <option value="github_issue_creator">🐙 GitHub Issue</option>
+            <option value="feedback_doc_triage">📝 Feedback Sheet</option>
+          </select>
+
+          {/* Ô Tìm Kiếm */}
+          <div className="relative flex-1 sm:w-64">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Tìm theo mã, tên trường, email..."
+              className="w-full pl-9 pr-8 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 outline-none focus:border-violet-500"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Bảng Danh Sách Tác Vụ Chi Tiết */}
+      {loading ? (
+        <div className="flex flex-col items-center justify-center py-24 text-slate-500 dark:text-slate-400 gap-3">
+          <Loader2 className="w-8 h-8 animate-spin text-violet-600 dark:text-violet-400" />
+          <span className="text-xs font-bold">Đang nạp dữ liệu tiến trình tác vụ...</span>
+        </div>
+      ) : filteredTasks.length === 0 ? (
+        <div className="bg-white dark:bg-slate-800 p-16 text-center rounded-3xl border border-slate-200/80 dark:border-slate-700/60 space-y-3 shadow-xs">
+          <CheckSquare className="w-12 h-12 mx-auto text-slate-300 dark:text-slate-600" />
+          <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300">Không tìm thấy tác vụ nào phù hợp</h3>
+          <p className="text-xs text-slate-400 max-w-sm mx-auto">
+            Thử thay đổi từ khóa tìm kiếm hoặc chuyển tab trạng thái khác.
+          </p>
         </div>
       ) : (
-        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 overflow-hidden shadow-xs">
+        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 overflow-hidden shadow-xs">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse min-w-[640px]">
+            <table className="w-full text-left text-xs border-collapse min-w-[900px]">
               <thead>
-                <tr className="border-b border-slate-200/80 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 font-semibold">
-                  <th className="p-3.5 pl-5">Mã Tác Vụ</th>
-                  <th className="p-3.5">Ticket Gốc / Nguồn</th>
-                  <th className="p-3.5">Bot Type</th>
-                  <th className="p-3.5">Trạng Thái</th>
-                  <th className="p-3.5">Thời Gian</th>
-                  <th className="p-3.5 pr-5 text-right">Thao Tác</th>
+                <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/75 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 font-bold uppercase text-[10px] tracking-wider">
+                  <th className="p-4 pl-6">Mã Tác Vụ</th>
+                  <th className="p-4">Nội Dung Nghiệp Vụ Cốt Lõi</th>
+                  <th className="p-4">Nguồn Yêu Cầu</th>
+                  <th className="p-4">Trạng Thái & Tiến Trình</th>
+                  <th className="p-4">Thời Gian</th>
+                  <th className="p-4 pr-6 text-right">Thao Tác</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50 text-slate-800 dark:text-slate-200">
-                {tasks.map((task) => {
-                  // 🎯 XỬ LÝ AN TOÀN TUYỆT ĐỐI CHO TICKET ID VÀ SOURCE
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
+                {filteredTasks.map((task) => {
                   const taskIdDisplay = task.id ? `#${task.id.slice(0, 8)}` : '#TASK';
-                  const ticketTitle =
-                    task.inbox_tickets?.subject ||
-                    (task.ticket_id ? `Ticket #${task.ticket_id.slice(0, 8)}` : null);
+                  const info = getTaskBusinessInfo(task);
+                  const Icon = info.icon;
+                  const payload = task.payload_data || {};
+                  const resultUrl = payload.result_file_url;
+
+                  const ticket = task.inbox_tickets;
+                  const isFromStudio = !task.ticket_id && !ticket;
 
                   return (
-                    <tr key={task.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/40 transition">
-                      <td className="p-3.5 pl-5 font-mono text-[11px] text-violet-700 dark:text-violet-300 font-medium whitespace-nowrap">
-                        {taskIdDisplay}
+                    <tr key={task.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
+                      {/* Cột 1: Mã ID & Loại Bot */}
+                      <td className="p-4 pl-6 align-top whitespace-nowrap">
+                        <div className="space-y-1">
+                          <span className="font-mono text-xs font-bold text-violet-700 dark:text-violet-300">
+                            {taskIdDisplay}
+                          </span>
+                          <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[10px] font-bold ${info.badgeColor}`}>
+                            <Icon className="w-3 h-3" />
+                            <span>{task.bot_type}</span>
+                          </div>
+                        </div>
                       </td>
-                      <td className="p-3.5 font-medium max-w-xs truncate text-slate-900 dark:text-slate-100">
-                        {ticketTitle ? (
-                          <span className="truncate block">{ticketTitle}</span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300 text-[10px] font-semibold">
+
+                      {/* Cột 2: Nội Dung Nghiệp Vụ */}
+                      <td className="p-4 align-top max-w-sm">
+                        <div className="space-y-1">
+                          <div className="font-bold text-xs text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                            <span>{info.title}</span>
+                          </div>
+                          {info.subtitle && (
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                              {info.subtitle}
+                            </div>
+                          )}
+                          {info.target && (
+                            <div className="text-[10px] font-mono text-violet-600 dark:text-violet-400 font-semibold">
+                              {info.target}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Cột 3: Nguồn Yêu Cầu */}
+                      <td className="p-4 align-top whitespace-nowrap">
+                        {isFromStudio ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300 border border-violet-200/80 dark:border-violet-800 text-[10px] font-extrabold shadow-2xs">
                             <Zap className="w-3 h-3 text-violet-500" /> Tác vụ Studio Trực Tiếp
                           </span>
+                        ) : (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5">
+                              {ticket?.source === 'gmail' ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-sky-600 bg-sky-50 dark:bg-sky-950 px-2 py-0.5 rounded-md border border-sky-200 dark:border-sky-800">
+                                  <Mail className="w-3 h-3" /> Gmail
+                                </span>
+                              ) : ticket?.source === 'osticket' ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-950 px-2 py-0.5 rounded-md border border-amber-200 dark:border-amber-800">
+                                  🎫 OS Ticket
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800">
+                                  📝 Form
+                                </span>
+                              )}
+                              {ticket?.category && (
+                                <span className="text-[10px] font-mono font-bold text-slate-500 uppercase">
+                                  [{ticket.category}]
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate max-w-[200px]" title={ticket?.subject || ''}>
+                              {ticket?.subject || `Ticket #${task.ticket_id?.slice(0, 8)}`}
+                            </div>
+                          </div>
                         )}
                       </td>
-                      <td className="p-3.5 font-mono text-[11px] text-slate-600 dark:text-slate-300 whitespace-nowrap">
-                        {task.bot_type}
+
+                      {/* Cột 4: Trạng Thái & Nút Tải Kết Quả */}
+                      <td className="p-4 align-top whitespace-nowrap space-y-1.5">
+                        <div>{renderStatusBadge(task.approval_status, task.execution_status, payload)}</div>
+
+                        {/* 👉 NÚT TẢI KẾT QUẢ TRỰC TIẾP NẾU CÓ RESULT URL */}
+                        {resultUrl && (
+                          <div>
+                            <a
+                              href={resultUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-extrabold transition shadow-2xs"
+                            >
+                              <Download className="w-3 h-3" />
+                              <span>Tải Kết Quả (.xlsx)</span>
+                            </a>
+                          </div>
+                        )}
                       </td>
-                      <td className="p-3.5 whitespace-nowrap">
-                        {renderStatusBadge(task.approval_status, task.execution_status)}
+
+                      {/* Cột 5: Thời Gian */}
+                      <td className="p-4 align-top text-slate-400 dark:text-slate-500 text-[11px] whitespace-nowrap font-mono">
+                        {formatVNDateTime(task.executed_at || task.created_at)}
                       </td>
-                      <td className="p-3.5 text-slate-400 dark:text-slate-500 text-[11px] whitespace-nowrap">
-                        {task.created_at ? new Date(task.created_at).toLocaleString('vi-VN') : '---'}
-                      </td>
-                      <td className="p-3.5 pr-5 text-right space-x-2 whitespace-nowrap">
+
+                      {/* Cột 6: Thao Tác */}
+                      <td className="p-4 pr-6 align-top text-right space-x-2 whitespace-nowrap">
                         {task.approval_status === 'pending' ? (
                           <button
                             onClick={() => handleOpenReview(task)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded-xl text-xs font-semibold transition shadow-2xs cursor-pointer"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded-xl text-xs font-bold transition shadow-2xs cursor-pointer"
                           >
                             <Edit3 className="w-3.5 h-3.5" />
                             <span>Duyệt & Chạy</span>
                           </button>
                         ) : (
-                          <button
-                            onClick={() => setViewLogTask(task)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-[11px] font-medium transition cursor-pointer"
-                          >
-                            <Terminal className="w-3 h-3 text-violet-500" />
-                            <span>Xem Logs</span>
-                          </button>
+                          <div className="inline-flex items-center gap-1.5">
+                            {task.execution_status === 'failed' && (
+                              <button
+                                onClick={() => handleRetryTask(task.id)}
+                                disabled={retryingId === task.id}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800 rounded-xl text-xs font-bold transition cursor-pointer"
+                                title="Chạy lại tác vụ bị lỗi này"
+                              >
+                                {retryingId === task.id ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <RotateCw className="w-3.5 h-3.5" />
+                                )}
+                                <span>Chạy Lại</span>
+                              </button>
+                            )}
+
+                            <button
+                              onClick={() => setDetailModalTask(task)}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition cursor-pointer"
+                            >
+                              <Terminal className="w-3.5 h-3.5 text-violet-500" />
+                              <span>Chi Tiết & Log</span>
+                            </button>
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -360,7 +647,121 @@ export const TaskManagementPage: React.FC = () => {
         </div>
       )}
 
-      {/* Modal: Phê Duyệt Trực Quan (Human-in-the-Loop) */}
+      {/* ===================================================================== */}
+      {/* 📄 MODAL: XEM CHI TIẾT TIẾN TRÌNH & EXECUTION LOGS                   */}
+      {/* ===================================================================== */}
+      {detailModalTask && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-3xl overflow-hidden shadow-2xl space-y-4 p-6 sm:p-7">
+            {/* Header Modal */}
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-violet-100 dark:bg-violet-950 text-violet-600 dark:text-violet-300 rounded-2xl">
+                  <Terminal className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    <span>Chi Tiết Tác Vụ #{detailModalTask.id?.slice(0, 8)}</span>
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-violet-100 dark:bg-violet-900 text-violet-700 dark:text-violet-300 font-mono font-bold">
+                      {detailModalTask.bot_type}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Thời gian tạo: {formatVNDateTime(detailModalTask.created_at)} | Thực thi: {formatVNDateTime(detailModalTask.executed_at)}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setDetailModalTask(null)}
+                className="p-1 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Thông Tin Tóm Tắt */}
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Nghiệp Vụ: {getTaskBusinessInfo(detailModalTask).title}
+                </span>
+                <div>{renderStatusBadge(detailModalTask.approval_status, detailModalTask.execution_status, detailModalTask.payload_data)}</div>
+              </div>
+
+              {detailModalTask.payload_data?.result_file_url && (
+                <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                  <span className="text-xs font-bold text-emerald-600 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4" /> Đã tạo thành công file kết quả:
+                  </span>
+                  <a
+                    href={detailModalTask.payload_data.result_file_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-xs"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Tải File (.xlsx)</span>
+                  </a>
+                </div>
+              )}
+            </div>
+
+            {/* Khung Nhật Ký Thực Thi (Execution Logs) */}
+            <div className="space-y-1.5 font-mono">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
+                <span className="flex items-center gap-1.5">
+                  <Code className="w-4 h-4 text-violet-500" />
+                  <span>Audit Logs Thực Thi:</span>
+                </span>
+              </div>
+              <div className="p-4 bg-slate-950 text-slate-200 rounded-2xl text-xs leading-relaxed max-h-56 overflow-y-auto border border-slate-800 space-y-1 scrollbar-thin">
+                {detailModalTask.execution_logs ? (
+                  detailModalTask.execution_logs.split('\n').map((line, idx) => (
+                    <div
+                      key={idx}
+                      className={
+                        line.includes('SUCCESS') || line.includes('Thành công')
+                          ? 'text-emerald-400 font-medium'
+                          : line.includes('ERROR') || line.includes('failed')
+                            ? 'text-rose-400 font-semibold'
+                            : 'text-slate-300'
+                      }
+                    >
+                      {line}
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-slate-500 italic">Chưa có nhật ký ghi nhận cho tác vụ này.</div>
+                )}
+              </div>
+            </div>
+
+            {/* Khung JSON Payload (Xem trước tham số đầu vào) */}
+            <details className="text-xs">
+              <summary className="font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 cursor-pointer">
+                ▶ Xem Tham Số Đầu Vào (Input Payload JSON)
+              </summary>
+              <pre className="mt-2 p-3 bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-300 rounded-xl font-mono text-[11px] overflow-x-auto max-h-36 border border-slate-200 dark:border-slate-800">
+                {JSON.stringify(detailModalTask.payload_data, null, 2)}
+              </pre>
+            </details>
+
+            {/* Nút Đóng Modal */}
+            <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                onClick={() => setDetailModalTask(null)}
+                className="px-5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-xl transition cursor-pointer"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* 🛡️ MODAL: PHÊ DUYỆT TRỰC QUAN (HUMAN-IN-THE-LOOP CHO TASK PENDING)    */}
+      {/* ===================================================================== */}
       {selectedTask && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl space-y-4 animate-in zoom-in duration-200">
@@ -381,7 +782,6 @@ export const TaskManagementPage: React.FC = () => {
               </div>
 
               <div className="flex items-center gap-2">
-                {/* Switcher Form vs JSON */}
                 <div className="flex items-center bg-slate-200/80 dark:bg-slate-800 p-1 rounded-xl">
                   <button
                     type="button"
@@ -421,7 +821,6 @@ export const TaskManagementPage: React.FC = () => {
             <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto">
               {modalMode === 'form' && selectedTask.bot_type === 'keycloak_api' ? (
                 <div className="space-y-5">
-                  {/* 1. Danh sách Email / Username */}
                   <div className="space-y-1.5">
                     <label className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
                       <span className="flex items-center gap-1.5">
@@ -439,7 +838,6 @@ export const TaskManagementPage: React.FC = () => {
                     />
                   </div>
 
-                  {/* 2. Loại Hành Động */}
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
                       Hành Động Cần Thực Thi:
@@ -466,7 +864,6 @@ export const TaskManagementPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* 3. Tùy Chọn Mật Khẩu */}
                   {kcActionType !== 'bulk_verify' && kcActionType !== 'bulk_set_status' && (
                     <div className="space-y-2 p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200/80 dark:border-slate-700/60">
                       <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
@@ -535,7 +932,6 @@ export const TaskManagementPage: React.FC = () => {
                     </div>
                   )}
 
-                  {/* 4. Trạng Thái & Temporary Toggle */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
@@ -586,7 +982,6 @@ export const TaskManagementPage: React.FC = () => {
                   </div>
                 </div>
               ) : (
-                /* JSON View cho Bot khác hoặc khi chuyển tab */
                 <div className="space-y-2">
                   <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                     <FileText className="w-3.5 h-3.5 text-violet-500" />
@@ -638,56 +1033,6 @@ export const TaskManagementPage: React.FC = () => {
                   </button>
                 </div>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal: Xem Chi Tiết Logs */}
-      {viewLogTask && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-950 border border-slate-800 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl space-y-3 p-6 font-mono">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800 text-slate-200">
-              <div className="flex items-center gap-2 text-xs font-semibold">
-                <Terminal className="w-4 h-4 text-violet-400" />
-                <span>Execution Logs: #{viewLogTask.id ? viewLogTask.id.slice(0, 8) : ''} ({viewLogTask.bot_type})</span>
-              </div>
-              <button
-                onClick={() => setViewLogTask(null)}
-                className="text-slate-400 hover:text-slate-100 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="p-4 bg-slate-900 rounded-xl text-xs space-y-1.5 max-h-72 overflow-y-auto leading-relaxed border border-slate-800">
-              {viewLogTask.execution_logs ? (
-                viewLogTask.execution_logs.split('\n').map((line, idx) => (
-                  <div
-                    key={idx}
-                    className={
-                      line.includes('SUCCESS') || line.includes('success')
-                        ? 'text-emerald-400'
-                        : line.includes('ERROR') || line.includes('failed')
-                          ? 'text-rose-400 font-semibold'
-                          : 'text-slate-300'
-                    }
-                  >
-                    {line}
-                  </div>
-                ))
-              ) : (
-                <div className="text-slate-500 italic">Chưa có nhật ký log cho tác vụ này.</div>
-              )}
-            </div>
-
-            <div className="flex justify-end pt-2">
-              <button
-                onClick={() => setViewLogTask(null)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-xl font-sans cursor-pointer"
-              >
-                Đóng
-              </button>
             </div>
           </div>
         </div>
