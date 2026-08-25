@@ -230,51 +230,84 @@ class WorkspaceContractService(WorkspaceBaseService):
                 logger.info("📝 Distributor mở: /distributor-workspace/contract-po/create...")
                 await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/contract-po/create", wait_until="networkidle", timeout=45000)
                 await page.wait_for_selector("h4:has-text('Create Contract/PO'), :text('Create Contract/PO')", timeout=15000)
+                await page.wait_for_timeout(1000)
 
-                type_select = page.locator(".MuiGrid-item:has(label:has-text('Contract Type')) .MuiSelect-select, .MuiGrid-item:has(label:has-text('Contract Type')) div[role='combobox']").first
+                # =============================================================
+                # 1. CHỌN CONTRACT TYPE: LICENSE
+                # =============================================================
+                logger.info("📋 Bước 1: Chọn Contract Type = 'License'...")
+                type_select = page.locator(".MuiGrid-item:has(label:has-text('Contract Type')) .MuiSelect-select, div:has(label:has-text('Contract Type')) div[role='combobox']").first
+                await type_select.wait_for(state="visible", timeout=10000)
                 await type_select.click()
-                await page.wait_for_timeout(500)
+                await page.wait_for_timeout(600)
 
-                license_opt = page.locator("ul[role='listbox'] li[data-value='License'], ul[role='listbox'] li:has-text('License')").first
+                license_opt = page.locator("ul[role='listbox'] li:has-text('License'), .MuiMenu-list li:has-text('License')").first
+                await license_opt.wait_for(state="visible", timeout=5000)
                 await license_opt.click()
                 await page.wait_for_timeout(1000)
 
-                notes = contract_data.get("notes", "Auto-requested by PTV Automation Hub")
-                notes_input = page.locator("div:has(label:has-text('Contract Notes')) textarea, textarea[name='notes']").first
+                # =============================================================
+                # 2. ĐIỀN CONTRACT NOTES
+                # =============================================================
+                notes = contract_data.get("notes") or contract_data.get("additional_notes") or "Auto-requested by PTV Automation Hub"
+                notes_input = page.locator("div:has(label:has-text('Contract Notes')) textarea, textarea[id*=':r']").first
                 if await notes_input.count() > 0:
-                    await notes_input.fill(notes)
+                    await notes_input.fill(str(notes))
 
+                # =============================================================
+                # 3. ĐIỀN DANH SÁCH MÔN HỌC (COURSES)
+                # =============================================================
                 courses = contract_data.get("courses", [])
                 if not courses:
-                    courses = [{"category": "SWRP", "course_name": None, "licenses": 100}]
+                    courses = [{
+                        "category": contract_data.get("category", "SWRP"),
+                        "course_name": contract_data.get("course_name"),
+                        "licenses": contract_data.get("licenses", 100),
+                        "unit_price": contract_data.get("unit_price", 0)
+                    }]
 
                 for idx, c in enumerate(courses):
                     if idx > 0:
-                        await page.click("button:has-text('Add Course')")
+                        logger.info(f"➕ Bấm 'Add Course' thêm môn #{idx + 1}...")
+                        add_btn = page.locator("button:has-text('Add Course')").first
+                        await add_btn.click()
                         await page.wait_for_timeout(1000)
 
+                    # Định vị Card của môn học thứ idx
                     course_card = page.locator(".MuiCard-root:has(label:has-text('License Category'))").nth(idx)
 
-                    cat_val = c.get("category", "SWRP")
-                    cat_dropdown = course_card.locator("div:has(label:has-text('License Category')) .MuiSelect-select, div:has(label:has-text('License Category')) div[role='combobox']").first
-                    await cat_dropdown.click()
+                    # A. Chọn License Category
+                    cat_val = c.get("category") or "SWRP"
+                    logger.info(f"📚 Môn #{idx + 1}: Chọn License Category = '{cat_val}'...")
+                    cat_select = course_card.locator("div:has(label:has-text('License Category')) .MuiSelect-select, div:has(label:has-text('License Category')) div[role='combobox']").first
+                    await cat_select.click()
                     await page.wait_for_timeout(500)
 
-                    cat_opt = page.locator(f"ul[role='listbox'] li[data-value='{cat_val}'], ul[role='listbox'] li:has-text('{cat_val}')").first
+                    cat_opt = page.locator(f"ul[role='listbox'] li:has-text('{cat_val}'), .MuiMenu-list li:has-text('{cat_val}')").first
                     if await cat_opt.count() > 0:
                         await cat_opt.click()
                     else:
                         await page.locator("ul[role='listbox'] li:not([data-value=''])").first.click()
 
-                    await page.wait_for_timeout(1000)
+                    # 🟢 CHỜ API TẢI DANH SÁCH MÔN HỌC CHO CATEGORY NÀY
+                    await page.wait_for_timeout(1500)
 
+                    # B. Chọn Course
                     course_name_val = c.get("course_name")
-                    course_dropdown = course_card.locator("div:has(label:has-text('Course')) .MuiSelect-select, div:has(label:has-text('Course')) div[role='combobox']").first
-                    await course_dropdown.click()
-                    await page.wait_for_timeout(500)
+                    logger.info(f"🎯 Môn #{idx + 1}: Chọn Course = '{course_name_val or 'Mặc định'}'...")
+                    course_select = course_card.locator("div:has(label:has-text('Course')) .MuiSelect-select, div:has(label:has-text('Course')) div[role='combobox']").first
+                    await course_select.wait_for(state="visible", timeout=10000)
+                    await course_select.click()
+                    await page.wait_for_timeout(600)
+
+                    # Nếu có ô Search trong menu xổ xuống thì gõ tìm kiếm
+                    search_box = page.locator(".MuiMenu-paper input[placeholder*='Search'], ul[role='listbox'] input").first
+                    if await search_box.count() > 0 and course_name_val:
+                        await search_box.fill(course_name_val)
+                        await page.wait_for_timeout(500)
 
                     if course_name_val:
-                        target_opt = page.locator(f"ul[role='listbox'] li:has-text('{course_name_val}')").first
+                        target_opt = page.locator(f"ul[role='listbox'] li:has-text('{course_name_val}'), .MuiMenu-list li:has-text('{course_name_val}')").first
                         if await target_opt.count() > 0:
                             await target_opt.click()
                         else:
@@ -284,23 +317,48 @@ class WorkspaceContractService(WorkspaceBaseService):
 
                     await page.wait_for_timeout(500)
 
-                    lic_input = course_card.locator("div:has(label:has-text('License(s)')) input[type='number'], input[type='number']").first
-                    await lic_input.fill(str(c.get("licenses", 100)))
+                    # C. Điền số lượng Licenses
+                    lic_qty = str(c.get("licenses", 100))
+                    lic_input = course_card.locator("div:has(label:has-text('License(s)')) input[type='number'], input[id*=':r']").first
+                    await lic_input.fill(lic_qty)
 
-                submit_btn = page.locator("button:has-text('Create Contract/PO')").last
+                    # D. Điền Unit Price (nếu có)
+                    unit_price_val = str(c.get("unit_price", 0))
+                    price_input = course_card.locator("div:has(label:has-text('Unit Price')) input[type='number']").first
+                    if await price_input.count() > 0:
+                        await price_input.fill(unit_price_val)
+
+                # =============================================================
+                # 4. ĐÍNH KÈM TÀI LIỆU (NẾU CÓ ATTACHMENT)
+                # =============================================================
+                doc_path = contract_data.get("document_path") or contract_data.get("upload_file_path")
+                if doc_path and os.path.exists(doc_path):
+                    logger.info(f"📎 Đang đính kèm tài liệu: {doc_path}...")
+                    file_input = page.locator("input#upload-documents, input[type='file']").first
+                    if await file_input.count() > 0:
+                        await file_input.set_input_files(doc_path)
+                        await page.wait_for_timeout(1000)
+
+                # =============================================================
+                # 5. NỘP HỢP ĐỒNG (CREATE CONTRACT/PO)
+                # =============================================================
+                logger.info("🚀 Đang bấm nút 'Create Contract/PO'...")
+                submit_btn = page.locator("button:has-text('Create Contract/PO'), button:has-text('💾 Create Contract/PO')").last
                 await submit_btn.click()
 
+                # Chờ chuyển hướng về trang danh sách hợp đồng
                 try:
-                    await page.wait_for_url("**/contract-po**", timeout=20000)
+                    await page.wait_for_url("**/contract-po**", timeout=25000)
                 except Exception:
                     pass
 
-                await page.wait_for_selector(".MuiDataGrid-root, .MuiDataGrid-row", timeout=25000)
+                await page.wait_for_selector(".MuiDataGrid-row", timeout=30000)
                 await page.wait_for_timeout(2000)
 
+                # Lấy mã DST Contract vừa tạo ở dòng đầu tiên
                 first_row = page.locator(".MuiDataGrid-row").first
                 contract_num_id = await first_row.get_attribute("data-id") if await first_row.count() > 0 else ""
-                code_elem = first_row.locator("[data-field='order_code'] .MuiBox-root, [data-field='order_code']").first
+                code_elem = first_row.locator("[data-field='order_code'], [data-field='contract_code'], .MuiDataGrid-cell").first
                 contract_full_code = (await code_elem.inner_text()).strip() if await code_elem.count() > 0 else (contract_num_id or "")
 
                 logger.info(f"🎉 TẠO DST CONTRACT THÀNH CÔNG: [{contract_full_code}]")
