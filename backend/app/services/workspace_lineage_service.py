@@ -255,5 +255,71 @@ class WorkspaceLineageService:
                 "password": decrypt_password(d_creds.get("encrypted_password", ""))
             }
         }
+    @staticmethod
+    def resolve_by_contract(contract_code: str) -> Optional[Dict[str, Any]]:
+        """Tự động truy vết Distributor & Partner từ mã Hợp đồng (PRT-... hoặc DST-...)."""
+        if not contract_code or contract_code in ["Tự động truy vết", "Tự động truy vết theo Order"]:
+            return None
+        
+        supabase = get_supabase_client()
+        clean_code = contract_code.strip()
+        
+        try:
+            # 1. Tìm trong bảng cache hợp đồng
+            cache_res = supabase.table("workspace_contracts_cache")\
+                .select("*")\
+                .or_(f"order_code.eq.{clean_code},contract_code.eq.{clean_code},id.eq.{clean_code}")\
+                .limit(1)\
+                .execute()
+            
+            if cache_res.data and len(cache_res.data) > 0:
+                item = cache_res.data[0]
+                dist_name = item.get("distributor_name") or item.get("receiver_name") or item.get("sender_name")
+                partner_name = item.get("partner_name") or item.get("sender_name")
+                
+                dist_creds = None
+                partner_creds = None
+                
+                if dist_name and dist_name not in ["Tự động truy vết", ""]:
+                    d_res = WorkspaceLineageService.resolve_by_distributor(dist_name)
+                    if d_res:
+                        dist_creds = d_res.get("distributor")
+                        
+                if partner_name and partner_name not in ["Tự động truy vết", ""]:
+                    p_res = WorkspaceLineageService.resolve_by_partner(partner_name)
+                    if p_res:
+                        partner_creds = p_res.get("partner")
+                        if not dist_creds:
+                            dist_creds = p_res.get("distributor")
+                            
+                if dist_creds:
+                    return {"distributor": dist_creds, "partner": partner_creds}
+        except Exception as e:
+            logger.warning(f"Lỗi truy vết contract từ cache: {e}")
+
+        # 2. Fallback an toàn: Lấy Master Distributor đầu tiên trong hệ thống
+        try:
+            default_dist = supabase.table("workspace_organizations")\
+                .select("*, workspace_credentials_vault(*)")\
+                .eq("role_type", "distributor")\
+                .limit(1)\
+                .execute()
+            if default_dist.data and len(default_dist.data) > 0:
+                d = default_dist.data[0]
+                raw_v = d.get("workspace_credentials_vault")
+                d_c = raw_v[0] if (isinstance(raw_v, list) and len(raw_v) > 0) else (raw_v or {})
+                return {
+                    "distributor": {
+                        "id": d.get("id"),
+                        "code": d.get("code"),
+                        "name": d.get("name"),
+                        "username": d_c.get("username", "testdistributor"),
+                        "password": decrypt_password(d_c.get("encrypted_password", ""))
+                    }
+                }
+        except Exception:
+            pass
+            
+        return None
 
 workspace_lineage_service = WorkspaceLineageService()

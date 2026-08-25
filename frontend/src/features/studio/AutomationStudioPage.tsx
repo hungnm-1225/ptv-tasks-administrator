@@ -530,8 +530,8 @@ export const AutomationStudioPage: React.FC = () => {
             toast.error('Vui lòng nhập hoặc chọn mã hợp đồng đối tác cần duyệt!');
             return;
           }
-          const resolvedPartnerName = selectedCachedItem?.partner_name || selectedCachedItem?.sender_name || selectedPartner?.name || 'Tự động truy vết';
-          const resolvedDistName = selectedCachedItem?.distributor_name || selectedCachedItem?.receiver_name || selectedDistributor?.name || 'Tự động truy vết';
+          const resolvedPartnerName = selectedCachedItem?.partner_name || selectedCachedItem?.sender_name || selectedPartner?.name || undefined;
+          const resolvedDistName = selectedCachedItem?.distributor_name || selectedCachedItem?.receiver_name || selectedDistributor?.name || undefined;
           const resolvedDistCode = selectedCachedItem?.distributor_code || selectedDistributor?.code;
 
           payload = {
@@ -546,8 +546,8 @@ export const AutomationStudioPage: React.FC = () => {
           summary.actionTitle = 'Phê Duyệt Hợp Đồng Đối Tác (PRT Contract)';
           summary.targetEntity = `Mã Hợp Đồng: ${targetContractCode}`;
           summary.detailsList = [
-            `Đối tác gửi: ${resolvedPartnerName}`,
-            `Nhà phân phối nhận: ${resolvedDistName}`,
+            `Đối tác gửi: ${resolvedPartnerName || 'Tự động truy vết từ mã hợp đồng'}`,
+            `Nhà phân phối nhận: ${resolvedDistName || 'Tự động truy vết từ Két sắt'}`,
           ];
         } else if (approveSubFlow === 'admin_approve_contract') {
           if (!targetContractCode) {

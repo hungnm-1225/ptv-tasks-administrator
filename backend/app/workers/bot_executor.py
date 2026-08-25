@@ -16,6 +16,16 @@ from app.services.playwright_service import playwright_lms_service
 logger = logging.getLogger(__name__)
 
 
+def clean_entity_str(val: Optional[str]) -> Optional[str]:
+    """Lọc bỏ các chuỗi rác hoặc chuỗi gợi ý 'Tự động truy vết' về None chuẩn mực."""
+    if not val or not isinstance(val, str):
+        return None
+    val_clean = val.strip()
+    if val_clean in ["Tự động truy vết", "Tự động truy vết theo Order", "None", "null", "undefined", ""]:
+        return None
+    return val_clean
+
+
 async def download_file_to_temp(url: str) -> Optional[str]:
     """Tải file từ attachment_url trên Supabase Storage về file tạm cục bộ an toàn."""
     if not url or not isinstance(url, str) or not url.startswith("http"):
@@ -54,15 +64,20 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
                 logger.info("🎓 Điều hướng sang Playwright LMS Direct Enroller...")
                 return await playwright_lms_service.enroll_users_pipeline(payload_data)
 
-            # Bóc tách thông tin phả hệ
+            # Bóc tách và làm sạch thông tin phả hệ
             hierarchy = payload_data.get("hierarchy") or {}
-            school_name = (
+            school_name = clean_entity_str(
                 payload_data.get("school_name") 
                 or hierarchy.get("school_name") 
                 or payload_data.get("school_id")
                 or hierarchy.get("school_code")
             )
             
+            partner_name = clean_entity_str(payload_data.get("partner_name") or payload_data.get("partner_code"))
+            distributor_name = clean_entity_str(payload_data.get("distributor_name") or payload_data.get("distributor_code"))
+            contract_code = clean_entity_str(payload_data.get("contract_code") or payload_data.get("contract_id"))
+            order_code = clean_entity_str(payload_data.get("order_code") or payload_data.get("order_id"))
+
             school_creds = payload_data.get("school_credentials")
             partner_creds = payload_data.get("partner_credentials")
             distributor_creds = payload_data.get("distributor_credentials")
@@ -71,30 +86,40 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
                 "password": getattr(settings, "TEST_ADMIN_PASS", "Pythaverse@2026")
             }
 
-            # Tự động suy vết phả hệ thông minh theo bất kỳ cấp nào (School -> Partner -> Distributor)
-            partner_name = payload_data.get("partner_name") or payload_data.get("partner_code")
-            distributor_name = payload_data.get("distributor_name") or payload_data.get("distributor_code")
+            # 🟢 CƠ CHẾ AUTO-RESOLVER THÔNG MINH 5 TẦNG:
+            # Tầng 1: Tự động truy vết từ Contract Code (PRT-... hoặc DST-...)
+            if contract_code and (not distributor_creds or not partner_creds):
+                c_lin = workspace_lineage_service.resolve_by_contract(contract_code)
+                if c_lin:
+                    distributor_creds = distributor_creds or c_lin.get("distributor")
+                    partner_creds = partner_creds or c_lin.get("partner")
 
-            # 1. Nếu có Distributor
+            # Tầng 2: Nếu có tên Distributor thật
             if distributor_name and not distributor_creds:
-                d_lin = workspace_lineage_service.resolve_by_distributor(str(distributor_name))
+                d_lin = workspace_lineage_service.resolve_by_distributor(distributor_name)
                 if d_lin:
                     distributor_creds = d_lin.get("distributor")
 
-            # 2. Nếu có Partner
+            # Tầng 3: Nếu có tên Partner thật
             if partner_name and (not partner_creds or not distributor_creds):
-                p_lin = workspace_lineage_service.resolve_by_partner(str(partner_name))
+                p_lin = workspace_lineage_service.resolve_by_partner(partner_name)
                 if p_lin:
                     partner_creds = partner_creds or p_lin.get("partner")
                     distributor_creds = distributor_creds or p_lin.get("distributor")
 
-            # 3. Nếu có School
+            # Tầng 4: Nếu có tên School thật
             if school_name and (not school_creds or not partner_creds or not distributor_creds):
-                s_lin = workspace_lineage_service.resolve_by_school(str(school_name))
+                s_lin = workspace_lineage_service.resolve_by_school(school_name)
                 if s_lin:
                     school_creds = school_creds or s_lin.get("school")
                     partner_creds = partner_creds or s_lin.get("partner")
                     distributor_creds = distributor_creds or s_lin.get("distributor")
+
+            # Tầng 5: Fallback an toàn tuyệt đối cho Distributor
+            if not distributor_creds and ("distributor" in action or "partner_contract" in action or "admin_approve" in action):
+                c_lin = workspace_lineage_service.resolve_by_contract(contract_code or "PRT")
+                if c_lin and c_lin.get("distributor"):
+                    distributor_creds = c_lin.get("distributor")
 
             # Chuẩn hóa dữ liệu order / courses
             courses_list = payload_data.get("courses") or []
@@ -126,14 +151,14 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
 
             # --- B. SUB-FLOW: DUYỆT ĐƠN LẺ SCHOOL ORDER CÓ SẴN ---
             elif action in ["approve_school_order_standalone", "approve_existing_school_order", "subflow_approve_school_order"]:
-                order_code = payload_data.get("order_code") or payload_data.get("order_id")
-                if not order_code:
+                target_order = order_code or "SCH-ORDER"
+                if not target_order:
                     return {"status": "failed", "error": "Thiếu mã Order (order_code) cần phê duyệt."}
                 if not partner_creds:
                     return {"status": "failed", "error": "Không tìm thấy thông tin đăng nhập của Partner."}
 
                 return await workspace_playwright_service.execute_approve_school_order_standalone(
-                    order_identifier=str(order_code),
+                    order_identifier=str(target_order),
                     partner_creds=partner_creds,
                     distributor_creds=distributor_creds or {},
                     sales_admin_creds=admin_creds,
@@ -142,20 +167,41 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
 
             # --- C. SUB-FLOW: DUYỆT ĐƠN LẺ PARTNER CONTRACT CÓ SẴN (PRT-...) ---
             elif action in ["approve_partner_contract_standalone", "subflow_approve_partner_contract", "approve_existing_partner_contract"]:
-                contract_code = payload_data.get("contract_code") or payload_data.get("contract_id")
-                if not contract_code:
+                target_contract = contract_code
+                if not target_contract:
                     return {"status": "failed", "error": "Thiếu mã Contract (contract_code) cần duyệt."}
                 if not distributor_creds:
                     return {"status": "failed", "error": "Không tìm thấy thông tin đăng nhập của Distributor."}
 
                 return await workspace_playwright_service.execute_approve_partner_contract_standalone(
-                    contract_identifier=str(contract_code),
+                    contract_identifier=str(target_contract),
                     distributor_creds=distributor_creds,
                     sales_admin_creds=admin_creds,
                     courses_needed=courses_list
                 )
 
-            # --- D. School Tạo Order ---
+            # --- D. Tạo & Duyệt Chuỗi Đối Tác (Partner -> Distributor) ---
+            elif action == "partner_create_and_approve_chain":
+                if not partner_creds or not distributor_creds:
+                    return {"status": "failed", "error": "Thiếu thông tin đăng nhập của Partner hoặc Distributor."}
+                return await workspace_playwright_service.execute_partner_create_and_approve_chain(
+                    partner_creds=partner_creds,
+                    distributor_creds=distributor_creds,
+                    sales_admin_creds=admin_creds,
+                    contract_data=payload_data.get("contract_data", payload_data)
+                )
+
+            # --- E. Tạo & Duyệt Chuỗi Nhà Phân Phối (Distributor -> Sales Admin) ---
+            elif action == "distributor_create_and_approve_chain":
+                if not distributor_creds:
+                    return {"status": "failed", "error": "Thiếu thông tin đăng nhập của Distributor."}
+                return await workspace_playwright_service.execute_distributor_create_and_approve_chain(
+                    distributor_creds=distributor_creds,
+                    sales_admin_creds=admin_creds,
+                    contract_data=payload_data.get("contract_data", payload_data)
+                )
+
+            # --- F. School Tạo Order ---
             elif action == "school_create_order":
                 if not school_creds:
                     return {"status": "failed", "error": f"Không tìm thấy tài khoản trường '{school_name}' trong Két Sắt"}
@@ -164,16 +210,16 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
                     order_data=order_details
                 )
 
-            # --- E. Partner Duyệt Order ---
+            # --- G. Partner Duyệt Order ---
             elif action == "partner_approve_order":
                 if not partner_creds:
                     return {"status": "failed", "error": "Thiếu thông tin đăng nhập Partner"}
                 return await workspace_playwright_service.partner_approve_school_order(
                     credentials=partner_creds,
-                    order_identifier=payload_data.get("order_code") or payload_data.get("order_id")
+                    order_identifier=order_code
                 )
 
-            # --- F. Partner Tạo Contract gửi Distributor ---
+            # --- H. Partner Tạo Contract gửi Distributor ---
             elif action == "partner_create_contract":
                 if not partner_creds:
                     return {"status": "failed", "error": "Thiếu thông tin đăng nhập Partner"}
@@ -182,16 +228,16 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
                     contract_data=payload_data
                 )
 
-            # --- G. Distributor Duyệt Contract của Partner ---
+            # --- I. Distributor Duyệt Contract của Partner ---
             elif action == "distributor_approve_contract":
                 if not distributor_creds:
                     return {"status": "failed", "error": "Thiếu thông tin đăng nhập Distributor"}
                 return await workspace_playwright_service.distributor_approve_partner_contract(
                     credentials=distributor_creds,
-                    contract_identifier=payload_data.get("contract_code") or payload_data.get("contract_id")
+                    contract_identifier=contract_code
                 )
 
-            # --- H. Distributor Tạo Contract gửi Sales Admin ---
+            # --- J. Distributor Tạo Contract gửi Sales Admin ---
             elif action == "distributor_create_contract":
                 if not distributor_creds:
                     return {"status": "failed", "error": "Thiếu thông tin đăng nhập Distributor"}
@@ -200,18 +246,17 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
                     contract_data=payload_data
                 )
 
-            # --- I. Sales Admin Duyệt Contract Tối Cao ---
+            # --- K. Sales Admin Duyệt Contract Tối Cao ---
             elif action in ["admin_approve_contract", "sales_admin_approve_contract"]:
                 return await workspace_playwright_service.admin_approve_distributor_contract(
                     credentials=admin_creds,
-                    contract_identifier=payload_data.get("contract_code") or payload_data.get("contract_id"),
+                    contract_identifier=contract_code,
                     justification=payload_data.get("justification")
                 )
 
-            # --- J. Tạo tài khoản hàng loạt (Công thức 15s/Tài khoản) ---
+            # --- L. Tạo tài khoản hàng loạt (Công thức 15s/Tài khoản) ---
             elif action == "bulk_account_creation":
                 from app.services.cof_excel_service import COFExcelService
-                from app.core.supabase import get_supabase_client
                 from datetime import datetime, timezone, timedelta
 
                 file_path = payload_data.get("upload_file_path")
@@ -245,7 +290,7 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
                 req_id = submit_res.get("request_id")
                 
                 # 🟢 TÍNH TOÁN THỜI GIAN NGHỈ NGẮT QUÃNG: 15s cho 1 tài khoản
-                wait_seconds = max(total_c * 15, 30)  # Tối thiểu 30s
+                wait_seconds = max(total_c * 15, 30)
                 next_check_time = datetime.now(timezone.utc) + timedelta(seconds=wait_seconds)
                 next_check_iso = next_check_time.isoformat()
 
@@ -262,7 +307,7 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
                     "message": f"Đã nộp thành công file batch ({total_c} tài khoản) với Mã Request #{req_id}. Hệ thống nghỉ {wait_seconds}s (15s/TK) và sẽ tự động quay lại kiểm tra kết quả."
                 }
 
-            # --- K. Kiểm tra tiến độ & tải kết quả (Pha 2) ---
+            # --- M. Kiểm tra tiến độ & tải kết quả (Pha 2) ---
             elif action == "check_account_batch":
                 return await workspace_playwright_service.check_and_export_batch_result(
                     credentials=school_creds or {},
@@ -270,7 +315,7 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
                     download_dir=payload_data.get("download_dir", "/tmp/results")
                 )
 
-            # --- L. School Ghi danh học viên & Group (Chính ngạch Workspace) ---
+            # --- N. School Ghi danh học viên & Group (Chính ngạch Workspace) ---
             elif action == "school_enroll_users":
                 return await workspace_playwright_service.school_enroll_users_and_groups(
                     credentials=school_creds or {},

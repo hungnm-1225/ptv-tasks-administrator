@@ -38,11 +38,12 @@ async def safe_job_wrapper(job_func, job_name: str):
         gc.collect()
 
 async def poll_workspace_long_tasks():
-    """Quét Supabase mỗi 5 phút để check các đợt tạo tài khoản đang chờ kiểm tra."""
+    """Quét Supabase mỗi 1 phút để check các đợt tạo tài khoản đã đến hạn kiểm tra."""
     supabase = get_supabase_client()
     now_utc = datetime.now(timezone.utc)
     now_iso = now_utc.isoformat()
 
+    # Chỉ lấy các task đã đến hoặc quá hạn next_check_at
     res = supabase.table("bot_automation_tasks")\
         .select("*, inbox_tickets(*)")\
         .eq("bot_type", "workspace_rpa")\
@@ -59,7 +60,7 @@ async def poll_workspace_long_tasks():
         os.makedirs(download_dir, exist_ok=True)
 
         now_vn = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).strftime("%Y-%m-%d %H:%M:%S")
-        logger.info(f"🔍 [{now_vn}] Đang kiểm tra tiến độ Request #{request_id} cho Task #{task_id[:8]}...")
+        logger.info(f"🔍 [{now_vn}] [#{task_id[:8]}] Đến hạn kiểm tra tiến độ Request #{request_id}...")
 
         check_res = await workspace_playwright_service.check_and_export_batch_result(
             credentials=school_creds,
@@ -76,18 +77,21 @@ async def poll_workspace_long_tasks():
 
             if cof_input_path and os.path.exists(cof_input_path):
                 output_cof_path = f"/tmp/ptv_results/COMPLETED_{os.path.basename(cof_input_path)}"
-                COFExcelService.write_results_back_to_cof(
-                    original_cof_path=cof_input_path,
-                    result_excel_path=downloaded_file,
-                    students_all=payload.get("students_all", []),
-                    students_to_create=payload.get("students_to_create", []),
-                    teachers_all=payload.get("teachers_all", []),
-                    teachers_to_create=payload.get("teachers_to_create", []),
-                    output_cof_path=output_cof_path
-                )
-                final_file_to_upload = output_cof_path
+                try:
+                    COFExcelService.write_results_back_to_cof(
+                        original_cof_path=cof_input_path,
+                        result_excel_path=downloaded_file,
+                        students_all=payload.get("students_all", []),
+                        students_to_create=payload.get("students_to_create", []),
+                        teachers_all=payload.get("teachers_all", []),
+                        teachers_to_create=payload.get("teachers_to_create", []),
+                        output_cof_path=output_cof_path
+                    )
+                    final_file_to_upload = output_cof_path
+                except Exception as cof_err:
+                    logger.error(f"Lỗi ghi ngược COF: {cof_err}")
 
-            # Tải file kết quả lên Supabase Storage
+            # 🟢 Tải file kết quả lên Supabase Storage
             storage_path = f"results/RESULT_{request_id}_{os.path.basename(final_file_to_upload)}"
             try:
                 with open(final_file_to_upload, "rb") as f_up:
@@ -104,7 +108,7 @@ async def poll_workspace_long_tasks():
             total_c = payload.get("total_count", 0)
 
             new_log = (
-                f"\n[{now_vn}] [SUCCESS] [workspace_rpa]: Hoàn thành tạo tài khoản (Request #{request_id}).\n"
+                f"\n[{now_vn}] [SUCCESS] [workspace_rpa] [#{task_id[:8]}]: Hoàn thành tạo tài khoản (Request #{request_id})!\n"
                 f"📊 Thống kê: {total_c} tài khoản (Học sinh: {student_c}, Giáo viên: {teacher_c})\n"
                 f"📥 Link tải file kết quả: {result_url}"
             )
@@ -115,16 +119,17 @@ async def poll_workspace_long_tasks():
                 "execution_status": "success",
                 "payload_data": payload,
                 "execution_logs": (task.get("execution_logs") or "") + new_log,
-                "executed_at": now_iso
+                "executed_at": datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).isoformat()
             }).eq("id", task_id).execute()
 
             if task.get("ticket_id"):
                 supabase.table("inbox_tickets").update({"status": "completed"}).eq("id", task["ticket_id"]).execute()
 
         elif status == "still_processing":
-            next_5m = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
-            payload["next_check_at"] = next_5m
-            new_log = f"\n[{now_vn}] [INFO] [workspace_rpa]: Request #{request_id} vẫn đang xử lý ({check_res.get('current_status')}). Sẽ kiểm tra lại sau 5 phút."
+            # Nếu vẫn đang xử lý -> Kiểm tra lại sau 60 giây
+            next_60s = (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat()
+            payload["next_check_at"] = next_60s
+            new_log = f"\n[{now_vn}] [INFO] [workspace_rpa] [#{task_id[:8]}]: Request #{request_id} vẫn đang xử lý ({check_res.get('current_status')}). Sẽ kiểm tra lại sau 60s."
             
             supabase.table("bot_automation_tasks").update({
                 "payload_data": payload,
@@ -147,8 +152,8 @@ async def lifespan(app: FastAPI):
     # 4. Quét Live Uptime & Auth Matrix định kỳ mỗi 30 phút (Đã sửa chuẩn cú pháp)
     scheduler.add_job(safe_job_wrapper, 'interval', minutes=30, args=[poll_site_uptime_cron, "Quét Site Uptime & Auth Matrix"], id='site_uptime_cron', replace_existing=True)
 
-    # 5. Quét Task Workspace Long-Running mỗi 5 phút
-    scheduler.add_job(safe_job_wrapper, 'interval', minutes=5, args=[poll_workspace_long_tasks, "Quét Task Workspace Long-Running"], id='workspace_long_tasks_cron')
+    # 5. Quét Task Workspace Long-Running mỗi 3 phút
+    scheduler.add_job(safe_job_wrapper, 'interval', minutes=3, args=[poll_workspace_long_tasks, "Quét Task Workspace Long-Running"], id='workspace_long_tasks_cron')
     
     # 6. Quét Workspace Distributor để update cache mỗi 45 phút
     scheduler.add_job(
