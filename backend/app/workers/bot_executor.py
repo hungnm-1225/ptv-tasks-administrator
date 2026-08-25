@@ -86,34 +86,36 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
                 "password": getattr(settings, "TEST_ADMIN_PASS", "Pythaverse@2026")
             }
 
-            # 🟢 CƠ CHẾ AUTO-RESOLVER THÔNG MINH 5 TẦNG:
-            # Tầng 1: Tự động truy vết từ Contract Code (PRT-... hoặc DST-...)
-            if contract_code and (not distributor_creds or not partner_creds):
-                c_lin = workspace_lineage_service.resolve_by_contract(contract_code)
-                if c_lin:
-                    distributor_creds = distributor_creds or c_lin.get("distributor")
-                    partner_creds = partner_creds or c_lin.get("partner")
-
-            # Tầng 2: Nếu có tên Distributor thật
-            if distributor_name and not distributor_creds:
-                d_lin = workspace_lineage_service.resolve_by_distributor(distributor_name)
+            # 🟢 CƠ CHẾ AUTO-RESOLVER ĐÚNG THỨ TỰ ƯU TIÊN:
+            # 1. ƯU TIÊN CAO NHẤT: Tra cứu từ distributor_code (VD: '36') hoặc distributor_name thật
+            if (distributor_name or payload_data.get("distributor_code")) and not distributor_creds:
+                target_dist_id = payload_data.get("distributor_code") or distributor_name
+                d_lin = workspace_lineage_service.resolve_by_distributor(str(target_dist_id))
                 if d_lin:
                     distributor_creds = d_lin.get("distributor")
 
-            # Tầng 3: Nếu có tên Partner thật
-            if partner_name and (not partner_creds or not distributor_creds):
-                p_lin = workspace_lineage_service.resolve_by_partner(partner_name)
+            # 2. ƯU TIÊN 2: Tra cứu từ Partner thật (tự động suy ra Distributor cấp cha)
+            if (partner_name or payload_data.get("partner_code")) and (not partner_creds or not distributor_creds):
+                target_part_id = payload_data.get("partner_code") or partner_name
+                p_lin = workspace_lineage_service.resolve_by_partner(str(target_part_id))
                 if p_lin:
                     partner_creds = partner_creds or p_lin.get("partner")
                     distributor_creds = distributor_creds or p_lin.get("distributor")
 
-            # Tầng 4: Nếu có tên School thật
+            # 3. ƯU TIÊN 3: Tra cứu từ School thật
             if school_name and (not school_creds or not partner_creds or not distributor_creds):
                 s_lin = workspace_lineage_service.resolve_by_school(school_name)
                 if s_lin:
                     school_creds = school_creds or s_lin.get("school")
                     partner_creds = partner_creds or s_lin.get("partner")
                     distributor_creds = distributor_creds or s_lin.get("distributor")
+
+            # 4. ƯU TIÊN 4: Tra cứu ngược từ mã Contract Code (PRT-...)
+            if contract_code and (not distributor_creds or not partner_creds):
+                c_lin = workspace_lineage_service.resolve_by_contract(contract_code)
+                if c_lin:
+                    distributor_creds = distributor_creds or c_lin.get("distributor")
+                    partner_creds = partner_creds or c_lin.get("partner")
 
             # Tầng 5: Fallback an toàn tuyệt đối cho Distributor
             if not distributor_creds and ("distributor" in action or "partner_contract" in action or "admin_approve" in action):
