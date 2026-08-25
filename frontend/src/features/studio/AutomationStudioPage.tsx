@@ -1339,15 +1339,13 @@ export const AutomationStudioPage: React.FC = () => {
                             className="p-3 bg-sky-50 dark:bg-sky-950/40 rounded-xl border border-sky-200 dark:border-sky-800/60 text-xs flex items-center justify-between"
                           >
                             <div>
-                              <div className="font-bold text-sky-900 dark:text-sky-200">{pc.course_name || 'Khóa học tiêu chuẩn'}</div>
+                              <div className="font-bold text-sky-900 dark:text-sky-200">{pc.course_name}</div>
                               <div className="text-[11px] text-slate-500 font-mono">
-                                Phân loại: {pc.category || 'SWRP'} | Hạn:{' '}
-                                {pc.start_date || pc.course_enroll_start_date || '2026-09-01'} ➔{' '}
-                                {pc.end_date || pc.course_enroll_end_date || '2027-05-31'}
+                                Phân loại: {pc.category}
                               </div>
                             </div>
                             <span className="px-3 py-1 bg-white dark:bg-slate-800 text-sky-700 dark:text-sky-300 rounded-lg font-extrabold border border-sky-200 dark:border-sky-700">
-                              {pc.licenses || pc.course_count || 50} Giấy phép
+                              {pc.licenses} Giấy phép
                             </span>
                           </div>
                         ))}
