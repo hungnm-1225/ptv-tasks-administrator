@@ -29,6 +29,7 @@ class WorkspaceContractService(WorkspaceBaseService):
         type_select = page.locator(".MuiGrid-item:has(label:has-text('Contract Type')) [role='combobox'], div:has(label:has-text('Contract Type')) .MuiSelect-select").first
         await type_select.wait_for(state="visible", timeout=10000)
         await type_select.click()
+        await page.wait_for_timeout(400)
         
         license_opt = page.locator("li[role='option']:has-text('License')").first
         await license_opt.wait_for(state="visible", timeout=8000)
@@ -65,6 +66,7 @@ class WorkspaceContractService(WorkspaceBaseService):
             logger.info(f"📚 Môn #{idx + 1}: Chọn License Category = '{cat_val}'...")
             cat_select = course_card.locator("div:has(label:has-text('License Category')) [role='combobox'], div:has(label:has-text('License Category')) .MuiSelect-select").first
             await cat_select.click()
+            await page.wait_for_timeout(400)
             
             cat_opt = page.locator(f"li[role='option']:has-text('{cat_val}')").first
             if await cat_opt.count() > 0:
@@ -96,18 +98,23 @@ class WorkspaceContractService(WorkspaceBaseService):
                 else:
                     await page.locator("li[role='option']").first.click()
 
-            await page.wait_for_timeout(500)
+            await page.wait_for_timeout(600)
 
-            # C. Điền số lượng Licenses
+            # C. Điền số lượng Licenses (gõ phím để React cập nhật State 100%)
             lic_qty = str(c.get("licenses", 100))
             lic_input = course_card.locator("div:has(label:has-text('License(s)')) input[type='number'], input[id*=':r']").first
-            await lic_input.fill(lic_qty)
+            await lic_input.click()
+            await page.keyboard.press("Control+A")
+            await page.keyboard.type(lic_qty)
+            await page.wait_for_timeout(300)
 
             # D. Điền Unit Price
             unit_price_val = str(c.get("unit_price", 0))
             price_input = course_card.locator("div:has(label:has-text('Unit Price')) input[type='number']").first
             if await price_input.count() > 0:
-                await price_input.fill(unit_price_val)
+                await price_input.click()
+                await page.keyboard.press("Control+A")
+                await page.keyboard.type(unit_price_val)
 
         # 4. Đính kèm tài liệu (nếu có)
         doc_path = contract_data.get("document_path") or contract_data.get("upload_file_path")
@@ -123,19 +130,26 @@ class WorkspaceContractService(WorkspaceBaseService):
         submit_btn = page.locator("button:has-text('Create Contract/PO')").last
         await submit_btn.click()
 
-        # Chờ điều hướng về trang danh sách
+        # Chờ chuyển hướng về trang danh sách hợp đồng /contract-po
         try:
-            await page.wait_for_url("**/contract-po**", timeout=25000)
+            await page.wait_for_url("**/distributor-workspace/contract-po", timeout=20000)
         except Exception:
-            pass
+            # Nếu chưa tự chuyển trang, thử điều hướng trực tiếp
+            await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/contract-po", wait_until="domcontentloaded", timeout=20000)
 
         await page.wait_for_timeout(2500)
 
         # Lấy mã DST Contract vừa tạo ở dòng đầu tiên
         first_row = page.locator(".MuiDataGrid-row").first
         contract_num_id = await first_row.get_attribute("data-id") if await first_row.count() > 0 else ""
-        code_elem = first_row.locator("[data-field='order_code'], [data-field='contract_code'], .MuiDataGrid-cellContent, .MuiDataGrid-cell").first
+        
+        # Bắt thẻ link hoặc text ở cột Contract Code
+        code_elem = first_row.locator("[data-field='order_code'] a, [data-field='contract_code'] a, [data-field='order_code'], a").first
         contract_full_code = (await code_elem.inner_text()).strip() if await code_elem.count() > 0 else (contract_num_id or "")
+
+        # Fallback nếu mã rỗng
+        if not contract_full_code and contract_num_id:
+            contract_full_code = f"DST-{contract_num_id}"
 
         logger.info(f"🎉 TẠO DST CONTRACT THÀNH CÔNG: [{contract_full_code}]")
         return {
@@ -164,13 +178,12 @@ class WorkspaceContractService(WorkspaceBaseService):
                 await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/partner-contract-po", wait_until="networkidle", timeout=45000)
                 await page.wait_for_timeout(2000)
 
-                # 1. Tìm dòng Hợp đồng theo mã (dùng auto-wait của locator)
+                # 1. Tìm dòng Hợp đồng theo mã
                 target_row = None
                 if contract_identifier:
                     logger.info(f"🔍 Đang tìm dòng Hợp đồng: [{contract_identifier}]...")
                     target_row = page.locator(f".MuiDataGrid-row:has-text('{contract_identifier}')").first
 
-                    # Nếu chưa thấy ngay ở trang 1 -> Gõ vào ô Search
                     if await target_row.count() == 0:
                         logger.info(f"🔍 Đang gõ [{contract_identifier}] vào ô Search để lọc...")
                         search_input = page.locator("input[placeholder*='Search'], .MuiTextField-root input, input[type='text']").first
@@ -182,7 +195,7 @@ class WorkspaceContractService(WorkspaceBaseService):
                 if not target_row or await target_row.count() == 0:
                     target_row = page.locator(".MuiDataGrid-row:has-text('Pending')").first
 
-                # 2. Click nút View Details (tự động đợi nút sẵn sàng)
+                # 2. Click nút View Details
                 logger.info(f"🔍 Đang bấm nút 'View Details' cho Contract [{contract_identifier or 'Pending'}]...")
                 info_btn = target_row.locator("button[aria-label='View Details'], [data-field='actions'] button, button:has(.lucide-info)").first
                 await info_btn.click(timeout=15000)
@@ -346,7 +359,9 @@ class WorkspaceContractService(WorkspaceBaseService):
 
                     lic_qty = str(c.get("licenses", 50))
                     lic_input = course_card.locator("div:has(label:has-text('License(s)')) input[type='number'], input[type='number']").first
-                    await lic_input.fill(lic_qty)
+                    await lic_input.click()
+                    await page.keyboard.press("Control+A")
+                    await page.keyboard.type(lic_qty)
 
                 submit_btn = page.locator("button:has-text('Create Contract/PO')").last
                 await submit_btn.click()
@@ -391,8 +406,8 @@ class WorkspaceContractService(WorkspaceBaseService):
                     return {"status": "failed", "error": login_err}
 
                 logger.info("👑 Mở: /sales-admin-workspace/dashboard...")
-                await page.goto(f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard", wait_until="networkidle", timeout=45000)
-                await page.wait_for_timeout(1500)
+                await page.goto(f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard", wait_until="domcontentloaded", timeout=45000)
+                await page.wait_for_timeout(2000)
 
                 target_row = None
                 if contract_identifier:
