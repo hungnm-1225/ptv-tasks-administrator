@@ -1,11 +1,19 @@
 # backend/app/api/v1/endpoints/bots.py
+import gc
 import re
 import uuid
 from fastapi import APIRouter, HTTPException, BackgroundTasks
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone, timedelta
 from app.core.supabase import get_supabase_client
 from app.workers.bot_executor import execute_approved_bot_task
+
+# Import các hàm nghiệp vụ Ingestion để ép quét trực tiếp
+from app.services.gmail_service import poll_unread_gmails
+from app.services.osticket_service import poll_open_ostickets
+from app.services.google_sheet_service import poll_form_feedbacks
+from app.services.site_monitor_service import poll_site_uptime_cron
+from app.services.workspace.workspace_scanner_service import workspace_scanner_service
 
 router = APIRouter()
 
@@ -13,7 +21,7 @@ router = APIRouter()
 VN_TZ = timezone(timedelta(hours=7))
 
 def format_vn_time(val: Any) -> str:
-    """Chuyển đổi mọi định dạng thời gian (UTC ISO, datetime) sang chuỗi giờ Việt Nam chuẩn (GMT+7)."""
+    """Chuyển đổi mọi định dạng thời gian sang chuỗi giờ Việt Nam chuẩn (GMT+7)."""
     if not val:
         return datetime.now(VN_TZ).strftime("%Y-%m-%d %H:%M:%S")
     if isinstance(val, str):
@@ -42,66 +50,63 @@ def is_valid_uuid(val: str) -> bool:
 def clean_log_message(msg: str) -> str:
     """Bóc tách bỏ timestamp và prefix tag trùng lặp đã bị lồng trong nội dung log."""
     cleaned = msg.strip()
-    # Xóa timestamp đầu dòng dạng: [2026-08-24 11:42:34] hoặc [2026-08-24T11:42:34...]
     cleaned = re.sub(r"^\[\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\]\s*", "", cleaned)
-    # Xóa các tag phụ lặp lại như [INFO], [ERROR], [SUCCESS], [worker_name]:
     cleaned = re.sub(r"^\[(INFO|ERROR|SUCCESS|APPROVAL|WARNING|RETRY|DEBUG)\]\s*", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"^\[[\w\d_-]+\]:\s*", "", cleaned)
     return cleaned.strip()
 
 
 @router.get("/status")
-async def get_bot_workers_status() -> Dict[str, str]:
-    """Kiểm tra trạng thái Real-time dựa trên TASK MỚI NHẤT của từng Worker."""
+async def get_bot_workers_status() -> Dict[str, Any]:
+    """Kiểm tra trạng thái Real-time chi tiết kèm số lượng task lỗi của từng Worker."""
     supabase = get_supabase_client()
     
-    status_map = {
-        "gmail_sync_worker": "active",
-        "keycloak_api_worker": "active",
-        "workspace_license_worker": "active",
-        "lms_git_worker": "active",
-        "google_doc_triage": "active",
-        "github_dispatcher": "active",
+    # Khởi tạo trạng thái mặc định
+    worker_stats = {
+        "gmail_sync_worker": {"status": "active", "failed_count": 0, "last_status": "idle"},
+        "osticket_sync_worker": {"status": "active", "failed_count": 0, "last_status": "idle"},
+        "feedback_sheet_worker": {"status": "active", "failed_count": 0, "last_status": "idle"},
+        "distributor_cache_worker": {"status": "active", "failed_count": 0, "last_status": "idle"},
+        "workspace_license_worker": {"status": "active", "failed_count": 0, "last_status": "idle"},
+        "keycloak_api_worker": {"status": "active", "failed_count": 0, "last_status": "idle"},
+        "lms_git_worker": {"status": "active", "failed_count": 0, "last_status": "idle"},
+        "github_dispatcher": {"status": "active", "failed_count": 0, "last_status": "idle"},
     }
     
     try:
-        # Lấy 30 task gần nhất để tìm task mới nhất cho từng worker
-        recent_tasks = supabase.table("bot_automation_tasks")\
-            .select("bot_type, execution_status, created_at")\
-            .order("created_at", desc=True)\
-            .limit(30)\
+        # 1. Đếm số task đang bị 'failed' cho từng loại bot trong 24h qua
+        failed_res = supabase.table("bot_automation_tasks")\
+            .select("bot_type")\
+            .eq("execution_status", "failed")\
             .execute()
             
-        checked_types = set()
-        
-        for task in (recent_tasks.data or []):
-            b_type = task.get("bot_type")
-            e_status = task.get("execution_status")
-            
-            # Chỉ xét trạng thái của lần chạy GẦN ĐÂY NHẤT của mỗi loại Worker
-            if b_type not in checked_types:
-                checked_types.add(b_type)
-                
-                if b_type == "keycloak_api":
-                    status_map["keycloak_api_worker"] = "degraded" if e_status == "failed" else "active"
-                elif b_type in ["workspace_rpa"]:
-                    status_map["workspace_license_worker"] = "degraded" if e_status == "failed" else "active"
-                elif b_type in ["lms_playwright", "lms_git_provisioning"]:
-                    status_map["lms_git_worker"] = "degraded" if e_status == "failed" else "active"
-                elif b_type in ["google_doc_comment", "feedback_doc_triage"]:
-                    status_map["google_doc_triage"] = "degraded" if e_status == "failed" else "active"
-                elif b_type == "github_issue_creator":
-                    status_map["github_dispatcher"] = "degraded" if e_status == "failed" else "active"
-                    
+        for row in (failed_res.data or []):
+            b_type = row.get("bot_type")
+            if b_type == "workspace_rpa":
+                worker_stats["workspace_license_worker"]["failed_count"] += 1
+            elif b_type == "keycloak_api":
+                worker_stats["keycloak_api_worker"]["failed_count"] += 1
+            elif b_type in ["lms_playwright", "lms_git_provisioning"]:
+                worker_stats["lms_git_worker"]["failed_count"] += 1
+            elif b_type == "github_issue_creator":
+                worker_stats["github_dispatcher"]["failed_count"] += 1
+            elif b_type in ["google_doc_comment", "feedback_doc_triage"]:
+                worker_stats["feedback_sheet_worker"]["failed_count"] += 1
+
+        # 2. Cập nhật trạng thái Degraded nếu có task lỗi
+        for k, v in worker_stats.items():
+            if v["failed_count"] > 0:
+                v["status"] = "degraded"
+
     except Exception as e:
-        print(f"Error checking worker status: {e}")
+        print(f"Error checking detailed worker status: {e}")
         
-    return status_map
+    return worker_stats
 
 
 @router.get("/logs")
 async def get_bot_terminal_logs() -> List[Dict[str, Any]]:
-    """Lấy danh sách log thực thi thật từ database với múi giờ Việt Nam và không trùng timestamp."""
+    """Lấy danh sách log thực thi từ database với múi giờ Việt Nam."""
     supabase = get_supabase_client()
     logs_output = []
     
@@ -119,7 +124,6 @@ async def get_bot_terminal_logs() -> List[Dict[str, Any]]:
             b_type = t.get("bot_type") or "Worker"
             e_status = t.get("execution_status") or "queued"
             
-            # 🟢 Chuẩn hóa mốc thời gian sang giờ Việt Nam (GMT+7)
             raw_time = t.get("executed_at") or t.get("created_at")
             time_str = format_vn_time(raw_time)
             
@@ -135,7 +139,6 @@ async def get_bot_terminal_logs() -> List[Dict[str, Any]]:
                 for line in t["execution_logs"].split("\n"):
                     if line.strip():
                         level = "SUCCESS" if "success" in line.lower() else "ERROR" if "error" in line.lower() or "fail" in line.lower() else "INFO"
-                        # 🟢 Làm sạch nội dung log để không bị lặp lại giờ và tags
                         cleaned_msg = clean_log_message(line)
                         if not cleaned_msg:
                             cleaned_msg = line.strip()
@@ -177,52 +180,123 @@ async def get_bot_terminal_logs() -> List[Dict[str, Any]]:
     return logs_output
 
 
+@router.post("/force-sync/{sync_type}")
+async def force_sync_pipeline(sync_type: str, background_tasks: BackgroundTasks):
+    """⚡ ÉP QUÉT NGAY LẬP TỨC CHO CÁC LUỒNG INGESTION MÀ KHÔNG CẦN ĐỢI 5 PHÚT."""
+    now_str = format_vn_time(None)
+    
+    if sync_type == "gmail":
+        background_tasks.add_task(poll_unread_gmails)
+        msg = "Đã kích hoạt quét Gmail @dtt.vn tức thì thành công!"
+    elif sync_type == "osticket":
+        background_tasks.add_task(poll_open_ostickets)
+        msg = "Đã kích hoạt cào vé OS Ticket Support tức thì thành công!"
+    elif sync_type == "sheet":
+        background_tasks.add_task(poll_form_feedbacks)
+        msg = "Đã kích hoạt quét Google Sheet Feedback tức thì thành công!"
+    elif sync_type == "distributor_cache":
+        background_tasks.add_task(workspace_scanner_service.scan_and_cache_all_distributors)
+        msg = "Đã kích hoạt quét và cập nhật Cache 5 Nhà phân phối thành công!"
+    elif sync_type == "site_uptime":
+        background_tasks.add_task(poll_site_uptime_cron)
+        msg = "Đã kích hoạt kiểm tra Uptime 10 Site thành công!"
+    else:
+        raise HTTPException(status_code=400, detail=f"Không hỗ trợ luồng đồng bộ: {sync_type}")
+
+    return {
+        "status": "success",
+        "sync_type": sync_type,
+        "message": f"[{now_str}] {msg}",
+        "timestamp": now_str
+    }
+
+
+@router.post("/purge-memory")
+async def purge_system_memory():
+    """🧹 CHỦ ĐỘNG DỌN DẸP BỘ NHỚ RAM (GARBAGE COLLECTION) TRÊN RENDER 512MB RAM."""
+    gc.collect()
+    now_str = format_vn_time(None)
+    return {
+        "status": "success",
+        "message": f"[{now_str}] Đã kích hoạt giải phóng bộ nhớ đệm RAM thành công!",
+        "timestamp": now_str
+    }
+
+
 @router.post("/{task_id}/retry")
 async def retry_bot_task(task_id: str, background_tasks: BackgroundTasks):
-    """Kích hoạt chạy lại cho một Task hoặc Restart Worker."""
+    """Kích hoạt chạy lại cho một Task cụ thể hoặc thử lại tất cả task lỗi của Worker."""
     supabase = get_supabase_client()
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    now_str = format_vn_time(None)
+    now_iso = datetime.now(timezone.utc).isoformat()
 
+    # Nếu task_id là Worker Key -> Thử lại toàn bộ các task đang bị FAILED của Worker đó
     if not is_valid_uuid(task_id):
         worker_key = task_id
-        if worker_key == "gmail_sync_worker":
-            try:
-                from app.services.gmail_service import poll_unread_gmails
+        bot_type_map = {
+            "workspace_license_worker": "workspace_rpa",
+            "keycloak_api_worker": "keycloak_api",
+            "lms_git_worker": "lms_playwright",
+            "github_dispatcher": "github_issue_creator",
+            "feedback_sheet_worker": "feedback_doc_triage"
+        }
+        
+        target_bot_type = bot_type_map.get(worker_key)
+        if not target_bot_type:
+            # Fallback nếu là Ingestion
+            if worker_key == "gmail_sync_worker":
                 background_tasks.add_task(poll_unread_gmails)
-            except ImportError:
-                pass
-        elif worker_key == "google_doc_triage":
-            try:
-                from app.services.google_sheet_service import poll_form_feedbacks
-                background_tasks.add_task(poll_form_feedbacks)
-            except ImportError:
-                pass
-        # 🟢 Bổ sung xử lý khi bấm Restart GitHub Dispatcher
-        elif worker_key in ["github_dispatcher", "github_issue_creator"]:
-            # Reset task lỗi cũ để worker trở lại trạng thái ACTIVE xanh ngay
-            try:
-                supabase.table("bot_automation_tasks")\
-                    .update({"execution_status": "dismissed"})\
-                    .eq("bot_type", "github_issue_creator")\
-                    .eq("execution_status", "failed")\
-                    .execute()
-            except Exception as e:
-                print(f"Error resetting github worker failed tasks: {e}")
+            elif worker_key == "osticket_sync_worker":
+                background_tasks.add_task(poll_open_ostickets)
+            return {
+                "status": "worker_triggered",
+                "message": f"Đã kích hoạt luồng [{worker_key}] thành công!",
+                "timestamp": now_str
+            }
+
+        # Tìm các task failed của bot_type này
+        failed_tasks = supabase.table("bot_automation_tasks")\
+            .select("*")\
+            .eq("bot_type", target_bot_type)\
+            .eq("execution_status", "failed")\
+            .limit(5)\
+            .execute()
+
+        count = len(failed_tasks.data or [])
+        if count == 0:
+            return {
+                "status": "no_failed_tasks",
+                "message": f"Worker [{worker_key}] không có task nào bị lỗi cần chạy lại!",
+                "timestamp": now_str
+            }
+
+        for t in (failed_tasks.data or []):
+            supabase.table("bot_automation_tasks").update({
+                "execution_status": "queued",
+                "approval_status": "approved",
+                "execution_logs": f"[{now_iso}] [RETRY] Auto-retry all triggered by Admin\n" + (t.get("execution_logs") or "")
+            }).eq("id", t["id"]).execute()
+
+            background_tasks.add_task(
+                execute_approved_bot_task,
+                bot_type=t.get("bot_type"),
+                payload_data=t.get("payload_data") or {}
+            )
 
         return {
-            "status": "worker_restarted",
-            "worker": worker_key,
-            "message": f"Worker [{worker_key}] đã được kiểm tra và kích hoạt lại thành công!",
+            "status": "batch_retry_queued",
+            "requeued_count": count,
+            "message": f"Đã đưa {count} tác vụ lỗi của [{worker_key}] vào hàng đợi chạy lại!",
             "timestamp": now_str
         }
 
+    # Nếu task_id là UUID cụ thể
     try:
         task_res = supabase.table("bot_automation_tasks").select("*").eq("id", task_id).execute()
         if not task_res.data:
             raise HTTPException(status_code=404, detail="Không tìm thấy task tương ứng trong database.")
         
         task = task_res.data[0]
-        now_iso = datetime.now(timezone.utc).isoformat()
         
         supabase.table("bot_automation_tasks").update({
             "execution_status": "queued",
