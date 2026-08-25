@@ -76,12 +76,25 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
         if execution_result is None:
             execution_result = {"status": "failed", "error": f"Worker '{bot_type}' kết thúc mà không trả về dữ liệu."}
 
-        is_success = (
-            execution_result.get("status") in ["success", "simulated", "submitted", "completed"] 
-            or execution_result.get("success_count", 0) > 0
-        )
-        
-        if is_success:
+        status_res = execution_result.get("status")
+
+        # 🟢 TRƯỜNG HỢP 1: TÁC VỤ CẦN CHỜ XỬ LÝ NGẦM (WAITING_POLL)
+        if status_res in ["waiting_poll", "submitted"]:
+            wait_msg = execution_result.get("message") or "Đã nộp batch, đang xếp hàng chờ xử lý ngầm..."
+            log_trail += f"[{end_time_str}] [INFO] [{bot_type}]: {wait_msg}\n"
+
+            # Cập nhật payload bổ sung thông tin hẹn giờ kiểm tra
+            merged_payload = {**(payload or {}), **execution_result}
+
+            supabase.table("bot_automation_tasks").update({
+                "execution_status": "waiting_poll",
+                "payload_data": merged_payload,
+                "execution_logs": log_trail,
+                "executed_at": get_vn_iso()
+            }).eq("id", task_id).execute()
+
+        # 🟢 TRƯỜNG HỢP 2: TÁC VỤ HOÀN TẤT THỰC SỰ (SUCCESS)
+        elif status_res in ["success", "simulated", "completed"] or execution_result.get("success_count", 0) > 0:
             success_msg = execution_result.get("message") or execution_result.get("issue_url") or "Thực thi tác vụ thành công!"
             log_trail += f"[{end_time_str}] [SUCCESS] [{bot_type}]: {success_msg}\n"
             
@@ -90,8 +103,11 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
             elif "logs" in execution_result:
                 log_trail += f"\n--- CHI TIẾT TIẾN TRÌNH RPA ---\n{execution_result['logs']}\n"
 
+            merged_payload = {**(payload or {}), **execution_result}
+
             supabase.table("bot_automation_tasks").update({
                 "execution_status": "success",
+                "payload_data": merged_payload,
                 "execution_logs": log_trail,
                 "executed_at": get_vn_iso()
             }).eq("id", task_id).execute()
@@ -101,6 +117,8 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
                     "status": "completed",
                     "updated_at": get_vn_iso()
                 }).eq("id", ticket_id).execute()
+
+        # 🔴 TRƯỜNG HỢP 3: THẤT BẠI
         else:
             err_msg = execution_result.get("error") or execution_result.get("message") or "Thất bại không rõ nguyên nhân."
             log_trail += f"[{end_time_str}] [ERROR] [{bot_type}]: {err_msg}\n"

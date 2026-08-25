@@ -137,48 +137,49 @@ class WorkspaceContractService(WorkspaceBaseService):
                 await page.wait_for_selector(".MuiDataGrid-root, .MuiDataGrid-row", timeout=25000)
                 await page.wait_for_timeout(1000)
 
+                # 1. Tìm dòng Hợp đồng mục tiêu (có hỗ trợ Search nếu nằm ở trang sau)
                 target_row = None
                 if contract_identifier:
                     target_row = page.locator(
-                        f".MuiDataGrid-row[data-id='{contract_identifier}'], "
-                        f".MuiDataGrid-row:has([data-field='order_code']:has-text('{contract_identifier}'))"
+                        f".MuiDataGrid-row:has([data-field='order_code']:has-text('{contract_identifier}')), "
+                        f".MuiDataGrid-row[data-id='{contract_identifier}']"
                     ).first
+
+                    # Nếu không thấy ở trang 1 -> Sử dụng ô Search
+                    if await target_row.count() == 0:
+                        logger.info(f"🔍 Không thấy [{contract_identifier}] ở trang 1, đang tìm qua ô Search...")
+                        search_input = page.locator(".MuiTextField-root:has(label:has-text('Search')) input, input[id*=':r']").first
+                        if await search_input.count() > 0:
+                            await search_input.fill(contract_identifier)
+                            await search_input.press("Enter")
+                            await page.wait_for_timeout(1500)
+                            target_row = page.locator(
+                                f".MuiDataGrid-row:has([data-field='order_code']:has-text('{contract_identifier}')), "
+                                f".MuiDataGrid-row[data-id='{contract_identifier}']"
+                            ).first
                 
+                # Nếu không truyền mã -> Lấy dòng Pending đầu tiên
                 if not target_row or await target_row.count() == 0:
                     target_row = page.locator(".MuiDataGrid-row:has([data-field='status']:has-text('Pending'))").first
 
                 if await target_row.count() == 0:
-                    return {"status": "failed", "error": f"Không tìm thấy Contract ({contract_identifier}) chờ duyệt"}
+                    return {"status": "failed", "error": f"Không tìm thấy Contract ({contract_identifier}) ở trạng thái Pending"}
 
-                info_btn = target_row.locator("button[aria-label='View Details'], [data-field='actions'] button, [data-field=' '] button, button:has(.lucide-menu)").first
+                # 2. Click trực tiếp nút View Details (icon Lucide Info) trên dòng
+                logger.info(f"🔍 Đang bấm nút 'View Details' cho Contract [{contract_identifier or 'Pending'}]...")
+                info_btn = target_row.locator("button[aria-label='View Details'], [data-field='actions'] button").first
                 await info_btn.click()
-                await page.wait_for_timeout(500)
 
-                view_item = page.locator("li[role='menuitem']:has-text('View'), .MuiMenuItem-root:has-text('View')").first
-                await view_item.wait_for(state="visible", timeout=7000)
-                await view_item.click()
+                # 3. Chờ Modal Dialog 'Partner Order Details' mở ra
+                await page.wait_for_selector("div[role='dialog']:has-text('Partner Order Details')", timeout=15000)
+                await page.wait_for_timeout(1000)
 
-                await page.wait_for_selector("div[role='dialog']", timeout=15000)
+                # 4. Kiểm tra điều kiện kho License: Có nút 'Approve Order' hay không
+                approve_btn = page.locator("div[role='dialog'] button:has-text('Approve Order')").first
+                can_approve = (await approve_btn.count() > 0) and (await approve_btn.is_visible())
 
-                # Chọn Pool Category License nếu có dropdown pool
-                pool_selects = page.locator("div[role='dialog'] .MuiSelect-select, div[role='dialog'] div[role='combobox']")
-                pool_cnt = await pool_selects.count()
-                for p_idx in range(pool_cnt):
-                    p_curr = pool_selects.nth(p_idx)
-                    try:
-                        await p_curr.click()
-                        await page.wait_for_timeout(400)
-                        opts = page.locator("ul[role='listbox'] li:not([data-value=''])")
-                        if await opts.count() > 0:
-                            await opts.first.click()
-                        await page.wait_for_timeout(500)
-                    except Exception:
-                        pass
-
-                approve_btn = page.locator("div[role='dialog'] button:has-text('Approve Order'), div[role='dialog'] button:has-text('Approve')")
-
-                if await approve_btn.count() > 0 and await approve_btn.is_visible():
-                    logger.info("✨ Kho đủ License! Bấm nút Approve Contract...")
+                if can_approve:
+                    logger.info(f"🎉 Kho Distributor ĐỦ License! Đang bấm 'Approve Order' cho Contract [{contract_identifier}]...")
                     await approve_btn.click()
                     await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=15000)
                     await page.wait_for_timeout(2000)
@@ -186,21 +187,26 @@ class WorkspaceContractService(WorkspaceBaseService):
                     return {
                         "status": "success",
                         "contract_identifier": contract_identifier,
-                        "message": "Distributor đã duyệt Partner Contract thành công"
+                        "message": f"Distributor đã phê duyệt thành công Partner Contract [{contract_identifier}]!"
                     }
                 else:
+                    logger.warning(f"⚠️ Kho Distributor KHÔNG ĐỦ License (Insufficient pool resources)!")
+                    logger.info(f"➡️ Chuẩn bị chuyển sang trang tạo Contract: {BASE_WORKSPACE_URL}/distributor-workspace/contract-po/create")
+                    
+                    # Đóng Modal Dialog hiện tại lại
                     close_btn = page.locator("div[role='dialog'] button:has-text('Close')").first
                     if await close_btn.count() > 0:
                         await close_btn.click()
+                        await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=10000)
 
                     return {
                         "status": "insufficient_pool",
                         "contract_identifier": contract_identifier,
-                        "message": "Kho Distributor không đủ License, cần tạo Contract xin Sales Admin cấp thêm."
+                        "message": f"Kho Distributor không đủ License cho Contract [{contract_identifier}]. Hệ thống sẽ tự động chuyển sang trang /distributor-workspace/contract-po/create để xin Sales Admin cấp bù."
                     }
 
             except Exception as e:
-                logger.error(f"❌ Lỗi Distributor Approve Partner Contract: {e}")
+                logger.error(f"❌ Lỗi Distributor Duyệt Partner Contract: {e}")
                 return {"status": "failed", "error": str(e)}
             finally:
                 await browser.close()
