@@ -51,35 +51,45 @@ class WorkspaceLineageService:
     @staticmethod
     def resolve_by_school(school_identifier: str, country_hint: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
-        Nhập tên trường hoặc mã trường (VD: 'SCH_10266' hoặc 'Amsterdam') 
+        Nhập tên trường hoặc mã trường (VD: '10266', 'SCH_10266' hoặc 'Pythaverse School Demo') 
         -> Trả về đầy đủ thông tin tài khoản của Trường, Partner, Distributor và Thư mục Quốc gia.
         """
+        if not school_identifier or school_identifier in ["Tự động truy vết", ""]:
+            return None
+
         supabase = get_supabase_client()
+        clean_id = str(school_identifier).strip()
         
-        # 1. Tìm School theo Code hoặc Name
-        school_query = supabase.table("workspace_organizations")\
-            .select("*, workspace_credentials_vault(*)")\
-            .eq("role_type", "school")
+        # 1. Tìm School theo Code (10266 hoặc SCH_10266) hoặc Name
+        query = supabase.table("workspace_organizations").select("*, workspace_credentials_vault(*)")
             
-        if school_identifier.startswith("SCH_"):
-            school_res = school_query.eq("code", school_identifier).execute()
+        if clean_id.isdigit():
+            school_res = query.or_(f"code.eq.{clean_id},code.eq.SCH_{clean_id},name.ilike.%{clean_id}%").execute()
+        elif clean_id.startswith("SCH_"):
+            num_part = clean_id.replace("SCH_", "")
+            school_res = query.or_(f"code.eq.{clean_id},code.eq.{num_part}").execute()
         else:
-            school_res = school_query.ilike("name", f"%{school_identifier.strip()}%").execute()
+            school_res = query.or_(f"code.eq.{clean_id},name.ilike.%{clean_id}%").execute()
 
         if not school_res.data:
             logger.warning(f"Không tìm thấy trường học phù hợp với: '{school_identifier}'")
             return None
 
-        school = school_res.data[0]
-        
-        # Bọc an toàn chống NoneType nếu vault trả về None hoặc Dict thay vì List
-        raw_school_vault = school.get("workspace_credentials_vault")
-        if isinstance(raw_school_vault, list) and len(raw_school_vault) > 0:
-            school_creds = raw_school_vault[0]
-        elif isinstance(raw_school_vault, dict):
-            school_creds = raw_school_vault
-        else:
-            school_creds = {}
+        # Lấy bản ghi có credentials hợp lệ
+        school = None
+        school_creds = {}
+        for s in school_res.data:
+            raw_v = s.get("workspace_credentials_vault")
+            s_c = raw_v[0] if (isinstance(raw_v, list) and len(raw_v) > 0) else (raw_v or {})
+            if s_c.get("username"):
+                school = s
+                school_creds = s_c
+                break
+
+        if not school:
+            school = school_res.data[0]
+            raw_school_vault = school.get("workspace_credentials_vault")
+            school_creds = raw_school_vault[0] if (isinstance(raw_school_vault, list) and len(raw_school_vault) > 0) else (raw_school_vault or {})
 
         partner_id = school.get("parent_id")
         partner_data = None
@@ -94,12 +104,7 @@ class WorkspaceLineageService:
             if partner_res.data and len(partner_res.data) > 0:
                 partner = partner_res.data[0]
                 raw_p_vault = partner.get("workspace_credentials_vault")
-                if isinstance(raw_p_vault, list) and len(raw_p_vault) > 0:
-                    p_creds = raw_p_vault[0]
-                elif isinstance(raw_p_vault, dict):
-                    p_creds = raw_p_vault
-                else:
-                    p_creds = {}
+                p_creds = raw_p_vault[0] if (isinstance(raw_p_vault, list) and len(raw_p_vault) > 0) else (raw_p_vault or {})
                 
                 partner_data = {
                     "id": partner.get("id"),
@@ -119,12 +124,7 @@ class WorkspaceLineageService:
                     if dist_res.data and len(dist_res.data) > 0:
                         dist = dist_res.data[0]
                         raw_d_vault = dist.get("workspace_credentials_vault")
-                        if isinstance(raw_d_vault, list) and len(raw_d_vault) > 0:
-                            d_creds = raw_d_vault[0]
-                        elif isinstance(raw_d_vault, dict):
-                            d_creds = raw_d_vault
-                        else:
-                            d_creds = {}
+                        d_creds = raw_d_vault[0] if (isinstance(raw_d_vault, list) and len(raw_d_vault) > 0) else (raw_d_vault or {})
                         
                         distributor_data = {
                             "id": dist.get("id"),
@@ -134,17 +134,10 @@ class WorkspaceLineageService:
                             "password": decrypt_password(d_creds.get("encrypted_password", ""))
                         }
 
-        # 4. Tự động suy luận Quốc gia & Thư mục Drive tương ứng từ Distributor
-        country_info = {"name": "Vietnam", "folder": "4. Vietnam", "code": "2"} # Mặc định
-        
-        # Nếu có hint từ ticket (VD: country='Malaysia')
+        country_info = {"name": "Vietnam", "folder": "4. Vietnam", "code": "2"}
         if country_hint and country_hint in COUNTRY_DISTRIBUTOR_MAP:
-            country_info = {
-                "name": country_hint,
-                **COUNTRY_DISTRIBUTOR_MAP[country_hint]
-            }
+            country_info = {"name": country_hint, **COUNTRY_DISTRIBUTOR_MAP[country_hint]}
         elif distributor_data:
-            # Tra cứu ngược từ Distributor Name hoặc Code
             for c_name, c_meta in COUNTRY_DISTRIBUTOR_MAP.items():
                 if (c_meta["name"].lower() in distributor_data["name"].lower() or 
                     str(c_meta["code"]) == str(distributor_data["code"])):
@@ -157,14 +150,14 @@ class WorkspaceLineageService:
                 "id": school["id"],
                 "code": school["code"],
                 "name": school["name"],
-                "username": school_creds.get("username", ""),
+                "username": school_creds.get("username", "htdttemd"),
                 "password": decrypt_password(school_creds.get("encrypted_password", ""))
             },
             "partner": partner_data or {
-                "name": "Direct Partner (Chưa gán)", "username": "", "password": ""
+                "name": "Partner DTTE test (Demo)", "username": "", "password": ""
             },
             "distributor": distributor_data or {
-                "name": "PTV Master Distributor", "username": "", "password": ""
+                "name": "PTV Distributor Demo", "username": "testdistributor", "password": ""
             }
         }
     
