@@ -15,12 +15,11 @@ MOODLE_BASE_URL = "https://learn.pythaverse.space"
 class PlaywrightLMSService:
     """
     Playwright Worker tự động hóa 100% trên Moodle PLearn Edwiser RemUI (learn.pythaverse.space):
-    - Đăng nhập Keycloak OpenID Connect SSO an toàn chống crash navigation.
-    - Chặn tải media/ảnh/fonts dư thừa để tối ưu bộ nhớ RAM trên máy chủ 512MB.
-    - Đảm bảo Clean State (tải lại trang Participants) ở đầu mỗi vòng lặp Role.
-    - Bắt chuẩn xác Selector từ DOM HTML thật của Moodle 4.x RemUI.
+    - Đăng nhập Keycloak OpenID Connect SSO bọc thép.
+    - Tuyệt đối KHÔNG dùng networkidle (tránh bị kẹt bởi background polling của Moodle RemUI).
+    - Mở Modal & Filter dựa trên DOM thực tế, fallback click bằng JS.
     - Tự động Ghi danh MỚI hoặc Gia hạn (Extend access ⚙️) với ngày kết thúc chính xác.
-    - Tạo Group và phân nhóm học sinh theo lớp.
+    - Quản lý Group & phân lớp.
     """
 
     def _sanitize_emails(self, email_list: Any) -> List[str]:
@@ -66,14 +65,14 @@ class PlaywrightLMSService:
         }
 
     async def _login_moodle_sso(self, page: Page) -> bool:
-        """Đăng nhập Moodle qua Keycloak SSO, bọc thép chống Execution context destroyed."""
+        """Đăng nhập Moodle qua Keycloak SSO an toàn."""
         try:
             admin_user = settings.TEST_ADMIN_USER or "adminworkspace"
             admin_pass = settings.TEST_ADMIN_PASS or settings.KEYCLOAK_ADMIN_PASS or ""
 
             logger.info("🔑 Đang mở cổng đăng nhập Moodle PLearn...")
             await page.goto(f"{MOODLE_BASE_URL}/login/index.php", wait_until="domcontentloaded", timeout=40000)
-            await page.wait_for_timeout(1000)
+            await page.wait_for_timeout(1500)
 
             # Nếu bị redirect sang Keycloak EID (eid.pythaverse.space)
             if "eid.pythaverse.space" in page.url or await page.locator("input#username, input[name='username']").count() > 0:
@@ -81,13 +80,10 @@ class PlaywrightLMSService:
                 await page.fill("input#username", admin_user)
                 await page.fill("input#password", admin_pass)
 
-                # Bấm submit và CHỜ redirect hoàn tất về learn.pythaverse.space
-                async with page.expect_navigation(timeout=40000, wait_until="networkidle"):
+                async with page.expect_navigation(timeout=45000, wait_until="domcontentloaded"):
                     await page.click("input#kc-login, button[type='submit']", force=True)
 
-            # Đợi trang đích ổn định
-            await page.wait_for_load_state("networkidle", timeout=30000)
-            await page.wait_for_timeout(1500)
+            await page.wait_for_timeout(2000)
 
             # Kiểm tra đăng nhập thành công
             if await page.locator(".usermenu, a[title='User menu'], .userinitials").count() > 0 or "login" not in page.url:
@@ -103,14 +99,12 @@ class PlaywrightLMSService:
     async def _set_moodle_datetime_selectors(self, container: Locator, date_info: Dict[str, str]):
         """Helper kích hoạt checkbox Enable và chọn ngày/tháng/năm chính xác trong form Moodle."""
         try:
-            # 1. Kích hoạt Checkbox Enable cho Enrolment ends
             enable_chk = container.locator("input#id_timeend_enabled, input[name='timeend[enabled]']").first
             if await enable_chk.count() > 0:
                 if not await enable_chk.is_checked():
                     await enable_chk.check(force=True)
                     await asyncio.sleep(0.3)
 
-            # 2. Điền Select Day, Month, Year
             day_sel = container.locator("select#id_timeend_day, select[name='timeend[day]']").first
             if await day_sel.count() > 0:
                 await day_sel.select_option(date_info["day"])
@@ -138,29 +132,23 @@ class PlaywrightLMSService:
     async def _open_enrol_modal_safely(self, page: Page) -> Optional[Locator]:
         """Kích hoạt mở Modal Enrol Users bọc thép an toàn theo DOM Edwiser RemUI."""
         try:
-            # Đợi nút Enrol users xuất hiện
-            enrol_btn = page.locator(".enrolusersbutton input[value='Enrol users'], #enrolusersbutton-1 input").first
-            await enrol_btn.wait_for(state="visible", timeout=12000)
-            await enrol_btn.click(force=True)
-            await page.wait_for_timeout(1000)
+            # 1. Thử click trực tiếp qua selector của Form
+            enrol_btn = page.locator("form[id^='enrolusersbutton'] input[type='submit'], .enrolusersbutton input").first
+            if await enrol_btn.count() > 0:
+                await enrol_btn.click(force=True)
+            else:
+                # 2. Fallback tìm nút Enrol users qua JS
+                await page.evaluate("""() => {
+                    const btn = document.querySelector("form[id^='enrolusersbutton'] input[type='submit'], .enrolusersbutton input, input[value='Enrol users']");
+                    if (btn) btn.click();
+                }""")
+
+            await page.wait_for_timeout(1500)
 
             # Bắt modal container
             modal = page.locator("div.modal.show[data-region='modal-container'], div.modal.show:has-text('Enrol users')").first
-            if await modal.count() > 0 and await modal.is_visible():
+            if await modal.count() > 0:
                 logger.info("✨ Đã mở thành công Enrol users modal!")
-                return modal
-
-            # Fallback trigger qua JS event nếu Modal chưa bung
-            logger.info("🔄 Trigger mở Modal qua JavaScript Event...")
-            await page.evaluate("""() => {
-                const btn = document.querySelector(".enrolusersbutton input[value='Enrol users'], #enrolusersbutton-1 input");
-                if (btn) btn.click();
-            }""")
-            await page.wait_for_timeout(1500)
-
-            modal = page.locator("div.modal.show[data-region='modal-container']").first
-            if await modal.count() > 0 and await modal.is_visible():
-                logger.info("✨ Đã mở thành công Enrol users modal (JS Fallback)!")
                 return modal
 
             return None
@@ -169,7 +157,7 @@ class PlaywrightLMSService:
             return None
 
     async def _close_modal_safely(self, page: Page, modal: Locator):
-        """Đóng modal và dọn dẹp sạch sẽ backdrop để không làm ô nhiễm DOM."""
+        """Đóng modal và dọn dẹp sạch sẽ backdrop."""
         try:
             cancel_btn = modal.locator("button[data-action='cancel'], button[data-action='hide'], .modal-header button.close").first
             if await cancel_btn.count() > 0:
@@ -178,24 +166,15 @@ class PlaywrightLMSService:
                 await page.keyboard.press("Escape")
             await page.wait_for_timeout(600)
 
-            # Force remove backdrop nếu còn sót lại
             await page.evaluate("""() => {
                 const backdrops = document.querySelectorAll('.modal-backdrop');
                 backdrops.forEach(b => b.remove());
                 document.body.classList.remove('modal-open');
             }""")
         except Exception as e:
-            logger.info(f"Lưu ý khi đóng modal: {e}")
+            logger.debug(f"Đóng modal: {e}")
 
     async def enroll_users_pipeline(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Luồng nghiệp vụ xử lý chính:
-        1. Duyệt từng nhóm Role: Non-editing teacher (7), Manager (1), Student (9).
-        2. Mỗi nhóm Role tải lại trang Participants sạch sẽ (Clean State).
-        3. Mở Modal 'Enrol users' -> Gõ email vào Autocomplete -> Chọn `li[role='option']`.
-        4. Với các user không tìm thấy -> Lọc bằng thanh Keyword Filter của Moodle -> Bấm ⚙️ Gia Hạn.
-        5. Nếu có group_name -> Mở trang Groups -> Tạo group và Add tất cả user thành công vào group.
-        """
         course_id = str(payload.get("course_id", "")).strip()
         course_name = payload.get("course_name", f"Course #{course_id}")
         end_date_str = payload.get("end_date", "")
@@ -203,12 +182,10 @@ class PlaywrightLMSService:
 
         date_info = self._parse_date_components(end_date_str) if end_date_str else None
 
-        # Thu thập danh sách email
         students = self._sanitize_emails(payload.get("student_emails", payload.get("students", [])))
         teachers = self._sanitize_emails(payload.get("teacher_emails", payload.get("non_editing_teachers", [])))
         managers = self._sanitize_emails(payload.get("manager_emails", payload.get("managers", [])))
 
-        # Nếu có truyền bulk_emails rời
         if payload.get("bulk_emails"):
             role_type = payload.get("single_role", "student")
             bulk_list = self._sanitize_emails(payload.get("bulk_emails"))
@@ -241,8 +218,8 @@ class PlaywrightLMSService:
             context = await browser.new_context(viewport={"width": 1440, "height": 900})
             page = await context.new_page()
 
-            # 🚀 Chặn tải ảnh / fonts dư thừa để tiết kiệm RAM và tăng tốc 3x
-            await page.route("**/*.{png,jpg,jpeg,gif,webp,ico,woff,woff2,ttf,otf}", lambda route: route.abort())
+            # Chặn ảnh để tiết kiệm RAM
+            await page.route("**/*.{png,jpg,jpeg,gif,webp,ico}", lambda route: route.abort())
 
             try:
                 # 1. Đăng nhập Moodle SSO
@@ -266,10 +243,10 @@ class PlaywrightLMSService:
                     logger.info(f"👥 Đang xử lý nhóm [{role_label}] ({len(emails)} emails)...")
                     logger.info(f"👥 ==========================================================")
 
-                    # 🌟 BƯỚC QUAN TRỌNG: Luôn Clean State tải lại trang danh sách trước mỗi Role
+                    # 🌟 Clean State tải lại trang danh sách trước mỗi Role
                     logger.info(f"📚 Truy cập trang quản lý học viên: {participants_url}")
                     await page.goto(participants_url, wait_until="domcontentloaded", timeout=40000)
-                    await page.wait_for_timeout(1500)
+                    await page.wait_for_timeout(2000)
 
                     emails_need_extend = []
 
@@ -278,20 +255,20 @@ class PlaywrightLMSService:
                     # ==============================================================
                     modal = await self._open_enrol_modal_safely(page)
                     if modal:
-                        # 1. Chọn Role trong Modal
+                        # 1. Chọn Role
                         role_select = modal.locator("select#id_roletoassign").first
                         if await role_select.count() > 0:
                             await role_select.select_option(value=role_value)
                             await page.wait_for_timeout(200)
 
-                        # 2. Bung "Show more..." để đặt ngày hết hạn nếu có
+                        # 2. Bung "Show more..." nếu có
                         try:
                             more_btn = modal.locator("a.moreless-toggler").first
                             if await more_btn.count() > 0 and (await more_btn.get_attribute("aria-expanded")) != "true":
                                 await more_btn.click(force=True)
                                 await page.wait_for_timeout(300)
-                        except Exception as e_sm:
-                            logger.debug(f"Show more toggler: {e_sm}")
+                        except Exception:
+                            pass
 
                         if date_info:
                             await self._set_moodle_datetime_selectors(modal, date_info)
@@ -304,10 +281,10 @@ class PlaywrightLMSService:
                             if await search_user_input.count() > 0:
                                 await search_user_input.click(force=True)
                                 await search_user_input.fill("")
-                                await search_user_input.type(email, delay=35)
+                                await search_user_input.type(email, delay=30)
                                 await page.wait_for_timeout(1200)
 
-                                # 👉 Chọn trực tiếp thẻ li[role='option'] trong dropdown
+                                # Tìm trong dropdown suggestions
                                 selected_ok = False
                                 suggestion_items = modal.locator("ul.form-autocomplete-suggestions li[role='option']")
                                 count_sug = await suggestion_items.count()
@@ -320,7 +297,6 @@ class PlaywrightLMSService:
                                         selected_ok = True
                                         break
 
-                                # Nếu không match chuỗi cụ thể nhưng chỉ có đúng 1 gợi ý và không phải "No suggestions"
                                 if not selected_ok and count_sug == 1:
                                     first_text = (await suggestion_items.first.inner_text()).lower()
                                     if "no suggestions" not in first_text:
@@ -336,21 +312,19 @@ class PlaywrightLMSService:
                                     logger.info(f"ℹ️ Không có trong gợi ý Mới -> Kiểm tra ngoài bảng Participants để CẬP NHẬT NGÀY: {email}")
                                     emails_need_extend.append(email)
 
-                        # Nếu có ít nhất 1 user mới được chọn -> Bấm Submit Enrol
+                        # Submit Enrol nếu có user mới
                         if new_selected_count > 0:
                             save_btn = modal.locator(".modal-footer button[data-action='save']").first
                             await save_btn.click(force=True)
-                            await page.wait_for_load_state("networkidle", timeout=25000)
-                            await page.wait_for_timeout(2000)
+                            await page.wait_for_timeout(3000)
                             logger.info(f"✅ Đã submit ghi danh {new_selected_count} tài khoản mới thành công!")
                         else:
-                            # Đóng modal an toàn và dọn backdrop
                             await self._close_modal_safely(page, modal)
                     else:
                         emails_need_extend = emails
 
                     # ==============================================================
-                    # BƯỚC B: GIA HẠN (EXTEND ACCESS CHO CÁC USER ĐÃ CÓ SẴN TRONG KHÓA)
+                    # BƯỚC B: GIA HẠN (EXTEND ACCESS CHO USER ĐÃ CÓ SẴN)
                     # ==============================================================
                     if emails_need_extend:
                         logger.info(f"🔍 Bắt đầu kiểm tra {len(emails_need_extend)} tài khoản để Gia Hạn (Từng email một)...")
@@ -358,72 +332,67 @@ class PlaywrightLMSService:
                         for email in emails_need_extend:
                             user_extended = False
 
-                            # 1. Reset filters trước khi tìm
+                            # 1. Reset filters
                             reset_btn = page.locator("button[data-filteraction='reset']:has-text('Clear filters')").first
                             if await reset_btn.count() > 0 and await reset_btn.is_visible():
                                 await reset_btn.click(force=True)
-                                await page.wait_for_timeout(800)
+                                await page.wait_for_timeout(600)
 
                             # 2. Chọn Filter Type là 'keywords'
                             type_select = page.locator("select[data-filterfield='type']").first
                             if await type_select.count() > 0 and await type_select.is_enabled():
                                 await type_select.select_option(value="keywords")
-                                await page.wait_for_timeout(400)
+                                await page.wait_for_timeout(300)
 
                             # 3. Gõ email vào ô Keyword Input & Enter
                             keyword_input = page.locator("div[data-filter-type='keywords'] input[placeholder='Type...'], div[data-filterregion='value'] input").first
                             if await keyword_input.count() > 0:
                                 await keyword_input.click(force=True)
                                 await keyword_input.fill("")
-                                await keyword_input.type(email, delay=25)
+                                await keyword_input.type(email, delay=20)
                                 await page.keyboard.press("Enter")
-                                await page.wait_for_timeout(400)
+                                await page.wait_for_timeout(300)
 
-                            # 4. Bấm Apply filters
+                            # 4. Bấm Apply filters (chỉ wait timeout cố định, KHÔNG dùng networkidle)
                             apply_btn = page.locator("button[data-filteraction='apply']:has-text('Apply filters')").first
                             if await apply_btn.count() > 0:
                                 await apply_btn.click(force=True)
-                                await page.wait_for_load_state("networkidle", timeout=15000)
-                                await page.wait_for_timeout(1200)
+                                await page.wait_for_timeout(2000)
 
-                            # 5. Khớp dòng user trong bảng theo Email (cột td.c2)
+                            # 5. Tìm dòng user trong bảng
                             user_row = page.locator(f"table#participants tbody tr:has(td.c2:text-is('{email}'))").first
                             if await user_row.count() == 0:
                                 user_row = page.locator(f"table#participants tbody tr:has(td.c2:has-text('{email}'))").first
 
                             if await user_row.count() > 0:
-                                # Bấm nút bánh răng Edit Enrolment ⚙️
                                 edit_gear = user_row.locator("a.editenrollink[data-action='editenrolment']").first
                                 if await edit_gear.count() > 0:
                                     await edit_gear.click(force=True)
-                                    
-                                    # Đợi modal Edit enrolment bung lên
+                                    await page.wait_for_timeout(1500)
+
                                     edit_modal = page.locator("div.modal.show[data-region='modal-container']").first
-                                    await edit_modal.wait_for(state="visible", timeout=8000)
-                                    await page.wait_for_timeout(500)
+                                    if await edit_modal.count() > 0:
+                                        # Đổi Status -> Active (0)
+                                        status_select = edit_modal.locator("select#id_status").first
+                                        if await status_select.count() > 0:
+                                            await status_select.select_option(value="0")
 
-                                    # Đổi Status -> Active (0)
-                                    status_select = edit_modal.locator("select#id_status").first
-                                    if await status_select.count() > 0:
-                                        await status_select.select_option(value="0")
+                                        # Cập nhật hạn
+                                        if date_info:
+                                            await self._set_moodle_datetime_selectors(edit_modal, date_info)
 
-                                    # Cập nhật hạn
-                                    if date_info:
-                                        await self._set_moodle_datetime_selectors(edit_modal, date_info)
+                                        # Bấm Save changes
+                                        save_edit_btn = edit_modal.locator(".modal-footer button[data-action='save']").first
+                                        await save_edit_btn.click(force=True)
+                                        await page.wait_for_timeout(2000)
 
-                                    # Bấm Save changes
-                                    save_edit_btn = edit_modal.locator(".modal-footer button[data-action='save']").first
-                                    await save_edit_btn.click(force=True)
-                                    await page.wait_for_load_state("networkidle", timeout=15000)
-                                    await page.wait_for_timeout(1000)
-
-                                    logger.info(f"🔄 ĐÃ GIA HẠN THÀNH CÔNG cho tài khoản: {email} ({role_label}) đến ngày {end_date_str}")
-                                    results["extended_access"].append({
-                                        "email": email,
-                                        "role": role_label,
-                                        "valid_until": end_date_str
-                                    })
-                                    user_extended = True
+                                        logger.info(f"🔄 ĐÃ GIA HẠN THÀNH CÔNG: {email} ({role_label}) đến ngày {end_date_str}")
+                                        results["extended_access"].append({
+                                            "email": email,
+                                            "role": role_label,
+                                            "valid_until": end_date_str
+                                        })
+                                        user_extended = True
 
                             if not user_extended:
                                 logger.warning(f"⚠️ KHÔNG TÌM THẤY tài khoản trên hệ thống: {email}")
@@ -434,7 +403,7 @@ class PlaywrightLMSService:
                                 })
 
                 # ==============================================================
-                # BƯỚC 4: QUẢN LÝ GROUP & THÊM THÀNH VIÊN VÀO LỚP
+                # BƯỚC C: QUẢN LÝ GROUP & THÊM THÀNH VIÊN VÀO LỚP
                 # ==============================================================
                 valid_emails = [x["email"] for x in results["enrolled_new"]] + [x["email"] for x in results["extended_access"]]
 
@@ -442,35 +411,29 @@ class PlaywrightLMSService:
                     logger.info(f"🏷️ Bắt đầu tiến trình tạo Group & phân nhóm: [{group_name}]...")
                     groups_url = f"{MOODLE_BASE_URL}/group/index.php?id={course_id}"
                     await page.goto(groups_url, wait_until="domcontentloaded", timeout=35000)
-                    await page.wait_for_timeout(1000)
+                    await page.wait_for_timeout(1500)
 
-                    # Kiểm tra xem Group đã có chưa
                     group_option = page.locator(f"select#groups option:has-text('{group_name}')").first
                     if await group_option.count() == 0:
                         logger.info(f"➕ Tạo Group mới: [{group_name}]...")
                         create_group_btn = page.locator("input#showcreateorphangroupform, input[value='Create group']").first
                         await create_group_btn.click(force=True)
-                        await page.wait_for_load_state("domcontentloaded")
+                        await page.wait_for_timeout(1200)
 
                         await page.fill("input#id_name", group_name)
                         await page.click("input#id_submitbutton, input[value='Save changes']", force=True)
-                        await page.wait_for_load_state("domcontentloaded")
-                        await page.wait_for_timeout(1000)
+                        await page.wait_for_timeout(1500)
 
-                    # Chọn Group vừa tạo/có sẵn
                     group_option = page.locator(f"select#groups option:has-text('{group_name}')").first
                     if await group_option.count() > 0:
                         await group_option.click(force=True)
                         await page.wait_for_timeout(400)
 
-                        # Bấm nút Add/remove users
                         add_members_btn = page.locator("input#showaddmembersform, input[value='Add/remove users']").first
                         if await add_members_btn.count() > 0 and await add_members_btn.is_enabled():
                             await add_members_btn.click(force=True)
-                            await page.wait_for_load_state("domcontentloaded")
-                            await page.wait_for_timeout(800)
+                            await page.wait_for_timeout(1200)
 
-                            # Thêm từng user vào group
                             for u_email in valid_emails:
                                 search_potential = page.locator("input#addselect_searchtext").first
                                 if await search_potential.count() > 0:
@@ -480,25 +443,22 @@ class PlaywrightLMSService:
                                     potential_opt = page.locator(f"select#addselect option:has-text('{u_email}')").first
                                     if await potential_opt.count() > 0:
                                         await potential_opt.click(force=True)
-                                        await page.wait_for_timeout(300)
+                                        await page.wait_for_timeout(200)
 
                                         add_btn = page.locator("input#add, input[value*='Add']").first
                                         if await add_btn.count() > 0 and await add_btn.is_enabled():
                                             await add_btn.click(force=True)
-                                            await page.wait_for_load_state("domcontentloaded")
                                             await page.wait_for_timeout(600)
                                             results["group_members_added"].append(u_email)
                                             logger.info(f"✅ Đã thêm vào Group [{group_name}]: {u_email}")
 
-                            # Bấm Back to groups
                             back_btn = page.locator("input[name='cancel'][value='Back to groups']").first
                             if await back_btn.count() > 0:
                                 await back_btn.click(force=True)
-                                await page.wait_for_load_state("domcontentloaded")
+                                await page.wait_for_timeout(1000)
 
                             results["group_created"] = group_name
 
-                # Tổng kết kết quả
                 success_count = len(results["enrolled_new"]) + len(results["extended_access"])
                 status = "success" if success_count > 0 else "failed"
 

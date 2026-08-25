@@ -24,7 +24,7 @@ class WorkspaceContractService(WorkspaceBaseService):
         await page.wait_for_selector("h4:has-text('Create Contract/PO'), :text('Create Contract/PO')", timeout=15000)
         await page.wait_for_timeout(1000)
 
-        # 1. Chọn Contract Type = 'License' (Bắt trực tiếp qua role='option')
+        # 1. Chọn Contract Type = 'License'
         logger.info("📋 Bước 1: Chọn Contract Type = 'License'...")
         type_select = page.locator(".MuiGrid-item:has(label:has-text('Contract Type')) [role='combobox'], div:has(label:has-text('Contract Type')) .MuiSelect-select").first
         await type_select.wait_for(state="visible", timeout=10000)
@@ -72,7 +72,7 @@ class WorkspaceContractService(WorkspaceBaseService):
             else:
                 await page.locator("li[role='option']").first.click()
 
-            # 🟢 CHỜ API TẢI DANH SÁCH MÔN HỌC CHO CATEGORY NÀY
+            # 🟢 Chờ API tải danh sách Course
             await page.wait_for_timeout(1500)
 
             # B. Chọn Course
@@ -83,7 +83,6 @@ class WorkspaceContractService(WorkspaceBaseService):
             await course_select.click()
             await page.wait_for_timeout(600)
 
-            # Nếu có tên môn cụ thể
             target_opt = None
             if course_name_val:
                 target_opt = page.locator(f"li[role='option']:has-text('{course_name_val}')").first
@@ -91,7 +90,6 @@ class WorkspaceContractService(WorkspaceBaseService):
             if target_opt and await target_opt.count() > 0:
                 await target_opt.click()
             else:
-                # Bỏ qua option đầu 'Select Course' nếu có, chọn môn hợp lệ đầu tiên
                 valid_opts = page.locator("li[role='option']:not(:has-text('Select Course'))")
                 if await valid_opts.count() > 0:
                     await valid_opts.first.click()
@@ -105,7 +103,7 @@ class WorkspaceContractService(WorkspaceBaseService):
             lic_input = course_card.locator("div:has(label:has-text('License(s)')) input[type='number'], input[id*=':r']").first
             await lic_input.fill(lic_qty)
 
-            # D. Điền Unit Price (nếu có)
+            # D. Điền Unit Price
             unit_price_val = str(c.get("unit_price", 0))
             price_input = course_card.locator("div:has(label:has-text('Unit Price')) input[type='number']").first
             if await price_input.count() > 0:
@@ -121,18 +119,17 @@ class WorkspaceContractService(WorkspaceBaseService):
                 await page.wait_for_timeout(1000)
 
         # 5. Bấm Create Contract/PO
-        logger.info("🚀 Đang bấm nút '💾 Create Contract/PO'...")
+        logger.info("🚀 Đang bấm nút 'Create Contract/PO'...")
         submit_btn = page.locator("button:has-text('Create Contract/PO')").last
         await submit_btn.click()
 
-        # Chờ chuyển hướng về trang danh sách hợp đồng
+        # Chờ điều hướng về trang danh sách
         try:
             await page.wait_for_url("**/contract-po**", timeout=25000)
         except Exception:
             pass
 
-        await page.wait_for_selector(".MuiDataGrid-row", timeout=30000)
-        await page.wait_for_timeout(2000)
+        await page.wait_for_timeout(2500)
 
         # Lấy mã DST Contract vừa tạo ở dòng đầu tiên
         first_row = page.locator(".MuiDataGrid-row").first
@@ -165,18 +162,18 @@ class WorkspaceContractService(WorkspaceBaseService):
 
                 logger.info("🏢 Distributor mở: /distributor-workspace/partner-contract-po...")
                 await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/partner-contract-po", wait_until="networkidle", timeout=45000)
-                await page.wait_for_selector(".MuiDataGrid-row", timeout=30000)
-                await page.wait_for_timeout(1500)
+                await page.wait_for_timeout(2000)
 
-                # 1. Tìm dòng Hợp đồng theo mã
+                # 1. Tìm dòng Hợp đồng theo mã (dùng auto-wait của locator)
                 target_row = None
                 if contract_identifier:
                     logger.info(f"🔍 Đang tìm dòng Hợp đồng: [{contract_identifier}]...")
                     target_row = page.locator(f".MuiDataGrid-row:has-text('{contract_identifier}')").first
 
+                    # Nếu chưa thấy ngay ở trang 1 -> Gõ vào ô Search
                     if await target_row.count() == 0:
                         logger.info(f"🔍 Đang gõ [{contract_identifier}] vào ô Search để lọc...")
-                        search_input = page.locator(".MuiTextField-root:has(label:has-text('Search')) input, input[type='text']").first
+                        search_input = page.locator("input[placeholder*='Search'], .MuiTextField-root input, input[type='text']").first
                         if await search_input.count() > 0:
                             await search_input.fill(contract_identifier)
                             await page.wait_for_timeout(2000)
@@ -185,19 +182,10 @@ class WorkspaceContractService(WorkspaceBaseService):
                 if not target_row or await target_row.count() == 0:
                     target_row = page.locator(".MuiDataGrid-row:has-text('Pending')").first
 
-                try:
-                    await target_row.wait_for(state="visible", timeout=10000)
-                except Exception:
-                    pass
-
-                if not target_row or await target_row.count() == 0:
-                    return {"status": "failed", "error": f"Không tìm thấy Contract ({contract_identifier}) ở trạng thái Pending trên bảng"}
-
-                # 2. Click nút View Details
+                # 2. Click nút View Details (tự động đợi nút sẵn sàng)
                 logger.info(f"🔍 Đang bấm nút 'View Details' cho Contract [{contract_identifier or 'Pending'}]...")
                 info_btn = target_row.locator("button[aria-label='View Details'], [data-field='actions'] button, button:has(.lucide-info)").first
-                await info_btn.wait_for(state="visible", timeout=8000)
-                await info_btn.click()
+                await info_btn.click(timeout=15000)
 
                 # 3. Chờ Modal Dialog mở ra
                 await page.wait_for_selector("div[role='dialog']", timeout=15000)
@@ -368,7 +356,6 @@ class WorkspaceContractService(WorkspaceBaseService):
                 except Exception:
                     pass
 
-                await page.wait_for_selector(".MuiDataGrid-row", timeout=25000)
                 await page.wait_for_timeout(2000)
 
                 first_row = page.locator(".MuiDataGrid-row").first
@@ -405,8 +392,7 @@ class WorkspaceContractService(WorkspaceBaseService):
 
                 logger.info("👑 Mở: /sales-admin-workspace/dashboard...")
                 await page.goto(f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard", wait_until="networkidle", timeout=45000)
-                await page.wait_for_selector(".MuiDataGrid-row", timeout=25000)
-                await page.wait_for_timeout(1000)
+                await page.wait_for_timeout(1500)
 
                 target_row = None
                 if contract_identifier:
