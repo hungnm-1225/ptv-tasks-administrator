@@ -134,47 +134,51 @@ class WorkspaceContractService(WorkspaceBaseService):
 
                 logger.info("🏢 Distributor mở: /distributor-workspace/partner-contract-po...")
                 await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/partner-contract-po", wait_until="networkidle", timeout=45000)
-                await page.wait_for_selector(".MuiDataGrid-root, .MuiDataGrid-row", timeout=25000)
-                await page.wait_for_timeout(1000)
+                
+                # Bắt buộc chờ ít nhất 1 dòng dữ liệu thực tế xuất hiện trên bảng
+                await page.wait_for_selector(".MuiDataGrid-row", timeout=30000)
+                await page.wait_for_timeout(1500)
 
-                # 1. Tìm dòng Hợp đồng mục tiêu (có hỗ trợ Search nếu nằm ở trang sau)
                 target_row = None
-                if contract_identifier:
-                    target_row = page.locator(
-                        f".MuiDataGrid-row:has([data-field='order_code']:has-text('{contract_identifier}')), "
-                        f".MuiDataGrid-row[data-id='{contract_identifier}']"
-                    ).first
 
-                    # Nếu không thấy ở trang 1 -> Sử dụng ô Search
+                # 1. Tìm dòng Hợp đồng theo mã
+                if contract_identifier:
+                    logger.info(f"🔍 Đang tìm dòng Hợp đồng: [{contract_identifier}]...")
+                    target_row = page.locator(f".MuiDataGrid-row:has-text('{contract_identifier}')").first
+
+                    # Nếu chưa thấy ngay ở trang hiện tại -> Dùng ô Search để lọc
                     if await target_row.count() == 0:
-                        logger.info(f"🔍 Không thấy [{contract_identifier}] ở trang 1, đang tìm qua ô Search...")
-                        search_input = page.locator(".MuiTextField-root:has(label:has-text('Search')) input, input[id*=':r']").first
+                        logger.info(f"🔍 Đang gõ [{contract_identifier}] vào ô Search để lọc...")
+                        search_input = page.locator(".MuiTextField-root:has(label:has-text('Search')) input, input[type='text']").first
                         if await search_input.count() > 0:
                             await search_input.fill(contract_identifier)
-                            await search_input.press("Enter")
-                            await page.wait_for_timeout(1500)
-                            target_row = page.locator(
-                                f".MuiDataGrid-row:has([data-field='order_code']:has-text('{contract_identifier}')), "
-                                f".MuiDataGrid-row[data-id='{contract_identifier}']"
-                            ).first
-                
-                # Nếu không truyền mã -> Lấy dòng Pending đầu tiên
+                            await page.wait_for_timeout(2000)
+                            target_row = page.locator(f".MuiDataGrid-row:has-text('{contract_identifier}')").first
+
+                # 2. Nếu không truyền mã -> Lấy dòng Pending đầu tiên
                 if not target_row or await target_row.count() == 0:
-                    target_row = page.locator(".MuiDataGrid-row:has([data-field='status']:has-text('Pending'))").first
+                    target_row = page.locator(".MuiDataGrid-row:has-text('Pending')").first
 
-                if await target_row.count() == 0:
-                    return {"status": "failed", "error": f"Không tìm thấy Contract ({contract_identifier}) ở trạng thái Pending"}
+                # 3. Chờ dòng mục tiêu sẵn sàng click
+                try:
+                    await target_row.wait_for(state="visible", timeout=10000)
+                except Exception:
+                    pass
 
-                # 2. Click trực tiếp nút View Details (icon Lucide Info) trên dòng
+                if not target_row or await target_row.count() == 0:
+                    return {"status": "failed", "error": f"Không tìm thấy Contract ({contract_identifier}) ở trạng thái Pending trên bảng"}
+
+                # 4. Click nút View Details (icon info) trên dòng tìm được
                 logger.info(f"🔍 Đang bấm nút 'View Details' cho Contract [{contract_identifier or 'Pending'}]...")
-                info_btn = target_row.locator("button[aria-label='View Details'], [data-field='actions'] button").first
+                info_btn = target_row.locator("button[aria-label='View Details'], [data-field='actions'] button, button:has(.lucide-info)").first
+                await info_btn.wait_for(state="visible", timeout=8000)
                 await info_btn.click()
 
-                # 3. Chờ Modal Dialog 'Partner Order Details' mở ra
-                await page.wait_for_selector("div[role='dialog']:has-text('Partner Order Details')", timeout=15000)
+                # 5. Chờ Modal Dialog 'Partner Order Details' mở ra
+                await page.wait_for_selector("div[role='dialog']", timeout=15000)
                 await page.wait_for_timeout(1000)
 
-                # 4. Kiểm tra điều kiện kho License: Có nút 'Approve Order' hay không
+                # 6. Kiểm tra điều kiện kho License: Có nút 'Approve Order' hay không
                 approve_btn = page.locator("div[role='dialog'] button:has-text('Approve Order')").first
                 can_approve = (await approve_btn.count() > 0) and (await approve_btn.is_visible())
 
