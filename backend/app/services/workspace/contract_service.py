@@ -13,25 +13,6 @@ logger = logging.getLogger(__name__)
 class WorkspaceContractService(WorkspaceBaseService):
     """Xử lý các nghiệp vụ tạo và phê duyệt Contract giữa Partner - Distributor - Sales Admin."""
 
-    async def _safe_navigate(self, page: Page, target_url: str, keyword_in_url: str = "", timeout: int = 35000):
-        """Hàm điều hướng an toàn: chống lỗi net::ERR_ABORTED khi dính redirect SSO ngầm."""
-        if keyword_in_url and keyword_in_url in page.url:
-            logger.info(f"ℹ️ Trang đã ở sẵn tại URL đích: {page.url}")
-            return
-
-        try:
-            await page.goto(target_url, wait_until="domcontentloaded", timeout=timeout)
-        except Exception as e:
-            err_msg = str(e)
-            if "ERR_ABORTED" in err_msg or "frame was detached" in err_msg:
-                logger.info(f"ℹ️ Bắt được cú redirect ngầm ({err_msg[:60]}...). Đang chờ trang ổn định...")
-                try:
-                    await page.wait_for_load_state("domcontentloaded", timeout=15000)
-                except Exception:
-                    pass
-            else:
-                raise e
-
     async def _fill_distributor_create_contract_form(
         self,
         page: Page,
@@ -39,8 +20,8 @@ class WorkspaceContractService(WorkspaceBaseService):
     ) -> Dict[str, Any]:
         """Hàm nội bộ: Điền form tạo Contract của Distributor trên phiên trình duyệt đang mở."""
         logger.info("📝 Distributor mở: /distributor-workspace/contract-po/create...")
-        await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/distributor-workspace/contract-po/create", "contract-po/create")
-        await page.wait_for_selector("h4:has-text('Create Contract/PO'), :text('Create Contract/PO')", timeout=20000)
+        await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/contract-po/create", wait_until="networkidle", timeout=45000)
+        await page.wait_for_selector("h4:has-text('Create Contract/PO'), :text('Create Contract/PO')", timeout=15000)
         await page.wait_for_timeout(1000)
 
         # 1. Chọn Contract Type = 'License'
@@ -165,7 +146,7 @@ class WorkspaceContractService(WorkspaceBaseService):
         try:
             await page.wait_for_url("**/distributor-workspace/contract-po", timeout=20000)
         except Exception:
-            await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/distributor-workspace/contract-po", "contract-po")
+            await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/contract-po", wait_until="domcontentloaded", timeout=20000)
 
         await page.wait_for_timeout(2500)
 
@@ -202,9 +183,8 @@ class WorkspaceContractService(WorkspaceBaseService):
                     return {"status": "failed", "error": login_err}
 
                 logger.info("🏢 Distributor mở: /distributor-workspace/partner-contract-po...")
-                await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/distributor-workspace/partner-contract-po", "partner-contract-po")
-                await page.wait_for_selector(".MuiDataGrid-row, [role='row']", timeout=25000)
-                await page.wait_for_timeout(1000)
+                await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/partner-contract-po", wait_until="networkidle", timeout=45000)
+                await page.wait_for_timeout(2000)
 
                 # 1. Tìm dòng Hợp đồng theo mã
                 target_row = None
@@ -328,8 +308,8 @@ class WorkspaceContractService(WorkspaceBaseService):
                     return {"status": "failed", "error": login_err}
 
                 logger.info("📝 Partner mở: /partner-workspace/contract-po/create...")
-                await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/partner-workspace/contract-po/create", "contract-po/create")
-                await page.wait_for_selector("h4:has-text('Create Contract/PO'), :text('Create Contract/PO')", timeout=20000)
+                await page.goto(f"{BASE_WORKSPACE_URL}/partner-workspace/contract-po/create", wait_until="networkidle", timeout=45000)
+                await page.wait_for_selector("h4:has-text('Create Contract/PO'), :text('Create Contract/PO')", timeout=15000)
 
                 type_select = page.locator(".MuiGrid-item:has(label:has-text('Contract Type')) [role='combobox'], div:has(label:has-text('Contract Type')) .MuiSelect-select").first
                 await type_select.wait_for(state="visible", timeout=10000)
@@ -434,15 +414,9 @@ class WorkspaceContractService(WorkspaceBaseService):
                     return {"status": "failed", "error": login_err}
 
                 logger.info("👑 Mở: /sales-admin-workspace/dashboard...")
-                # 🚀 SỬA LỖI ERR_ABORTED: Dùng safe navigation thông minh
-                await self._safe_navigate(
-                    page=page,
-                    target_url=f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard",
-                    keyword_in_url="sales-admin-workspace",
-                    timeout=35000
-                )
-                await page.wait_for_selector(".MuiDataGrid-row, [role='row']", timeout=25000)
-                await page.wait_for_timeout(1000)
+                # Tránh lỗi ERR_ABORTED do redirect bằng domcontentloaded
+                await page.goto(f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard", wait_until="domcontentloaded", timeout=45000)
+                await page.wait_for_timeout(2000)
 
                 target_row = None
                 if contract_identifier:
