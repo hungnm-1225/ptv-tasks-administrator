@@ -214,7 +214,7 @@ export const UnifiedInboxPage: React.FC = () => {
 
   // ⚡ SWR TẢI TICKETS (KHÔNG BẬT SPINNER NẾU ĐÃ CÓ DỮ LIỆU CACHE)
   const loadTickets = useCallback(async (forceSpinner = false) => {
-    const cached = getInboxCache<InboxTicket[]>(filterCacheKey);
+    const cached = getInboxCache<InboxTicket[]>('all_tickets_master');
     if (cached && !forceSpinner) {
       setTickets(cached);
       setLoading(false);
@@ -223,10 +223,12 @@ export const UnifiedInboxPage: React.FC = () => {
     }
 
     try {
-      const endpoint = `/tickets?sort=${sortOrder}&status=${selectedStatus}&category=${selectedCategory}&source=${selectedSource}`;
+      const endpoint = `/tickets?sort=desc`;
       const data = await fetchApi<InboxTicket[]>(endpoint);
-      setInboxCache(filterCacheKey, data || []);
-      setTickets(data || []);
+      if (data) {
+        setInboxCache('all_tickets_master', data);
+        setTickets(data);
+      }
     } catch (err) {
       if (!cached) {
         toast.error('Không thể tải danh sách ticket: ' + (err as Error).message);
@@ -234,7 +236,7 @@ export const UnifiedInboxPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [filterCacheKey, sortOrder, selectedStatus, selectedCategory, selectedSource]);
+  }, []);
 
   // Nạp metadata ngầm
   useEffect(() => {
@@ -280,31 +282,62 @@ export const UnifiedInboxPage: React.FC = () => {
 
   // Tìm kiếm tức thì đa trường (0ms)
   const filteredTickets = useMemo(() => {
-    if (!searchQuery.trim()) return tickets;
-    const query = searchQuery.trim().toLowerCase();
+    let result = [...tickets];
 
-    return tickets.filter((t) => {
-      const matchSubject = t.subject?.toLowerCase().includes(query);
-      const matchSender = t.sender_email?.toLowerCase().includes(query);
-      const matchSubmitter = t.submitter_name?.toLowerCase().includes(query);
-      const matchSummary = t.ai_summary?.toLowerCase().includes(query);
-      const matchSourceId = t.source_id?.toLowerCase().includes(query);
-      const matchRaw = t.raw_content?.toLowerCase().includes(query);
-      const matchCountry = t.country?.toLowerCase().includes(query);
-      const matchSchoolMeta = t.metadata?.school_name?.toLowerCase().includes(query);
+    // 1. Lọc theo Nguồn (Source: gmail | google_form | osticket)
+    if (selectedSource !== 'all') {
+      result = result.filter((t) => t.source === selectedSource);
+    }
 
-      return (
-        matchSubject ||
-        matchSender ||
-        matchSubmitter ||
-        matchSummary ||
-        matchSourceId ||
-        matchRaw ||
-        matchCountry ||
-        matchSchoolMeta
-      );
+    // 2. Lọc theo Phân loại (Category: bug | account_keycloak | lms_enroll | license | other)
+    if (selectedCategory !== 'all') {
+      result = result.filter((t) => t.category === selectedCategory);
+    }
+
+    // 3. Lọc theo Trạng thái (Status: pending | processing | completed | dismissed)
+    if (selectedStatus !== 'all') {
+      if (selectedStatus === 'processing') {
+        result = result.filter((t) => t.status === 'processing' || t.status === 'waiting_poll');
+      } else {
+        result = result.filter((t) => (t.status || 'pending') === selectedStatus);
+      }
+    }
+
+    // 4. Lọc theo Từ khóa tìm kiếm (Search Query)
+    if (searchQuery.trim()) {
+      const query = searchQuery.trim().toLowerCase();
+      result = result.filter((t) => {
+        const matchSubject = t.subject?.toLowerCase().includes(query);
+        const matchSender = t.sender_email?.toLowerCase().includes(query);
+        const matchSubmitter = t.submitter_name?.toLowerCase().includes(query);
+        const matchSummary = t.ai_summary?.toLowerCase().includes(query);
+        const matchSourceId = t.source_id?.toLowerCase().includes(query);
+        const matchRaw = t.raw_content?.toLowerCase().includes(query);
+        const matchCountry = t.country?.toLowerCase().includes(query);
+        const matchSchoolMeta = t.metadata?.school_name?.toLowerCase().includes(query);
+
+        return (
+          matchSubject ||
+          matchSender ||
+          matchSubmitter ||
+          matchSummary ||
+          matchSourceId ||
+          matchRaw ||
+          matchCountry ||
+          matchSchoolMeta
+        );
+      });
+    }
+
+    // 5. Sắp xếp theo Thời gian (Sort Order)
+    result.sort((a, b) => {
+      const timeA = new Date(a.created_at || a.ticket_timestamp || 0).getTime();
+      const timeB = new Date(b.created_at || b.ticket_timestamp || 0).getTime();
+      return sortOrder === 'desc' ? timeB - timeA : timeA - timeB;
     });
-  }, [tickets, searchQuery]);
+
+    return result;
+  }, [tickets, selectedSource, selectedCategory, selectedStatus, searchQuery, sortOrder]);
 
   const getDirectSourceUrl = (ticket: InboxTicket) => {
     if (ticket.source === 'gmail') {

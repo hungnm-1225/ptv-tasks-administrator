@@ -1,10 +1,12 @@
 # backend/app/api/v1/endpoints/tickets.py
 import time
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 from app.core.supabase import get_supabase_client
 from app.core.gemini import process_ticket_with_ai
+from app.services.osticket_service import poll_open_ostickets
+from app.services.gmail_service import poll_unread_gmails
 
 router = APIRouter()
 
@@ -76,6 +78,35 @@ async def list_tickets(
     except Exception as e:
         print(f"❌ Lỗi tải tickets: {e}")
         return []
+
+
+# =============================================================================
+# 🚀 ENDPOINTS KÍCH HOẠT ĐỒNG BỘ THỦ CÔNG (SYNC ON-DEMAND)
+# =============================================================================
+@router.post("/sync/osticket")
+async def trigger_sync_osticket(background_tasks: BackgroundTasks):
+    """Kích hoạt quét cào OS Ticket ngay lập tức chạy ngầm."""
+    async def run_sync_and_clear_cache():
+        try:
+            await poll_open_ostickets()
+        finally:
+            tickets_cache.invalidate()
+
+    background_tasks.add_task(run_sync_and_clear_cache)
+    return {"status": "success", "message": "🚀 Đã kích hoạt quét OS Ticket chạy ngầm!"}
+
+
+@router.post("/sync/gmail")
+async def trigger_sync_gmail(background_tasks: BackgroundTasks):
+    """Kích hoạt quét Gmail ngay lập tức chạy ngầm."""
+    async def run_sync_and_clear_cache():
+        try:
+            await poll_unread_gmails()
+        finally:
+            tickets_cache.invalidate()
+
+    background_tasks.add_task(run_sync_and_clear_cache)
+    return {"status": "success", "message": "🚀 Đã kích hoạt quét Gmail chạy ngầm!"}
 
 
 @router.put("/{ticket_id}/complete")
