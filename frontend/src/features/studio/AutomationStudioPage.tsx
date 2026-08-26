@@ -100,10 +100,22 @@ interface PreparedTaskSummary {
   detailsList: string[];
 }
 
+// ⚡ BỘ NHỚ ĐỆM CLIENT SWR (LƯU RAM TRÌNH DUYỆT - HIỂN THỊ TỨC THÌ 0MS KHÔNG SPINNER)
+const studioClientCache = {
+  schools: null as HierarchySchoolItem[] | null,
+  wsCategories: null as string[] | null,
+  wsCourses: null as CourseItem[] | null,
+  lmsCategories: null as string[] | null,
+  lmsCourses: null as CourseItem[] | null,
+  orders: null as ScrapedPendingItem[] | null,
+  prtContracts: null as ScrapedPendingItem[] | null,
+  dstContracts: null as ScrapedPendingItem[] | null,
+};
+
 export const AutomationStudioPage: React.FC = () => {
   const navigate = useNavigate();
 
-  // 3 Cỗ Máy Tự Động Hóa Chính (Đã bỏ github_issue_creator)
+  // 3 Cỗ Máy Tự Động Hóa Chính
   const [selectedBotType, setSelectedBotType] = useState<'workspace_rpa' | 'keycloak_api' | 'feedback_doc_triage'>('workspace_rpa');
 
   // 4 Mục chính của Workspace RPA
@@ -126,32 +138,38 @@ export const AutomationStudioPage: React.FC = () => {
   const [additionalNotes, setAdditionalNotes] = useState<string>('Pythaverse Auto-Pipeline Managed');
   const [showAutoTopupSettings, setShowAutoTopupSettings] = useState<boolean>(false);
 
-  // 👉 TÌM KIẾM TOÀN NĂNG & ITEM ĐƯỢC CHỌN (TÁCH BIỆT KHÔNG LÀM MẤT LIST)
+  // Tìm kiếm & Item được chọn
   const [universalSearchQuery, setUniversalSearchQuery] = useState<string>('');
   const [selectedItemCode, setSelectedItemCode] = useState<string>('');
   const [selectedCachedItem, setSelectedCachedItem] = useState<ScrapedPendingItem | null>(null);
 
-  // Lý do phê duyệt Sales Admin (Bắt buộc >= 15 ký tự)
+  // Lý do phê duyệt Sales Admin
   const [adminJustification, setAdminJustification] = useState<string>(
     'Afiq requests and approves the requests, Hung QA processes the contract via Automation Hub'
   );
 
-  // Loading state & Dữ liệu cache
-  const [isScrapingLive, setIsScrapingLive] = useState<boolean>(false);
+  // Khởi tạo State lấy ngay từ clientCache (0ms)
+  const initialCacheList = useMemo(() => {
+    if (approveSubFlow === 'approve_school_order') return studioClientCache.orders || [];
+    if (approveSubFlow === 'approve_partner_contract') return studioClientCache.prtContracts || [];
+    return studioClientCache.dstContracts || [];
+  }, [approveSubFlow]);
+
+  const [isScrapingLive, setIsScrapingLive] = useState<boolean>(initialCacheList.length === 0);
   const [isLoadingOrderDetails, setIsLoadingOrderDetails] = useState<boolean>(false);
-  const [scrapedPendingList, setScrapedPendingList] = useState<ScrapedPendingItem[]>([]);
+  const [scrapedPendingList, setScrapedPendingList] = useState<ScrapedPendingItem[]>(initialCacheList);
   const [parsedOrderCourses, setParsedOrderCourses] = useState<any[]>([]);
 
-  // Bộ lọc trạng thái (Mặc định 'pending')
+  // Bộ lọc trạng thái
   const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
 
-  // Metadata Workspace & LMS
-  const [schoolsList, setSchoolsList] = useState<HierarchySchoolItem[]>([]);
-  const [workspaceCategoriesList, setWorkspaceCategoriesList] = useState<string[]>(['SWRP', 'IR', 'ASP', 'Other']);
-  const [workspaceCoursesList, setWorkspaceCoursesList] = useState<CourseItem[]>([]);
+  // Metadata Workspace & LMS khởi tạo từ Cache
+  const [schoolsList, setSchoolsList] = useState<HierarchySchoolItem[]>(studioClientCache.schools || []);
+  const [workspaceCategoriesList, setWorkspaceCategoriesList] = useState<string[]>(studioClientCache.wsCategories || ['SWRP', 'IR', 'ASP', 'Other']);
+  const [workspaceCoursesList, setWorkspaceCoursesList] = useState<CourseItem[]>(studioClientCache.wsCourses || []);
 
-  const [lmsCategoriesList, setLmsCategoriesList] = useState<string[]>([]);
-  const [lmsCoursesList, setLmsCoursesList] = useState<CourseItem[]>([]);
+  const [lmsCategoriesList, setLmsCategoriesList] = useState<string[]>(studioClientCache.lmsCategories || []);
+  const [lmsCoursesList, setLmsCoursesList] = useState<CourseItem[]>(studioClientCache.lmsCourses || []);
   const [lmsCourseCategory, setLmsCourseCategory] = useState<string>('');
   const [lmsCourseId, setLmsCourseId] = useState<number>(0);
   const [lmsCourseName, setLmsCourseName] = useState<string>('');
@@ -183,7 +201,6 @@ export const AutomationStudioPage: React.FC = () => {
   nextYear.setFullYear(today.getFullYear() + 1);
   nextYear.setDate(nextYear.getDate() - 1);
 
-  // Danh sách môn học khi Tạo mới
   const [selectedCourses, setSelectedCourses] = useState<OrderCourseSelection[]>([]);
 
   // Thời hạn LMS Enroll
@@ -208,14 +225,13 @@ export const AutomationStudioPage: React.FC = () => {
   const [kcEnableStatus, setKcEnableStatus] = useState<boolean>(false);
   const [kcStatusAction, setKcStatusAction] = useState<'enable' | 'disable'>('enable');
 
-  // Feedback Doc Triage với AI Assistant
+  // Feedback Doc Triage
   const [docUrl, setDocUrl] = useState<string>('');
   const [assigneeEmail, setAssigneeEmail] = useState<string>('hung.nguyenmanh@dtt.vn');
   const [feedbackCommentContent, setFeedbackCommentContent] = useState<string>(
     'Kính gửi anh/chị, em xin phép chuyển thông tin phản hồi này để team kỹ thuật rà soát và hỗ trợ giải quyết.'
   );
   const [isGeneratingDocComment, setIsGeneratingDocComment] = useState<boolean>(false);
-
   const [submitting, setSubmitting] = useState<boolean>(false);
 
   // State Confirmation Modal
@@ -226,7 +242,7 @@ export const AutomationStudioPage: React.FC = () => {
     summary: PreparedTaskSummary;
   } | null>(null);
 
-  // Nạp metadata ban đầu
+  // ⚡ SWR NẠP METADATA NGẦM (KHÔNG BLOCK GIAO DIỆN)
   useEffect(() => {
     const loadAllMetadata = async () => {
       try {
@@ -238,17 +254,26 @@ export const AutomationStudioPage: React.FC = () => {
           fetchApi<CourseItem[]>('/courses/lms').catch(() => []),
         ]);
 
-        setSchoolsList(schools || []);
-        if (wsCats && wsCats.length > 0) setWorkspaceCategoriesList(wsCats);
-        setWorkspaceCoursesList(wsCourses || []);
-
+        if (schools) {
+          studioClientCache.schools = schools;
+          setSchoolsList(schools);
+        }
+        if (wsCats && wsCats.length > 0) {
+          studioClientCache.wsCategories = wsCats;
+          setWorkspaceCategoriesList(wsCats);
+        }
+        if (wsCourses) {
+          studioClientCache.wsCourses = wsCourses;
+          setWorkspaceCoursesList(wsCourses);
+        }
         if (lmsCats && lmsCats.length > 0) {
+          studioClientCache.lmsCategories = lmsCats;
           setLmsCategoriesList(lmsCats);
           setLmsCourseCategory(lmsCats[0]);
         }
-        setLmsCoursesList(lmsCourses || []);
-
         if (lmsCourses && lmsCourses.length > 0) {
+          studioClientCache.lmsCourses = lmsCourses;
+          setLmsCoursesList(lmsCourses);
           const firstCat = lmsCats && lmsCats.length > 0 ? lmsCats[0] : lmsCourses[0].category;
           const matchFirst = lmsCourses.filter((c) => c.category === firstCat);
           const activeFirst = matchFirst.length > 0 ? matchFirst[0] : lmsCourses[0];
@@ -257,7 +282,7 @@ export const AutomationStudioPage: React.FC = () => {
           setLmsCourseCategory(activeFirst.category);
         }
       } catch (e) {
-        console.warn('Lỗi nạp metadata:', e);
+        console.warn('Lỗi nạp metadata ngầm:', e);
       }
     };
     loadAllMetadata();
@@ -322,26 +347,43 @@ export const AutomationStudioPage: React.FC = () => {
     }
   };
 
-  // Nạp dữ liệu Cache im lặng (Silent fetch không popup toast)
+  // ⚡ SWR FETCH: LẤY TỪ RAM TRƯỚC (0MS), SAU ĐÓ REVALIDATE NGẦM
   const handleFetchCachedList = async () => {
-    setIsScrapingLive(true);
-    setScrapedPendingList([]);
-    setParsedOrderCourses([]);
-    setSelectedCachedItem(null);
-    setSelectedItemCode('');
+    // 1. Nếu đã có dữ liệu cache -> Lấy ra hiển thị ngay lập tức (KHÔNG set spinner)
+    let currentCached: ScrapedPendingItem[] | null = null;
+    if (approveSubFlow === 'approve_school_order') currentCached = studioClientCache.orders;
+    else if (approveSubFlow === 'approve_partner_contract') currentCached = studioClientCache.prtContracts;
+    else if (approveSubFlow === 'admin_approve_contract') currentCached = studioClientCache.dstContracts;
+
+    if (currentCached && currentCached.length > 0) {
+      setScrapedPendingList(currentCached);
+      setIsScrapingLive(false);
+    } else {
+      setIsScrapingLive(true);
+    }
+
+    // 2. Âm thầm revalidate từ Backend
     try {
       if (approveSubFlow === 'approve_school_order') {
         const res = await fetchApi<any>(`/workspace/cached-pending-orders`);
-        setScrapedPendingList(res?.orders || []);
+        const orders = res?.orders || [];
+        studioClientCache.orders = orders;
+        setScrapedPendingList(orders);
       } else if (approveSubFlow === 'approve_partner_contract') {
         const res = await fetchApi<any>(`/workspace/cached-pending-contracts?contract_type=PRT`);
-        setScrapedPendingList(res?.contracts || []);
+        const contracts = res?.contracts || [];
+        studioClientCache.prtContracts = contracts;
+        setScrapedPendingList(contracts);
       } else if (approveSubFlow === 'admin_approve_contract') {
         const res = await fetchApi<any>(`/workspace/cached-pending-contracts?contract_type=DST`);
-        setScrapedPendingList(res?.contracts || []);
+        const contracts = res?.contracts || [];
+        studioClientCache.dstContracts = contracts;
+        setScrapedPendingList(contracts);
       }
     } catch (err) {
-      toast.error('Lỗi đọc dữ liệu Cache: ' + (err as Error).message);
+      if (!currentCached) {
+        toast.error('Lỗi đọc dữ liệu Cache: ' + (err as Error).message);
+      }
     } finally {
       setIsScrapingLive(false);
     }
@@ -353,7 +395,7 @@ export const AutomationStudioPage: React.FC = () => {
     }
   }, [approveSubFlow, workspaceMainCategory]);
 
-  // Bộ lọc tìm kiếm toàn năng (Universal Filter)
+  // Bộ lọc tìm kiếm toàn năng
   const filteredCacheList = useMemo(() => {
     return scrapedPendingList.filter((item) => {
       const rawStat = (item.status || '').toLowerCase();
@@ -371,7 +413,6 @@ export const AutomationStudioPage: React.FC = () => {
       const q = universalSearchQuery.trim().toLowerCase();
       if (!q) return true;
 
-      // Tìm kiếm toàn năng trên tất cả thuộc tính
       const codeMatch = (item.order_code || item.contract_code || item.data_id || '').toLowerCase().includes(q);
       const schoolMatch = (item.school_name || '').toLowerCase().includes(q) || (item.school_code || '').toLowerCase().includes(q);
       const partnerMatch = (item.partner_name || item.sender_name || '').toLowerCase().includes(q) || (item.partner_code || '').toLowerCase().includes(q);
@@ -446,9 +487,7 @@ export const AutomationStudioPage: React.FC = () => {
     setSelectedCourses(selectedCourses.filter((_, idx) => idx !== index));
   };
 
-  // =========================================================================
-  // 🛡️ BƯỚC 1: KIỂM TRA DỮ LIỆU & MỞ CONFIRMATION MODAL
-  // =========================================================================
+  // Mở Modal Xác Nhận
   const handleOpenConfirmModal = () => {
     let payload: Record<string, any> = {
       is_manual_dispatch: true,
@@ -470,11 +509,12 @@ export const AutomationStudioPage: React.FC = () => {
       summary.engineName = '🏢 Workspace RPA & LMS Pipeline';
 
       if (workspaceMainCategory === 'approve') {
+        if (!selectedItemCode) {
+          toast.error('Vui lòng click chọn 1 Đơn Hàng / Hợp Đồng trong danh sách kết quả lọc phía dưới!');
+          return;
+        }
+
         if (approveSubFlow === 'approve_school_order') {
-          if (!selectedItemCode) {
-            toast.error('Vui lòng click chọn 1 Đơn Hàng Trường trong danh sách kết quả lọc phía dưới!');
-            return;
-          }
           const resolvedSchoolName = selectedCachedItem?.school_name || 'Tự động truy vết theo Order';
           const resolvedPartnerName = selectedCachedItem?.partner_name || 'Tự động truy vết';
 
@@ -495,10 +535,6 @@ export const AutomationStudioPage: React.FC = () => {
             `Số lượng môn học bóc tách: ${parsedOrderCourses.length} môn`,
           ];
         } else if (approveSubFlow === 'approve_partner_contract') {
-          if (!selectedItemCode) {
-            toast.error('Vui lòng click chọn 1 Hợp Đồng Đối Tác trong danh sách kết quả lọc phía dưới!');
-            return;
-          }
           const resolvedPartnerName = selectedCachedItem?.partner_name || selectedCachedItem?.sender_name || undefined;
           const resolvedDistName = selectedCachedItem?.distributor_name || selectedCachedItem?.receiver_name || undefined;
           const resolvedDistCode = selectedCachedItem?.distributor_code;
@@ -520,12 +556,6 @@ export const AutomationStudioPage: React.FC = () => {
             `Nhà phân phối nhận: ${resolvedDistName || 'Tự động truy vết từ Két sắt'}`,
           ];
         } else if (approveSubFlow === 'admin_approve_contract') {
-          if (!selectedItemCode) {
-            toast.error('Vui lòng click chọn 1 Hợp Đồng Quản Trị trong danh sách kết quả lọc phía dưới!');
-            return;
-          }
-
-          // 🔴 BẮT BUỘC LÝ DO PHÊ DUYỆT TỐI THIỂU 15 KÝ TỰ
           if (!adminJustification || adminJustification.trim().length < 15) {
             toast.error('Lý do phê duyệt của Sales Admin bắt buộc phải có ít nhất 15 ký tự!');
             return;
@@ -745,7 +775,7 @@ export const AutomationStudioPage: React.FC = () => {
         doc_url: docUrl,
         assignee_email: assigneeEmail,
         comment_content: feedbackCommentContent,
-        row_index: 1, // Luôn mặc định xử lý trang đầu
+        row_index: 1,
       };
 
       summary.engineName = '🤖 Feedback Sheet & Google Doc Triage';
@@ -765,9 +795,7 @@ export const AutomationStudioPage: React.FC = () => {
     setIsConfirmModalOpen(true);
   };
 
-  // =========================================================================
-  // 🚀 BƯỚC 2: XÁC NHẬN & CHẠY WORKER NGẦM (1-CLICK DISPATCH)
-  // =========================================================================
+  // Xác Nhận & Chạy Ngay
   const handleConfirmExecute = async () => {
     if (!preparedPayload) return;
 
@@ -863,7 +891,7 @@ export const AutomationStudioPage: React.FC = () => {
 
       {/* Panel Form Chính */}
       <div className="space-y-6 bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
-        {/* Bước 1: Chọn Cỗ Máy Tự Động Hóa (3 Cỗ Máy Chính) */}
+        {/* Bước 1: Chọn Cỗ Máy Tự Động Hóa */}
         <div className="space-y-2.5">
           <label className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
             <span className="w-5 h-5 rounded-full bg-violet-100 dark:bg-violet-900/50 text-violet-600 dark:text-violet-300 flex items-center justify-center text-[10px] font-extrabold">
@@ -943,7 +971,7 @@ export const AutomationStudioPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Ô TÌM KIẾM ĐỐI TƯỢNG (CHỈ DÙNG CHO TẠO MỚI & BULK ACCOUNTS - ĐÃ LOẠI BỎ Ở MỤC DUYỆT) */}
+            {/* Ô TÌM KIẾM ĐỐI TƯỢNG */}
             {workspaceMainCategory !== 'approve' && workspaceMainCategory !== 'lms_enroll' && (
               <div className="space-y-2 relative" ref={entityDropdownRef}>
                 <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
@@ -1089,7 +1117,7 @@ export const AutomationStudioPage: React.FC = () => {
               </div>
             )}
 
-            {/* MỤC 1: PHÊ DUYỆT (TỐI ƯU TOÀN NĂNG & GỌN GÀNG) */}
+            {/* MỤC 1: PHÊ DUYỆT */}
             {workspaceMainCategory === 'approve' && (
               <div className="space-y-4">
                 {/* 3 Sub-tabs duyệt */}
@@ -1163,7 +1191,7 @@ export const AutomationStudioPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Lý do phê duyệt Sales Admin (Bắt buộc >= 15 ký tự) */}
+                  {/* Lý do phê duyệt Sales Admin */}
                   {approveSubFlow === 'admin_approve_contract' && (
                     <div className="space-y-1.5 pt-1">
                       <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
@@ -1193,7 +1221,7 @@ export const AutomationStudioPage: React.FC = () => {
                     </div>
                   )}
 
-                  {/* DANH SÁCH HIỂN THỊ ĐƠN HÀNG / HỢP ĐỒNG (CLICK CHỌN KHÔNG BỊ MẤT LIST) */}
+                  {/* DANH SÁCH HIỂN THỊ ĐƠN HÀNG / HỢP ĐỒNG (CÓ SWR LOAD TỨC THÌ) */}
                   <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-700">
                     <div className="flex items-center justify-between flex-wrap gap-2">
                       <div className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
@@ -1226,7 +1254,7 @@ export const AutomationStudioPage: React.FC = () => {
                     </div>
 
                     <div className="max-h-56 overflow-y-auto space-y-1.5 p-1.5 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800 scrollbar-thin">
-                      {isScrapingLive ? (
+                      {isScrapingLive && scrapedPendingList.length === 0 ? (
                         <div className="py-6 flex items-center justify-center gap-2 text-xs text-slate-500">
                           <Loader2 className="w-4 h-4 animate-spin text-violet-600" />
                           <span>Đang nạp danh sách...</span>
@@ -1258,7 +1286,6 @@ export const AutomationStudioPage: React.FC = () => {
                                     handleLoadOrderDetails(itemCode, item.school_name);
                                   }
                                 } else {
-                                  // Cho Partner & Distributor Contract
                                   if (item.courses_data && item.courses_data.length > 0) {
                                     setParsedOrderCourses(item.courses_data);
                                   } else {
@@ -1303,7 +1330,7 @@ export const AutomationStudioPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* KHUNG CHI TIẾT KHÓA HỌC / THÔNG SỐ HỢP ĐỒNG (HIỂN THỊ ĐẦY ĐỦ CHO CẢ 3 LUỒNG) */}
+                  {/* KHUNG CHI TIẾT KHÓA HỌC */}
                   <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-700">
                     <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
                       <span className="flex items-center gap-1.5">
@@ -1356,7 +1383,7 @@ export const AutomationStudioPage: React.FC = () => {
                     )}
                   </div>
 
-                  {/* THIẾT LẬP DỰ PHÒNG KHI THIẾU LICENSE (AUTO-TOPUP FALLBACK) */}
+                  {/* THIẾT LẬP DỰ PHÒNG */}
                   <div className="pt-2 border-t border-slate-100 dark:border-slate-700">
                     <button
                       type="button"
@@ -2115,7 +2142,7 @@ export const AutomationStudioPage: React.FC = () => {
           </div>
         )}
 
-        {/* Feedback Sheet & Google Doc (Nâng cấp với AI Assistant) */}
+        {/* Feedback Sheet */}
         {selectedBotType === 'feedback_doc_triage' && (
           <div className="space-y-4 p-6 rounded-2xl bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200/70 dark:border-blue-800/40">
             <div className="flex items-center justify-between">
@@ -2186,13 +2213,10 @@ export const AutomationStudioPage: React.FC = () => {
         </div>
       </div>
 
-      {/* ===================================================================== */}
-      {/* 🛡️ CONFIRMATION MODAL                                                 */}
-      {/* ===================================================================== */}
+      {/* CONFIRMATION MODAL */}
       {isConfirmModalOpen && preparedPayload && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-150">
           <div className="max-w-xl w-full bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden p-6 sm:p-7 space-y-5">
-            {/* Header Modal */}
             <div className="flex items-start justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 rounded-2xl">
@@ -2216,7 +2240,6 @@ export const AutomationStudioPage: React.FC = () => {
               </button>
             </div>
 
-            {/* Thông Tin Tóm Tắt Nghiệp Vụ */}
             <div className="p-4 rounded-2xl bg-violet-50/70 dark:bg-violet-950/30 border border-violet-200/80 dark:border-violet-800/50 space-y-2.5">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-violet-900 dark:text-violet-200">
@@ -2248,7 +2271,6 @@ export const AutomationStudioPage: React.FC = () => {
               )}
             </div>
 
-            {/* Khung Xem Trước JSON Payload */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-[11px] font-bold text-slate-600 dark:text-slate-400">
                 <span className="flex items-center gap-1">
@@ -2262,7 +2284,6 @@ export const AutomationStudioPage: React.FC = () => {
               </pre>
             </div>
 
-            {/* Nút Điều Khiển Trong Modal */}
             <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="button"

@@ -29,15 +29,23 @@ import { CourseItem } from '../../types';
 type CoursePaneType = 'workspace' | 'lms';
 type BulkInputMode = 'file' | 'text';
 
+// ⚡ BỘ NHỚ ĐỆM CLIENT SWR CHO KHÓA HỌC (HIỂN THỊ NGAY 0MS KHI CHUYỂN TAB)
+const coursesClientCache = {
+    workspace: { courses: null as CourseItem[] | null, categories: null as string[] | null },
+    lms: { courses: null as CourseItem[] | null, categories: null as string[] | null },
+};
+
 export const CoursesManagerPage: React.FC = () => {
     const [activePane, setActivePane] = useState<CoursePaneType>('workspace');
-    const [courses, setCourses] = useState<CourseItem[]>([]);
-    const [categories, setCategories] = useState<string[]>([]);
+
+    // Khởi tạo ngay từ Client Cache nếu đã có (0ms không spinner)
+    const [courses, setCourses] = useState<CourseItem[]>(coursesClientCache[activePane].courses || []);
+    const [categories, setCategories] = useState<string[]>(coursesClientCache[activePane].categories || []);
     const [selectedCategory, setSelectedCategory] = useState<string>('all');
     const [searchQuery, setSearchQuery] = useState<string>('');
-    const [isLoading, setIsLoading] = useState<boolean>(true);
+    const [isLoading, setIsLoading] = useState<boolean>(!coursesClientCache[activePane].courses);
 
-    // --- Modal Thêm / Sửa Từng Khóa Học ---
+    // Modal Thêm / Sửa
     const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
     const [editingCourse, setEditingCourse] = useState<CourseItem | null>(null);
     const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -49,7 +57,7 @@ export const CoursesManagerPage: React.FC = () => {
     const [formSku, setFormSku] = useState<string>('');
     const [formLmsUrl, setFormLmsUrl] = useState<string>('');
 
-    // --- Modal Bulk Import (.xlsx, .csv hoặc Copy-Paste) ---
+    // Modal Bulk Import
     const [isBulkModalOpen, setIsBulkModalOpen] = useState<boolean>(false);
     const [bulkMode, setBulkMode] = useState<BulkInputMode>('file');
     const [bulkRawText, setBulkRawText] = useState<string>('');
@@ -64,24 +72,36 @@ export const CoursesManagerPage: React.FC = () => {
     const [isBulking, setIsBulking] = useState<boolean>(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // --- Modal Quản Lý Danh Mục (Category Manager) ---
+    // Modal Category Manager
     const [isCatModalOpen, setIsCatModalOpen] = useState<boolean>(false);
     const [editingCatOld, setEditingCatOld] = useState<string | null>(null);
     const [editingCatNew, setEditingCatNew] = useState<string>('');
     const [isCatSubmitting, setIsCatSubmitting] = useState<boolean>(false);
 
-    // 1. Tải danh mục & khóa học
-    const loadData = useCallback(async () => {
-        setIsLoading(true);
+    // ⚡ TẢI DANH MỤC & KHÓA HỌC (SWR SILENT BACKGROUND FETCH)
+    const loadData = useCallback(async (forceSpinner = false) => {
+        const cached = coursesClientCache[activePane];
+        if (cached.courses && !forceSpinner) {
+            setCourses(cached.courses);
+            setCategories(cached.categories || []);
+            setIsLoading(false);
+        } else {
+            setIsLoading(true);
+        }
+
         try {
             const [coursesData, catsData] = await Promise.all([
                 fetchApi<CourseItem[]>(`/courses/${activePane}`),
                 fetchApi<string[]>(`/courses/${activePane}/categories`)
             ]);
+            coursesClientCache[activePane].courses = coursesData;
+            coursesClientCache[activePane].categories = catsData;
             setCourses(coursesData);
             setCategories(catsData);
         } catch (err: any) {
-            toast.error('Lỗi khi tải dữ liệu khóa học: ' + (err.message || err));
+            if (!cached.courses) {
+                toast.error('Lỗi khi tải dữ liệu khóa học: ' + (err.message || err));
+            }
         } finally {
             setIsLoading(false);
         }
@@ -93,7 +113,7 @@ export const CoursesManagerPage: React.FC = () => {
         loadData();
     }, [loadData]);
 
-    // 2. Lọc danh sách hiển thị
+    // Lọc danh sách hiển thị trong RAM
     const filteredCourses = useMemo(() => {
         return courses.filter(item => {
             const matchCat = selectedCategory === 'all' || item.category === selectedCategory;
@@ -108,7 +128,6 @@ export const CoursesManagerPage: React.FC = () => {
         });
     }, [courses, selectedCategory, searchQuery]);
 
-    // 3. Xử lý khi thay đổi Course ID ở Form Đơn lẻ -> Tự động sinh Link LMS
     const handleCourseIdChange = (val: string) => {
         setFormCourseId(val);
         if (val.trim() && !isNaN(Number(val.trim()))) {
@@ -116,7 +135,6 @@ export const CoursesManagerPage: React.FC = () => {
         }
     };
 
-    // 4. Mở Modal Thêm / Sửa
     const handleOpenModal = (course?: CourseItem) => {
         if (course) {
             setEditingCourse(course);
@@ -136,7 +154,6 @@ export const CoursesManagerPage: React.FC = () => {
         setIsModalOpen(true);
     };
 
-    // 5. Lưu Form Khóa Học Đơn Lẻ
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!formCourseId || !formCategory || !formCourseName) {
@@ -170,8 +187,10 @@ export const CoursesManagerPage: React.FC = () => {
                 });
                 toast.success(`Đã thêm mới khóa học #${payload.course_id} thành công!`);
             }
+            // 🧹 Xóa cache client để nạp mới
+            coursesClientCache[activePane].courses = null;
             setIsModalOpen(false);
-            loadData();
+            loadData(true);
         } catch (err: any) {
             toast.error('Thao tác thất bại: ' + (err.message || err));
         } finally {
@@ -179,7 +198,6 @@ export const CoursesManagerPage: React.FC = () => {
         }
     };
 
-    // 6. Xóa khóa học đơn lẻ
     const handleDelete = async (course: CourseItem) => {
         if (!window.confirm(`Anh có chắc chắn muốn xóa khóa học "${course.course_name}" (#${course.course_id}) khỏi danh mục không?`)) {
             return;
@@ -188,13 +206,13 @@ export const CoursesManagerPage: React.FC = () => {
         try {
             await fetchApi(`/courses/${activePane}/${course.id}`, { method: 'DELETE' });
             toast.success(`Đã xóa khóa học #${course.course_id}`);
+            coursesClientCache[activePane].courses = null;
             setCourses(prev => prev.filter(c => c.id !== course.id));
         } catch (err: any) {
             toast.error('Không thể xóa: ' + (err.message || err));
         }
     };
 
-    // 7. Xử lý Đọc File Excel / CSV bằng SheetJS
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -216,11 +234,10 @@ export const CoursesManagerPage: React.FC = () => {
                 }
 
                 const parsedList: any[] = [];
-                // Xác định dòng tiêu đề nếu có
                 let startIdx = 0;
                 const firstRowStr = (rawRows[0] || []).join(' ').toLowerCase();
                 if (firstRowStr.includes('id') || firstRowStr.includes('course') || firstRowStr.includes('danh mục')) {
-                    startIdx = 1; // Bỏ qua dòng header
+                    startIdx = 1;
                 }
 
                 for (let i = startIdx; i < rawRows.length; i++) {
@@ -234,7 +251,6 @@ export const CoursesManagerPage: React.FC = () => {
                     const sku = row[3] ? String(row[3]).trim() : null;
                     let url = row[4] ? String(row[4]).trim() : '';
 
-                    // 🟢 Tự động sinh link LMS chuẩn theo ID
                     if (!url && !isNaN(cId)) {
                         url = `https://learn.pythaverse.space/course/view.php?id=${cId}`;
                     }
@@ -264,7 +280,6 @@ export const CoursesManagerPage: React.FC = () => {
         reader.readAsBinaryString(file);
     };
 
-    // 8. Xử lý Parse text Excel / TSV copy-paste
     const handleParseBulkText = (text: string) => {
         setBulkRawText(text);
         if (!text.trim()) {
@@ -290,7 +305,6 @@ export const CoursesManagerPage: React.FC = () => {
                 const sku = parts[3]?.trim() || null;
                 let url = parts[4]?.trim() || '';
 
-                // 🟢 Tự động sinh link nếu thiếu
                 if (!url && !isNaN(cId)) {
                     url = `https://learn.pythaverse.space/course/view.php?id=${cId}`;
                 }
@@ -310,7 +324,6 @@ export const CoursesManagerPage: React.FC = () => {
         setBulkPreview(parsedList);
     };
 
-    // 9. Thực thi Lưu Bulk Import lên Supabase
     const handleExecuteBulkUpsert = async () => {
         if (bulkPreview.length === 0) {
             toast.warning('Chưa có dòng dữ liệu hợp lệ nào để đồng bộ.');
@@ -324,11 +337,12 @@ export const CoursesManagerPage: React.FC = () => {
                 body: JSON.stringify({ courses: bulkPreview })
             });
             toast.success(res.message || `Đã đồng bộ ${bulkPreview.length} khóa học thành công!`);
+            coursesClientCache[activePane].courses = null;
             setIsBulkModalOpen(false);
             setBulkRawText('');
             setUploadedFileName('');
             setBulkPreview([]);
-            loadData();
+            loadData(true);
         } catch (err: any) {
             toast.error('Lỗi khi đồng bộ hàng loạt: ' + (err.message || err));
         } finally {
@@ -336,7 +350,6 @@ export const CoursesManagerPage: React.FC = () => {
         }
     };
 
-    // 10. Đổi tên Category
     const handleRenameCategory = async (oldCat: string) => {
         if (!editingCatNew.trim() || editingCatNew.trim().toUpperCase() === oldCat) {
             setEditingCatOld(null);
@@ -353,9 +366,11 @@ export const CoursesManagerPage: React.FC = () => {
                 })
             });
             toast.success(`Đã đổi tên danh mục "${oldCat}" thành "${editingCatNew.trim().toUpperCase()}"!`);
+            coursesClientCache[activePane].categories = null;
+            coursesClientCache[activePane].courses = null;
             setEditingCatOld(null);
             setEditingCatNew('');
-            loadData();
+            loadData(true);
         } catch (err: any) {
             toast.error('Đổi tên danh mục thất bại: ' + (err.message || err));
         } finally {
@@ -363,7 +378,6 @@ export const CoursesManagerPage: React.FC = () => {
         }
     };
 
-    // 11. Xóa / Gộp Category
     const handleDeleteCategory = async (cat: string) => {
         const remainingCats = categories.filter(c => c !== cat);
         let promptMsg = `Anh muốn làm gì với các khóa học thuộc danh mục "${cat}"?\n\n- Bấm OK để GỘP sang danh mục khác\n- Bấm Cancel để hủy bỏ.`;
@@ -378,7 +392,9 @@ export const CoursesManagerPage: React.FC = () => {
                     method: 'DELETE'
                 });
                 toast.success(`Đã gộp danh mục "${cat}" vào "${targetCat.toUpperCase()}"!`);
-                loadData();
+                coursesClientCache[activePane].categories = null;
+                coursesClientCache[activePane].courses = null;
+                loadData(true);
             } catch (err: any) {
                 toast.error('Lỗi khi gộp danh mục: ' + (err.message || err));
             } finally {
@@ -401,7 +417,6 @@ export const CoursesManagerPage: React.FC = () => {
                     </p>
                 </div>
 
-                {/* Tab-Pane Selector */}
                 <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700/60 shadow-xs">
                     <button
                         onClick={() => setActivePane('workspace')}
@@ -429,7 +444,6 @@ export const CoursesManagerPage: React.FC = () => {
             {/* Action Toolbar */}
             <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 shadow-xs space-y-3.5">
                 <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-                    {/* Ô Tìm Kiếm */}
                     <div className="relative flex-1">
                         <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                         <input
@@ -441,10 +455,9 @@ export const CoursesManagerPage: React.FC = () => {
                         />
                     </div>
 
-                    {/* Nhóm Nút Hành Động */}
                     <div className="flex items-center gap-2 flex-wrap">
                         <button
-                            onClick={loadData}
+                            onClick={() => loadData(true)}
                             disabled={isLoading}
                             title="Làm mới dữ liệu"
                             className="p-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-xl text-slate-600 dark:text-slate-300 transition-colors"
@@ -452,7 +465,6 @@ export const CoursesManagerPage: React.FC = () => {
                             <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
                         </button>
 
-                        {/* Nút Quản Lý Category */}
                         <button
                             onClick={() => setIsCatModalOpen(true)}
                             className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl transition-all"
@@ -461,7 +473,6 @@ export const CoursesManagerPage: React.FC = () => {
                             Quản Lý Category
                         </button>
 
-                        {/* Nút Nhập Nhanh Bulk Import */}
                         <button
                             onClick={() => {
                                 setIsBulkModalOpen(true);
@@ -475,7 +486,6 @@ export const CoursesManagerPage: React.FC = () => {
                             Nhập Nhanh File / Excel
                         </button>
 
-                        {/* Nút Thêm Khóa Học Lẻ */}
                         <button
                             onClick={() => handleOpenModal()}
                             className="flex items-center gap-1.5 px-3.5 py-2 bg-violet-600 hover:bg-violet-700 active:scale-98 text-white text-xs font-semibold rounded-xl shadow-xs transition-all"
@@ -486,7 +496,6 @@ export const CoursesManagerPage: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Thanh Category Chips (Lọc Category Phụ Thuộc) */}
                 <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
                     <span className="text-[11px] font-medium text-slate-400 flex items-center gap-1 shrink-0 mr-1">
                         <FolderCheck className="w-3.5 h-3.5" /> Danh mục:
@@ -522,7 +531,7 @@ export const CoursesManagerPage: React.FC = () => {
             {isLoading ? (
                 <div className="flex flex-col items-center justify-center py-24 text-slate-400 gap-3">
                     <Loader2 className="w-8 h-8 animate-spin text-violet-600" />
-                    <span className="text-xs">Đang nạp danh mục khóa học từ Supabase...</span>
+                    <span className="text-xs">Đang nạp danh mục khóa học...</span>
                 </div>
             ) : filteredCourses.length === 0 ? (
                 <div className="bg-white dark:bg-slate-800 p-12 text-center rounded-2xl border border-slate-200 dark:border-slate-700 text-slate-400">
@@ -591,9 +600,7 @@ export const CoursesManagerPage: React.FC = () => {
                 </div>
             )}
 
-            {/* ==================================================================== */}
-            {/* MODAL 1: BULK IMPORT (.XLSX / .CSV / COPY-PASTE)                     */}
-            {/* ==================================================================== */}
+            {/* MODAL 1: BULK IMPORT */}
             {isBulkModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in">
                     <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-2xl w-full border border-slate-200 dark:border-slate-700 shadow-2xl p-6 relative max-h-[90vh] flex flex-col">
@@ -612,7 +619,6 @@ export const CoursesManagerPage: React.FC = () => {
                             Hệ thống sẽ tự động tạo URL <code className="text-violet-600 font-mono">https://learn.pythaverse.space/course/view.php?id=[Course_ID]</code>.
                         </p>
 
-                        {/* Chuyển đổi giữa Upload File và Dán Text */}
                         <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-xl mb-3 text-xs">
                             <button
                                 type="button"
@@ -671,7 +677,6 @@ export const CoursesManagerPage: React.FC = () => {
                                 />
                             )}
 
-                            {/* Bảng Xem Trước (Preview) */}
                             <div>
                                 <div className="flex items-center justify-between mb-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300">
                                     <span>Xem trước ({bulkPreview.length} khóa học hợp lệ):</span>
@@ -733,9 +738,7 @@ export const CoursesManagerPage: React.FC = () => {
                 </div>
             )}
 
-            {/* ==================================================================== */}
-            {/* MODAL 2: QUẢN LÝ DANH MỤC CATEGORIES                                 */}
-            {/* ==================================================================== */}
+            {/* MODAL 2: QUẢN LÝ DANH MỤC */}
             {isCatModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in">
                     <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full border border-slate-200 dark:border-slate-700 shadow-2xl p-6 relative">
@@ -834,9 +837,7 @@ export const CoursesManagerPage: React.FC = () => {
                 </div>
             )}
 
-            {/* ==================================================================== */}
-            {/* MODAL 3: THÊM / SỬA KHÓA HỌC ĐƠN LẺ                                  */}
-            {/* ==================================================================== */}
+            {/* MODAL 3: THÊM / SỬA KHÓA HỌC */}
             {isModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in">
                     <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full border border-slate-200 dark:border-slate-700 shadow-2xl p-6 relative">
