@@ -1,5 +1,5 @@
 // frontend/src/features/bots/BotCommanderPage.tsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Terminal,
   RefreshCw,
@@ -46,6 +46,22 @@ interface ExecutionWorkerConfig {
   icon: React.ElementType;
   iconColor: string;
 }
+
+// ⚡ TRỢ THỦ PERSISTENT STORAGE (LƯU LOCALSTORAGE - 0MS INSTANT RENDER)
+const getBotLocalCache = <T,>(key: string): T | null => {
+  try {
+    const raw = localStorage.getItem(`ptv_bot_${key}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const setBotLocalCache = (key: string, data: any) => {
+  try {
+    localStorage.setItem(`ptv_bot_${key}`, JSON.stringify(data));
+  } catch { }
+};
 
 const INGESTION_PIPELINES: IngestionWorkerConfig[] = [
   {
@@ -122,9 +138,14 @@ const EXECUTION_ENGINES: ExecutionWorkerConfig[] = [
 ];
 
 export const BotCommanderPage: React.FC = () => {
-  const [botStatus, setBotStatus] = useState<Record<string, { status: string; failed_count: number }> | null>(null);
-  const [logs, setLogs] = useState<BotTerminalLog[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  // ⚡ KHỞI TẠO STATE NGAY TỪ LOCALSTORAGE (0MS)
+  const initialStatus = useMemo(() => getBotLocalCache<Record<string, { status: string; failed_count: number }>>('workers_status'), []);
+  const initialLogs = useMemo(() => getBotLocalCache<BotTerminalLog[]>('terminal_logs') || [], []);
+
+  const [botStatus, setBotStatus] = useState<Record<string, { status: string; failed_count: number }> | null>(initialStatus);
+  const [logs, setLogs] = useState<BotTerminalLog[]>(initialLogs);
+  const [loading, setLoading] = useState<boolean>(!initialStatus);
+
   const [syncingType, setSyncingType] = useState<string | null>(null);
   const [retryingKey, setRetryingKey] = useState<string | null>(null);
   const [purgingRam, setPurgingRam] = useState<boolean>(false);
@@ -133,7 +154,13 @@ export const BotCommanderPage: React.FC = () => {
 
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
 
-  const loadBotData = async (showToast = false) => {
+  // ⚡ SWR TẢI DỮ LIỆU BOT & LOGS (KHÔNG BẬT SPINNER NẾU ĐÃ CÓ CACHE)
+  const loadBotData = useCallback(async (showToast = false, forceSpinner = false) => {
+    const cachedStatus = getBotLocalCache<Record<string, { status: string; failed_count: number }>>('workers_status');
+    if (!cachedStatus || forceSpinner) {
+      setLoading(true);
+    }
+
     try {
       const [statusData, logsData] = await Promise.all([
         fetchApi<Record<string, { status: string; failed_count: number }>>('/bots/status'),
@@ -141,6 +168,8 @@ export const BotCommanderPage: React.FC = () => {
       ]);
       setBotStatus(statusData);
       setLogs(logsData);
+      setBotLocalCache('workers_status', statusData);
+      setBotLocalCache('terminal_logs', logsData);
       if (showToast) toast.success('Đã cập nhật trạng thái Workers & Logs thời gian thực!');
     } catch (err) {
       console.error('Lỗi khi nạp dữ liệu Bot Commander:', err);
@@ -148,7 +177,7 @@ export const BotCommanderPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadBotData();
@@ -156,7 +185,7 @@ export const BotCommanderPage: React.FC = () => {
       loadBotData();
     }, 15000);
     return () => clearInterval(interval);
-  }, []);
+  }, [loadBotData]);
 
   useEffect(() => {
     if (autoScroll && terminalEndRef.current) {
@@ -170,8 +199,7 @@ export const BotCommanderPage: React.FC = () => {
     try {
       const res = await fetchApi<{ message?: string }>(`/bots/force-sync/${syncType}`, { method: 'POST' });
       toast.success(res?.message || `Đã kích hoạt quét ngay cho [${pipelineName}]!`);
-      // Đợi 2 giây nạp lại log
-      setTimeout(() => loadBotData(), 2000);
+      setTimeout(() => loadBotData(false, false), 1500);
     } catch (err) {
       toast.error('Lỗi ép quét dữ liệu: ' + (err as Error).message);
     } finally {
@@ -185,7 +213,7 @@ export const BotCommanderPage: React.FC = () => {
     try {
       const res = await fetchApi<{ message?: string }>(`/bots/${workerKey}/retry`, { method: 'POST' });
       toast.success(res?.message || `Đã gửi tín hiệu chạy lại cho [${workerName}]`);
-      setTimeout(() => loadBotData(), 1500);
+      setTimeout(() => loadBotData(false, false), 1500);
     } catch (err) {
       toast.error('Lỗi gửi tín hiệu retry: ' + (err as Error).message);
     } finally {
@@ -199,6 +227,7 @@ export const BotCommanderPage: React.FC = () => {
     try {
       const res = await fetchApi<{ message?: string }>('/bots/purge-memory', { method: 'POST' });
       toast.success(res?.message || 'Đã giải phóng bộ nhớ RAM Render thành công!');
+      loadBotData(false, false);
     } catch (err) {
       toast.error('Lỗi dọn RAM: ' + (err as Error).message);
     } finally {
@@ -214,21 +243,28 @@ export const BotCommanderPage: React.FC = () => {
 
   const handleClearLogs = () => {
     const nowLocal = new Date().toLocaleString('sv-SE', { hour12: false }).replace('T', ' ');
-    setLogs([{
+    // 🟢 Thêm kiểu : BotTerminalLog[] để thỏa mãn TypeScript Strict Union
+    const cleared: BotTerminalLog[] = [{
       timestamp: nowLocal,
       level: 'INFO',
       worker: 'Console',
       message: 'Terminal logs cleared locally.',
       raw_line: `[${nowLocal}] [INFO] [Console]: Terminal cleared.`
-    }]);
+    }];
+    setLogs(cleared);
+    setBotLocalCache('terminal_logs', cleared);
     toast.info('Đã xóa màn hình console');
   };
 
-  const filteredLogs = logs.filter(l =>
-    l.raw_line.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    l.worker.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredLogs = useMemo(() => {
+    return logs.filter(l =>
+      (l.raw_line || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (l.worker || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (l.message || '').toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [logs, searchQuery]);
 
+  // 🟢 Hàm lấy màu sắc log
   const getLogColorClass = (level: string) => {
     switch (level) {
       case 'SUCCESS':
@@ -272,7 +308,7 @@ export const BotCommanderPage: React.FC = () => {
             type="button"
             onClick={handlePurgeMemory}
             disabled={purgingRam}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-500/10 dark:hover:bg-amber-500/20 border border-amber-200 dark:border-amber-500/30 rounded-xl text-xs font-semibold text-amber-700 dark:text-amber-300 transition shadow-xs"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-500/10 dark:hover:bg-amber-500/20 border border-amber-200 dark:border-amber-500/30 rounded-xl text-xs font-semibold text-amber-700 dark:text-amber-300 transition shadow-xs cursor-pointer"
             title="Kích hoạt Garbage Collector giải phóng RAM máy chủ Render"
           >
             <Sparkles className={`w-3.5 h-3.5 ${purgingRam ? 'animate-spin' : ''}`} />
@@ -282,9 +318,9 @@ export const BotCommanderPage: React.FC = () => {
           {/* Làm mới dữ liệu */}
           <button
             type="button"
-            onClick={() => loadBotData(true)}
+            onClick={() => loadBotData(true, true)}
             disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-300 transition shadow-xs"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-300 transition shadow-xs cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             <span>Đồng bộ</span>
@@ -335,12 +371,11 @@ export const BotCommanderPage: React.FC = () => {
                     {p.cronInterval}
                   </span>
 
-                  {/* Nút ÉP QUÉT NGAY */}
                   <button
                     type="button"
                     onClick={() => handleForceSync(p.syncType, p.name)}
                     disabled={isSyncing}
-                    className="flex items-center gap-1 px-2.5 py-1 bg-sky-50 hover:bg-sky-100 dark:bg-sky-500/10 dark:hover:bg-sky-500/20 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-500/30 rounded-lg text-[11px] font-semibold transition"
+                    className="flex items-center gap-1 px-2.5 py-1 bg-sky-50 hover:bg-sky-100 dark:bg-sky-500/10 dark:hover:bg-sky-500/20 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-500/30 rounded-lg text-[11px] font-semibold transition cursor-pointer"
                   >
                     {isSyncing ? (
                       <>
@@ -413,14 +448,13 @@ export const BotCommanderPage: React.FC = () => {
                     {w.engineType}
                   </span>
 
-                  {/* Nút CHẠY LẠI TASK LỖI */}
                   <button
                     type="button"
                     onClick={() => handleRetryWorker(w.key, w.name)}
                     disabled={isRetrying}
-                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition ${isDegraded
-                        ? 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-500/40 animate-pulse'
-                        : 'bg-violet-50 hover:bg-violet-100 dark:bg-violet-500/10 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-500/30'
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition cursor-pointer ${isDegraded
+                      ? 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-500/40 animate-pulse'
+                      : 'bg-violet-50 hover:bg-violet-100 dark:bg-violet-500/10 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-500/30'
                       }`}
                   >
                     {isRetrying ? (
@@ -451,7 +485,6 @@ export const BotCommanderPage: React.FC = () => {
 
           {/* Controls */}
           <div className="flex items-center gap-2">
-            {/* Search Input */}
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
               <input
@@ -463,11 +496,10 @@ export const BotCommanderPage: React.FC = () => {
               />
             </div>
 
-            {/* Auto scroll toggle */}
             <button
               type="button"
               onClick={() => setAutoScroll(!autoScroll)}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition ${autoScroll ? 'bg-violet-600/30 text-violet-300 border border-violet-500/40' : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition cursor-pointer ${autoScroll ? 'bg-violet-600/30 text-violet-300 border border-violet-500/40' : 'bg-slate-800 text-slate-400 hover:text-slate-200'
                 }`}
               title="Tự động cuộn theo log mới"
             >
@@ -475,22 +507,20 @@ export const BotCommanderPage: React.FC = () => {
               <span className="hidden sm:inline">Auto-scroll</span>
             </button>
 
-            {/* Copy */}
             <button
               type="button"
               onClick={handleCopyLogs}
-              className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-[11px] text-slate-300 transition"
+              className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-[11px] text-slate-300 transition cursor-pointer"
               title="Sao chép toàn bộ logs"
             >
               <Copy className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Copy</span>
             </button>
 
-            {/* Clear */}
             <button
               type="button"
               onClick={handleClearLogs}
-              className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-[11px] text-slate-300 transition"
+              className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-[11px] text-slate-300 transition cursor-pointer"
               title="Xóa màn hình"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -499,7 +529,7 @@ export const BotCommanderPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Terminal Body */}
+        {/* Terminal Body - Hỗ trợ SWR 0ms */}
         <div className="p-4 bg-slate-950 font-mono text-xs space-y-1.5 h-80 overflow-y-auto leading-relaxed scrollbar-thin scrollbar-thumb-slate-800">
           {filteredLogs.length === 0 ? (
             <div className="text-slate-500 italic py-10 text-center">Không tìm thấy dòng nhật ký nào phù hợp.</div>

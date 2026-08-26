@@ -1,5 +1,5 @@
 // frontend/src/features/inbox/UnifiedInboxPage.tsx
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Sparkles,
@@ -73,6 +73,22 @@ interface OrderCourseSelection {
   end_date: string;
 }
 
+// ⚡ TRỢ THỦ PERSISTENT STORAGE (LƯU LOCALSTORAGE - HIỂN THỊ TỨC THÌ 0MS)
+const getInboxCache = <T,>(key: string): T | null => {
+  try {
+    const raw = localStorage.getItem(`ptv_inbox_${key}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const setInboxCache = (key: string, data: any) => {
+  try {
+    localStorage.setItem(`ptv_inbox_${key}`, JSON.stringify(data));
+  } catch { }
+};
+
 // Hàm làm sạch thẻ HTML
 const stripHtmlTags = (htmlString: string | null | undefined): string => {
   if (!htmlString) return '';
@@ -135,8 +151,17 @@ export const UnifiedInboxPage: React.FC = () => {
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
 
-  const [tickets, setTickets] = useState<InboxTicket[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  // ⚡ KHỞI TẠO STATE TỪ LOCALSTORAGE (0MS)
+  const filterCacheKey = useMemo(() => {
+    return `list_${selectedStatus}_${selectedCategory}_${selectedSource}_${sortOrder}`;
+  }, [selectedStatus, selectedCategory, selectedSource, sortOrder]);
+
+  const initialCachedTickets = useMemo(() => {
+    return getInboxCache<InboxTicket[]>(filterCacheKey) || [];
+  }, [filterCacheKey]);
+
+  const [tickets, setTickets] = useState<InboxTicket[]>(initialCachedTickets);
+  const [loading, setLoading] = useState<boolean>(initialCachedTickets.length === 0);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [expandedContent, setExpandedContent] = useState<Record<string, boolean>>({});
   const [previewFile, setPreviewFile] = useState<{ filename: string; url: string } | null>(null);
@@ -162,10 +187,10 @@ export const UnifiedInboxPage: React.FC = () => {
   const [creatingTask, setCreatingTask] = useState<boolean>(false);
   const [extractingCof, setExtractingCof] = useState<boolean>(false);
 
-  // Metadata Phả hệ & Khóa học
-  const [schoolsList, setSchoolsList] = useState<HierarchySchoolItem[]>([]);
-  const [categoriesList, setCategoriesList] = useState<string[]>(['SWRP', 'IR', 'ASP', 'Other']);
-  const [coursesList, setCoursesList] = useState<CourseItem[]>([]);
+  // Metadata Phả hệ & Khóa học (Lấy nhanh từ Storage)
+  const [schoolsList, setSchoolsList] = useState<HierarchySchoolItem[]>(() => getInboxCache<HierarchySchoolItem[]>('schools') || []);
+  const [categoriesList, setCategoriesList] = useState<string[]>(() => getInboxCache<string[]>('categories') || ['SWRP', 'IR', 'ASP', 'Other']);
+  const [coursesList, setCoursesList] = useState<CourseItem[]>(() => getInboxCache<CourseItem[]>('courses') || []);
   const [selectedSchool, setSelectedSchool] = useState<HierarchySchoolItem | null>(null);
 
   const [selectedCourses, setSelectedCourses] = useState<OrderCourseSelection[]>([
@@ -187,21 +212,31 @@ export const UnifiedInboxPage: React.FC = () => {
 
   const SPREADSHEET_ID = '1rZgFBD2PuZWL1jvQefcYZztCQvo99Lhx0GATTKvj1Go';
 
-  const loadTickets = async () => {
-    setLoading(true);
+  // ⚡ SWR TẢI TICKETS (KHÔNG BẬT SPINNER NẾU ĐÃ CÓ DỮ LIỆU CACHE)
+  const loadTickets = useCallback(async (forceSpinner = false) => {
+    const cached = getInboxCache<InboxTicket[]>(filterCacheKey);
+    if (cached && !forceSpinner) {
+      setTickets(cached);
+      setLoading(false);
+    } else if (forceSpinner || !cached) {
+      setLoading(true);
+    }
+
     try {
       const endpoint = `/tickets?sort=${sortOrder}&status=${selectedStatus}&category=${selectedCategory}&source=${selectedSource}`;
       const data = await fetchApi<InboxTicket[]>(endpoint);
+      setInboxCache(filterCacheKey, data || []);
       setTickets(data || []);
     } catch (err) {
-      console.error('Lỗi nạp ticket:', err);
-      toast.error('Không thể tải danh sách ticket: ' + (err as Error).message);
-      setTickets([]);
+      if (!cached) {
+        toast.error('Không thể tải danh sách ticket: ' + (err as Error).message);
+      }
     } finally {
       setLoading(false);
     }
-  };
+  }, [filterCacheKey, sortOrder, selectedStatus, selectedCategory, selectedSource]);
 
+  // Nạp metadata ngầm
   useEffect(() => {
     const loadMetadata = async () => {
       try {
@@ -210,11 +245,20 @@ export const UnifiedInboxPage: React.FC = () => {
           fetchApi<string[]>('/workspace/categories'),
           fetchApi<CourseItem[]>('/workspace/courses')
         ]);
-        setSchoolsList(schools || []);
-        if (cats && cats.length > 0) setCategoriesList(cats);
-        setCoursesList(courses || []);
+        if (schools) {
+          setInboxCache('schools', schools);
+          setSchoolsList(schools);
+        }
+        if (cats && cats.length > 0) {
+          setInboxCache('categories', cats);
+          setCategoriesList(cats);
+        }
+        if (courses) {
+          setInboxCache('courses', courses);
+          setCoursesList(courses);
+        }
       } catch (e) {
-        console.warn('Chưa nạp được metadata:', e);
+        console.warn('Chưa nạp được metadata ngầm:', e);
       }
     };
     loadMetadata();
@@ -232,7 +276,7 @@ export const UnifiedInboxPage: React.FC = () => {
 
   useEffect(() => {
     loadTickets();
-  }, [selectedCategory, selectedSource, selectedStatus, sortOrder]);
+  }, [loadTickets]);
 
   // Tìm kiếm tức thì đa trường (0ms)
   const filteredTickets = useMemo(() => {
@@ -275,52 +319,79 @@ export const UnifiedInboxPage: React.FC = () => {
     return '#';
   };
 
+  // ⚡ OPTIMISTIC UI: ĐỔI CATEGORY NGAY TỨC THÌ
   const handleCategoryChange = async (ticketId: string, newCategory: string) => {
+    const prevTickets = [...tickets];
+    const updated = tickets.map(t => t.id === ticketId ? { ...t, category: newCategory as any } : t);
+    setTickets(updated);
+    setInboxCache(filterCacheKey, updated);
+    toast.success(`Đã cập nhật phân loại thành [${newCategory.toUpperCase()}]`);
+
     try {
       await fetchApi(`/tickets/${ticketId}/category`, {
         method: 'PUT',
         body: JSON.stringify({ category: newCategory })
       });
-      toast.success(`Đã cập nhật phân loại thành [${newCategory.toUpperCase()}]`);
-      await loadTickets();
     } catch (err) {
+      setTickets(prevTickets);
       toast.error('Lỗi đổi Category: ' + (err as Error).message);
     }
   };
 
+  // ⚡ OPTIMISTIC UI: BỎ QUA TICKET
   const handleDismissTask = async (ticketId: string) => {
     setActionLoading(ticketId);
+    const prevTickets = [...tickets];
+    const updated = selectedStatus === 'all'
+      ? tickets.filter(t => t.id !== ticketId)
+      : tickets.map(t => t.id === ticketId ? { ...t, status: 'dismissed' as any } : t);
+
+    setTickets(updated);
+    setInboxCache(filterCacheKey, updated);
+    toast.success('Đã chuyển ticket vào mục Đã Bỏ Qua');
+
     try {
       await fetchApi(`/tickets/${ticketId}/dismiss`, { method: 'PUT' });
-      toast.success('Đã chuyển ticket vào mục Đã Bỏ Qua');
-      await loadTickets();
     } catch (err) {
+      setTickets(prevTickets);
       toast.error('Lỗi bỏ qua ticket: ' + (err as Error).message);
     } finally {
       setActionLoading(null);
     }
   };
 
+  // ⚡ OPTIMISTIC UI: KHÔI PHỤC TICKET
   const handleRestoreTask = async (ticketId: string) => {
     setActionLoading(ticketId);
+    const prevTickets = [...tickets];
+    const updated = tickets.map(t => t.id === ticketId ? { ...t, status: 'pending' as any } : t);
+    setTickets(updated);
+    setInboxCache(filterCacheKey, updated);
+    toast.success('Đã khôi phục ticket về Hòm Thư');
+
     try {
       await fetchApi(`/tickets/${ticketId}/restore`, { method: 'PUT' });
-      toast.success('Đã khôi phục ticket về Hòm Thư thành công');
-      await loadTickets();
     } catch (err) {
+      setTickets(prevTickets);
       toast.error('Lỗi khôi phục ticket: ' + (err as Error).message);
     } finally {
       setActionLoading(null);
     }
   };
 
+  // ⚡ OPTIMISTIC UI: HOÀN THÀNH TICKET
   const handleCompleteTask = async (ticketId: string) => {
     setActionLoading(ticketId);
+    const prevTickets = [...tickets];
+    const updated = tickets.map(t => t.id === ticketId ? { ...t, status: 'completed' as any } : t);
+    setTickets(updated);
+    setInboxCache(filterCacheKey, updated);
+    toast.success('Đã đánh dấu hoàn thành ticket!');
+
     try {
       await fetchApi(`/tickets/${ticketId}/complete`, { method: 'PUT' });
-      toast.success('Đã đánh dấu hoàn thành ticket!');
-      await loadTickets();
     } catch (err) {
+      setTickets(prevTickets);
       toast.error('Lỗi hoàn thành ticket: ' + (err as Error).message);
     } finally {
       setActionLoading(null);
@@ -344,7 +415,6 @@ export const UnifiedInboxPage: React.FC = () => {
     setSchoolSearchQuery(matchedSchool ? `${matchedSchool.school_name} (${matchedSchool.school_code})` : '');
     setKcTargetEmail(ticket.sender_email);
 
-    // Mặc định an toàn cho Keycloak: Tắt mọi hành động can thiệp
     setKcEnableResetPass(false);
     setKcEnableVerify(false);
     setKcEnableStatus(false);
@@ -354,7 +424,7 @@ export const UnifiedInboxPage: React.FC = () => {
 
     if (ticket.category === 'account_keycloak') {
       botType = 'keycloak_api';
-      setKcEnableResetPass(true); // Nếu AI gợi ý đổi pass thì bật sẵn
+      setKcEnableResetPass(true);
     } else if (ticket.category === 'lms_enroll') {
       botType = 'workspace_rpa';
       subFlow = 'lms_enroll';
@@ -370,7 +440,6 @@ export const UnifiedInboxPage: React.FC = () => {
     generatePayloadJson(botType, subFlow, ticket, matchedSchool, selectedCourses, ticket.sender_email, false, 'Ptv@2026', true, false, 'verify', false, 'enable');
   };
 
-  // Hàm đồng bộ JSON Payload linh hoạt
   const generatePayloadJson = (
     bType: BotType,
     wSubFlow: string,
@@ -637,7 +706,7 @@ export const UnifiedInboxPage: React.FC = () => {
       );
 
       setTaskModalTicket(null);
-      await loadTickets();
+      await loadTickets(true);
     } catch (err) {
       toast.error('Lỗi tạo tác vụ: ' + (err as Error).message);
     } finally {
@@ -729,7 +798,6 @@ export const UnifiedInboxPage: React.FC = () => {
 
       {/* THANH CÔNG CỤ TỐI ƯU */}
       <div className="bg-white dark:bg-slate-800/90 p-3.5 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 shadow-xs space-y-3">
-        {/* Hàng 1: Search Input */}
         <div className="relative w-full">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
@@ -754,7 +822,6 @@ export const UnifiedInboxPage: React.FC = () => {
           )}
         </div>
 
-        {/* Hàng 2: Dropdowns */}
         <div className="flex items-center justify-between flex-wrap gap-2.5 pt-1 border-t border-slate-100 dark:border-slate-700/50">
           <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">
             <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 shadow-2xs">
@@ -813,8 +880,8 @@ export const UnifiedInboxPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Ticket List */}
-      {loading ? (
+      {/* Ticket List - Hỗ trợ SWR 0ms */}
+      {loading && tickets.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-slate-500 gap-3">
           <Loader2 className="w-7 h-7 animate-spin text-violet-600" />
           <span className="text-xs font-medium">Đang nạp danh sách ticket...</span>
@@ -1104,11 +1171,10 @@ export const UnifiedInboxPage: React.FC = () => {
         </div>
       )}
 
-      {/* 🚀 MODAL REVAMP: KHỞI TẠO TÁC VỤ BOT PHÂN LUỒNG RÕ RÀNG & KEYCLOAK SAFE-BY-DEFAULT */}
+      {/* MODAL KHỞI TẠO TÁC VỤ BOT */}
       {taskModalTicket && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden space-y-4 p-6 max-h-[92vh] overflow-y-auto">
-            {/* Header Modal */}
             <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-700 flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <div className="p-2 bg-violet-100 dark:bg-violet-900/50 text-violet-600 dark:text-violet-300 rounded-xl">
@@ -1132,7 +1198,6 @@ export const UnifiedInboxPage: React.FC = () => {
               </button>
             </div>
 
-            {/* Ticket Info Card */}
             <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-700 text-xs space-y-1">
               <div className="font-semibold text-slate-800 dark:text-slate-200 truncate">
                 {taskModalTicket.subject || 'Không có tiêu đề'}
@@ -1144,7 +1209,7 @@ export const UnifiedInboxPage: React.FC = () => {
               </div>
             </div>
 
-            {/* 🎯 BƯỚC 1: CHỌN NHÓM CỖ MÁY BOT (SEGMENTED TABS) */}
+            {/* BƯỚC 1: CHỌN NHÓM CỖ MÁY BOT */}
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
                 1. Chọn Phân Hệ Tự Động Hóa:
@@ -1180,7 +1245,7 @@ export const UnifiedInboxPage: React.FC = () => {
               </div>
             </div>
 
-            {/* 🎯 BƯỚC 2A: NẾU CHỌN WORKSPACE RPA -> CHỌN 4 TIỂU LUỒNG */}
+            {/* BƯỚC 2A: WORKSPACE RPA */}
             {selectedBotType === 'workspace_rpa' && (
               <div className="space-y-4 p-4 rounded-2xl bg-violet-50/60 dark:bg-violet-950/20 border border-violet-200/70 dark:border-violet-800/40">
                 <div className="flex items-center justify-between flex-wrap gap-2">
@@ -1200,7 +1265,6 @@ export const UnifiedInboxPage: React.FC = () => {
                   </button>
                 </div>
 
-                {/* 4 Chế độ phụ */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-violet-100/60 dark:bg-violet-900/40 p-1.5 rounded-xl text-[11px] font-medium">
                   {[
                     { id: 'end_to_end', label: 'Trọn Gói (Order + User + LMS)' },
@@ -1225,7 +1289,7 @@ export const UnifiedInboxPage: React.FC = () => {
                   ))}
                 </div>
 
-                {/* 1. Chọn trường phả hệ */}
+                {/* Chọn trường phả hệ */}
                 <div className="space-y-1.5 relative" ref={schoolDropdownRef}>
                   <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
                     <span className="flex items-center gap-1.5">
@@ -1295,7 +1359,7 @@ export const UnifiedInboxPage: React.FC = () => {
                   )}
                 </div>
 
-                {/* 2. Chọn Khóa học (Nếu luồng có dính tới Khóa học/LMS) */}
+                {/* Chọn Khóa học */}
                 {(workspaceSubFlow === 'end_to_end' || workspaceSubFlow === 'order_contract' || workspaceSubFlow === 'lms_enroll') && (
                   <div className="space-y-3 pt-2 border-t border-violet-200/60 dark:border-violet-800/40">
                     <div className="flex items-center justify-between">
@@ -1404,7 +1468,7 @@ export const UnifiedInboxPage: React.FC = () => {
               </div>
             )}
 
-            {/* 🎯 BƯỚC 2B: KEYCLOAK IDENTITY GUARD (SAFE-BY-DEFAULT 3 CÔNG TẮC) */}
+            {/* BƯỚC 2B: KEYCLOAK IDENTITY GUARD */}
             {selectedBotType === 'keycloak_api' && (
               <div className="space-y-3.5 p-4 rounded-2xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-800/40">
                 <div className="flex items-center justify-between">
@@ -1417,7 +1481,6 @@ export const UnifiedInboxPage: React.FC = () => {
                   </span>
                 </div>
 
-                {/* Email mục tiêu */}
                 <div className="space-y-1">
                   <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Email hoặc Username Cần Xử Lý:</label>
                   <input
@@ -1432,24 +1495,21 @@ export const UnifiedInboxPage: React.FC = () => {
                   />
                 </div>
 
-                {/* 3 Thẻ Toggle Độc Lập Custom UI */}
                 <div className="space-y-3 pt-1">
-                  {/* Card 1: Reset Mật Khẩu */}
+                  {/* Card 1: Reset Pass */}
                   <div
-                    className={`p-3.5 rounded-2xl border transition-all ${
-                      kcEnableResetPass
-                        ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
-                        : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
-                    }`}
+                    className={`p-3.5 rounded-2xl border transition-all ${kcEnableResetPass
+                      ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
+                      : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
+                      }`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2.5">
                         <div
-                          className={`p-2 rounded-xl ${
-                            kcEnableResetPass
-                              ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300'
-                              : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
-                          }`}
+                          className={`p-2 rounded-xl ${kcEnableResetPass
+                            ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300'
+                            : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
+                            }`}
                         >
                           <KeyRound className="w-4 h-4" />
                         </div>
@@ -1468,9 +1528,8 @@ export const UnifiedInboxPage: React.FC = () => {
                           setKcEnableResetPass(val);
                           generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, val, kcTempPass, kcForceChange, kcEnableVerify, kcVerifyAction, kcEnableStatus, kcStatusAction);
                         }}
-                        className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${
-                          kcEnableResetPass ? 'bg-amber-500 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
-                        }`}
+                        className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${kcEnableResetPass ? 'bg-amber-500 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
+                          }`}
                       >
                         <span className="w-4 h-4 bg-white rounded-full shadow-md" />
                       </button>
@@ -1498,11 +1557,10 @@ export const UnifiedInboxPage: React.FC = () => {
                               setKcForceChange(val);
                               generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, true, kcTempPass, val, kcEnableVerify, kcVerifyAction, kcEnableStatus, kcStatusAction);
                             }}
-                            className={`w-4 h-4 rounded border flex items-center justify-center cursor-pointer transition ${
-                              kcForceChange
-                                ? 'bg-amber-500 border-amber-500 text-white'
-                                : 'border-slate-300 dark:border-slate-600'
-                            }`}
+                            className={`w-4 h-4 rounded border flex items-center justify-center cursor-pointer transition ${kcForceChange
+                              ? 'bg-amber-500 border-amber-500 text-white'
+                              : 'border-slate-300 dark:border-slate-600'
+                              }`}
                           >
                             {kcForceChange && <Check className="w-3 h-3" />}
                           </button>
@@ -1523,20 +1581,18 @@ export const UnifiedInboxPage: React.FC = () => {
 
                   {/* Card 2: Xác thực Email */}
                   <div
-                    className={`p-3.5 rounded-2xl border transition-all ${
-                      kcEnableVerify
-                        ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
-                        : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
-                    }`}
+                    className={`p-3.5 rounded-2xl border transition-all ${kcEnableVerify
+                      ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
+                      : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
+                      }`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2.5">
                         <div
-                          className={`p-2 rounded-xl ${
-                            kcEnableVerify
-                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300'
-                              : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
-                          }`}
+                          className={`p-2 rounded-xl ${kcEnableVerify
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300'
+                            : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
+                            }`}
                         >
                           <ShieldCheck className="w-4 h-4" />
                         </div>
@@ -1555,9 +1611,8 @@ export const UnifiedInboxPage: React.FC = () => {
                           setKcEnableVerify(val);
                           generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, kcEnableResetPass, kcTempPass, kcForceChange, val, kcVerifyAction, kcEnableStatus, kcStatusAction);
                         }}
-                        className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${
-                          kcEnableVerify ? 'bg-amber-500 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
-                        }`}
+                        className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${kcEnableVerify ? 'bg-amber-500 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
+                          }`}
                       >
                         <span className="w-4 h-4 bg-white rounded-full shadow-md" />
                       </button>
@@ -1571,11 +1626,10 @@ export const UnifiedInboxPage: React.FC = () => {
                             setKcVerifyAction('verify');
                             generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, kcEnableResetPass, kcTempPass, kcForceChange, true, 'verify', kcEnableStatus, kcStatusAction);
                           }}
-                          className={`flex-1 py-1.5 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${
-                            kcVerifyAction === 'verify'
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
-                              : 'border-slate-200 dark:border-slate-700 text-slate-500'
-                          }`}
+                          className={`flex-1 py-1.5 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcVerifyAction === 'verify'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
+                            : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                            }`}
                         >
                           ✓ Đã Xác Thực
                         </button>
@@ -1585,11 +1639,10 @@ export const UnifiedInboxPage: React.FC = () => {
                             setKcVerifyAction('unverify');
                             generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, kcEnableResetPass, kcTempPass, kcForceChange, true, 'unverify', kcEnableStatus, kcStatusAction);
                           }}
-                          className={`flex-1 py-1.5 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${
-                            kcVerifyAction === 'unverify'
-                              ? 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
-                              : 'border-slate-200 dark:border-slate-700 text-slate-500'
-                          }`}
+                          className={`flex-1 py-1.5 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcVerifyAction === 'unverify'
+                            ? 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
+                            : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                            }`}
                         >
                           ✗ Gỡ Xác Thực
                         </button>
@@ -1599,20 +1652,18 @@ export const UnifiedInboxPage: React.FC = () => {
 
                   {/* Card 3: Khóa / Mở Khóa */}
                   <div
-                    className={`p-3.5 rounded-2xl border transition-all ${
-                      kcEnableStatus
-                        ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
-                        : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
-                    }`}
+                    className={`p-3.5 rounded-2xl border transition-all ${kcEnableStatus
+                      ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
+                      : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
+                      }`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2.5">
                         <div
-                          className={`p-2 rounded-xl ${
-                            kcEnableStatus
-                              ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-300'
-                              : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
-                          }`}
+                          className={`p-2 rounded-xl ${kcEnableStatus
+                            ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-300'
+                            : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
+                            }`}
                         >
                           <UserX className="w-4 h-4" />
                         </div>
@@ -1631,9 +1682,8 @@ export const UnifiedInboxPage: React.FC = () => {
                           setKcEnableStatus(val);
                           generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, kcEnableResetPass, kcTempPass, kcForceChange, kcEnableVerify, kcVerifyAction, val, kcStatusAction);
                         }}
-                        className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${
-                          kcEnableStatus ? 'bg-amber-500 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
-                        }`}
+                        className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${kcEnableStatus ? 'bg-amber-500 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
+                          }`}
                       >
                         <span className="w-4 h-4 bg-white rounded-full shadow-md" />
                       </button>
@@ -1647,11 +1697,10 @@ export const UnifiedInboxPage: React.FC = () => {
                             setKcStatusAction('enable');
                             generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, kcEnableResetPass, kcTempPass, kcForceChange, kcEnableVerify, kcVerifyAction, true, 'enable');
                           }}
-                          className={`flex-1 py-1.5 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${
-                            kcStatusAction === 'enable'
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
-                              : 'border-slate-200 dark:border-slate-700 text-slate-500'
-                          }`}
+                          className={`flex-1 py-1.5 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcStatusAction === 'enable'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
+                            : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                            }`}
                         >
                           ✓ Kích Hoạt
                         </button>
@@ -1661,11 +1710,10 @@ export const UnifiedInboxPage: React.FC = () => {
                             setKcStatusAction('disable');
                             generatePayloadJson('keycloak_api', workspaceSubFlow, taskModalTicket, selectedSchool, selectedCourses, kcTargetEmail, kcEnableResetPass, kcTempPass, kcForceChange, kcEnableVerify, kcVerifyAction, true, 'disable');
                           }}
-                          className={`flex-1 py-1.5 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${
-                            kcStatusAction === 'disable'
-                              ? 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
-                              : 'border-slate-200 dark:border-slate-700 text-slate-500'
-                          }`}
+                          className={`flex-1 py-1.5 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcStatusAction === 'disable'
+                            ? 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
+                            : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                            }`}
                         >
                           ✗ Vô Hiệu Hóa
                         </button>
@@ -1676,7 +1724,7 @@ export const UnifiedInboxPage: React.FC = () => {
               </div>
             )}
 
-            {/* 🎯 BƯỚC 3: PAYLOAD JSON PREVIEW */}
+            {/* BƯỚC 3: PAYLOAD JSON PREVIEW */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
                 <span>Tham Số Thực Thi (JSON)</span>

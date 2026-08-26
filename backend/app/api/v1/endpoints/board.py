@@ -1,4 +1,5 @@
 # backend/app/api/v1/endpoints/board.py
+import time
 from fastapi import APIRouter, HTTPException, Query
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
@@ -6,6 +7,37 @@ from datetime import datetime, timezone, timedelta
 from app.core.supabase import get_supabase_client
 
 router = APIRouter()
+
+# =============================================================================
+# ⚡ IN-MEMORY CACHE CHO WORKBOARD (TỐC ĐỘ 1MS TỪ RAM)
+# =============================================================================
+class BoardMemoryCache:
+    def __init__(self, default_ttl: int = 300):  # Lưu RAM 5 phút
+        self._cache: Dict[str, Any] = {}
+
+    def get(self, key: str) -> Optional[Any]:
+        if key in self._cache:
+            data, expire_at = self._cache[key]
+            if time.time() < expire_at:
+                return data
+            del self._cache[key]
+        return None
+
+    def set(self, key: str, value: Any, ttl: Optional[int] = None):
+        expire_at = time.time() + (ttl if ttl is not None else 300)
+        self._cache[key] = (value, expire_at)
+
+    def invalidate(self, prefix: str = ""):
+        """Xóa cache khi có thao tác thêm / sửa / xóa / kéo thẻ."""
+        if not prefix:
+            self._cache.clear()
+        else:
+            keys_to_del = [k for k in self._cache if k.startswith(prefix)]
+            for k in keys_to_del:
+                del self._cache[k]
+
+board_cache = BoardMemoryCache(default_ttl=300)
+
 
 class SubtaskItem(BaseModel):
     id: str
@@ -76,21 +108,35 @@ class MoveCardSchema(BaseModel):
 
 
 # ===================================================================
-# 1. BOARDS & THÙNG RÁC (TRASH BIN 30 NGÀY)
+# 1. BOARDS & THÙNG RÁC (CÓ RAM CACHE)
 # ===================================================================
 @router.get("/boards")
 async def list_boards() -> List[Dict[str, Any]]:
-    """Lấy danh sách các Board còn hoạt động (chưa bị xóa)."""
+    """Lấy danh sách các Board hoạt động (Đọc siêu tốc từ RAM Cache)."""
+    cache_key = "boards_active"
+    cached = board_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     supabase = get_supabase_client()
     res = supabase.table("work_boards").select("*").eq("is_deleted", False).order("created_at", desc=False).execute()
-    return res.data or []
+    data = res.data or []
+    board_cache.set(cache_key, data, ttl=300)
+    return data
 
 @router.get("/boards/trash")
 async def list_trash_boards() -> List[Dict[str, Any]]:
-    """Lấy danh sách Board nằm trong Thùng Rác (30 ngày)."""
+    """Lấy danh sách Board nằm trong Thùng Rác."""
+    cache_key = "boards_trash"
+    cached = board_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     supabase = get_supabase_client()
     res = supabase.table("work_boards").select("*").eq("is_deleted", True).order("deleted_at", desc=True).execute()
-    return res.data or []
+    data = res.data or []
+    board_cache.set(cache_key, data, ttl=300)
+    return data
 
 @router.post("/boards")
 async def create_board(payload: BoardCreateSchema):
@@ -102,7 +148,6 @@ async def create_board(payload: BoardCreateSchema):
     board = res.data[0]
     board_id = board["id"]
 
-    # 6 Cột Mặc Định
     default_cols = [
         {"board_id": board_id, "title": "Tiếp Nhận", "color": "#64748b", "column_type": "backlog", "order_index": 0},
         {"board_id": board_id, "title": "Cần Làm", "color": "#38bdf8", "column_type": "todo", "order_index": 1},
@@ -112,6 +157,7 @@ async def create_board(payload: BoardCreateSchema):
         {"board_id": board_id, "title": "Hủy Bỏ", "color": "#f43f5e", "column_type": "abort", "order_index": 5},
     ]
     supabase.table("work_board_columns").insert(default_cols).execute()
+    board_cache.invalidate()
     return {"status": "success", "data": board}
 
 @router.put("/boards/{board_id}")
@@ -120,39 +166,47 @@ async def update_board(board_id: str, payload: BoardUpdateSchema):
     update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
     res = supabase.table("work_boards").update(update_data).eq("id", board_id).execute()
+    board_cache.invalidate()
     return {"status": "success", "data": res.data[0] if res.data else None}
 
 @router.delete("/boards/{board_id}")
 async def soft_delete_board(board_id: str):
-    """Xóa tạm thời đưa vào Thùng rác 30 ngày."""
     supabase = get_supabase_client()
     now_iso = datetime.now(timezone.utc).isoformat()
     supabase.table("work_boards").update({"is_deleted": True, "deleted_at": now_iso}).eq("id", board_id).execute()
+    board_cache.invalidate()
     return {"status": "success", "message": "Đã chuyển bảng vào Thùng rác."}
 
 @router.put("/boards/{board_id}/restore")
 async def restore_board(board_id: str):
-    """Khôi phục bảng từ Thùng rác."""
     supabase = get_supabase_client()
     supabase.table("work_boards").update({"is_deleted": False, "deleted_at": None}).eq("id", board_id).execute()
+    board_cache.invalidate()
     return {"status": "success", "message": "Đã khôi phục bảng thành công."}
 
 @router.delete("/boards/{board_id}/permanent")
 async def permanent_delete_board(board_id: str):
-    """Xóa vĩnh viễn bảng khỏi hệ thống."""
     supabase = get_supabase_client()
     supabase.table("work_boards").delete().eq("id", board_id).execute()
+    board_cache.invalidate()
     return {"status": "success", "message": "Đã xóa vĩnh viễn bảng."}
 
 
 # ===================================================================
-# 2. COLUMNS & CARDS CRUD
+# 2. COLUMNS & CARDS CRUD (CÓ RAM CACHE)
 # ===================================================================
 @router.get("/boards/{board_id}/columns")
 async def list_columns(board_id: str) -> List[Dict[str, Any]]:
+    cache_key = f"columns_{board_id}"
+    cached = board_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     supabase = get_supabase_client()
     res = supabase.table("work_board_columns").select("*").eq("board_id", board_id).order("order_index", desc=False).execute()
-    return res.data or []
+    data = res.data or []
+    board_cache.set(cache_key, data, ttl=300)
+    return data
 
 @router.post("/boards/{board_id}/columns")
 async def create_column(board_id: str, payload: ColumnCreateSchema):
@@ -160,6 +214,7 @@ async def create_column(board_id: str, payload: ColumnCreateSchema):
     data = payload.model_dump()
     data["board_id"] = board_id
     res = supabase.table("work_board_columns").insert(data).execute()
+    board_cache.invalidate(f"columns_{board_id}")
     return {"status": "success", "data": res.data[0] if res.data else None}
 
 @router.put("/columns/{column_id}")
@@ -167,20 +222,29 @@ async def update_column(column_id: str, payload: ColumnUpdateSchema):
     supabase = get_supabase_client()
     update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
     res = supabase.table("work_board_columns").update(update_data).eq("id", column_id).execute()
+    board_cache.invalidate("columns_")
     return {"status": "success", "data": res.data[0] if res.data else None}
 
 @router.delete("/columns/{column_id}")
 async def delete_column(column_id: str):
     supabase = get_supabase_client()
     supabase.table("work_board_columns").delete().eq("id", column_id).execute()
+    board_cache.invalidate("columns_")
     return {"status": "success", "message": "Đã xóa cột thành công."}
 
 @router.get("/boards/{board_id}/cards")
 async def list_board_cards(board_id: str) -> List[Dict[str, Any]]:
+    cache_key = f"cards_{board_id}"
+    cached = board_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     supabase = get_supabase_client()
     try:
         res = supabase.table("work_board_cards").select("*").eq("board_id", board_id).order("order_index", desc=False).execute()
-        return res.data or []
+        data = res.data or []
+        board_cache.set(cache_key, data, ttl=300)
+        return data
     except Exception as e:
         print(f"Error fetching cards: {e}")
         return []
@@ -192,6 +256,7 @@ async def create_card(payload: BoardCardCreateSchema):
     if data.get("subtasks"):
         data["subtasks"] = [s.model_dump() if hasattr(s, 'model_dump') else s for s in data["subtasks"]]
     res = supabase.table("work_board_cards").insert(data).execute()
+    board_cache.invalidate(f"cards_{payload.board_id}")
     return {"status": "success", "data": res.data[0] if res.data else None}
 
 @router.put("/cards/{card_id}")
@@ -202,6 +267,7 @@ async def update_card(card_id: str, payload: BoardCardUpdateSchema):
         update_data["subtasks"] = [s.model_dump() if hasattr(s, 'model_dump') else s for s in update_data["subtasks"]]
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
     res = supabase.table("work_board_cards").update(update_data).eq("id", card_id).execute()
+    board_cache.invalidate("cards_")
     return {"status": "success", "data": res.data[0] if res.data else None}
 
 @router.put("/cards/{card_id}/move")
@@ -213,10 +279,12 @@ async def move_card(card_id: str, payload: MoveCardSchema):
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
     res = supabase.table("work_board_cards").update(update_data).eq("id", card_id).execute()
+    board_cache.invalidate("cards_")
     return {"status": "success", "data": res.data[0] if res.data else None}
 
 @router.delete("/cards/{card_id}")
 async def delete_card(card_id: str):
     supabase = get_supabase_client()
     supabase.table("work_board_cards").delete().eq("id", card_id).execute()
+    board_cache.invalidate("cards_")
     return {"status": "success", "message": "Đã xóa thẻ."}

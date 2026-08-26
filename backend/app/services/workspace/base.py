@@ -67,17 +67,19 @@ class WorkspaceBaseService:
 
         try:
             logger.info(f"🔑 [{role_title}] Đang đăng nhập tài khoản '{username}'...")
-            response = await page.goto(f"{BASE_WORKSPACE_URL}/login", wait_until="networkidle", timeout=35000)
+            # 🚀 TỐI ƯU: Đổi sang domcontentloaded và chờ input username xuất hiện
+            response = await page.goto(f"{BASE_WORKSPACE_URL}/login", wait_until="domcontentloaded", timeout=25000)
             
             if response and response.status >= 500:
                 err = f"🔥 [{role_title}] Máy chủ Pythaverse bị sập hoặc bảo trì! (Mã HTTP: {response.status})"
                 logger.error(err)
                 return False, err
 
+            await page.wait_for_selector("input[name='username'], input[name='email'], #username", timeout=15000)
             await page.fill("input[name='username'], input[name='email'], #username", username)
             await page.fill("input[name='password'], #password", password)
             await page.click("button[type='submit'], input[type='submit'], button:has-text('Log In'), button:has-text('Đăng nhập')")
-            await page.wait_for_timeout(3500)
+            await page.wait_for_timeout(2500)
 
             kc_error_locator = page.locator(".alert-error, #input-error, span.kc-feedback-text, .alert.alert-warning, p.instruction")
             if await kc_error_locator.count() > 0 and await kc_error_locator.first.is_visible():

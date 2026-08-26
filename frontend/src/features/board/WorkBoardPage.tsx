@@ -42,14 +42,46 @@ const PRESET_OVERLAYS = [
     { name: 'Xám Khói (Slate)', color: '#334155' }
 ];
 
+// ⚡ TRỢ THỦ PERSISTENT STORAGE (LƯU LOCALSTORAGE - HIỂN THỊ TỨC THÌ 0MS)
+const getBoardLocalCache = <T,>(key: string): T | null => {
+    try {
+        const raw = localStorage.getItem(`ptv_wb_${key}`);
+        return raw ? JSON.parse(raw) : null;
+    } catch {
+        return null;
+    }
+};
+
+const setBoardLocalCache = (key: string, data: any) => {
+    try {
+        localStorage.setItem(`ptv_wb_${key}`, JSON.stringify(data));
+    } catch { }
+};
+
 export const WorkBoardPage: React.FC = () => {
-    // Boards & States
-    const [boards, setBoards] = useState<BoardItem[]>([]);
-    const [trashBoards, setTrashBoards] = useState<BoardItem[]>([]);
-    const [activeBoardId, setActiveBoardId] = useState<string>('');
-    const [columns, setColumns] = useState<BoardColumnItem[]>([]);
-    const [cards, setCards] = useState<BoardCardItem[]>([]);
-    const [isLoading, setIsLoading] = useState<boolean>(true);
+    // ⚡ KHỞI TẠO STATE NGAY TỪ LOCALSTORAGE (0MS TUYỆT ĐỐI)
+    const initialBoards = useMemo(() => getBoardLocalCache<BoardItem[]>('boards_list') || [], []);
+    const initialActiveId = useMemo(() => {
+        const savedId = getBoardLocalCache<string>('active_id');
+        if (savedId && initialBoards.some(b => b.id === savedId)) return savedId;
+        const defaultB = initialBoards.find(b => b.is_default) || initialBoards[0];
+        return defaultB ? defaultB.id : '';
+    }, [initialBoards]);
+
+    const initialColumns = useMemo(() => {
+        return initialActiveId ? (getBoardLocalCache<BoardColumnItem[]>(`cols_${initialActiveId}`) || []) : [];
+    }, [initialActiveId]);
+
+    const initialCards = useMemo(() => {
+        return initialActiveId ? (getBoardLocalCache<BoardCardItem[]>(`cards_${initialActiveId}`) || []) : [];
+    }, [initialActiveId]);
+
+    const [boards, setBoards] = useState<BoardItem[]>(initialBoards);
+    const [trashBoards, setTrashBoards] = useState<BoardItem[]>(() => getBoardLocalCache<BoardItem[]>('trash_list') || []);
+    const [activeBoardId, setActiveBoardId] = useState<string>(initialActiveId);
+    const [columns, setColumns] = useState<BoardColumnItem[]>(initialColumns);
+    const [cards, setCards] = useState<BoardCardItem[]>(initialCards);
+    const [isLoading, setIsLoading] = useState<boolean>(initialColumns.length === 0);
 
     // Filters
     const [searchQuery, setSearchQuery] = useState<string>('');
@@ -93,7 +125,7 @@ export const WorkBoardPage: React.FC = () => {
 
     const bgFileInputRef = useRef<HTMLInputElement>(null);
 
-    // 1. Tải Boards
+    // ⚡ 1. SWR TẢI BOARDS NGẦM
     const loadBoards = useCallback(async () => {
         try {
             const [activeData, trashData] = await Promise.all([
@@ -102,26 +134,42 @@ export const WorkBoardPage: React.FC = () => {
             ]);
             setBoards(activeData);
             setTrashBoards(trashData);
+            setBoardLocalCache('boards_list', activeData);
+            setBoardLocalCache('trash_list', trashData);
 
             if (activeData.length > 0) {
                 if (!activeBoardId || !activeData.some(b => b.id === activeBoardId)) {
                     const defaultB = activeData.find(b => b.is_default) || activeData[0];
                     setActiveBoardId(defaultB.id);
+                    setBoardLocalCache('active_id', defaultB.id);
                 }
             }
         } catch (err: any) {
-            toast.error('Lỗi nạp danh sách bảng: ' + (err.message || err));
+            if (boards.length === 0) {
+                toast.error('Lỗi nạp danh sách bảng: ' + (err.message || err));
+            }
         }
-    }, [activeBoardId]);
+    }, [activeBoardId, boards.length]);
 
     useEffect(() => {
         loadBoards();
     }, [loadBoards]);
 
-    // 2. Tải Dữ Liệu Board Đang Chọn
-    const loadBoardData = useCallback(async (boardId: string) => {
+    // ⚡ 2. SWR TẢI CỘT & THẺ NGẦM (KHÔNG HIỆN LOADING NẾU ĐÃ CÓ CACHE)
+    const loadBoardData = useCallback(async (boardId: string, forceSpinner = false) => {
         if (!boardId) return;
-        setIsLoading(true);
+
+        const cachedCols = getBoardLocalCache<BoardColumnItem[]>(`cols_${boardId}`);
+        const cachedCards = getBoardLocalCache<BoardCardItem[]>(`cards_${boardId}`);
+
+        if (cachedCols && cachedCards && !forceSpinner) {
+            setColumns(cachedCols);
+            setCards(cachedCards);
+            setIsLoading(false);
+        } else if (forceSpinner) {
+            setIsLoading(true);
+        }
+
         try {
             const [colsData, cardsData] = await Promise.all([
                 fetchApi<BoardColumnItem[]>(`/board/boards/${boardId}/columns`),
@@ -129,8 +177,12 @@ export const WorkBoardPage: React.FC = () => {
             ]);
             setColumns(colsData);
             setCards(cardsData);
+            setBoardLocalCache(`cols_${boardId}`, colsData);
+            setBoardLocalCache(`cards_${boardId}`, cardsData);
         } catch (err: any) {
-            toast.error('Lỗi tải dữ liệu bảng: ' + (err.message || err));
+            if (!cachedCols) {
+                toast.error('Lỗi tải dữ liệu bảng: ' + (err.message || err));
+            }
         } finally {
             setIsLoading(false);
         }
@@ -138,6 +190,7 @@ export const WorkBoardPage: React.FC = () => {
 
     useEffect(() => {
         if (activeBoardId) {
+            setBoardLocalCache('active_id', activeBoardId);
             loadBoardData(activeBoardId);
             const curBoard = boards.find(b => b.id === activeBoardId);
             if (curBoard) {
@@ -194,7 +247,7 @@ export const WorkBoardPage: React.FC = () => {
 
         const targetCol = columns.find(c => c.id === targetColumnId);
 
-        // Thông báo trạng thái chuyển cột
+        // Giữ nguyên 100% logic thông báo của anh
         if (targetCol?.column_type === 'done') {
             toast.success(`✓ Đã hoàn thành công việc: "${targetCard.title}"`);
         } else if (targetCol?.column_type === 'abort') {
@@ -203,7 +256,9 @@ export const WorkBoardPage: React.FC = () => {
             toast.info(`Đã chuyển sang [${targetCol?.title}]`);
         }
 
-        setCards(prev => prev.map(c => c.id === draggedCardId ? { ...c, column_id: targetColumnId } : c));
+        const updatedCards = cards.map(c => c.id === draggedCardId ? { ...c, column_id: targetColumnId } : c);
+        setCards(updatedCards);
+        setBoardLocalCache(`cards_${activeBoardId}`, updatedCards);
         setDraggedCardId(null);
 
         try {
@@ -212,11 +267,11 @@ export const WorkBoardPage: React.FC = () => {
                 body: JSON.stringify({ column_id: targetColumnId })
             });
         } catch (err: any) {
-            loadBoardData(activeBoardId);
+            loadBoardData(activeBoardId, true);
         }
     };
 
-    // 5. Thêm nhanh Thẻ với Priority & Category mặc định (Thấp & Khác)
+    // 5. Thêm nhanh Thẻ
     const handleQuickAddCard = async (colId: string) => {
         if (!quickAddTitle.trim()) {
             setQuickAddColId(null);
@@ -238,7 +293,9 @@ export const WorkBoardPage: React.FC = () => {
             });
 
             toast.success('Đã thêm thẻ mới!');
-            setCards(prev => [res.data, ...prev]);
+            const updated = [res.data, ...cards];
+            setCards(updated);
+            setBoardLocalCache(`cards_${activeBoardId}`, updated);
             setQuickAddTitle('');
             setQuickAddColId(null);
             setQuickAddPriority('low');
@@ -248,7 +305,7 @@ export const WorkBoardPage: React.FC = () => {
         }
     };
 
-    // 6. Upload Ảnh Nền Board lên Supabase
+    // 6. Upload Ảnh Nền Board
     const handleUploadBgFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file || !activeBoardId) return;
@@ -274,7 +331,9 @@ export const WorkBoardPage: React.FC = () => {
                 body: JSON.stringify({ background_url: publicUrl })
             });
 
-            setBoards(prev => prev.map(b => b.id === activeBoardId ? { ...b, background_url: publicUrl } : b));
+            const updatedBoards = boards.map(b => b.id === activeBoardId ? { ...b, background_url: publicUrl } : b);
+            setBoards(updatedBoards);
+            setBoardLocalCache('boards_list', updatedBoards);
             toast.success('Đã áp dụng ảnh nền mới!', { id: toastId });
         } catch (err: any) {
             toast.error('Lỗi tải ảnh: ' + (err.message || err), { id: toastId });
@@ -284,7 +343,7 @@ export const WorkBoardPage: React.FC = () => {
         }
     };
 
-    // 7. Lưu Toàn Bộ Cài Đặt Board (Độ mờ, Overlay, Categories, Priorities)
+    // 7. Lưu Cài Đặt Board
     const handleSaveBoardSettings = async () => {
         if (!activeBoardId) return;
         try {
@@ -300,7 +359,7 @@ export const WorkBoardPage: React.FC = () => {
                 })
             });
 
-            setBoards(prev => prev.map(b => b.id === activeBoardId ? {
+            const updatedBoards = boards.map(b => b.id === activeBoardId ? {
                 ...b,
                 overlay_color: boardOverlayColor,
                 overlay_opacity: boardOverlayOpacity,
@@ -308,8 +367,10 @@ export const WorkBoardPage: React.FC = () => {
                 card_opacity: boardCardOpacity,
                 categories: boardCategories,
                 priorities: boardPriorities
-            } : b));
+            } : b);
 
+            setBoards(updatedBoards);
+            setBoardLocalCache('boards_list', updatedBoards);
             toast.success('Đã lưu toàn bộ thiết lập Board!');
             setIsSettingsModalOpen(false);
         } catch (err: any) {
@@ -317,7 +378,7 @@ export const WorkBoardPage: React.FC = () => {
         }
     };
 
-    // 8. Xóa Board (Đưa vào Thùng Rác 30 ngày)
+    // 8. Xóa Board (Soft Delete)
     const handleSoftDeleteBoard = async () => {
         if (!activeBoardId) return;
         if (!window.confirm(`Chuyển bảng "${activeBoard?.title}" vào Thùng rác? (Bảng sẽ tự động xóa vĩnh viễn sau 30 ngày).`)) return;
@@ -332,7 +393,7 @@ export const WorkBoardPage: React.FC = () => {
         }
     };
 
-    // 9. Khôi phục Board từ Thùng Rác
+    // 9. Khôi phục Board
     const handleRestoreBoard = async (bId: string) => {
         try {
             await fetchApi(`/board/boards/${bId}/restore`, { method: 'PUT' });
@@ -365,7 +426,9 @@ export const WorkBoardPage: React.FC = () => {
                 body: JSON.stringify(activeCard)
             });
             toast.success('Đã lưu thay đổi thẻ!');
-            setCards(prev => prev.map(c => c.id === activeCard.id ? res.data : c));
+            const updated = cards.map(c => c.id === activeCard.id ? res.data : c);
+            setCards(updated);
+            setBoardLocalCache(`cards_${activeBoardId}`, updated);
             setIsCardModalOpen(false);
         } catch (err: any) {
             toast.error('Lỗi lưu thẻ: ' + (err.message || err));
@@ -374,7 +437,6 @@ export const WorkBoardPage: React.FC = () => {
         }
     };
 
-    // Helper Màu Cột / Thẻ RGBA
     const hexToRgba = (hex: string, opacity: number) => {
         let c = hex.replace('#', '');
         if (c.length === 3) c = c.split('').map(x => x + x).join('');
@@ -399,7 +461,7 @@ export const WorkBoardPage: React.FC = () => {
                 }}
             />
 
-            {/* Content Container (Full Width tràn viền) */}
+            {/* Content Container */}
             <div className="relative z-10 w-full h-full flex flex-col p-4 space-y-3">
                 {/* Top Control Bar */}
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-900/80 backdrop-blur-md p-3 rounded-2xl border border-slate-700/70 shadow-xl text-xs">
@@ -421,7 +483,7 @@ export const WorkBoardPage: React.FC = () => {
                         {/* Nút Tạo Board */}
                         <button
                             onClick={() => setIsNewBoardModalOpen(true)}
-                            className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl border border-slate-700 transition-colors"
+                            className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl border border-slate-700 transition-colors cursor-pointer"
                         >
                             <FolderPlus className="w-3.5 h-3.5 text-violet-400" />
                             Tạo Board
@@ -430,7 +492,7 @@ export const WorkBoardPage: React.FC = () => {
                         {/* Nút Cài Đặt Chuyên Sâu */}
                         <button
                             onClick={() => setIsSettingsModalOpen(true)}
-                            className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl border border-slate-700 transition-colors"
+                            className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl border border-slate-700 transition-colors cursor-pointer"
                         >
                             <Sliders className="w-3.5 h-3.5 text-emerald-400" />
                             Tùy Chỉnh Board
@@ -445,7 +507,7 @@ export const WorkBoardPage: React.FC = () => {
                                 setColumnFormType('custom');
                                 setIsColumnModalOpen(true);
                             }}
-                            className="flex items-center gap-1 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white font-semibold rounded-xl transition-all shadow-xs"
+                            className="flex items-center gap-1 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white font-semibold rounded-xl transition-all shadow-xs cursor-pointer"
                         >
                             <Plus className="w-3.5 h-3.5" />
                             Thêm Cột
@@ -469,7 +531,7 @@ export const WorkBoardPage: React.FC = () => {
                         <select
                             value={filterPriority}
                             onChange={(e) => setFilterPriority(e.target.value)}
-                            className="px-2.5 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-200 outline-none"
+                            className="px-2.5 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-200 outline-none cursor-pointer"
                         >
                             <option value="all">⚡ Tất cả Priority</option>
                             {boardPriorities.map(p => (
@@ -481,7 +543,7 @@ export const WorkBoardPage: React.FC = () => {
                         <select
                             value={filterCategory}
                             onChange={(e) => setFilterCategory(e.target.value)}
-                            className="px-2.5 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-200 outline-none"
+                            className="px-2.5 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-200 outline-none cursor-pointer"
                         >
                             <option value="all">🏷️ Tất cả Phân loại</option>
                             {boardCategories.map(cat => (
@@ -491,7 +553,7 @@ export const WorkBoardPage: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Kanban Board Columns Area (Full Width Hỗ Trợ Cuộn Ngang) */}
+                {/* Kanban Board Columns Area */}
                 <div className="flex-1 flex gap-3.5 items-start overflow-x-auto pb-2">
                     {columns.map(col => {
                         const colCards = filteredCards.filter(c => c.column_id === col.id);
@@ -528,7 +590,7 @@ export const WorkBoardPage: React.FC = () => {
                                                 setColumnFormType(col.column_type);
                                                 setIsColumnModalOpen(true);
                                             }}
-                                            className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-md"
+                                            className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-md cursor-pointer"
                                         >
                                             <Settings2 className="w-3.5 h-3.5" />
                                         </button>
@@ -539,14 +601,14 @@ export const WorkBoardPage: React.FC = () => {
                                                 setQuickAddPriority('low');
                                                 setQuickAddCategory('Khác');
                                             }}
-                                            className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-md"
+                                            className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-md cursor-pointer"
                                         >
                                             <Plus className="w-3.5 h-3.5" />
                                         </button>
                                     </div>
                                 </div>
 
-                                {/* Ô Thêm Nhanh Thẻ (Có set Priority & Category mặc định Thấp & Khác) */}
+                                {/* Ô Thêm Nhanh Thẻ */}
                                 {quickAddColId === col.id && (
                                     <div className="bg-slate-800/90 p-2.5 rounded-xl border border-violet-500 mb-2.5 text-xs space-y-2 animate-in fade-in">
                                         <textarea
@@ -562,7 +624,7 @@ export const WorkBoardPage: React.FC = () => {
                                             <select
                                                 value={quickAddPriority}
                                                 onChange={(e) => setQuickAddPriority(e.target.value)}
-                                                className="p-1 bg-slate-900 border border-slate-700 rounded text-[11px] text-slate-300 outline-none"
+                                                className="p-1 bg-slate-900 border border-slate-700 rounded text-[11px] text-slate-300 outline-none cursor-pointer"
                                             >
                                                 {boardPriorities.map(p => (
                                                     <option key={p.key} value={p.key}>{p.label}</option>
@@ -572,7 +634,7 @@ export const WorkBoardPage: React.FC = () => {
                                             <select
                                                 value={quickAddCategory}
                                                 onChange={(e) => setQuickAddCategory(e.target.value)}
-                                                className="p-1 bg-slate-900 border border-slate-700 rounded text-[11px] text-slate-300 outline-none"
+                                                className="p-1 bg-slate-900 border border-slate-700 rounded text-[11px] text-slate-300 outline-none cursor-pointer"
                                             >
                                                 {boardCategories.map(cat => (
                                                     <option key={cat} value={cat}>{cat}</option>
@@ -583,13 +645,13 @@ export const WorkBoardPage: React.FC = () => {
                                         <div className="flex items-center justify-end gap-1.5 pt-1">
                                             <button
                                                 onClick={() => setQuickAddColId(null)}
-                                                className="px-2 py-1 text-[11px] text-slate-400 hover:text-slate-200"
+                                                className="px-2 py-1 text-[11px] text-slate-400 hover:text-slate-200 cursor-pointer"
                                             >
                                                 Hủy
                                             </button>
                                             <button
                                                 onClick={() => handleQuickAddCard(col.id)}
-                                                className="px-3 py-1 bg-violet-600 text-white rounded-lg text-[11px] font-semibold hover:bg-violet-700"
+                                                className="px-3 py-1 bg-violet-600 text-white rounded-lg text-[11px] font-semibold hover:bg-violet-700 cursor-pointer"
                                             >
                                                 Thêm Thẻ
                                             </button>
@@ -641,7 +703,7 @@ export const WorkBoardPage: React.FC = () => {
                                                     </span>
                                                 </div>
 
-                                                {/* Tiêu đề (Hiệu ứng Gạch Ngang nếu Abort, Tích Xanh nếu Done) */}
+                                                {/* Tiêu đề */}
                                                 <div className="flex items-start gap-1.5 mb-2">
                                                     {isDoneCol && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />}
                                                     {isAbortCol && <Ban className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />}
@@ -665,7 +727,7 @@ export const WorkBoardPage: React.FC = () => {
                                                     </div>
                                                 )}
 
-                                                {/* Footer: User & Date */}
+                                                {/* Footer */}
                                                 <div className="flex items-center justify-between pt-2 border-t border-slate-700/60 text-[10px] text-slate-400">
                                                     <span className="flex items-center gap-1 truncate max-w-[120px]">
                                                         <User className="w-3 h-3" />
@@ -688,15 +750,13 @@ export const WorkBoardPage: React.FC = () => {
                 </div>
             </div>
 
-            {/* ==================================================================== */}
-            {/* MODAL: TÙY CHỈNH BOARD CHUYÊN SÂU (3 TABS)                          */}
-            {/* ==================================================================== */}
+            {/* MODAL: TÙY CHỈNH BOARD */}
             {isSettingsModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs animate-in fade-in">
                     <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-xl w-full p-6 text-xs text-slate-200 shadow-2xl relative max-h-[90vh] flex flex-col">
                         <button
                             onClick={() => setIsSettingsModalOpen(false)}
-                            className="absolute right-4 top-4 text-slate-400 hover:text-white"
+                            className="absolute right-4 top-4 text-slate-400 hover:text-white cursor-pointer"
                         >
                             <X className="w-5 h-5" />
                         </button>
@@ -711,7 +771,7 @@ export const WorkBoardPage: React.FC = () => {
                             <button
                                 type="button"
                                 onClick={() => setSettingsTab('visuals')}
-                                className={`flex-1 py-1.5 rounded-lg font-semibold transition-all ${settingsTab === 'visuals' ? 'bg-slate-700 text-white shadow-xs' : 'text-slate-400'
+                                className={`flex-1 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${settingsTab === 'visuals' ? 'bg-slate-700 text-white shadow-xs' : 'text-slate-400'
                                     }`}
                             >
                                 🎨 Hình Nền & Độ Mờ
@@ -719,7 +779,7 @@ export const WorkBoardPage: React.FC = () => {
                             <button
                                 type="button"
                                 onClick={() => setSettingsTab('taxonomy')}
-                                className={`flex-1 py-1.5 rounded-lg font-semibold transition-all ${settingsTab === 'taxonomy' ? 'bg-slate-700 text-white shadow-xs' : 'text-slate-400'
+                                className={`flex-1 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${settingsTab === 'taxonomy' ? 'bg-slate-700 text-white shadow-xs' : 'text-slate-400'
                                     }`}
                             >
                                 🏷️ Phân Loại & Priority
@@ -727,7 +787,7 @@ export const WorkBoardPage: React.FC = () => {
                             <button
                                 type="button"
                                 onClick={() => setSettingsTab('trash')}
-                                className={`flex-1 py-1.5 rounded-lg font-semibold transition-all ${settingsTab === 'trash' ? 'bg-slate-700 text-white shadow-xs' : 'text-slate-400'
+                                className={`flex-1 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${settingsTab === 'trash' ? 'bg-slate-700 text-white shadow-xs' : 'text-slate-400'
                                     }`}
                             >
                                 🗑️ Thùng Rác Board ({trashBoards.length})
@@ -735,10 +795,8 @@ export const WorkBoardPage: React.FC = () => {
                         </div>
 
                         <div className="flex-1 overflow-y-auto space-y-4 pr-1">
-                            {/* TAB 1: VISUALS & OPACITY SLIDERS */}
                             {settingsTab === 'visuals' && (
                                 <div className="space-y-4">
-                                    {/* Upload Ảnh */}
                                     <div>
                                         <label className="block font-semibold mb-1">Ảnh Nền Board:</label>
                                         <input type="file" ref={bgFileInputRef} onChange={handleUploadBgFile} accept="image/*" className="hidden" />
@@ -758,7 +816,6 @@ export const WorkBoardPage: React.FC = () => {
                                         </div>
                                     </div>
 
-                                    {/* Màu Lớp Phủ Overlay */}
                                     <div>
                                         <label className="block font-semibold mb-1">Màu Lớp Phủ (Overlay Color):</label>
                                         <div className="flex gap-2 flex-wrap">
@@ -767,7 +824,7 @@ export const WorkBoardPage: React.FC = () => {
                                                     key={ov.name}
                                                     type="button"
                                                     onClick={() => setBoardOverlayColor(ov.color)}
-                                                    className={`px-3 py-1 rounded-lg border text-[11px] font-medium transition-all ${boardOverlayColor === ov.color ? 'border-emerald-400 bg-emerald-950/30 text-emerald-300' : 'border-slate-700 bg-slate-800 text-slate-300'
+                                                    className={`px-3 py-1 rounded-lg border text-[11px] font-medium transition-all cursor-pointer ${boardOverlayColor === ov.color ? 'border-emerald-400 bg-emerald-950/30 text-emerald-300' : 'border-slate-700 bg-slate-800 text-slate-300'
                                                         }`}
                                                 >
                                                     {ov.name}
@@ -776,7 +833,6 @@ export const WorkBoardPage: React.FC = () => {
                                         </div>
                                     </div>
 
-                                    {/* 🎚️ 3 THANH TRƯỢT OPACITY TỪ 0 - 100% */}
                                     <div className="bg-slate-800/60 p-3.5 rounded-xl border border-slate-700 space-y-3">
                                         <div>
                                             <div className="flex justify-between mb-1">
@@ -829,10 +885,8 @@ export const WorkBoardPage: React.FC = () => {
                                 </div>
                             )}
 
-                            {/* TAB 2: TAXONOMY (CATEGORIES & PRIORITIES) */}
                             {settingsTab === 'taxonomy' && (
                                 <div className="space-y-4">
-                                    {/* Danh Mục Categories */}
                                     <div>
                                         <label className="block font-semibold mb-1.5">Danh sách Phân Loại (Categories) áp dụng cho Board:</label>
                                         <div className="flex flex-wrap gap-1.5 mb-2">
@@ -845,7 +899,7 @@ export const WorkBoardPage: React.FC = () => {
                                                                 const updated = boardCategories.filter((_, i) => i !== idx);
                                                                 setBoards(prev => prev.map(b => b.id === activeBoardId ? { ...b, categories: updated } : b));
                                                             }}
-                                                            className="text-slate-400 hover:text-rose-400"
+                                                            className="text-slate-400 hover:text-rose-400 cursor-pointer"
                                                         >
                                                             <X className="w-3 h-3" />
                                                         </button>
@@ -870,7 +924,7 @@ export const WorkBoardPage: React.FC = () => {
                                                     setBoards(prev => prev.map(b => b.id === activeBoardId ? { ...b, categories: updated } : b));
                                                     setNewCategoryInput('');
                                                 }}
-                                                className="px-3 py-2 bg-violet-600 text-white rounded-xl font-semibold"
+                                                className="px-3 py-2 bg-violet-600 text-white rounded-xl font-semibold cursor-pointer"
                                             >
                                                 Thêm
                                             </button>
@@ -879,7 +933,6 @@ export const WorkBoardPage: React.FC = () => {
                                 </div>
                             )}
 
-                            {/* TAB 3: TRASH BIN & BOARD DELETION */}
                             {settingsTab === 'trash' && (
                                 <div className="space-y-4">
                                     <div className="p-3 bg-rose-950/30 border border-rose-800/60 rounded-xl flex items-center justify-between">
@@ -890,7 +943,7 @@ export const WorkBoardPage: React.FC = () => {
                                         <button
                                             type="button"
                                             onClick={handleSoftDeleteBoard}
-                                            className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-semibold rounded-lg"
+                                            className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-semibold rounded-lg cursor-pointer"
                                         >
                                             Xóa Bảng Này
                                         </button>
@@ -914,13 +967,13 @@ export const WorkBoardPage: React.FC = () => {
                                                         <div className="flex items-center gap-2">
                                                             <button
                                                                 onClick={() => handleRestoreBoard(tb.id)}
-                                                                className="flex items-center gap-1 px-2.5 py-1 bg-emerald-600/30 text-emerald-300 hover:bg-emerald-600/50 rounded-lg text-[11px]"
+                                                                className="flex items-center gap-1 px-2.5 py-1 bg-emerald-600/30 text-emerald-300 hover:bg-emerald-600/50 rounded-lg text-[11px] cursor-pointer"
                                                             >
                                                                 <RotateCcw className="w-3 h-3" /> Khôi phục
                                                             </button>
                                                             <button
                                                                 onClick={() => handlePermanentDeleteBoard(tb.id)}
-                                                                className="p-1 text-rose-400 hover:text-rose-300"
+                                                                className="p-1 text-rose-400 hover:text-rose-300 cursor-pointer"
                                                                 title="Xóa vĩnh viễn"
                                                             >
                                                                 <Trash2 className="w-3.5 h-3.5" />
@@ -939,7 +992,7 @@ export const WorkBoardPage: React.FC = () => {
                             <button
                                 type="button"
                                 onClick={() => setIsSettingsModalOpen(false)}
-                                className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl"
+                                className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl cursor-pointer"
                             >
                                 Đóng
                             </button>
@@ -947,7 +1000,7 @@ export const WorkBoardPage: React.FC = () => {
                                 <button
                                     type="button"
                                     onClick={handleSaveBoardSettings}
-                                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl"
+                                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl cursor-pointer"
                                 >
                                     Lưu Thiết Lập
                                 </button>
@@ -957,9 +1010,7 @@ export const WorkBoardPage: React.FC = () => {
                 </div>
             )}
 
-            {/* ==================================================================== */}
-            {/* MODAL: TẠO BOARD MỚI                                                 */}
-            {/* ==================================================================== */}
+            {/* MODAL: TẠO BOARD MỚI */}
             {isNewBoardModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
                     <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 text-xs text-slate-200">
@@ -974,8 +1025,11 @@ export const WorkBoardPage: React.FC = () => {
                                 body: JSON.stringify({ title: newBoardTitle.trim() })
                             });
                             toast.success(`Đã tạo bảng "${newBoardTitle}"!`);
-                            setBoards(prev => [...prev, res.data]);
+                            const updated = [...boards, res.data];
+                            setBoards(updated);
+                            setBoardLocalCache('boards_list', updated);
                             setActiveBoardId(res.data.id);
+                            setBoardLocalCache('active_id', res.data.id);
                             setIsNewBoardModalOpen(false);
                             setNewBoardTitle('');
                         }} className="space-y-4">
@@ -991,17 +1045,15 @@ export const WorkBoardPage: React.FC = () => {
                                 />
                             </div>
                             <div className="flex justify-end gap-2">
-                                <button type="button" onClick={() => setIsNewBoardModalOpen(false)} className="px-4 py-2 bg-slate-800 text-slate-400 rounded-xl">Hủy</button>
-                                <button type="submit" className="px-4 py-2 bg-violet-600 text-white font-semibold rounded-xl">Tạo Board</button>
+                                <button type="button" onClick={() => setIsNewBoardModalOpen(false)} className="px-4 py-2 bg-slate-800 text-slate-400 rounded-xl cursor-pointer">Hủy</button>
+                                <button type="submit" className="px-4 py-2 bg-violet-600 text-white font-semibold rounded-xl cursor-pointer">Tạo Board</button>
                             </div>
                         </form>
                     </div>
                 </div>
             )}
 
-            {/* ==================================================================== */}
-            {/* MODAL: THÊM / SỬA CỘT                                                */}
-            {/* ==================================================================== */}
+            {/* MODAL: THÊM / SỬA CỘT */}
             {isColumnModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
                     <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 text-xs text-slate-200">
@@ -1022,7 +1074,7 @@ export const WorkBoardPage: React.FC = () => {
                                 });
                             }
                             setIsColumnModalOpen(false);
-                            loadBoardData(activeBoardId);
+                            loadBoardData(activeBoardId, true);
                         }} className="space-y-3">
                             <div>
                                 <label className="block font-semibold mb-1">Tên Cột</label>
@@ -1039,7 +1091,7 @@ export const WorkBoardPage: React.FC = () => {
                                 <select
                                     value={columnFormType}
                                     onChange={(e) => setColumnFormType(e.target.value)}
-                                    className="w-full p-2 bg-slate-800 border border-slate-700 rounded-xl text-white outline-none"
+                                    className="w-full p-2 bg-slate-800 border border-slate-700 rounded-xl text-white outline-none cursor-pointer"
                                 >
                                     <option value="custom">📌 Thông thường</option>
                                     <option value="done">✓ Hoàn thành (Tích xanh & Mờ dịu)</option>
@@ -1047,21 +1099,19 @@ export const WorkBoardPage: React.FC = () => {
                                 </select>
                             </div>
                             <div className="flex justify-end gap-2 pt-2">
-                                <button type="button" onClick={() => setIsColumnModalOpen(false)} className="px-4 py-2 bg-slate-800 rounded-xl text-slate-400">Hủy</button>
-                                <button type="submit" className="px-4 py-2 bg-violet-600 text-white font-semibold rounded-xl">Lưu Cột</button>
+                                <button type="button" onClick={() => setIsColumnModalOpen(false)} className="px-4 py-2 bg-slate-800 rounded-xl text-slate-400 cursor-pointer">Hủy</button>
+                                <button type="submit" className="px-4 py-2 bg-violet-600 text-white font-semibold rounded-xl cursor-pointer">Lưu Cột</button>
                             </div>
                         </form>
                     </div>
                 </div>
             )}
 
-            {/* ==================================================================== */}
-            {/* MODAL: CHI TIẾT CARD                                                 */}
-            {/* ==================================================================== */}
+            {/* MODAL: CHI TIẾT CARD */}
             {isCardModalOpen && activeCard && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs">
                     <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-xl w-full p-6 text-xs text-slate-200 relative max-h-[90vh] flex flex-col">
-                        <button onClick={() => setIsCardModalOpen(false)} className="absolute right-4 top-4 text-slate-400 hover:text-white">
+                        <button onClick={() => setIsCardModalOpen(false)} className="absolute right-4 top-4 text-slate-400 hover:text-white cursor-pointer">
                             <X className="w-5 h-5" />
                         </button>
 
@@ -1079,7 +1129,7 @@ export const WorkBoardPage: React.FC = () => {
                                     <select
                                         value={activeCard.priority}
                                         onChange={(e) => setActiveCard({ ...activeCard, priority: e.target.value })}
-                                        className="w-full p-1.5 bg-slate-900 border border-slate-700 rounded-lg text-white font-bold"
+                                        className="w-full p-1.5 bg-slate-900 border border-slate-700 rounded-lg text-white font-bold cursor-pointer"
                                     >
                                         {boardPriorities.map(p => (
                                             <option key={p.key} value={p.key}>{p.label}</option>
@@ -1092,7 +1142,7 @@ export const WorkBoardPage: React.FC = () => {
                                     <select
                                         value={activeCard.category || 'Khác'}
                                         onChange={(e) => setActiveCard({ ...activeCard, category: e.target.value })}
-                                        className="w-full p-1.5 bg-slate-900 border border-slate-700 rounded-lg text-white"
+                                        className="w-full p-1.5 bg-slate-900 border border-slate-700 rounded-lg text-white cursor-pointer"
                                     >
                                         {boardCategories.map(cat => (
                                             <option key={cat} value={cat}>{cat}</option>
@@ -1132,7 +1182,6 @@ export const WorkBoardPage: React.FC = () => {
                                 />
                             </div>
 
-                            {/* Subtasks */}
                             <div>
                                 <label className="block font-semibold mb-1 flex justify-between">
                                     <span>Checklist công việc:</span>
@@ -1153,7 +1202,7 @@ export const WorkBoardPage: React.FC = () => {
                                             <button onClick={() => {
                                                 const updated = (activeCard.subtasks || []).filter(s => s.id !== sub.id);
                                                 setActiveCard({ ...activeCard, subtasks: updated });
-                                            }} className="text-slate-400 hover:text-rose-400"><X className="w-3.5 h-3.5" /></button>
+                                            }} className="text-slate-400 hover:text-rose-400 cursor-pointer"><X className="w-3.5 h-3.5" /></button>
                                         </div>
                                     ))}
                                 </div>
@@ -1175,7 +1224,7 @@ export const WorkBoardPage: React.FC = () => {
                                             });
                                             setNewSubtaskTitle('');
                                         }}
-                                        className="px-3 py-2 bg-slate-800 text-white rounded-xl"
+                                        className="px-3 py-2 bg-slate-800 text-white rounded-xl cursor-pointer"
                                     >
                                         Thêm
                                     </button>
@@ -1189,16 +1238,18 @@ export const WorkBoardPage: React.FC = () => {
                                 onClick={async () => {
                                     if (!window.confirm('Xóa thẻ này?')) return;
                                     await fetchApi(`/board/cards/${activeCard.id}`, { method: 'DELETE' });
-                                    setCards(prev => prev.filter(c => c.id !== activeCard.id));
+                                    const updated = cards.filter(c => c.id !== activeCard.id);
+                                    setCards(updated);
+                                    setBoardLocalCache(`cards_${activeBoardId}`, updated);
                                     setIsCardModalOpen(false);
                                 }}
-                                className="text-rose-400 font-semibold"
+                                className="text-rose-400 font-semibold cursor-pointer"
                             >
                                 Xóa Thẻ
                             </button>
                             <div className="flex gap-2">
-                                <button onClick={() => setIsCardModalOpen(false)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl">Hủy</button>
-                                <button disabled={isSavingCard} onClick={handleSaveCardDetail} className="px-4 py-2 bg-violet-600 text-white font-semibold rounded-xl">
+                                <button onClick={() => setIsCardModalOpen(false)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl cursor-pointer">Hủy</button>
+                                <button disabled={isSavingCard} onClick={handleSaveCardDetail} className="px-4 py-2 bg-violet-600 text-white font-semibold rounded-xl cursor-pointer">
                                     Lưu Thay Đổi
                                 </button>
                             </div>

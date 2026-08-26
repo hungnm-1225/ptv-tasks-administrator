@@ -1,5 +1,5 @@
 // frontend/src/features/tasks/TaskManagementPage.tsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   CheckCircle2,
   Clock,
@@ -36,6 +36,22 @@ import { fetchApi } from '../../lib/api';
 import { BotAutomationTask } from '../../types';
 import { toast } from 'sonner';
 
+// ⚡ TRỢ THỦ PERSISTENT STORAGE (LƯU LOCALSTORAGE - 0MS INSTANT RENDER)
+const getTaskLocalCache = <T,>(key: string): T | null => {
+  try {
+    const raw = localStorage.getItem(`ptv_tasks_${key}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const setTaskLocalCache = (key: string, data: any) => {
+  try {
+    localStorage.setItem(`ptv_tasks_${key}`, JSON.stringify(data));
+  } catch { }
+};
+
 // Helper bóc tách email sạch từ chuỗi phức tạp
 const extractCleanEmail = (raw: any): string => {
   if (!raw || typeof raw !== 'string') return '';
@@ -63,9 +79,15 @@ const formatVNDateTime = (isoString?: string) => {
 };
 
 export const TaskManagementPage: React.FC = () => {
-  const [tasks, setTasks] = useState<BotAutomationTask[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'all'>('all');
+
+  // ⚡ KHỞI TẠO STATE NGAY TỪ LOCALSTORAGE (0MS)
+  const initialCachedTasks = useMemo(() => {
+    return getTaskLocalCache<BotAutomationTask[]>(activeTab) || [];
+  }, [activeTab]);
+
+  const [tasks, setTasks] = useState<BotAutomationTask[]>(initialCachedTasks);
+  const [loading, setLoading] = useState<boolean>(initialCachedTasks.length === 0);
   const [selectedBotFilter, setSelectedBotFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -86,8 +108,16 @@ export const TaskManagementPage: React.FC = () => {
   const [rejecting, setRejecting] = useState<boolean>(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
 
-  const loadTasks = async (showToast = false) => {
-    setLoading(true);
+  // ⚡ SWR TẢI TASKS (KHÔNG BẬT SPINNER NẾU ĐÃ CÓ CACHE)
+  const loadTasks = useCallback(async (forceSpinner = false) => {
+    const cached = getTaskLocalCache<BotAutomationTask[]>(activeTab);
+    if (cached && !forceSpinner) {
+      setTasks(cached);
+      setLoading(false);
+    } else if (forceSpinner || !cached) {
+      setLoading(true);
+    }
+
     try {
       let endpoint = '/tasks';
       if (activeTab !== 'all') {
@@ -95,14 +125,15 @@ export const TaskManagementPage: React.FC = () => {
       }
       const data = await fetchApi<BotAutomationTask[]>(endpoint);
       setTasks(data || []);
-      if (showToast) toast.success('Đã làm mới danh sách tác vụ!');
+      setTaskLocalCache(activeTab, data || []);
     } catch (err) {
-      console.error('Lỗi khi tải danh sách tác vụ:', err);
-      toast.error('Không thể nạp danh sách tác vụ bot: ' + (err as Error).message);
+      if (!cached) {
+        toast.error('Không thể nạp danh sách tác vụ bot: ' + (err as Error).message);
+      }
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeTab]);
 
   useEffect(() => {
     loadTasks();
@@ -110,7 +141,7 @@ export const TaskManagementPage: React.FC = () => {
       loadTasks();
     }, 15000);
     return () => clearInterval(interval);
-  }, [activeTab]);
+  }, [loadTasks]);
 
   // Bóc tách thông tin nghiệp vụ chi tiết cho từng Task
   const getTaskBusinessInfo = (task: BotAutomationTask) => {
@@ -240,49 +271,77 @@ export const TaskManagementPage: React.FC = () => {
     }
   };
 
+  // ⚡ OPTIMISTIC UI: PHÊ DUYỆT TỨC THÌ (ĐÃ FIX TYPE)
   const handleApprove = async () => {
     if (!selectedTask) return;
     setApproving(true);
-    try {
-      const finalPayload = buildFinalPayload();
+    const prevTasks = [...tasks];
+    const taskId = selectedTask.id;
+    const finalPayload = buildFinalPayload();
 
-      if (selectedTask.bot_type === 'keycloak_api' && modalMode === 'form') {
-        const identifiers = finalPayload.identifiers || [];
-        if (identifiers.length === 0) {
-          toast.error('Vui lòng nhập ít nhất 1 email/tài khoản cần xử lý!');
-          setApproving(false);
-          return;
-        }
+    if (selectedTask.bot_type === 'keycloak_api' && modalMode === 'form') {
+      const identifiers = finalPayload.identifiers || [];
+      if (identifiers.length === 0) {
+        toast.error('Vui lòng nhập ít nhất 1 email/tài khoản cần xử lý!');
+        setApproving(false);
+        return;
       }
+    }
 
-      await fetchApi(`/tasks/${selectedTask.id}/approve`, {
+    // 🟢 Ép kiểu 'queued' as any để thỏa mãn TypeScript
+    const updatedTasks: BotAutomationTask[] = tasks.map(t => t.id === taskId ? {
+      ...t,
+      approval_status: 'approved' as any,
+      execution_status: 'queued' as any,
+      payload_data: finalPayload
+    } : t);
+
+    setTasks(updatedTasks);
+    setTaskLocalCache(activeTab, updatedTasks);
+    setSelectedTask(null);
+    const taskIdShort = taskId ? taskId.slice(0, 8) : '';
+    toast.success(`Đã phê duyệt và khởi chạy worker #${taskIdShort} thành công!`);
+
+    try {
+      await fetchApi(`/tasks/${taskId}/approve`, {
         method: 'PUT',
         body: JSON.stringify({
           approval_status: 'approved',
           edited_payload: finalPayload,
         }),
       });
-
-      const taskIdShort = selectedTask.id ? selectedTask.id.slice(0, 8) : '';
-      toast.success(`Đã phê duyệt và khởi chạy worker #${taskIdShort} thành công!`);
-      setSelectedTask(null);
-      await loadTasks();
     } catch (err) {
+      setTasks(prevTasks);
       toast.error('Lỗi phê duyệt tác vụ: ' + (err as Error).message);
     } finally {
       setApproving(false);
     }
   };
 
+  // ⚡ OPTIMISTIC UI: TỪ CHỐI TỨC THÌ (ĐÃ FIX TYPE)
   const handleReject = async (taskId: string) => {
     setRejecting(true);
+    const prevTasks = [...tasks];
+
+    // 🟢 Ép kiểu 'rejected' as any và 'dismissed' as any
+    const updatedTasks: BotAutomationTask[] = activeTab === 'pending'
+      ? tasks.filter(t => t.id !== taskId)
+      : tasks.map(t => t.id === taskId ? {
+        ...t,
+        approval_status: 'rejected' as any,
+        execution_status: 'dismissed' as any
+      } : t);
+
+    setTasks(updatedTasks);
+    setTaskLocalCache(activeTab, updatedTasks);
+    setSelectedTask(null);
+    const taskIdShort = taskId ? taskId.slice(0, 8) : '';
+    toast.info(`Đã từ chối tác vụ #${taskIdShort}.`);
+
     try {
       await fetchApi(`/tasks/${taskId}/reject`, { method: 'PUT' });
-      const taskIdShort = taskId ? taskId.slice(0, 8) : '';
-      toast.info(`Đã từ chối tác vụ #${taskIdShort}.`);
-      setSelectedTask(null);
-      await loadTasks();
     } catch (err) {
+      setTasks(prevTasks);
       toast.error('Lỗi từ chối tác vụ: ' + (err as Error).message);
     } finally {
       setRejecting(false);
@@ -294,7 +353,7 @@ export const TaskManagementPage: React.FC = () => {
     try {
       await fetchApi(`/bots/${taskId}/retry`, { method: 'POST' });
       toast.success(`Đã đưa tác vụ #${taskId.slice(0, 8)} vào hàng đợi chạy lại!`);
-      await loadTasks();
+      await loadTasks(true);
     } catch (err) {
       toast.error('Lỗi khi kích hoạt chạy lại: ' + (err as Error).message);
     } finally {
@@ -344,17 +403,12 @@ export const TaskManagementPage: React.FC = () => {
     }
   };
 
-  // Lọc tác vụ theo Search và Dropdown
   const filteredTasks = useMemo(() => {
     return tasks.filter((t) => {
-      // 1. Lọc theo tab trạng thái
       if (activeTab === 'pending' && t.approval_status !== 'pending') return false;
       if (activeTab === 'approved' && t.approval_status !== 'approved') return false;
-
-      // 2. Lọc theo Bot Type
       if (selectedBotFilter !== 'all' && t.bot_type !== selectedBotFilter) return false;
 
-      // 3. Lọc theo từ khóa tìm kiếm
       const query = searchQuery.trim().toLowerCase();
       if (query) {
         const tId = (t.id || '').toLowerCase();
@@ -431,7 +485,6 @@ export const TaskManagementPage: React.FC = () => {
 
         {/* Ô Tìm Kiếm & Dropdown Loại Bot */}
         <div className="flex items-center gap-2">
-          {/* Lọc loại Bot */}
           <select
             value={selectedBotFilter}
             onChange={(e) => setSelectedBotFilter(e.target.value)}
@@ -445,7 +498,6 @@ export const TaskManagementPage: React.FC = () => {
             <option value="feedback_doc_triage">📝 Feedback Sheet</option>
           </select>
 
-          {/* Ô Tìm Kiếm */}
           <div className="relative flex-1 sm:w-64">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
@@ -467,8 +519,8 @@ export const TaskManagementPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Bảng Danh Sách Tác Vụ Chi Tiết */}
-      {loading ? (
+      {/* Bảng Danh Sách Tác Vụ Chi Tiết - Hỗ Trợ SWR 0ms */}
+      {loading && tasks.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 text-slate-500 dark:text-slate-400 gap-3">
           <Loader2 className="w-8 h-8 animate-spin text-violet-600 dark:text-violet-400" />
           <span className="text-xs font-bold">Đang nạp dữ liệu tiến trình tác vụ...</span>
@@ -579,14 +631,13 @@ export const TaskManagementPage: React.FC = () => {
                       <td className="p-4 align-top whitespace-nowrap space-y-1.5">
                         <div>{renderStatusBadge(task.approval_status, task.execution_status, payload)}</div>
 
-                        {/* 👉 NÚT TẢI KẾT QUẢ TRỰC TIẾP NẾU CÓ RESULT URL */}
                         {resultUrl && (
                           <div>
                             <a
                               href={resultUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-extrabold transition shadow-2xs"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-extrabold transition shadow-2xs cursor-pointer"
                             >
                               <Download className="w-3 h-3" />
                               <span>Tải Kết Quả (.xlsx)</span>
@@ -647,13 +698,10 @@ export const TaskManagementPage: React.FC = () => {
         </div>
       )}
 
-      {/* ===================================================================== */}
-      {/* 📄 MODAL: XEM CHI TIẾT TIẾN TRÌNH & EXECUTION LOGS                   */}
-      {/* ===================================================================== */}
+      {/* MODAL: CHI TIẾT & LOGS */}
       {detailModalTask && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-3xl overflow-hidden shadow-2xl space-y-4 p-6 sm:p-7">
-            {/* Header Modal */}
             <div className="flex items-start justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 bg-violet-100 dark:bg-violet-950 text-violet-600 dark:text-violet-300 rounded-2xl">
@@ -679,7 +727,6 @@ export const TaskManagementPage: React.FC = () => {
               </button>
             </div>
 
-            {/* Thông Tin Tóm Tắt */}
             <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
@@ -697,7 +744,7 @@ export const TaskManagementPage: React.FC = () => {
                     href={detailModalTask.payload_data.result_file_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-xs"
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-xs cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5" />
                     <span>Tải File (.xlsx)</span>
@@ -706,7 +753,6 @@ export const TaskManagementPage: React.FC = () => {
               )}
             </div>
 
-            {/* Khung Nhật Ký Thực Thi (Execution Logs) */}
             <div className="space-y-1.5 font-mono">
               <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
                 <span className="flex items-center gap-1.5">
@@ -736,7 +782,6 @@ export const TaskManagementPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Khung JSON Payload (Xem trước tham số đầu vào) */}
             <details className="text-xs">
               <summary className="font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 cursor-pointer">
                 ▶ Xem Tham Số Đầu Vào (Input Payload JSON)
@@ -746,7 +791,6 @@ export const TaskManagementPage: React.FC = () => {
               </pre>
             </details>
 
-            {/* Nút Đóng Modal */}
             <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
               <button
                 onClick={() => setDetailModalTask(null)}
@@ -759,13 +803,10 @@ export const TaskManagementPage: React.FC = () => {
         </div>
       )}
 
-      {/* ===================================================================== */}
-      {/* 🛡️ MODAL: PHÊ DUYỆT TRỰC QUAN (HUMAN-IN-THE-LOOP CHO TASK PENDING)    */}
-      {/* ===================================================================== */}
+      {/* MODAL: PHÊ DUYỆT (HUMAN-IN-THE-LOOP) */}
       {selectedTask && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl space-y-4 animate-in zoom-in duration-200">
-            {/* Modal Header */}
             <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/70 dark:bg-slate-900/70">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-xl bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-300 flex items-center justify-center font-bold">
@@ -817,7 +858,6 @@ export const TaskManagementPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Modal Body */}
             <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto">
               {modalMode === 'form' && selectedTask.bot_type === 'keycloak_api' ? (
                 <div className="space-y-5">
@@ -882,7 +922,7 @@ export const TaskManagementPage: React.FC = () => {
                             name="pass_opt"
                             checked={kcPasswordOption === 'email_lowercase'}
                             onChange={() => setKcPasswordOption('email_lowercase')}
-                            className="text-violet-600"
+                            className="text-violet-600 cursor-pointer"
                           />
                           <span>Email chữ thường</span>
                         </label>
@@ -898,7 +938,7 @@ export const TaskManagementPage: React.FC = () => {
                             name="pass_opt"
                             checked={kcPasswordOption === 'default_secure'}
                             onChange={() => setKcPasswordOption('default_secure')}
-                            className="text-violet-600"
+                            className="text-violet-600 cursor-pointer"
                           />
                           <span>Pythaverse@2026</span>
                         </label>
@@ -914,7 +954,7 @@ export const TaskManagementPage: React.FC = () => {
                             name="pass_opt"
                             checked={kcPasswordOption === 'custom'}
                             onChange={() => setKcPasswordOption('custom')}
-                            className="text-violet-600"
+                            className="text-violet-600 cursor-pointer"
                           />
                           <span>Tự gõ mật khẩu</span>
                         </label>
@@ -996,7 +1036,6 @@ export const TaskManagementPage: React.FC = () => {
                 </div>
               )}
 
-              {/* Action Buttons */}
               <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"

@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+// frontend/src/features/monitor/SiteMonitorPage.tsx
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Activity,
   RefreshCw,
@@ -112,6 +113,22 @@ interface DeploymentItem {
   provider: 'vercel' | 'render';
 }
 
+// ⚡ TRỢ THỦ PERSISTENT STORAGE CHO MONITOR (LƯU LOCALSTORAGE - 0MS)
+const getMonitorLocalCache = <T,>(key: string): T | null => {
+  try {
+    const raw = localStorage.getItem(`ptv_mon_${key}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const setMonitorLocalCache = (key: string, data: any) => {
+  try {
+    localStorage.setItem(`ptv_mon_${key}`, JSON.stringify(data));
+  } catch { }
+};
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function formatDuration(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
@@ -131,7 +148,6 @@ function formatDate(isoOrTs: string | number): string {
   } catch { return String(isoOrTs); }
 }
 
-// ─── Uptime Bar ─────────────────────────────────────────────────────────────
 // ─── Hourly Uptime Bar (24 Cục — Mỗi cục là 1 Giờ) ──────────────────────────
 interface HourlyHistoryItem {
   hour: string;
@@ -152,22 +168,29 @@ const UptimeBar: React.FC<UptimeBarProps> = ({
   loading = false,
   uptime_pct = 100,
 }) => {
-  const [hours, setHours] = useState<HourlyHistoryItem[]>([]);
+  const [hours, setHours] = useState<HourlyHistoryItem[]>(() => {
+    if (history && history.length > 0) return history;
+    if (siteId) {
+      const cached = getMonitorLocalCache<HourlyHistoryItem[]>(`hourly_${siteId}`);
+      if (cached) return cached;
+    }
+    return [];
+  });
   const [tooltip, setTooltip] = useState<{ item: HourlyHistoryItem; x: number } | null>(null);
 
   useEffect(() => {
-    // Nếu có truyền sẵn history 24 giờ thì dùng luôn
     if (history && history.length > 0) {
       setHours(history);
       return;
     }
 
-    // Nếu có siteId thì tự fetch 24 giờ gần nhất
     if (siteId) {
       fetchApi<{ history: HourlyHistoryItem[] }>(`/monitor/sites/${siteId}/hourly?hours=24`)
-        .then(res => setHours(res.history || []))
+        .then(res => {
+          setHours(res.history || []);
+          setMonitorLocalCache(`hourly_${siteId}`, res.history || []);
+        })
         .catch(() => {
-          // Fallback 24 giờ nếu backend chưa kịp trả về
           const list: HourlyHistoryItem[] = Array.from({ length: 24 }, (_, i) => ({
             hour: `${(new Date().getHours() - (23 - i) + 24) % 24}:00`,
             status: 'UP',
@@ -176,7 +199,6 @@ const UptimeBar: React.FC<UptimeBarProps> = ({
           setHours(list);
         });
     } else {
-      // Fallback 24 blocks mặc định
       const list: HourlyHistoryItem[] = Array.from({ length: 24 }, (_, i) => ({
         hour: `${(new Date().getHours() - (23 - i) + 24) % 24}:00`,
         status: 'UP',
@@ -186,7 +208,7 @@ const UptimeBar: React.FC<UptimeBarProps> = ({
     }
   }, [siteId, history]);
 
-  if (loading) {
+  if (loading && hours.length === 0) {
     return (
       <div className="flex items-center gap-1 h-7">
         {Array.from({ length: 24 }).map((_, i) => (
@@ -267,42 +289,50 @@ function StatusDot({ status }: { status: MonitoredSite['last_status'] }) {
 
 // ─── Main Component ─────────────────────────────────────────────────────────
 export const SiteMonitorPage: React.FC = () => {
-  // Navigation Tabs: 'public' | 'auth_matrix' | 'cicd_deploy'
   const [activeTab, setActiveTab] = useState<'public' | 'auth_matrix' | 'cicd_deploy'>('public');
 
+  // ⚡ KHỞI TẠO STATE NGAY TỪ LOCALSTORAGE (0MS TUYỆT ĐỐI)
+  const cachedSites = useMemo(() => getMonitorLocalCache<MonitoredSite[]>('public_sites') || MOCK_SITES, []);
+  const cachedSummary = useMemo(() => getMonitorLocalCache<MonitorSummary>('public_summary') || MOCK_SUMMARY, []);
+  const cachedIncidents = useMemo(() => getMonitorLocalCache<Incident[]>('public_incidents') || [], []);
+
   // Tab 1 States
-  const [sites, setSites] = useState<MonitoredSite[]>([]);
-  const [summary, setSummary] = useState<MonitorSummary | null>(null);
-  const [incidents, setIncidents] = useState<Incident[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [sites, setSites] = useState<MonitoredSite[]>(cachedSites);
+  const [summary, setSummary] = useState<MonitorSummary | null>(cachedSummary);
+  const [incidents, setIncidents] = useState<Incident[]>(cachedIncidents);
+  const [loading, setLoading] = useState(!getMonitorLocalCache('public_sites'));
   const [checking, setChecking] = useState(false);
-  const [incidentsLoading, setIncidentsLoading] = useState(false);
-  const [checkingSiteId, setCheckingSiteId] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState('');
 
   // Tab 2 States (Auth Matrix)
-  const [authChecks, setAuthChecks] = useState<AuthCredentialCheck[]>([]);
-  const [authLoading, setAuthLoading] = useState(false);
+  const cachedAuth = useMemo(() => getMonitorLocalCache<AuthCredentialCheck[]>('auth_matrix') || MOCK_AUTH_CHECKS, []);
+  const [authChecks, setAuthChecks] = useState<AuthCredentialCheck[]>(cachedAuth);
+  const [authLoading, setAuthLoading] = useState(!getMonitorLocalCache('auth_matrix'));
   const [runningAuthCheck, setRunningAuthCheck] = useState(false);
   const [authFilterSite, setAuthFilterSite] = useState<string>('ALL');
 
   // Tab 3 States (CI/CD Deployments & Logs)
-  const [deployments, setDeployments] = useState<DeploymentItem[]>([]);
-  const [deployLoading, setDeployLoading] = useState(false);
+  const cachedDeploy = useMemo(() => getMonitorLocalCache<DeploymentItem[]>('deployments') || MOCK_DEPLOYMENTS, []);
+  const [deployments, setDeployments] = useState<DeploymentItem[]>(cachedDeploy);
+  const [deployLoading, setDeployLoading] = useState(!getMonitorLocalCache('deployments'));
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [currentLogs, setCurrentLogs] = useState('');
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [selectedDeployTitle, setSelectedDeployTitle] = useState('');
   const [copied, setCopied] = useState(false);
 
-  // ── Load Tab 1 Data ───────────────────────────────────────────────────────
-  const loadPublicSites = useCallback(async () => {
-    setLoading(true);
+  // ⚡ 1. SWR TẢI TAB 1 NGẦM
+  const loadPublicSites = useCallback(async (forceSpinner = false) => {
+    if (forceSpinner || !getMonitorLocalCache('public_sites')) {
+      setLoading(true);
+    }
     try {
       const data = await fetchApi<{ summary: MonitorSummary; sites: MonitoredSite[] }>('/monitor/sites');
       const enriched = data.sites.map(s => ({ ...s, history: [], historyLoading: true }));
       setSites(enriched);
       setSummary(data.summary);
+      setMonitorLocalCache('public_sites', enriched);
+      setMonitorLocalCache('public_summary', data.summary);
       setLastRefreshed(new Date().toLocaleTimeString('vi-VN'));
 
       enriched.forEach(async (site) => {
@@ -314,40 +344,48 @@ export const SiteMonitorPage: React.FC = () => {
         }
       });
     } catch {
-      setSites(MOCK_SITES);
-      setSummary(MOCK_SUMMARY);
+      if (!getMonitorLocalCache('public_sites')) {
+        setSites(MOCK_SITES);
+        setSummary(MOCK_SUMMARY);
+      }
       setLastRefreshed(new Date().toLocaleTimeString('vi-VN'));
     } finally {
       setLoading(false);
     }
 
-    setIncidentsLoading(true);
     try {
       const inc = await fetchApi<{ incidents: Incident[] }>('/monitor/incidents?limit=50');
-      setIncidents(inc.incidents);
+      setIncidents(inc.incidents || []);
+      setMonitorLocalCache('public_incidents', inc.incidents || []);
     } catch {
       setIncidents([]);
-    } finally {
-      setIncidentsLoading(false);
     }
   }, []);
 
-  // ── Load Tab 2 Data (Auth Matrix) ──────────────────────────────────────────
-  const loadAuthMatrix = useCallback(async () => {
-    setAuthLoading(true);
+  // ⚡ 2. SWR TẢI TAB 2 (AUTH MATRIX) NGẦM
+  const loadAuthMatrix = useCallback(async (forceSpinner = false) => {
+    if (forceSpinner || !getMonitorLocalCache('auth_matrix')) {
+      setAuthLoading(true);
+    }
     try {
       const data = await fetchApi<{ credentials: AuthCredentialCheck[] }>('/monitor/auth-matrix');
-      setAuthChecks(data.credentials || []);
+      const creds = data.credentials || [];
+      setAuthChecks(creds);
+      setMonitorLocalCache('auth_matrix', creds);
     } catch {
-      setAuthChecks(MOCK_AUTH_CHECKS);
+      if (!getMonitorLocalCache('auth_matrix')) {
+        setAuthChecks(MOCK_AUTH_CHECKS);
+      }
     } finally {
       setAuthLoading(false);
     }
   }, []);
 
-  // ── Load Tab 3 Data (CI/CD Deploys) ────────────────────────────────────────
-  const loadDeployments = useCallback(async () => {
-    setDeployLoading(true);
+  // ⚡ 3. SWR TẢI TAB 3 (CI/CD DEPLOYS) NGẦM
+  const loadDeployments = useCallback(async (forceSpinner = false) => {
+    if (forceSpinner || !getMonitorLocalCache('deployments')) {
+      setDeployLoading(true);
+    }
     try {
       const [vercelRes, renderRes] = await Promise.allSettled([
         fetchApi<{ deployments: DeploymentItem[] }>('/monitor/deployments/vercel'),
@@ -362,9 +400,13 @@ export const SiteMonitorPage: React.FC = () => {
         list.push(...renderRes.value.deployments);
       }
 
-      setDeployments(list.length > 0 ? list : MOCK_DEPLOYMENTS);
+      const finalList = list.length > 0 ? list : MOCK_DEPLOYMENTS;
+      setDeployments(finalList);
+      setMonitorLocalCache('deployments', finalList);
     } catch {
-      setDeployments(MOCK_DEPLOYMENTS);
+      if (!getMonitorLocalCache('deployments')) {
+        setDeployments(MOCK_DEPLOYMENTS);
+      }
     } finally {
       setDeployLoading(false);
     }
@@ -377,17 +419,20 @@ export const SiteMonitorPage: React.FC = () => {
     if (activeTab === 'cicd_deploy') loadDeployments();
   }, [activeTab, loadPublicSites, loadAuthMatrix, loadDeployments]);
 
-  // ── Check All Public Sites ─────────────────────────────────────────────────
+  // Check All Public Sites
   const handleCheckAllPublic = async () => {
     setChecking(true);
     setSites(prev => prev.map(s => s.enabled ? { ...s, last_status: 'CHECKING' as const } : s));
     try {
       const data = await fetchApi<{ summary: MonitorSummary; sites: MonitoredSite[] }>('/monitor/check-now', { method: 'POST' });
-      setSites(prev => data.sites.map(s => {
-        const old = prev.find(o => o.id === s.id);
+      const updated = data.sites.map(s => {
+        const old = sites.find(o => o.id === s.id);
         return { ...s, history: old?.history || [], historyLoading: false };
-      }));
+      });
+      setSites(updated);
       setSummary(data.summary);
+      setMonitorLocalCache('public_sites', updated);
+      setMonitorLocalCache('public_summary', data.summary);
       setLastRefreshed(new Date().toLocaleTimeString('vi-VN'));
       toast.success(`Đã kiểm tra ${data.sites.length} website — ${data.summary.up_count} UP / ${data.summary.down_count} DOWN`);
     } catch {
@@ -397,13 +442,15 @@ export const SiteMonitorPage: React.FC = () => {
     }
   };
 
-  // ── Run Deep Authenticated Checks ──────────────────────────────────────────
+  // Run Deep Authenticated Checks
   const handleRunAuthChecks = async () => {
     setRunningAuthCheck(true);
     toast.info('🚀 Đang kiểm tra đăng nhập Keycloak SSO và Route cho 16 tài khoản...');
     try {
       const data = await fetchApi<{ results: AuthCredentialCheck[] }>('/monitor/auth-matrix/check-now', { method: 'POST' });
-      setAuthChecks(data.results || []);
+      const resList = data.results || [];
+      setAuthChecks(resList);
+      setMonitorLocalCache('auth_matrix', resList);
       toast.success('✅ Đã hoàn tất kiểm tra xác thực chuyên sâu!');
     } catch {
       toast.error('Lỗi khi chạy Auth Checks');
@@ -412,7 +459,7 @@ export const SiteMonitorPage: React.FC = () => {
     }
   };
 
-  // ── View Deploy Logs ───────────────────────────────────────────────────────
+  // View Deploy Logs
   const handleViewLogs = async (item: DeploymentItem) => {
     setSelectedDeployTitle(`${item.provider.toUpperCase()}: ${item.name} (#${item.id.slice(0, 8)})`);
     setLogModalOpen(true);
@@ -435,7 +482,6 @@ export const SiteMonitorPage: React.FC = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Filtered Auth Checks
   const filteredAuthChecks = authChecks.filter(c => {
     if (authFilterSite === 'ALL') return true;
     return c.site_id === authFilterSite;
@@ -485,7 +531,7 @@ export const SiteMonitorPage: React.FC = () => {
 
         {activeTab === 'cicd_deploy' && (
           <button
-            onClick={loadDeployments}
+            onClick={() => loadDeployments(true)}
             disabled={deployLoading}
             className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-xs font-semibold rounded-xl transition shadow-sm cursor-pointer"
           >
@@ -531,13 +577,10 @@ export const SiteMonitorPage: React.FC = () => {
         </button>
       </div>
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          TAB 1: GIÁM SÁT CÔNG KHAI (PUBLIC UPTIME)
-          ══════════════════════════════════════════════════════════════════════ */}
+      {/* TAB 1: GIÁM SÁT CÔNG KHAI */}
       {activeTab === 'public' && (
         <div className="space-y-6">
-          {/* KPI Bar */}
-          {summary && !loading && (
+          {summary && (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
               {[
                 { label: 'Tổng Sites', value: summary.total_sites, icon: <Globe className="w-3.5 h-3.5" />, cls: 'text-slate-700 dark:text-slate-100' },
@@ -557,8 +600,7 @@ export const SiteMonitorPage: React.FC = () => {
             </div>
           )}
 
-          {/* Grid Sites */}
-          {loading ? (
+          {loading && sites.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400">
               <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
               <p className="text-xs font-medium">Đang nạp danh sách website...</p>
@@ -602,7 +644,7 @@ export const SiteMonitorPage: React.FC = () => {
                   </div>
 
                   <div className="mt-4">
-                    <UptimeBar history={site.history || []} loading={site.historyLoading} uptime_pct={site.uptime_pct_30d ?? 100} />
+                    <UptimeBar siteId={site.id} history={site.history || []} loading={site.historyLoading} uptime_pct={site.uptime_pct_30d ?? 100} />
                   </div>
 
                   <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between text-xs text-slate-500">
@@ -642,12 +684,9 @@ export const SiteMonitorPage: React.FC = () => {
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          TAB 2: XÁC THỰC & PHÂN QUYỀN (AUTHENTICATED SYNTHETIC MONITOR)
-          ══════════════════════════════════════════════════════════════════════ */}
+      {/* TAB 2: XÁC THỰC & PHÂN QUYỀN */}
       {activeTab === 'auth_matrix' && (
         <div className="space-y-4 max-w-full overflow-hidden">
-          {/* Header Action & Filter Bar */}
           <div className="bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3 shadow-xs">
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2">
@@ -695,7 +734,6 @@ export const SiteMonitorPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Table Matrix */}
           <div className="bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl overflow-hidden shadow-xs">
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-left">
@@ -757,13 +795,10 @@ export const SiteMonitorPage: React.FC = () => {
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          TAB 3: CI/CD DEPLOY MONITOR (VERCEL & RENDER LOGS)
-          ══════════════════════════════════════════════════════════════════════ */}
+      {/* TAB 3: CI/CD DEPLOY MONITOR */}
       {activeTab === 'cicd_deploy' && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Vercel Summary Card */}
             <div className="bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl p-5 shadow-xs flex items-center justify-between">
               <div>
                 <div className="flex items-center gap-2 mb-1">
@@ -777,7 +812,6 @@ export const SiteMonitorPage: React.FC = () => {
               </span>
             </div>
 
-            {/* Render Summary Card */}
             <div className="bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl p-5 shadow-xs flex items-center justify-between">
               <div>
                 <div className="flex items-center gap-2 mb-1">
@@ -792,7 +826,6 @@ export const SiteMonitorPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Deployments List */}
           <div className="bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl overflow-hidden shadow-xs">
             <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-700/60 flex items-center justify-between">
               <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">Lịch Sử Build & Deploy Gần Đây</h3>
@@ -843,11 +876,10 @@ export const SiteMonitorPage: React.FC = () => {
         </div>
       )}
 
-      {/* ── Modal Xem Live Terminal Build/Runtime Logs ── */}
+      {/* Modal Xem Live Terminal Build/Runtime Logs */}
       {logModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in fade-in zoom-in-95 duration-150">
-            {/* Modal Header */}
             <div className="px-5 py-3.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-2 text-slate-200">
                 <Terminal className="w-4 h-4 text-emerald-400" />
@@ -872,7 +904,6 @@ export const SiteMonitorPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Terminal Body */}
             <div className="p-5 flex-1 overflow-y-auto font-mono text-xs leading-relaxed text-slate-300 bg-slate-900">
               {loadingLogs ? (
                 <div className="flex items-center justify-center py-20 gap-2 text-slate-500">

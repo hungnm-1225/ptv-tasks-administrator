@@ -24,18 +24,26 @@ class WorkspaceAccountService(WorkspaceBaseService):
         async with async_playwright() as p:
             browser, context, page = await self._create_context(p)
             try:
-                is_ok, login_err = await self.login_role(page, credentials.get("username", ""), credentials.get("password", ""), "School")
+                is_ok, login_err = await self.login_role(
+                    page, credentials.get("username", ""), credentials.get("password", ""), "School"
+                )
                 if not is_ok:
                     return {"status": "failed", "error": login_err}
 
-                await page.goto(f"{BASE_WORKSPACE_URL}/school-workspace/account-creation/create", wait_until="networkidle", timeout=45000)
-                await page.wait_for_selector("input[type='file']", timeout=15000)
+                logger.info("📂 Đang mở trang Tạo tài khoản hàng loạt...")
+                # 🚀 SỬA LỖI TIMEOUT: Chuyển sang domcontentloaded và chờ input file
+                await page.goto(
+                    f"{BASE_WORKSPACE_URL}/school-workspace/account-creation/create",
+                    wait_until="domcontentloaded",
+                    timeout=30000
+                )
+                await page.wait_for_selector("input[type='file']", timeout=20000)
 
                 file_input = page.locator("input[type='file']")
                 await file_input.set_input_files(upload_file_path)
-                await page.wait_for_timeout(2500)
+                await page.wait_for_timeout(2000)
 
-                upload_btn = page.locator("//button[normalize-space()='Upload']")
+                upload_btn = page.locator("//button[normalize-space()='Upload'], button:has-text('Upload')").first
                 await upload_btn.wait_for(state="visible", timeout=10000)
                 await upload_btn.click()
 
@@ -45,7 +53,11 @@ class WorkspaceAccountService(WorkspaceBaseService):
                     pass
 
                 if "account-creation" not in page.url:
-                    await page.goto(f"{BASE_WORKSPACE_URL}/school-workspace/account-creation", wait_until="domcontentloaded", timeout=30000)
+                    await page.goto(
+                        f"{BASE_WORKSPACE_URL}/school-workspace/account-creation",
+                        wait_until="domcontentloaded",
+                        timeout=30000
+                    )
 
                 await page.wait_for_selector(".MuiDataGrid-row, [role='row']", timeout=25000)
                 await page.wait_for_timeout(2000)
@@ -55,22 +67,26 @@ class WorkspaceAccountService(WorkspaceBaseService):
                 
                 if not request_id:
                     id_cell = first_row.locator("[data-field='id'] .MuiDataGrid-cellContent").first
-                    request_id = (await id_cell.inner_text()).strip()
+                    if await id_cell.count() > 0:
+                        request_id = (await id_cell.inner_text()).strip()
 
                 logger.info(f"🎉 BẮT ĐƯỢC REQUEST ID: [ #{request_id} ] (Dự kiến: {record_count * 10}s)")
 
                 # =============================================================
                 # 🚀 FAST-PATH: Kiểm tra nhanh tại chỗ nếu batch vừa phải (<= 30 tài khoản)
                 # =============================================================
-                if record_count <= 30:
+                if record_count <= 30 and request_id:
                     logger.info(f"⚡ [Fast-Path] Đang chờ 12s để thử lấy kết quả ngay cho Request #{request_id}...")
                     await page.wait_for_timeout(12000)
                     
-                    # Refresh trang nhẹ nhàng để cập nhật trạng thái mới nhất
-                    await page.reload(wait_until="networkidle")
+                    # 🚀 SỬA LỖI: Reload bằng domcontentloaded nhẹ nhàng
+                    await page.reload(wait_until="domcontentloaded")
                     await page.wait_for_selector(".MuiDataGrid-row", timeout=20000)
 
-                    target_row = page.locator(f".MuiDataGrid-row[data-id='{request_id}'], .MuiDataGrid-row:has([data-field='id']:has-text('{request_id}'))").first
+                    target_row = page.locator(
+                        f".MuiDataGrid-row[data-id='{request_id}'], .MuiDataGrid-row:has([data-field='id']:has-text('{request_id}'))"
+                    ).first
+
                     if await target_row.count() > 0:
                         status_cell = target_row.locator("[data-field='status'] .MuiDataGrid-cellContent").first
                         status_text = (await status_cell.inner_text()).strip().lower()
@@ -81,7 +97,7 @@ class WorkspaceAccountService(WorkspaceBaseService):
                             await action_btn.click()
                             await page.wait_for_timeout(1000)
 
-                            async with page.expect_download() as download_info:
+                            async with page.expect_download(timeout=30000) as download_info:
                                 export_item = page.locator("text=Export, li:has-text('Export')").first
                                 await export_item.click()
 
@@ -120,26 +136,36 @@ class WorkspaceAccountService(WorkspaceBaseService):
         async with async_playwright() as p:
             browser, context, page = await self._create_context(p)
             try:
-                is_ok, login_err = await self.login_role(page, credentials.get("username", ""), credentials.get("password", ""), "School")
+                is_ok, login_err = await self.login_role(
+                    page, credentials.get("username", ""), credentials.get("password", ""), "School"
+                )
                 if not is_ok:
                     return {"status": "failed", "error": login_err}
 
-                await page.goto(f"{BASE_WORKSPACE_URL}/school-workspace/account-creation", wait_until="networkidle", timeout=45000)
+                # 🚀 SỬA LỖI: Dùng domcontentloaded thay cho networkidle
+                await page.goto(
+                    f"{BASE_WORKSPACE_URL}/school-workspace/account-creation",
+                    wait_until="domcontentloaded",
+                    timeout=35000
+                )
                 await page.wait_for_selector(".MuiDataGrid-row", timeout=25000)
 
-                target_row = page.locator(f".MuiDataGrid-row[data-id='{request_id}'], .MuiDataGrid-row:has([data-field='id']:has-text('{request_id}'))").first
+                target_row = page.locator(
+                    f".MuiDataGrid-row[data-id='{request_id}'], .MuiDataGrid-row:has([data-field='id']:has-text('{request_id}'))"
+                ).first
+
                 if await target_row.count() == 0:
                     return {"status": "not_found", "error": f"Không tìm thấy Request #{request_id}"}
 
                 status_cell = target_row.locator("[data-field='status'] .MuiDataGrid-cellContent").first
                 status_text = (await status_cell.inner_text()).strip()
 
-                if "done" in status_text.lower() or "completed" in status_text.lower() or "success" in status_text.lower():
+                if any(w in status_text.lower() for w in ["done", "completed", "success"]):
                     action_btn = target_row.locator("[data-field='actions'] button").first
                     await action_btn.click()
                     await page.wait_for_timeout(1000)
 
-                    async with page.expect_download() as download_info:
+                    async with page.expect_download(timeout=30000) as download_info:
                         export_item = page.locator("text=Export, li:has-text('Export')").first
                         await export_item.click()
 
