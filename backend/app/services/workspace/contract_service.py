@@ -13,6 +13,25 @@ logger = logging.getLogger(__name__)
 class WorkspaceContractService(WorkspaceBaseService):
     """Xử lý các nghiệp vụ tạo và phê duyệt Contract giữa Partner - Distributor - Sales Admin."""
 
+    async def _safe_navigate(self, page: Page, target_url: str, keyword_in_url: str = "", timeout: int = 35000):
+        """Hàm điều hướng an toàn: chống lỗi net::ERR_ABORTED khi dính redirect SSO ngầm."""
+        if keyword_in_url and keyword_in_url in page.url:
+            logger.info(f"ℹ️ Trang đã ở sẵn tại URL đích: {page.url}")
+            return
+
+        try:
+            await page.goto(target_url, wait_until="domcontentloaded", timeout=timeout)
+        except Exception as e:
+            err_msg = str(e)
+            if "ERR_ABORTED" in err_msg or "frame was detached" in err_msg:
+                logger.info(f"ℹ️ Bắt được cú redirect ngầm ({err_msg[:60]}...). Đang chờ trang ổn định...")
+                try:
+                    await page.wait_for_load_state("domcontentloaded", timeout=15000)
+                except Exception:
+                    pass
+            else:
+                raise e
+
     async def _fill_distributor_create_contract_form(
         self,
         page: Page,
@@ -20,8 +39,8 @@ class WorkspaceContractService(WorkspaceBaseService):
     ) -> Dict[str, Any]:
         """Hàm nội bộ: Điền form tạo Contract của Distributor trên phiên trình duyệt đang mở."""
         logger.info("📝 Distributor mở: /distributor-workspace/contract-po/create...")
-        await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/contract-po/create", wait_until="networkidle", timeout=45000)
-        await page.wait_for_selector("h4:has-text('Create Contract/PO'), :text('Create Contract/PO')", timeout=15000)
+        await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/distributor-workspace/contract-po/create", "contract-po/create")
+        await page.wait_for_selector("h4:has-text('Create Contract/PO'), :text('Create Contract/PO')", timeout=20000)
         await page.wait_for_timeout(1000)
 
         # 1. Chọn Contract Type = 'License'
@@ -146,7 +165,7 @@ class WorkspaceContractService(WorkspaceBaseService):
         try:
             await page.wait_for_url("**/distributor-workspace/contract-po", timeout=20000)
         except Exception:
-            await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/contract-po", wait_until="domcontentloaded", timeout=20000)
+            await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/distributor-workspace/contract-po", "contract-po")
 
         await page.wait_for_timeout(2500)
 
@@ -183,8 +202,9 @@ class WorkspaceContractService(WorkspaceBaseService):
                     return {"status": "failed", "error": login_err}
 
                 logger.info("🏢 Distributor mở: /distributor-workspace/partner-contract-po...")
-                await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/partner-contract-po", wait_until="networkidle", timeout=45000)
-                await page.wait_for_timeout(2000)
+                await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/distributor-workspace/partner-contract-po", "partner-contract-po")
+                await page.wait_for_selector(".MuiDataGrid-row, [role='row']", timeout=25000)
+                await page.wait_for_timeout(1000)
 
                 # 1. Tìm dòng Hợp đồng theo mã
                 target_row = None
@@ -197,6 +217,7 @@ class WorkspaceContractService(WorkspaceBaseService):
                         search_input = page.locator("input[placeholder*='Search'], .MuiTextField-root input, input[type='text']").first
                         if await search_input.count() > 0:
                             await search_input.fill(contract_identifier)
+                            await page.keyboard.press("Enter")
                             await page.wait_for_timeout(2000)
                             target_row = page.locator(f".MuiDataGrid-row:has-text('{contract_identifier}')").first
 
@@ -308,8 +329,8 @@ class WorkspaceContractService(WorkspaceBaseService):
                     return {"status": "failed", "error": login_err}
 
                 logger.info("📝 Partner mở: /partner-workspace/contract-po/create...")
-                await page.goto(f"{BASE_WORKSPACE_URL}/partner-workspace/contract-po/create", wait_until="networkidle", timeout=45000)
-                await page.wait_for_selector("h4:has-text('Create Contract/PO'), :text('Create Contract/PO')", timeout=15000)
+                await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/partner-workspace/contract-po/create", "contract-po/create")
+                await page.wait_for_selector("h4:has-text('Create Contract/PO'), :text('Create Contract/PO')", timeout=20000)
 
                 type_select = page.locator(".MuiGrid-item:has(label:has-text('Contract Type')) [role='combobox'], div:has(label:has-text('Contract Type')) .MuiSelect-select").first
                 await type_select.wait_for(state="visible", timeout=10000)
@@ -414,32 +435,59 @@ class WorkspaceContractService(WorkspaceBaseService):
                     return {"status": "failed", "error": login_err}
 
                 logger.info("👑 Mở: /sales-admin-workspace/dashboard...")
-                # Tránh lỗi ERR_ABORTED do redirect bằng domcontentloaded
-                await page.goto(f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard", wait_until="domcontentloaded", timeout=45000)
+                await self._safe_navigate(
+                    page=page,
+                    target_url=f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard",
+                    keyword_in_url="sales-admin-workspace",
+                    timeout=35000
+                )
+                
+                # 🚀 BƯỚC 1: CHỜ BẢNG NẠP DỮ LIỆU THẬT (Chống bẫy Header Row)
+                logger.info("⏳ Chờ nạp danh sách Order trên Sales Admin Dashboard...")
+                await page.wait_for_selector(".MuiDataGrid-virtualScrollerContent, .MuiDataGrid-row", timeout=30000)
                 await page.wait_for_timeout(2000)
 
                 target_row = None
-                if contract_identifier:
-                    logger.info(f"🔍 Tìm dòng Hợp đồng DST: [{contract_identifier}]...")
-                    target_row = page.locator(f".MuiDataGrid-row:has-text('{contract_identifier}')").first
-
-                    if await target_row.count() == 0:
-                        search_input = page.locator("input[placeholder*='Search'], .MuiTextField-root input, input[type='text']").first
-                        if await search_input.count() > 0:
-                            await search_input.fill(contract_identifier)
-                            await page.wait_for_timeout(2000)
-                            target_row = page.locator(f".MuiDataGrid-row:has-text('{contract_identifier}')").first
                 
+                # 🚀 BƯỚC 2: TÌM KIẾM THEO Ô 'Search by ID'
+                if contract_identifier:
+                    logger.info(f"🔍 Tìm Hợp đồng DST: [{contract_identifier}]...")
+                    
+                    # Trích xuất số ID đuôi (Ví dụ: DST-20260819-563 -> 563)
+                    search_id = contract_identifier.split("-")[-1] if "-" in contract_identifier else contract_identifier
+                    
+                    # Định vị ô Search by ID
+                    search_input = page.locator(
+                        "div:has(label:has-text('Search by ID')) input, input[name='id'], input[id*='search']"
+                    ).first
+
+                    if await search_input.count() > 0:
+                        logger.info(f"✍️ Gõ ID [{search_id}] vào ô 'Search by ID'...")
+                        await search_input.click()
+                        await page.keyboard.press("Control+A")
+                        await page.keyboard.type(search_id)
+                        await page.keyboard.press("Enter")
+                        await page.wait_for_timeout(2500)
+
+                    # Tìm lại dòng sau khi search
+                    target_row = page.locator(f".MuiDataGrid-row:has-text('{contract_identifier}'), .MuiDataGrid-row:has-text('{search_id}')").first
+
+                # Nếu không tìm thấy bằng search, lấy dòng Pending đầu tiên
                 if not target_row or await target_row.count() == 0:
+                    logger.info("ℹ️ Thử quét dòng 'Pending' có sẵn trên màn hình...")
                     target_row = page.locator(".MuiDataGrid-row:has-text('Pending')").first
 
                 if await target_row.count() == 0:
                     return {"status": "failed", "error": f"Không tìm thấy Contract ({contract_identifier}) Pending trên Dashboard"}
 
-                logger.info("🔍 Bấm nút xem chi tiết Contract...")
-                eye_btn = target_row.locator("button[aria-label='View Details'], [data-field='actions'] button, [data-field=' '] button, button:has(.lucide-eye), button:has(.lucide-info)").first
+                # 🚀 BƯỚC 3: BẤM ICON CON MẮT (Actions: 👁️)
+                logger.info("🔍 Bấm nút xem chi tiết Contract (Icon Con Mắt 👁️)...")
+                eye_btn = target_row.locator(
+                    "button[aria-label='View Details'], [data-field='Actions'] button, [data-field='actions'] button, button:has(svg), svg[data-testid='VisibilityIcon']"
+                ).first
                 await eye_btn.click(timeout=15000)
 
+                # 🚀 BƯỚC 4: BẤM NÚT 'Approve'
                 await page.wait_for_selector("button:has-text('Approve')", timeout=15000)
                 await page.wait_for_timeout(1000)
 
@@ -447,6 +495,7 @@ class WorkspaceContractService(WorkspaceBaseService):
                 approve_btn = page.locator("button:has-text('Approve')").first
                 await approve_btn.click()
 
+                # 🚀 BƯỚC 5: ĐIỀN JUSTIFICATION VÀ XÁC NHẬN
                 await page.wait_for_selector("div[role='dialog']", timeout=10000)
                 await page.wait_for_timeout(500)
 
