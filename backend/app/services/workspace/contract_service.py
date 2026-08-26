@@ -100,7 +100,7 @@ class WorkspaceContractService(WorkspaceBaseService):
             logger.info("⏳ Chờ API nạp danh sách khóa học...")
             await page.wait_for_timeout(2000)
 
-            # B. Chọn Course (Cột 2 - Định vị chính xác qua label 'Course')
+            # B. Chọn Course (Cột 2)
             course_name_val = c.get("course_name")
             logger.info(f"🎯 Môn #{idx + 1}: Chọn Course = '{course_name_val or 'Mặc định'}'...")
             course_item = course_card.locator(".MuiGrid-item").filter(has=page.locator("label", has_text=re.compile(r"^Course"))).first
@@ -109,7 +109,6 @@ class WorkspaceContractService(WorkspaceBaseService):
             await course_select.click()
             await page.wait_for_timeout(800)
 
-            # Chờ dropdown môn học mở ra
             await page.wait_for_selector("li[role='option']", timeout=8000)
 
             target_opt = None
@@ -161,7 +160,6 @@ class WorkspaceContractService(WorkspaceBaseService):
         submit_btn = page.locator("button:has-text('Create Contract/PO')").last
         await submit_btn.click()
 
-        # Chờ điều hướng về trang danh sách hợp đồng /contract-po
         try:
             await page.wait_for_url("**/distributor-workspace/contract-po", timeout=20000)
         except Exception:
@@ -169,7 +167,7 @@ class WorkspaceContractService(WorkspaceBaseService):
 
         await page.wait_for_timeout(2500)
 
-        # Lấy mã DST Contract vừa tạo ở dòng đầu tiên
+        # Lấy mã DST Contract vừa tạo
         first_row = page.locator(".MuiDataGrid-row").first
         contract_num_id = await first_row.get_attribute("data-id") if await first_row.count() > 0 else ""
         code_elem = first_row.locator("[data-field='order_code'] a, [data-field='contract_code'] a, [data-field='order_code'], a").first
@@ -193,7 +191,7 @@ class WorkspaceContractService(WorkspaceBaseService):
         auto_create_dst_if_short: bool = True,
         courses_needed: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
-        """Duyệt Partner Contract. TÍCH HỢP LIỀN MẠCH 1-SESSION: Nếu thiếu License, tạo ngay DST Contract không cần login lại!"""
+        """Duyệt Partner Contract. TÍCH HỢP LIỀN MẠCH 1-SESSION."""
         async with async_playwright() as p:
             browser, context, page = await self._create_context(p)
             try:
@@ -206,14 +204,12 @@ class WorkspaceContractService(WorkspaceBaseService):
                 await page.wait_for_selector(".MuiDataGrid-row, [role='row']", timeout=25000)
                 await page.wait_for_timeout(1000)
 
-                # 1. Tìm dòng Hợp đồng theo mã
                 target_row = None
                 if contract_identifier:
-                    logger.info(f"🔍 Đang tìm dòng Hợp đồng: [{contract_identifier}]...")
+                    logger.info(f"🔍 Đang tìm Hợp đồng Partner: [{contract_identifier}]...")
                     target_row = page.locator(f".MuiDataGrid-row:has-text('{contract_identifier}')").first
 
                     if await target_row.count() == 0:
-                        logger.info(f"🔍 Đang gõ [{contract_identifier}] vào ô Search để lọc...")
                         search_input = page.locator("input[placeholder*='Search'], .MuiTextField-root input, input[type='text']").first
                         if await search_input.count() > 0:
                             await search_input.fill(contract_identifier)
@@ -224,16 +220,27 @@ class WorkspaceContractService(WorkspaceBaseService):
                 if not target_row or await target_row.count() == 0:
                     target_row = page.locator(".MuiDataGrid-row:has-text('Pending')").first
 
-                # 2. Click nút View Details
+                if not target_row or await target_row.count() == 0:
+                    return {"status": "failed", "error": f"Không tìm thấy Partner Contract ({contract_identifier}) trên bảng"}
+
+                # Kiểm tra nếu đã approved
+                row_text = (await target_row.inner_text()).lower()
+                if "approved" in row_text or "completed" in row_text:
+                    logger.info(f"✨ Partner Contract [{contract_identifier}] đã được duyệt từ trước!")
+                    return {
+                        "status": "success",
+                        "contract_identifier": contract_identifier,
+                        "already_approved": True,
+                        "message": f"Partner Contract [{contract_identifier}] đã được duyệt từ trước."
+                    }
+
                 logger.info(f"🔍 Đang bấm nút 'View Details' cho Contract [{contract_identifier or 'Pending'}]...")
                 info_btn = target_row.locator("button[aria-label='View Details'], [data-field='actions'] button, button:has(.lucide-info)").first
                 await info_btn.click(timeout=15000)
 
-                # 3. Chờ Modal Dialog mở ra
                 await page.wait_for_selector("div[role='dialog']", timeout=15000)
                 await page.wait_for_timeout(1000)
 
-                # 4. Kiểm tra điều kiện kho License
                 approve_btn = page.locator("div[role='dialog'] button:has-text('Approve Order')").first
                 can_approve = (await approve_btn.count() > 0) and (await approve_btn.is_visible())
 
@@ -251,7 +258,6 @@ class WorkspaceContractService(WorkspaceBaseService):
                 else:
                     logger.warning(f"⚠️ Kho Distributor KHÔNG ĐỦ License (Insufficient pool resources)!")
                     
-                    # 🟢 TỐI ƯU 1-SESSION: CHUYỂN TRANG TẠO DST CONTRACT TRỰC TIẾP
                     if auto_create_dst_if_short:
                         logger.info(f"⚡ [1-SESSION SPEEDUP] Trực tiếp chuyển sang trang tạo Contract không cần login lại...")
                         close_btn = page.locator("div[role='dialog'] button:has-text('Close')").first
@@ -279,7 +285,6 @@ class WorkspaceContractService(WorkspaceBaseService):
                         else:
                             return dst_contract_res
 
-                    # Fallback
                     close_btn = page.locator("div[role='dialog'] button:has-text('Close')").first
                     if await close_btn.count() > 0:
                         await close_btn.click()
@@ -301,7 +306,6 @@ class WorkspaceContractService(WorkspaceBaseService):
         credentials: Dict[str, str],
         contract_data: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Tạo DST Contract độc lập khi gọi từ bên ngoài."""
         async with async_playwright() as p:
             browser, context, page = await self._create_context(p)
             try:
@@ -442,60 +446,83 @@ class WorkspaceContractService(WorkspaceBaseService):
                     timeout=35000
                 )
                 
-                # 🚀 BƯỚC 1: CHỜ BẢNG NẠP DỮ LIỆU THẬT (Chống bẫy Header Row)
+                # 🚀 BƯỚC 1: Chờ bảng nạp dữ liệu thật
                 logger.info("⏳ Chờ nạp danh sách Order trên Sales Admin Dashboard...")
                 await page.wait_for_selector(".MuiDataGrid-virtualScrollerContent, .MuiDataGrid-row", timeout=30000)
-                await page.wait_for_timeout(2000)
+                await page.wait_for_timeout(1500)
 
                 target_row = None
+                search_kw = str(contract_identifier).strip() if contract_identifier else ""
                 
-                # 🚀 BƯỚC 2: TÌM KIẾM THEO Ô 'Search by ID'
-                if contract_identifier:
-                    logger.info(f"🔍 Tìm Hợp đồng DST: [{contract_identifier}]...")
+                # 🚀 BƯỚC 2: Tìm kiếm theo đúng chuỗi ID đầy đủ của anh
+                if search_kw:
+                    logger.info(f"🔍 Tìm Hợp đồng DST: [{search_kw}]...")
                     
-                    # Trích xuất số ID đuôi (Ví dụ: DST-20260819-563 -> 563)
-                    search_id = contract_identifier.split("-")[-1] if "-" in contract_identifier else contract_identifier
-                    
-                    # Định vị ô Search by ID
                     search_input = page.locator(
                         "div:has(label:has-text('Search by ID')) input, input[name='id'], input[id*='search']"
                     ).first
 
                     if await search_input.count() > 0:
-                        logger.info(f"✍️ Gõ ID [{search_id}] vào ô 'Search by ID'...")
+                        logger.info(f"✍️ Gõ mã [{search_kw}] vào ô 'Search by ID'...")
                         await search_input.click()
                         await page.keyboard.press("Control+A")
-                        await page.keyboard.type(search_id)
+                        await page.keyboard.type(search_kw)
                         await page.keyboard.press("Enter")
                         await page.wait_for_timeout(2500)
 
-                    # Tìm lại dòng sau khi search
-                    target_row = page.locator(f".MuiDataGrid-row:has-text('{contract_identifier}'), .MuiDataGrid-row:has-text('{search_id}')").first
+                    target_row = page.locator(f".MuiDataGrid-row:has-text('{search_kw}')").first
 
-                # Nếu không tìm thấy bằng search, lấy dòng Pending đầu tiên
+                # Nếu không chỉ định mã hoặc không tìm thấy bằng search, quét dòng Pending
                 if not target_row or await target_row.count() == 0:
-                    logger.info("ℹ️ Thử quét dòng 'Pending' có sẵn trên màn hình...")
-                    target_row = page.locator(".MuiDataGrid-row:has-text('Pending')").first
+                    if not search_kw:
+                        logger.info("ℹ️ Quét dòng 'Pending' đầu tiên trên màn hình...")
+                        target_row = page.locator(".MuiDataGrid-row:has-text('Pending')").first
 
-                if await target_row.count() == 0:
-                    return {"status": "failed", "error": f"Không tìm thấy Contract ({contract_identifier}) Pending trên Dashboard"}
+                # 🛡️ FALLBACK 1: Không tìm thấy Hợp đồng
+                if not target_row or await target_row.count() == 0:
+                    err_msg = f"❌ Không tìm thấy Hợp đồng ({search_kw or 'Pending'}) trên Sales Admin Dashboard!"
+                    logger.error(err_msg)
+                    return {"status": "failed", "error": err_msg}
 
-                # 🚀 BƯỚC 3: BẤM ICON CON MẮT (Actions: 👁️)
+                # 🛡️ FALLBACK 2 (TẦNG 1): Kiểm tra nếu dòng đã mang trạng thái Đã Duyệt
+                row_raw_text = (await target_row.inner_text()).lower()
+                if "approved" in row_raw_text or "completed" in row_raw_text:
+                    logger.info(f"✨ Hợp đồng [{search_kw}] đã ở trạng thái ĐÃ DUYỆT từ trước đó!")
+                    return {
+                        "status": "success",
+                        "contract_identifier": search_kw,
+                        "already_approved": True,
+                        "message": f"Hợp đồng [{search_kw}] đã được Sales Admin phê duyệt từ trước đó."
+                    }
+
+                # 🚀 BƯỚC 3: Bấm icon con mắt 👁️ xem chi tiết
                 logger.info("🔍 Bấm nút xem chi tiết Contract (Icon Con Mắt 👁️)...")
                 eye_btn = target_row.locator(
                     "button[aria-label='View Details'], [data-field='Actions'] button, [data-field='actions'] button, button:has(svg), svg[data-testid='VisibilityIcon']"
                 ).first
                 await eye_btn.click(timeout=15000)
 
-                # 🚀 BƯỚC 4: BẤM NÚT 'Approve'
-                await page.wait_for_selector("button:has-text('Approve')", timeout=15000)
-                await page.wait_for_timeout(1000)
+                await page.wait_for_timeout(1500)
 
-                logger.info("👑 Bấm nút 'Approve'...")
+                # 🛡️ FALLBACK 2 (TẦNG 2): Kiểm tra nút Approve trong modal
                 approve_btn = page.locator("button:has-text('Approve')").first
+                if await approve_btn.count() == 0 or not (await approve_btn.is_visible()):
+                    logger.info(f"✨ Không thấy nút 'Approve' -> Hợp đồng [{search_kw}] đã được duyệt từ trước!")
+                    close_btn = page.locator("button:has-text('Close'), div[role='dialog'] button:has-text('Close')").first
+                    if await close_btn.count() > 0 and await close_btn.is_visible():
+                        await close_btn.click()
+                    return {
+                        "status": "success",
+                        "contract_identifier": search_kw,
+                        "already_approved": True,
+                        "message": f"Hợp đồng [{search_kw}] đã được Sales Admin phê duyệt từ trước đó."
+                    }
+
+                # 🚀 BƯỚC 4: Bấm nút 'Approve'
+                logger.info("👑 Bấm nút 'Approve'...")
                 await approve_btn.click()
 
-                # 🚀 BƯỚC 5: ĐIỀN JUSTIFICATION VÀ XÁC NHẬN
+                # 🚀 BƯỚC 5: Điền justification và xác nhận
                 await page.wait_for_selector("div[role='dialog']", timeout=10000)
                 await page.wait_for_timeout(500)
 
@@ -513,10 +540,10 @@ class WorkspaceContractService(WorkspaceBaseService):
                 await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=15000)
                 await page.wait_for_timeout(2000)
 
-                logger.info(f"🎉 Sales Admin đã duyệt DST Contract {contract_identifier or ''} thành công!")
+                logger.info(f"🎉 Sales Admin đã duyệt DST Contract {search_kw} thành công!")
                 return {
                     "status": "success",
-                    "contract_identifier": contract_identifier,
+                    "contract_identifier": search_kw,
                     "justification": valid_justification,
                     "message": "Sales Admin đã phê duyệt DST Contract thành công"
                 }
