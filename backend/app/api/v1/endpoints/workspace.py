@@ -1,5 +1,6 @@
 # backend/app/api/v1/endpoints/workspace.py
 import re
+import time
 from fastapi import APIRouter, Query, HTTPException, BackgroundTasks
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
@@ -11,65 +12,114 @@ from app.services.workspace.workspace_scanner_service import workspace_scanner_s
 
 router = APIRouter()
 
+# =============================================================================
+# ⚡ IN-MEMORY CACHE CHO PHẢ HỆ 480 TRƯỜNG & KHÓA HỌC WORKSPACE
+# =============================================================================
+class WorkspaceMemoryCache:
+    def __init__(self, default_ttl: int = 900):  # Lưu RAM 15 phút
+        self._cache: Dict[str, Any] = {}
+
+    def get(self, key: str) -> Optional[Any]:
+        if key in self._cache:
+            data, expire_at = self._cache[key]
+            if time.time() < expire_at:
+                return data
+            del self._cache[key]
+        return None
+
+    def set(self, key: str, value: Any, ttl: Optional[int] = None):
+        expire_at = time.time() + (ttl if ttl is not None else 900)
+        self._cache[key] = (value, expire_at)
+
+    def invalidate(self, key: str = ""):
+        if not key:
+            self._cache.clear()
+        elif key in self._cache:
+            del self._cache[key]
+
+ws_cache = WorkspaceMemoryCache(default_ttl=900)
+
 
 class ExtractCOFRequest(BaseModel):
     cof_text: str
 
 
 # =============================================================================
-# 1. PHẢ HỆ VÀ DANH MỤC KHÓA HỌC
+# 1. PHẢ HỆ VÀ DANH MỤC KHÓA HỌC (TỐC ĐỘ 1MS TỪ RAM)
 # =============================================================================
 @router.get("/hierarchy-schools")
 async def get_hierarchy_schools(search: str = Query("", description="Tìm kiếm tên trường hoặc mã trường")):
-    """Lấy danh sách 480 trường học kèm chuỗi liên thông Partner và Distributor."""
-    supabase = get_supabase_client()
-    try:
-        query = supabase.table("workspace_organizations")\
-            .select("id, code, name, role_type, parent_id")\
-            .eq("role_type", "school")\
-            .order("name", desc=False)
+    """Lấy danh sách 480 trường học kèm phả hệ (Đọc siêu tốc từ In-Memory Cache)."""
+    cache_key = "all_hierarchy_schools"
+    all_schools = ws_cache.get(cache_key)
+
+    # Nếu chưa có trong RAM -> Nạp từ Supabase và dựng phả hệ
+    if all_schools is None:
+        supabase = get_supabase_client()
+        try:
+            schools_res = supabase.table("workspace_organizations")\
+                .select("id, code, name, role_type, parent_id")\
+                .eq("role_type", "school")\
+                .order("name", desc=False)\
+                .limit(500)\
+                .execute()
+            schools = schools_res.data or []
             
-        if search:
-            query = query.ilike("name", f"%{search}%")
+            all_orgs = supabase.table("workspace_organizations").select("id, code, name, role_type, parent_id").execute()
+            org_map = {o["id"]: o for o in (all_orgs.data or [])}
             
-        schools_res = query.limit(500).execute()
-        schools = schools_res.data or []
+            results = []
+            for s in schools:
+                partner_id = s.get("parent_id")
+                partner = org_map.get(partner_id, {})
+                dist_id = partner.get("parent_id")
+                distributor = org_map.get(dist_id, {})
+                
+                results.append({
+                    "school_id": s["id"],
+                    "school_code": s["code"],
+                    "school_name": s["name"],
+                    "partner_name": partner.get("name", "Direct Partner"),
+                    "partner_code": partner.get("code", "N/A"),
+                    "distributor_name": distributor.get("name", "Master Distributor"),
+                    "distributor_code": distributor.get("code", "N/A"),
+                    "full_lineage": f"{distributor.get('name', 'Distributor')} ➔ {partner.get('name', 'Partner')} ➔ {s['name']}"
+                })
+                
+            all_schools = results
+            ws_cache.set(cache_key, all_schools, ttl=900)  # Lưu RAM 15 phút
+        except Exception as e:
+            print(f"❌ Lỗi lấy danh sách phả hệ: {e}")
+            return []
+
+    # Tìm kiếm từ khóa ngay trong RAM (0.1ms)
+    if search:
+        s_lower = search.strip().lower()
+        return [
+            s for s in all_schools 
+            if s_lower in s["school_name"].lower() 
+            or s_lower in str(s["school_code"]).lower()
+            or s_lower in s["partner_name"].lower()
+            or s_lower in s["distributor_name"].lower()
+        ]
         
-        all_orgs = supabase.table("workspace_organizations").select("id, code, name, role_type, parent_id").execute()
-        org_map = {o["id"]: o for o in (all_orgs.data or [])}
-        
-        results = []
-        for s in schools:
-            partner_id = s.get("parent_id")
-            partner = org_map.get(partner_id, {})
-            dist_id = partner.get("parent_id")
-            distributor = org_map.get(dist_id, {})
-            
-            results.append({
-                "school_id": s["id"],
-                "school_code": s["code"],
-                "school_name": s["name"],
-                "partner_name": partner.get("name", "Direct Partner"),
-                "partner_code": partner.get("code", "N/A"),
-                "distributor_name": distributor.get("name", "Master Distributor"),
-                "distributor_code": distributor.get("code", "N/A"),
-                "full_lineage": f"{distributor.get('name', 'Distributor')} ➔ {partner.get('name', 'Partner')} ➔ {s['name']}"
-            })
-            
-        return results
-    except Exception as e:
-        print(f"❌ Lỗi lấy danh sách phả hệ: {e}")
-        return []
+    return all_schools
 
 
 @router.get("/categories")
 async def get_course_categories():
-    """Lấy danh sách các Category duy nhất từ database workspace_courses."""
+    """Lấy danh sách các Category duy nhất (Đọc từ RAM Cache)."""
+    cache_key = "workspace_categories"
+    cached = ws_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     supabase = get_supabase_client()
     try:
         res = supabase.table("workspace_courses").select("category").execute()
         categories = sorted(list(set(item["category"] for item in (res.data or []) if item.get("category"))))
         if categories:
+            ws_cache.set(cache_key, categories, ttl=900)
             return categories
     except Exception as e:
         print(f"⚠️ Lỗi đọc categories: {e}")
@@ -78,21 +128,28 @@ async def get_course_categories():
 
 @router.get("/courses")
 async def get_workspace_courses(category: Optional[str] = Query(None)):
-    """Lấy danh mục khóa học từ bảng workspace_courses trên database, hỗ trợ lọc theo Category."""
+    """Lấy danh mục khóa học từ bảng workspace_courses (Có Cache RAM)."""
+    cache_key = f"workspace_courses_{category or 'all'}"
+    cached = ws_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     supabase = get_supabase_client()
     try:
         query = supabase.table("workspace_courses").select("*").order("course_id")
         if category and category != "all":
             query = query.eq("category", category)
         res = query.execute()
-        return res.data or []
+        data = res.data or []
+        ws_cache.set(cache_key, data, ttl=600)
+        return data
     except Exception as e:
         print(f"❌ Lỗi query khóa học: {e}")
         return []
 
 
 # =============================================================================
-# 2. CACHED ENDPOINTS: ĐỌC DỮ LIỆU TỪ SUPABASE CACHE (TỐC ĐỘ 50ms - KHÔNG TỐN RAM)
+# 2. CACHED ENDPOINTS: ĐỌC DỮ LIỆU TỪ SUPABASE CACHE
 # =============================================================================
 @router.get("/cached-pending-orders")
 async def get_cached_pending_orders(
@@ -105,7 +162,6 @@ async def get_cached_pending_orders(
     try:
         query = supabase.table("workspace_orders_cache").select("*").order("order_date", desc=True)
         
-        # Chỉ lọc nếu school_name không phải là trường test mặc định
         if school_name and "000 SCHOOL" not in school_name.upper():
             query = query.ilike("school_name", f"%{school_name.strip()}%")
             
@@ -161,7 +217,7 @@ async def trigger_distributor_cache_sync(background_tasks: BackgroundTasks):
 
 
 # =============================================================================
-# 3. LIVE SCRAPERS (BACKUP CHO TRƯỜNG HỢP CẦN CÀO TRỰC TIẾP)
+# 3. LIVE SCRAPERS
 # =============================================================================
 @router.get("/pending-school-orders")
 async def get_pending_school_orders(
@@ -234,8 +290,14 @@ async def extract_cof_content(req: ExtractCOFRequest):
     student_match = re.search(r"Total No\. Student:\s*\(\*\)[,:\s]*(\d+)", text, re.IGNORECASE)
     total_students = int(student_match.group(1)) if student_match else 50
 
-    db_courses_res = supabase.table("workspace_courses").select("*").execute()
-    db_courses_map = {c["course_id"]: c for c in (db_courses_res.data or [])}
+    # Lấy cache khóa học thay vì query lại DB
+    cached_courses = ws_cache.get("workspace_courses_all")
+    if not cached_courses:
+        db_courses_res = supabase.table("workspace_courses").select("*").execute()
+        cached_courses = db_courses_res.data or []
+        ws_cache.set("workspace_courses_all", cached_courses, ttl=600)
+
+    db_courses_map = {c["course_id"]: c for c in cached_courses}
 
     extracted_courses = []
     lines = text.split("\n")

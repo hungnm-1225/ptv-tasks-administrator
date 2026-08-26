@@ -1,4 +1,5 @@
 # backend/app/api/v1/endpoints/courses.py
+import time
 import logging
 from fastapi import APIRouter, HTTPException, Query
 from typing import Dict, Any, List, Optional
@@ -8,6 +9,36 @@ from app.core.supabase import get_supabase_client
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# =============================================================================
+# ⚡ IN-MEMORY CACHE ENGINE (TỐC ĐỘ 1MS - KHÔNG CẦN REDIS/THƯ VIỆN NGOÀI)
+# =============================================================================
+class SimpleMemoryCache:
+    def __init__(self, default_ttl: int = 600):  # Mặc định lưu RAM 10 phút
+        self._cache: Dict[str, Any] = {}
+
+    def get(self, key: str) -> Optional[Any]:
+        if key in self._cache:
+            data, expire_at = self._cache[key]
+            if time.time() < expire_at:
+                return data
+            del self._cache[key]
+        return None
+
+    def set(self, key: str, value: Any, ttl: Optional[int] = None):
+        expire_at = time.time() + (ttl if ttl is not None else 600)
+        self._cache[key] = (value, expire_at)
+
+    def invalidate(self, prefix: str = ""):
+        """Xóa cache khi có thao tác Thêm / Sửa / Xóa."""
+        if not prefix:
+            self._cache.clear()
+        else:
+            keys_to_del = [k for k in self._cache if k.startswith(prefix)]
+            for k in keys_to_del:
+                del self._cache[k]
+
+course_cache = SimpleMemoryCache(default_ttl=600)
 
 
 class CourseSchema(BaseModel):
@@ -19,7 +50,6 @@ class CourseSchema(BaseModel):
 
     @model_validator(mode="after")
     def auto_fill_lms_url(self):
-        # 🟢 Tự động sinh link nếu để trống
         if not self.lms_url or not self.lms_url.strip():
             self.lms_url = f"https://learn.pythaverse.space/course/view.php?id={self.course_id}"
         return self
@@ -49,7 +79,7 @@ def get_table_name(course_type: str) -> str:
 
 
 # -------------------------------------------------------------------
-# 1. LẤY DANH SÁCH KHÓA HỌC (Hỗ trợ Search, Filter Category & Bypass 1000 limit)
+# 1. LẤY DANH SÁCH KHÓA HỌC (Có In-Memory Cache)
 # -------------------------------------------------------------------
 @router.get("/{course_type}")
 async def list_courses(
@@ -58,47 +88,58 @@ async def list_courses(
     search: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     table = get_table_name(course_type)
-    supabase = get_supabase_client()
+    cache_key = f"all_courses_{table}"
     
-    try:
-        # Lấy tối đa 5000 bản ghi để không bị cắt cụt danh mục lớn
-        query = supabase.table(table).select("*").range(0, 4999).order("category", desc=False).order("course_id", desc=False)
+    # ⚡ Đọc từ RAM nếu có
+    cached_data = course_cache.get(cache_key)
+    if cached_data is None:
+        supabase = get_supabase_client()
+        try:
+            res = supabase.table(table).select("*").range(0, 4999).order("category", desc=False).order("course_id", desc=False).execute()
+            cached_data = res.data or []
+            course_cache.set(cache_key, cached_data, ttl=600)
+        except Exception as e:
+            logger.error(f"❌ Lỗi lấy danh sách khóa học {table}: {e}")
+            return []
+
+    data = cached_data
+
+    # Lọc danh mục trong RAM
+    if category and category.strip() != "" and category.lower() not in ["all", "tất cả"]:
+        cat_clean = category.strip().lower()
+        data = [c for c in data if str(c.get("category", "")).strip().lower() == cat_clean]
+
+    # Tìm kiếm từ khóa trong RAM
+    if search:
+        s_lower = search.strip().lower()
+        data = [
+            c for c in data 
+            if s_lower in str(c.get("course_id", "")).lower() 
+            or s_lower in str(c.get("course_name", "") or "").lower()
+            or s_lower in str(c.get("sku", "") or "").lower()
+            or s_lower in str(c.get("category", "") or "").lower()
+        ]
         
-        if category and category.strip() != "" and category.lower() != "all" and category.lower() != "tất cả":
-            query = query.eq("category", category.strip())
-            
-        res = query.execute()
-        data = res.data or []
-        
-        if search:
-            s_lower = search.strip().lower()
-            data = [
-                c for c in data 
-                if s_lower in str(c.get("course_id", "")).lower() 
-                or s_lower in str(c.get("course_name", "") or "").lower()
-                or s_lower in str(c.get("sku", "") or "").lower()
-                or s_lower in str(c.get("category", "") or "").lower()
-            ]
-            
-        return data
-    except Exception as e:
-        logger.error(f"❌ Lỗi lấy danh sách khóa học {table}: {e}")
-        return []
+    return data
 
 
 # -------------------------------------------------------------------
-# 2. LẤY DANH SÁCH TẤT CẢ CATEGORIES DUY NHẤT
+# 2. LẤY DANH SÁCH TẤT CẢ CATEGORIES DUY NHẤT (Có In-Memory Cache)
 # -------------------------------------------------------------------
 @router.get("/{course_type}/categories")
 async def get_categories(course_type: str) -> List[str]:
     table = get_table_name(course_type)
-    supabase = get_supabase_client()
+    cache_key = f"categories_{table}"
     
+    cached_cats = course_cache.get(cache_key)
+    if cached_cats is not None:
+        return cached_cats
+
+    supabase = get_supabase_client()
     try:
         res = supabase.table(table).select("category").range(0, 4999).execute()
         raw_data = res.data or []
         
-        # Lọc danh mục duy nhất, loại bỏ chuỗi rỗng
         categories_set = set()
         for row in raw_data:
             cat = row.get("category")
@@ -106,6 +147,7 @@ async def get_categories(course_type: str) -> List[str]:
                 categories_set.add(str(cat).strip())
                 
         cats = sorted(list(categories_set))
+        course_cache.set(cache_key, cats, ttl=600)
         return cats
     except Exception as e:
         logger.error(f"❌ Lỗi lấy categories từ {table}: {e}")
@@ -113,24 +155,27 @@ async def get_categories(course_type: str) -> List[str]:
 
 
 # -------------------------------------------------------------------
-# 3. TẠO KHÓA HỌC MỚI
+# 3. TẠO KHÓA HỌC MỚI (Tự động xóa cache)
 # -------------------------------------------------------------------
 @router.post("/{course_type}")
 async def create_course(course_type: str, payload: CourseSchema):
     table = get_table_name(course_type)
     supabase = get_supabase_client()
     
-    # Kiểm tra trùng Course ID
     dup = supabase.table(table).select("id").eq("course_id", payload.course_id).execute()
     if dup.data:
         raise HTTPException(status_code=400, detail=f"Course ID #{payload.course_id} đã tồn tại trong {table}!")
         
     res = supabase.table(table).insert(payload.model_dump()).execute()
+    
+    # 🧹 Xóa cache để nạp lại dữ liệu mới
+    course_cache.invalidate(f"all_courses_{table}")
+    course_cache.invalidate(f"categories_{table}")
     return {"status": "success", "data": res.data[0] if res.data else None}
 
 
 # -------------------------------------------------------------------
-# 4. CẬP NHẬT KHÓA HỌC
+# 4. CẬP NHẬT KHÓA HỌC (Tự động xóa cache)
 # -------------------------------------------------------------------
 @router.put("/{course_type}/{course_db_id}")
 async def update_course(course_type: str, course_db_id: str, payload: CourseUpdateSchema):
@@ -142,11 +187,15 @@ async def update_course(course_type: str, course_db_id: str, payload: CourseUpda
         raise HTTPException(status_code=400, detail="Không có trường nào để cập nhật.")
         
     res = supabase.table(table).update(update_data).eq("id", course_db_id).execute()
+    
+    # 🧹 Xóa cache
+    course_cache.invalidate(f"all_courses_{table}")
+    course_cache.invalidate(f"categories_{table}")
     return {"status": "success", "data": res.data[0] if res.data else None}
 
 
 # -------------------------------------------------------------------
-# 5. XÓA KHÓA HỌC
+# 5. XÓA KHÓA HỌC (Tự động xóa cache)
 # -------------------------------------------------------------------
 @router.delete("/{course_type}/{course_db_id}")
 async def delete_course(course_type: str, course_db_id: str):
@@ -154,11 +203,15 @@ async def delete_course(course_type: str, course_db_id: str):
     supabase = get_supabase_client()
     
     res = supabase.table(table).delete().eq("id", course_db_id).execute()
+    
+    # 🧹 Xóa cache
+    course_cache.invalidate(f"all_courses_{table}")
+    course_cache.invalidate(f"categories_{table}")
     return {"status": "success", "message": "Đã xóa khóa học thành công."}
 
 
 # -------------------------------------------------------------------
-# 6. NHẬP NHANH / BULK UPSERT HÀNG LOẠT KHÓA HỌC
+# 6. NHẬP NHANH / BULK UPSERT (Tự động xóa cache)
 # -------------------------------------------------------------------
 @router.post("/{course_type}/bulk-upsert")
 async def bulk_upsert_courses(course_type: str, payload: BulkCoursesPayload):
@@ -168,7 +221,6 @@ async def bulk_upsert_courses(course_type: str, payload: BulkCoursesPayload):
     if not payload.courses:
         raise HTTPException(status_code=400, detail="Danh sách khóa học rỗng.")
         
-    # Khử trùng lặp Course ID trong file upload
     unique_records_map = {}
     for c in payload.courses:
         data = c.model_dump()
@@ -184,6 +236,9 @@ async def bulk_upsert_courses(course_type: str, payload: BulkCoursesPayload):
             chunk = records[i:i + batch_size]
             supabase.table(table).upsert(chunk, on_conflict="course_id").execute()
             
+        # 🧹 Xóa cache
+        course_cache.invalidate(f"all_courses_{table}")
+        course_cache.invalidate(f"categories_{table}")
         return {
             "status": "success",
             "total_processed": len(records),
@@ -195,7 +250,7 @@ async def bulk_upsert_courses(course_type: str, payload: BulkCoursesPayload):
 
 
 # -------------------------------------------------------------------
-# 7. ĐỔI TÊN DANH MỤC (RENAME CATEGORY HÀNG LOẠT)
+# 7. ĐỔI TÊN DANH MỤC (Tự động xóa cache)
 # -------------------------------------------------------------------
 @router.put("/{course_type}/categories/rename")
 async def rename_category(course_type: str, payload: RenameCategoryPayload):
@@ -213,6 +268,9 @@ async def rename_category(course_type: str, payload: RenameCategoryPayload):
         .eq("category", old_cat)\
         .execute()
         
+    # 🧹 Xóa cache
+    course_cache.invalidate(f"all_courses_{table}")
+    course_cache.invalidate(f"categories_{table}")
     return {
         "status": "success",
         "message": f"Đã đổi tên danh mục từ '{old_cat}' sang '{new_cat}' cho các khóa học liên quan."
@@ -220,7 +278,7 @@ async def rename_category(course_type: str, payload: RenameCategoryPayload):
 
 
 # -------------------------------------------------------------------
-# 8. XÓA / GỘP DANH MỤC
+# 8. XÓA / GỘP DANH MỤC (Tự động xóa cache)
 # -------------------------------------------------------------------
 @router.delete("/{course_type}/categories/{category_name}")
 async def delete_category(
@@ -238,16 +296,15 @@ async def delete_category(
             .update({"category": target_clean})\
             .eq("category", cat_clean)\
             .execute()
-        return {
-            "status": "success",
-            "message": f"Đã gộp tất cả khóa học từ '{cat_clean}' sang '{target_clean}'."
-        }
+        msg = f"Đã gộp tất cả khóa học từ '{cat_clean}' sang '{target_clean}'."
     else:
         res = supabase.table(table)\
             .delete()\
             .eq("category", cat_clean)\
             .execute()
-        return {
-            "status": "success",
-            "message": f"Đã xóa toàn bộ các khóa học thuộc danh mục '{cat_clean}'."
-        }
+        msg = f"Đã xóa toàn bộ các khóa học thuộc danh mục '{cat_clean}'."
+
+    # 🧹 Xóa cache
+    course_cache.invalidate(f"all_courses_{table}")
+    course_cache.invalidate(f"categories_{table}")
+    return {"status": "success", "message": msg}

@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from fastapi.middleware.gzip import GZipMiddleware
 
 # Import Services
 from app.services.gmail_service import poll_unread_gmails
@@ -188,6 +189,8 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
+    GZipMiddleware,
+    minimum_size=1000,
     allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
