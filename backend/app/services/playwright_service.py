@@ -15,19 +15,21 @@ MOODLE_BASE_URL = "https://learn.pythaverse.space"
 class PlaywrightLMSService:
     """
     Playwright Worker tự động hóa 100% trên Moodle PLearn Edwiser RemUI (learn.pythaverse.space):
-    - Đăng nhập Keycloak OpenID Connect SSO bọc thép.
-    - Chống mạng lag, chống Layout Shift và chống kết quả ma (Ghost response).
-    - Tự động Ghi danh MỚI kèm ngày hết hạn Enrolment ends.
-    - Smart Fallback: Tự động chuyển sang Gia hạn (Update date) nếu User đã có trong khóa.
-    - Đổi Role trực tiếp (Inline Role Modifier ✏️).
-    - Xóa người dùng khỏi khóa học (Unenrol User 🗑️).
+    - Đăng nhập Keycloak OpenID Connect SSO an toàn.
+    - Chống mạng lag, Layout Shift và triệt tiêu kết quả ma (Ghost response).
+    - Ghi danh MỚI kèm bung 'Show more...', bật Enable và cài đặt Enrolment ends.
+    - Smart Fallback: Lọc chuẩn 2 nhịp & so khớp chính xác 100% cột td.c2 để Gia hạn (Update date).
+    - Đổi Mono-Role (gỡ sạch role cũ và gán role mong muốn).
+    - Xóa người dùng khỏi khóa học (Unenrol 🗑️).
     - Tạo Group & Phân nhóm lớp tự động.
     """
 
     def __init__(self):
+        # Mặc định chạy headless trên server Render 512MB RAM
         self.headless = True
 
     def _sanitize_emails(self, email_list: Any) -> List[str]:
+        """Làm sạch và lọc trùng danh sách email."""
         if not email_list:
             return []
         if isinstance(email_list, str):
@@ -45,6 +47,7 @@ class PlaywrightLMSService:
         return cleaned
 
     def _parse_date_components(self, date_str: str) -> Dict[str, str]:
+        """Chuyển chuỗi ngày sang dict day/month/year."""
         try:
             if "-" in date_str:
                 parts = date_str.split("-")
@@ -66,6 +69,7 @@ class PlaywrightLMSService:
         }
 
     async def _login_moodle_sso(self, page: Page) -> bool:
+        """Đăng nhập Moodle qua Keycloak SSO an toàn."""
         try:
             admin_user = settings.TEST_ADMIN_USER or "adminworkspace"
             admin_pass = settings.TEST_ADMIN_PASS or settings.KEYCLOAK_ADMIN_PASS or ""
@@ -102,6 +106,7 @@ class PlaywrightLMSService:
             return False
 
     async def _close_modal_safely(self, page: Page, modal: Locator):
+        """Đóng modal và dọn dẹp sạch sẽ backdrop."""
         try:
             cancel_btn = modal.locator("button[data-action='cancel'], button[data-action='hide'], .modal-header button.close").first
             if await cancel_btn.count() > 0:
@@ -119,7 +124,7 @@ class PlaywrightLMSService:
             logger.debug(f"Đóng modal: {e}")
 
     async def enroll_users_pipeline(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Luồng Ghi Danh kết hợp Smart Fallback (Enrol New -> Extend Date -> Add Group)."""
+        """Luồng Ghi Danh toàn năng kết hợp Smart Fallback (Enrol New -> Extend Date -> Add Group)."""
         course_id = str(payload.get("course_id", "")).strip()
         course_name = payload.get("course_name", f"Course #{course_id}")
         end_date_str = payload.get("end_date", "")
@@ -158,7 +163,7 @@ class PlaywrightLMSService:
         async with async_playwright() as p:
             browser: Browser = await p.chromium.launch(
                 headless=self.headless,
-                slow_mo=200 if not self.headless else 0,
+                slow_mo=150 if not self.headless else 0,
                 args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--single-process"]
             )
             context = await browser.new_context(
@@ -291,7 +296,7 @@ class PlaywrightLMSService:
                         emails_need_fallback = emails
 
                     # ----------------------------------------------------------
-                    # BƯỚC 2: SMART FALLBACK (TÌM TRONG BẢNG ĐỂ GIA HẠN NGÀY)
+                    # BƯỚC 2: SMART FALLBACK (LỌC CHUẨN 2 NHỊP & BẮT CHUẨN TD.C2)
                     # ----------------------------------------------------------
                     if emails_need_fallback:
                         logger.info(f"🔄 BẮT ĐẦU SMART FALLBACK KIỂM TRA {len(emails_need_fallback)} TÀI KHOẢN TRONG BẢNG...")
@@ -299,32 +304,41 @@ class PlaywrightLMSService:
                         for email in emails_need_fallback:
                             user_extended = False
 
-                            reset_btn = page.locator("button[data-filteraction='reset']:has-text('Clear filters')").first
-                            if await reset_btn.count() > 0 and await reset_btn.is_visible():
-                                await reset_btn.click(force=True)
-                                await page.wait_for_timeout(1000)
+                            # 1. Chọn Keyword
+                            select_loc = page.locator("div[data-filterregion='filters'] select[data-filterfield='type']").first
+                            if await select_loc.count() > 0:
+                                await select_loc.scroll_into_view_if_needed()
+                                await select_loc.click()
+                                await select_loc.select_option(value="keywords")
+                                await page.evaluate("""() => {
+                                    const sel = document.querySelector("div[data-filterregion='filters'] select[data-filterfield='type']");
+                                    if (sel) {
+                                        sel.dispatchEvent(new Event('change', { bubbles: true }));
+                                        if (window.jQuery) { window.jQuery(sel).trigger('change'); }
+                                    }
+                                }""")
 
-                            type_select = page.locator("select[data-filterfield='type']").first
-                            if await type_select.count() > 0 and await type_select.is_enabled():
-                                await type_select.select_option(value="keywords")
-                                await page.wait_for_timeout(400)
+                            # 2. Điền email vào ô Type...
+                            kw_input = page.locator("input[placeholder='Type...']").first
+                            await kw_input.wait_for(state="visible", timeout=20000)
+                            await kw_input.click(force=True)
+                            await kw_input.fill(email)
+                            await page.wait_for_timeout(400)
 
-                            keyword_input = page.locator("div[data-filter-type='keywords'] input, div[data-filterregion='value'] input").first
-                            if await keyword_input.count() > 0:
-                                await keyword_input.click(force=True)
-                                await keyword_input.fill(email)
-                                await page.keyboard.press("Enter")
-                                await page.wait_for_timeout(400)
-
+                            # 3. Bấm Apply filters 2 lần
                             apply_btn = page.locator("button[data-filteraction='apply']:has-text('Apply filters')").first
-                            if await apply_btn.count() > 0:
-                                await apply_btn.click(force=True)
-                                await page.wait_for_timeout(2500)
+                            await apply_btn.click(force=True)
+                            await page.wait_for_timeout(1500)
+                            await apply_btn.click(force=True)
+                            await page.wait_for_timeout(3500)
 
-                            user_row = page.locator(f"table#participants tbody tr:has-text('{email}')").first
+                            # 4. So khớp chính xác cột td.cell.c2
+                            user_row = page.locator("table#participants tbody tr").filter(
+                                has=page.locator(f"td.cell.c2, td.c2", has_text=email)
+                            ).first
 
                             if await user_row.count() > 0:
-                                edit_gear = user_row.locator("a.editenrollink, a[data-action='editenrolment'], i.fa-cog, i.fa-pen").first
+                                edit_gear = user_row.locator("a.editenrollink, a[data-action='editenrolment']").first
                                 if await edit_gear.count() > 0:
                                     await edit_gear.click(force=True)
                                     
@@ -368,7 +382,6 @@ class PlaywrightLMSService:
                                         })
                                         user_extended = True
 
-                            # NẾU CẢ MODAL VÀ TRANG PARTICIPANTS ĐỀU KHÔNG CÓ -> BÁO LỖI CHÍNH XÁC
                             if not user_extended:
                                 logger.warning(f"❌ SMART FALLBACK THẤT BẠI: Hoàn toàn không tìm thấy tài khoản trên hệ thống: {email}")
                                 results["not_found"].append({
@@ -458,8 +471,8 @@ class PlaywrightLMSService:
             finally:
                 await browser.close()
 
-    async def modify_user_role(self, course_id: str, email: str, new_role_label: str, mode: str = "replace") -> Dict[str, Any]:
-        """Hàm độc lập đổi hoặc gán thêm Role cho 1 User trên Moodle."""
+    async def modify_user_role(self, course_id: str, email: str, new_role_label: str, mode: str = "mono") -> Dict[str, Any]:
+        """Đổi Mono-Role (gỡ sạch role cũ và gán role mong muốn) hoặc thêm role."""
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=self.headless, args=["--no-sandbox", "--disable-gpu", "--single-process"])
             page = await browser.new_page()
@@ -471,45 +484,72 @@ class PlaywrightLMSService:
                 await page.goto(participants_url, wait_until="load", timeout=60000)
                 await page.wait_for_timeout(1500)
 
-                # Lọc user
-                kw_input = page.locator("div[data-filter-type='keywords'] input, div[data-filterregion='value'] input").first
-                if await kw_input.count() > 0:
-                    await kw_input.fill(email)
-                    await page.keyboard.press("Enter")
-                    await page.locator("button[data-filteraction='apply']").first.click(force=True)
-                    await page.wait_for_timeout(2500)
+                # Chọn Keyword
+                select_loc = page.locator("div[data-filterregion='filters'] select[data-filterfield='type']").first
+                if await select_loc.count() > 0:
+                    await select_loc.select_option(value="keywords")
+                    await page.evaluate("""() => {
+                        const sel = document.querySelector("div[data-filterregion='filters'] select[data-filterfield='type']");
+                        if (sel) {
+                            sel.dispatchEvent(new Event('change', { bubbles: true }));
+                            if (window.jQuery) { window.jQuery(sel).trigger('change'); }
+                        }
+                    }""")
 
-                user_row = page.locator(f"table#participants tbody tr:has-text('{email}')").first
+                # Điền email & Apply filters 2 lần
+                kw_input = page.locator("input[placeholder='Type...']").first
+                await kw_input.wait_for(state="visible", timeout=20000)
+                await kw_input.click(force=True)
+                await kw_input.fill(email)
+                await page.wait_for_timeout(400)
+
+                apply_btn = page.locator("button[data-filteraction='apply']:has-text('Apply filters')").first
+                await apply_btn.click(force=True)
+                await page.wait_for_timeout(1500)
+                await apply_btn.click(force=True)
+                await page.wait_for_timeout(3500)
+
+                user_row = page.locator("table#participants tbody tr").filter(
+                    has=page.locator("td.cell.c2, td.c2", has_text=email)
+                ).first
+
                 if await user_row.count() == 0:
                     return {"status": "failed", "error": f"Không tìm thấy user {email} trong khóa học."}
 
-                # Bấm bút chì sửa role
-                pencil_btn = user_row.locator("a[data-action='editroles'], i.fa-pen, i.fa-pencil").first
-                await pencil_btn.click(force=True)
+                role_cell = user_row.locator("td.cell.c3, td.c3").first
+                role_link = role_cell.locator("a.quickeditlink, a").first
+                await role_link.click(force=True)
                 await page.wait_for_timeout(1000)
 
-                # Nếu mode là 'replace' thì xóa các role cũ
-                if mode == "replace":
-                    old_tags = user_row.locator(".inplaceeditable span.badge [data-action='remove']")
-                    count_old = await old_tags.count()
-                    for _ in range(count_old):
-                        await old_tags.nth(0).click(force=True)
-                        await page.wait_for_timeout(300)
+                # Nếu là mode 'mono' (hoặc 'replace'): Gỡ toàn bộ các role cũ
+                if mode in ["mono", "replace"]:
+                    while True:
+                        old_badges_cancel = role_cell.locator(".form-autocomplete-selection span.badge span.edw-icon-Cancel, .badge .edw-icon-Cancel")
+                        if await old_badges_cancel.count() > 0:
+                            await old_badges_cancel.first.click(force=True)
+                            await page.wait_for_timeout(400)
+                        else:
+                            break
 
-                # Chọn role mới
-                role_dropdown = user_row.locator("select.custom-select, select[name='roles']").first
-                if await role_dropdown.count() > 0:
-                    await role_dropdown.select_option(label=new_role_label)
-                    await page.wait_for_timeout(500)
+                # Mở dropdown và chọn role mới
+                down_arrow = role_cell.locator("span.form-autocomplete-downarrow, .edw-icon-Down-Arrow").first
+                if await down_arrow.count() > 0:
+                    await down_arrow.click(force=True)
+                    await page.wait_for_timeout(600)
 
-                # Lưu
-                save_btn = user_row.locator("a[data-action='saveroles'], i.fa-floppy-disk, i.fa-save").first
-                if await save_btn.count() > 0:
-                    await save_btn.click(force=True)
+                new_opt = role_cell.locator(f"ul.form-autocomplete-suggestions li:has-text('{new_role_label}')").first
+                if await new_opt.count() > 0:
+                    await new_opt.click(force=True)
+                    await page.wait_for_timeout(600)
+
+                # Lưu qua icon đĩa mềm 💾
+                save_disk_btn = role_cell.locator("i.fa-floppy-o, a:has(i.fa-floppy-o)").first
+                if await save_disk_btn.count() > 0:
+                    await save_disk_btn.click(force=True)
                 else:
                     await page.keyboard.press("Enter")
 
-                await page.wait_for_timeout(2000)
+                await page.wait_for_timeout(2500)
                 return {"status": "success", "message": f"Đã cập nhật role thành [{new_role_label}] cho {email}"}
             finally:
                 await browser.close()
@@ -523,7 +563,7 @@ class PlaywrightLMSService:
         results = {"unenrolled": [], "not_found": []}
 
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=self.headless, args=["--no-sandbox", "--disable-gpu", "--single-process"])
+            browser: Browser = await p.chromium.launch(headless=self.headless, args=["--no-sandbox", "--disable-gpu", "--single-process"])
             page = await browser.new_page()
             try:
                 if not await self._login_moodle_sso(page):
@@ -534,29 +574,42 @@ class PlaywrightLMSService:
                 await page.wait_for_timeout(1500)
 
                 for email in clean_emails:
-                    # Reset filter và tìm email
-                    reset_btn = page.locator("button[data-filteraction='reset']:has-text('Clear filters')").first
-                    if await reset_btn.count() > 0 and await reset_btn.is_visible():
-                        await reset_btn.click(force=True)
-                        await page.wait_for_timeout(600)
+                    select_loc = page.locator("div[data-filterregion='filters'] select[data-filterfield='type']").first
+                    if await select_loc.count() > 0:
+                        await select_loc.select_option(value="keywords")
+                        await page.evaluate("""() => {
+                            const sel = document.querySelector("div[data-filterregion='filters'] select[data-filterfield='type']");
+                            if (sel) {
+                                sel.dispatchEvent(new Event('change', { bubbles: true }));
+                                if (window.jQuery) { window.jQuery(sel).trigger('change'); }
+                            }
+                        }""")
 
-                    kw_input = page.locator("div[data-filter-type='keywords'] input, div[data-filterregion='value'] input").first
-                    if await kw_input.count() > 0:
-                        await kw_input.fill(email)
-                        await page.keyboard.press("Enter")
-                        await page.locator("button[data-filteraction='apply']").first.click(force=True)
-                        await page.wait_for_timeout(2500)
+                    kw_input = page.locator("input[placeholder='Type...']").first
+                    await kw_input.wait_for(state="visible", timeout=20000)
+                    await kw_input.click(force=True)
+                    await kw_input.fill(email)
+                    await page.wait_for_timeout(400)
 
-                    user_row = page.locator(f"table#participants tbody tr:has-text('{email}')").first
+                    apply_btn = page.locator("button[data-filteraction='apply']:has-text('Apply filters')").first
+                    await apply_btn.click(force=True)
+                    await page.wait_for_timeout(1500)
+                    await apply_btn.click(force=True)
+                    await page.wait_for_timeout(3500)
+
+                    user_row = page.locator("table#participants tbody tr").filter(
+                        has=page.locator("td.cell.c2, td.c2", has_text=email)
+                    ).first
+
                     if await user_row.count() > 0:
-                        trash_btn = user_row.locator("a.unenrollink, a[data-action='unenrol'], i.fa-trash, i.fa-trash-can").first
+                        trash_btn = user_row.locator("a.unenrollink, a[data-action='unenrol'], i.edw-icon-Delete-Course").first
                         if await trash_btn.count() > 0:
                             await trash_btn.click(force=True)
                             
-                            modal = page.locator("div.modal.show:has-text('Unenrol'), div.modal.show[data-region='modal-container']").first
-                            await modal.wait_for(state="visible", timeout=8000)
+                            modal = page.locator("div.modal.show:has-text('Unenrol')").first
+                            await modal.wait_for(state="visible", timeout=15000)
 
-                            confirm_btn = modal.locator(".modal-footer button.btn-primary, button:has-text('Unenrol')").first
+                            confirm_btn = modal.locator(".modal-footer button[data-action='save'], button:has-text('Unenrol')").first
                             await confirm_btn.click(force=True)
                             await page.wait_for_timeout(3000)
                             results["unenrolled"].append(email)

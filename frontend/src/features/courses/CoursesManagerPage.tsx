@@ -29,21 +29,45 @@ import { CourseItem } from '../../types';
 type CoursePaneType = 'workspace' | 'lms';
 type BulkInputMode = 'file' | 'text';
 
-// ⚡ BỘ NHỚ ĐỆM CLIENT SWR CHO KHÓA HỌC (HIỂN THỊ NGAY 0MS KHI CHUYỂN TAB)
-const coursesClientCache = {
-    workspace: { courses: null as CourseItem[] | null, categories: null as string[] | null },
-    lms: { courses: null as CourseItem[] | null, categories: null as string[] | null },
+// ⚡ TRỢ THỦ PERSISTENT CACHE CHO KHÓA HỌC (LƯU LOCALSTORAGE)
+const getCoursesCache = (pane: CoursePaneType): { courses: CourseItem[] | null; categories: string[] | null } => {
+    try {
+        const rawCourses = localStorage.getItem(`ptv_courses_${pane}`);
+        const rawCats = localStorage.getItem(`ptv_cats_${pane}`);
+        return {
+            courses: rawCourses ? JSON.parse(rawCourses) : null,
+            categories: rawCats ? JSON.parse(rawCats) : null,
+        };
+    } catch {
+        return { courses: null, categories: null };
+    }
+};
+
+const setCoursesCache = (pane: CoursePaneType, courses: CourseItem[], categories: string[]) => {
+    try {
+        localStorage.setItem(`ptv_courses_${pane}`, JSON.stringify(courses));
+        localStorage.setItem(`ptv_cats_${pane}`, JSON.stringify(categories));
+    } catch { }
+};
+
+const clearCoursesCache = (pane: CoursePaneType) => {
+    try {
+        localStorage.removeItem(`ptv_courses_${pane}`);
+        localStorage.removeItem(`ptv_cats_${pane}`);
+    } catch { }
 };
 
 export const CoursesManagerPage: React.FC = () => {
     const [activePane, setActivePane] = useState<CoursePaneType>('workspace');
 
-    // Khởi tạo ngay từ Client Cache nếu đã có (0ms không spinner)
-    const [courses, setCourses] = useState<CourseItem[]>(coursesClientCache[activePane].courses || []);
-    const [categories, setCategories] = useState<string[]>(coursesClientCache[activePane].categories || []);
+    // ⚡ Lấy ngay từ localStorage khi mở trang (0ms)
+    const initialCache = useMemo(() => getCoursesCache(activePane), [activePane]);
+
+    const [courses, setCourses] = useState<CourseItem[]>(initialCache.courses || []);
+    const [categories, setCategories] = useState<string[]>(initialCache.categories || []);
     const [selectedCategory, setSelectedCategory] = useState<string>('all');
     const [searchQuery, setSearchQuery] = useState<string>('');
-    const [isLoading, setIsLoading] = useState<boolean>(!coursesClientCache[activePane].courses);
+    const [isLoading, setIsLoading] = useState<boolean>(!initialCache.courses);
 
     // Modal Thêm / Sửa
     const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -78,9 +102,9 @@ export const CoursesManagerPage: React.FC = () => {
     const [editingCatNew, setEditingCatNew] = useState<string>('');
     const [isCatSubmitting, setIsCatSubmitting] = useState<boolean>(false);
 
-    // ⚡ TẢI DANH MỤC & KHÓA HỌC (SWR SILENT BACKGROUND FETCH)
+    // ⚡ SWR SILENT FETCH
     const loadData = useCallback(async (forceSpinner = false) => {
-        const cached = coursesClientCache[activePane];
+        const cached = getCoursesCache(activePane);
         if (cached.courses && !forceSpinner) {
             setCourses(cached.courses);
             setCategories(cached.categories || []);
@@ -94,8 +118,7 @@ export const CoursesManagerPage: React.FC = () => {
                 fetchApi<CourseItem[]>(`/courses/${activePane}`),
                 fetchApi<string[]>(`/courses/${activePane}/categories`)
             ]);
-            coursesClientCache[activePane].courses = coursesData;
-            coursesClientCache[activePane].categories = catsData;
+            setCoursesCache(activePane, coursesData, catsData);
             setCourses(coursesData);
             setCategories(catsData);
         } catch (err: any) {
@@ -113,7 +136,6 @@ export const CoursesManagerPage: React.FC = () => {
         loadData();
     }, [loadData]);
 
-    // Lọc danh sách hiển thị trong RAM
     const filteredCourses = useMemo(() => {
         return courses.filter(item => {
             const matchCat = selectedCategory === 'all' || item.category === selectedCategory;
@@ -187,8 +209,7 @@ export const CoursesManagerPage: React.FC = () => {
                 });
                 toast.success(`Đã thêm mới khóa học #${payload.course_id} thành công!`);
             }
-            // 🧹 Xóa cache client để nạp mới
-            coursesClientCache[activePane].courses = null;
+            clearCoursesCache(activePane);
             setIsModalOpen(false);
             loadData(true);
         } catch (err: any) {
@@ -206,7 +227,7 @@ export const CoursesManagerPage: React.FC = () => {
         try {
             await fetchApi(`/courses/${activePane}/${course.id}`, { method: 'DELETE' });
             toast.success(`Đã xóa khóa học #${course.course_id}`);
-            coursesClientCache[activePane].courses = null;
+            clearCoursesCache(activePane);
             setCourses(prev => prev.filter(c => c.id !== course.id));
         } catch (err: any) {
             toast.error('Không thể xóa: ' + (err.message || err));
@@ -337,7 +358,7 @@ export const CoursesManagerPage: React.FC = () => {
                 body: JSON.stringify({ courses: bulkPreview })
             });
             toast.success(res.message || `Đã đồng bộ ${bulkPreview.length} khóa học thành công!`);
-            coursesClientCache[activePane].courses = null;
+            clearCoursesCache(activePane);
             setIsBulkModalOpen(false);
             setBulkRawText('');
             setUploadedFileName('');
@@ -366,8 +387,7 @@ export const CoursesManagerPage: React.FC = () => {
                 })
             });
             toast.success(`Đã đổi tên danh mục "${oldCat}" thành "${editingCatNew.trim().toUpperCase()}"!`);
-            coursesClientCache[activePane].categories = null;
-            coursesClientCache[activePane].courses = null;
+            clearCoursesCache(activePane);
             setEditingCatOld(null);
             setEditingCatNew('');
             loadData(true);
@@ -392,8 +412,7 @@ export const CoursesManagerPage: React.FC = () => {
                     method: 'DELETE'
                 });
                 toast.success(`Đã gộp danh mục "${cat}" vào "${targetCat.toUpperCase()}"!`);
-                coursesClientCache[activePane].categories = null;
-                coursesClientCache[activePane].courses = null;
+                clearCoursesCache(activePane);
                 loadData(true);
             } catch (err: any) {
                 toast.error('Lỗi khi gộp danh mục: ' + (err.message || err));
@@ -528,7 +547,7 @@ export const CoursesManagerPage: React.FC = () => {
             </div>
 
             {/* Danh Sách Khóa Học Grid */}
-            {isLoading ? (
+            {isLoading && courses.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-24 text-slate-400 gap-3">
                     <Loader2 className="w-8 h-8 animate-spin text-violet-600" />
                     <span className="text-xs">Đang nạp danh mục khóa học...</span>

@@ -12,9 +12,9 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
 | Lĩnh Vực / Phạm Vi Tác Vụ | Agent Chuyên Gia | Hồ Sơ Tham Chiếu | Trọng Tâm Quy Chuẩn Áp Dụng |
 |---|---|---|---|
 | **Frontend UI/UX** | `frontend-specialist` | `.agent/agents/frontend-specialist.md` | React 19, TypeScript Strict, Tailwind CSS v4, Dark/Light theme, SaaS aesthetic, chống AI-slop, loại bỏ nhãn song ngữ thừa, responsive, accessible. |
-| **Backend & REST APIs** | `backend-specialist` | `.agent/agents/backend-specialist.md` | Python 3.11, FastAPI 0.115, Pydantic v2 validation, Async/Await, APScheduler 6 Crons, Safe Job Wrapper. |
+| **Backend & REST APIs** | `backend-specialist` | `.agent/agents/backend-specialist.md` | Python 3.11, FastAPI 0.115, Pydantic v2 validation, Async/Await, APScheduler 6 Crons, Safe Job Wrapper, In-Memory RAM Caching. |
 | **Database & Storage** | `database-architect` | `.agent/agents/database-architect.md` | Supabase PostgreSQL 16 (16 bảng CSDL + Storage Bucket), ENUMs, Foreign Keys, RLS Policies `@dtt.vn`, Performance Indexes, Triggers. |
-| **RPA & Web Scraping** | `qa-automation-engineer` | `.agent/agents/qa-automation-engineer.md` | Playwright Async Chromium, Gói `workspace/` modularized 8 modules, Scanner Direct API, Viewport chuẩn, Selector kiên cố, Smart Polling, dọn RAM `gc.collect()`. |
+| **RPA & Web Scraping** | `qa-automation-engineer` | `.agent/agents/qa-automation-engineer.md` | Playwright Async Chromium, Gói `workspace/` modularized 8 modules, Scanner Direct API, Moodle Keyword Filter 2 nhịp, Viewport chuẩn, Selector kiên cố, Smart Polling, dọn RAM `gc.collect()`. |
 | **Security & Identity** | `security-auditor` | `.agent/agents/security-auditor.md` | Whitelist Domain `@dtt.vn`, Fernet Credential Vault (`VAULT_SECRET_KEY`), Keycloak Admin REST API + Playwright Fallback, Bearer Token validation. |
 | **Điều Phối Đa Nhiệm** | `orchestrator` | `.agent/agents/orchestrator.md` | Phân tích luồng end-to-end, giải quyết xung đột dữ liệu, thiết kế pipeline liên thông đa dịch vụ. |
 | **Gỡ Lỗi & Điều Tra Lỗi** | `debugger` | `.agent/agents/debugger.md` | 4-Phase Systematic Debugging, bắt log thực thi GMT+7, cô lập nguyên nhân gốc rễ, Gemini 10-model fallback. |
@@ -27,7 +27,7 @@ Khi phân tích, sửa code hoặc tư vấn giải pháp, AI phải luôn nắm
 
 ### 2.1. Cấu Trúc 7 Phân Hệ Pythaverse
 1. **School Workspace (`pythaverse.space`):** Hệ thống phân quyền 3 cấp (`Distributor` ➔ `Partner` ➔ `School`). School tạo Order lên Partner; Partner cấp License từ Pool; Distributor duyệt Contract cấp bù; Sales Admin phê duyệt tối cao.
-2. **PLearn LMS (`learn.pythaverse.space`):** Moodle LMS (PHP / MariaDB / REST WebServices). Quản lý khóa học (Categories: `SWRP`, `IR`, `ASP`...) và ghi danh học sinh/giáo viên theo Role (`Student` - 9, `Non-editing teacher` - 7, `Manager` - 1).
+2. **PLearn LMS (`learn.pythaverse.space`):** Moodle LMS (PHP / MariaDB / REST WebServices / Edwiser RemUI). Quản lý khóa học (Categories: `SWRP`, `IR`, `ASP`...) và ghi danh học sinh/giáo viên theo Role (`Student` - 9, `Non-editing teacher` - 7, `Manager` - 1), chia nhóm lớp tự động.
 3. **PGit (`git.pythaverse.space`):** Gitea Git Server. Yêu cầu tài khoản phải đăng nhập SSO qua Keycloak ít nhất 1 lần để kích hoạt provisioning tự động.
 4. **Keycloak Auth IDP (`eid.pythaverse.space`):** Cổng xác thực tập trung OAuth2/OIDC (Realm: `idp` / `master`). Quản trị reset mật khẩu, kích hoạt/vô hiệu hóa tài khoản, xác thực email.
 5. **Leanbot IDE (`ide.pythaverse.space`):** Blockly Web IDE / App Inventor kết nối Robot qua Bluetooth BLE Companion APK.
@@ -46,7 +46,13 @@ Gói dịch vụ được tách nhỏ thành 8 module chuyên biệt kế thừa
 - `__init__.py`: Class `WorkspacePlaywrightService` gom toàn bộ đa kế thừa thành singleton `workspace_playwright_service`.
 - `workspace_playwright_service.py`: Bridge file re-export 100% tương thích ngược.
 
-### 2.3. Quy Trình Bóc Tách COF (Curriculum Order Form)
+### 2.3. Dịch Vụ Moodle LMS Direct Enroller (`backend/app/services/playwright_service.py`)
+- **Smart Fallback 2 nhịp:** Khi ghi danh người dùng vào Moodle, nếu email không xuất hiện trong gợi ý Mới, tự động kích hoạt Keyword Filter (chọn `keywords`, nhập email vào `input[placeholder='Type...']`, click `Apply filters` 2 lần để tạo Tag Pill và lọc danh sách), so khớp chính xác cột `td.cell.c2` để Gia hạn (Extend date).
+- **Mono-Role Replacement:** Khi thay đổi vai trò (`modify_user_role`), xóa sạch toàn bộ role badges cũ trước khi gán duy nhất 1 role mong muốn và lưu bằng icon đĩa mềm 💾.
+- **Unenrol:** Tìm kiếm chính xác qua Keyword Filter và click icon thùng rác 🗑️ xác nhận gỡ người dùng khỏi khóa học.
+- **Auto Group Creation:** Tự động tạo Group và phân nhóm học viên tại `/group/index.php?id=...`.
+
+### 2.4. Quy Trình Bóc Tách COF (Curriculum Order Form)
 - **Tab 1 (`Curriculum Order Form` / `COF`):** Bóc tách `School Name`, `Country`, danh sách môn học, License, Start/End Date.
 - **Tab 2 (`Student Information`):** Bóc tách họ tên, email, ngày sinh (`DOB`), nhóm lớp (`class_group`). Chỉ tạo tài khoản cho học sinh chưa có Username và `Account Exist != 'yes'`.
 - **Tab 3 (`Teacher Information`):** Bóc tách họ tên, email giáo viên, môn học phân công (`course_assign`).
@@ -54,36 +60,40 @@ Gói dịch vụ được tách nhỏ thành 8 module chuyên biệt kế thừa
 - **Sinh File Accounts:** Sinh file `accounts.xlsx` 7 cột bắt đầu từ dòng 6 (`No.`, `First Name (*)`, `Last Name (*)`, `Mobile number (Optional)`, `Email (*)`, `Date of Birth (*)`, `Role (*)`).
 - **Ghi Ngược Kết Quả:** Đọc file kết quả `RESULT_accounts.xlsx`, map User/Pass vào cột 12-13, Group LMS vào cột 14, highlight nền màu cam nhạt (`#FCE4D6`) và chữ in đậm đỏ (`#C00000`).
 
-### 2.4. Quy Trình Két Sắt & Phả Hệ Tổ Chức (Hierarchy & Vault)
+### 2.5. Quy Trình Két Sắt & Phả Hệ Tổ Chức (Hierarchy & Vault)
 - **Bảng `workspace_organizations`:** Lưu cây quan hệ 3 cấp (`distributor` ➔ `partner` ➔ `school`) qua `parent_id`.
 - **Bảng `workspace_credentials_vault`:** Lưu trữ tài khoản và mật khẩu đã được mã hóa bằng thuật toán đối xứng `Fernet` (`VAULT_SECRET_KEY`).
 - **Giải Mã An Toàn:** Khi Playwright cần thông tin đăng nhập tự động, sử dụng `WorkspaceLineageService.resolve_by_school()` để tự động truy vết 3 cấp và giải mã mật khẩu tức thì.
 
-### 2.5. Smart Polling Engine (Nộp File Batch Tạo Tài Khoản)
+### 2.6. Smart Polling Engine (Nộp File Batch Tạo Tài Khoản)
 - **Pha 1 (Submit):** Upload file `accounts.xlsx`, nếu batch <= 30 tài khoản sẽ kích hoạt **Hybrid Fast-Path** đợi 12s lấy kết quả ngay. Nếu > 30 tài khoản, bắt `Request ID` tại dòng đầu của `MuiDataGrid`, đóng trình duyệt Chromium ngay lập tức để giải phóng RAM, đặt task `execution_status = 'waiting_poll'`.
 - **Pha 2 (Polling):** Cronjob `poll_workspace_long_tasks` mỗi 5 phút mở kiểm tra trạng thái Request ID. Khi trạng thái là `Done` / `Completed` ➔ Bấm Action Menu ➔ `Export` tải file kết quả `RESULT_accounts.xlsx`, gọi `COFExcelService.write_results_back_to_cof()` ghi ngược kết quả và đẩy lên Google Drive.
 
-### 2.6. Cấu Trúc Thư Mục Google Drive Phân Tầng 6 Cấp (`GoogleDriveService`)
+### 2.7. Cấu Trúc Thư Mục Google Drive Phân Tầng 6 Cấp (`GoogleDriveService`)
 - Dựng chuỗi thư mục phân tầng tự động: `Root` ➔ `{Năm}` ➔ `{Quốc gia}` ➔ `[Distributor] {Tên}` ➔ `[Partner] {Tên}` ➔ `[School] {Tên}`.
 - Tải file kết quả COF lên đúng thư mục trường học và trả về `web_view_link`.
 
-### 2.7. Điều Phối Tác Vụ Độc Lập Automation Studio (`AutomationStudioPage.tsx` / `/studio`)
+### 2.8. In-Memory RAM Caching (1ms Response Engine)
+- Triển khai trong [`backend/app/api/v1/endpoints/courses.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/courses.py) (`SimpleMemoryCache`) và [`backend/app/api/v1/endpoints/workspace.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/workspace.py) (`WorkspaceMemoryCache`).
+- **TTL:** 10 - 15 phút.
+- **Tự động Invalidate:** Bất kỳ thao tác Create, Update, Delete hoặc Bulk Upsert nào đều phải gọi `.invalidate()` để làm sạch cache ngay lập tức, đảm bảo tính toàn vẹn dữ liệu.
+
+### 2.9. Điều Phối Tác Vụ Độc Lập Automation Studio (`AutomationStudioPage.tsx` / `/studio`)
 - Cho phép Quản trị viên chủ động khởi tạo và điều phối các tác vụ Bot RPA/API mà không cần gắn với một ticket hòm thư đầu vào (`ticket_id = null`, `is_manual_dispatch = true`).
-- Tích hợp 4 Dispatcher Engines: Keycloak Identity (3 Safe Toggles), Workspace License Phả Hệ (6 sub-flows, 480 trường), LMS Moodle & Git Provisioning, Google Feedback Doc Triage.
-
-### 2.8. Giám Sát Sức Khỏe Hệ Sinh Thái Đa Tầng 3-Tabs (`SiteMonitorPage.tsx`)
-- **Tab 1 (Giám Sát Công Khai):** Giám sát Live 10 Website Pythaverse, Live Uptime Bar 24 giờ và Uptime Bars 24h phong cách UptimeRobot.
-- **Tab 2 (Ma Trận Xác Thực & Phân Quyền):** Kiểm thử tự động đăng nhập Keycloak SSO & quyền truy cập route nội bộ cho 16 tài khoản test 7 vai trò (`Admin`, `Sales Admin`, `Distributor`, `Partner`, `School`, `Teacher`, `Student`) giải mã Fernet từ bảng `site_monitor_credentials`.
-- **Tab 3 (CI/CD & Tiến Trình Triển Khai):** Kết nối Vercel REST API và Render REST API, theo dõi trạng thái builds và hiển thị live terminal logs.
-
-### 2.9. Bảng Điều Phối Tác Vụ Kanban Thông Minh (`WorkBoardPage.tsx` / `/board`)
-- Quản lý đa bảng (`work_boards`), tùy biến wallpaper và màu nền, thùng rác 30 ngày (soft delete / restore / permanent delete).
-- 6 cột trạng thái tiêu chuẩn (`work_board_columns`): Backlog, To Do, In Progress, Review, Done, Abort.
-- Thẻ công việc chi tiết (`work_board_cards`): Kéo thả Drag & Drop, Subtasks checklist với thanh tiến độ thời gian thực, phân quyền phụ trách, hạn chót (`due_date`) và hiệu ứng pháo hoa hạt TypeScript Canvas Confetti khi hoàn thành nhiệm vụ.
+- Tích hợp 3 Dispatcher Engines: `workspace_rpa`, `keycloak_api`, `feedback_doc_triage`.
+- **4 Nhóm Tác Vụ Workspace RPA:** 
+  1. *Phê duyệt (`approve`):* Duyệt School Order, Partner Contract, Admin Approve Contract.
+  2. *Tạo & Duyệt Chuỗi (`create_and_approve`):* Master E2E Chain 4 cấp, Partner Chain, Distributor Chain kèm Autocomplete phả hệ 480 trường.
+  3. *Tạo tài khoản hàng loạt (`bulk_accounts`):* Nộp batch COF và tính toán nghỉ 15s/tài khoản.
+  4. *Ghi danh LMS (`lms_enroll`):* Ghi danh & phân nhóm lớp School Workspace / Moodle LMS.
+- **Persistent Client Cache:** Lưu trữ LocalStorage (`ptv_studio_*`) nạp danh mục trường và môn học với tốc độ 0ms tuyệt đối.
 
 ### 2.10. Quản Lý Danh Mục Khóa Học Song Song (`CoursesManagerPage.tsx` / `/courses`)
-- Phân biệt rõ 2 bảng khóa học: `workspace_courses` (dùng cho RPA License Chain, COF matching) và `lms_courses` (dùng cho Moodle LMS PLearn enrollment).
-- Hỗ trợ CRUD đơn lẻ với URL LMS tự sinh, Bulk Upsert từ file `.xlsx`/`.csv` hoặc paste văn bản qua SheetJS, và Category Manager đổi tên/gộp danh mục hàng loạt.
+- **Kiến trúc Dual Pane:** Phân biệt rõ 2 bảng khóa học: `workspace_courses` (dùng cho RPA License Chain, COF matching) và `lms_courses` (dùng cho Moodle LMS PLearn enrollment).
+- **SWR Silent Fetch & LocalStorage Cache (`ptv_courses_*`, `ptv_cats_*`):** Tải trang tức thì 0ms và tự động làm mới ngầm.
+- **CRUD Đơn Lẻ & Tự Sinh URL LMS:** Tự động điền URL Moodle `https://learn.pythaverse.space/course/view.php?id={course_id}`.
+- **Bulk Import Hàng Loạt (SheetJS XLSX + Text Parser):** Hỗ trợ nạp file Excel hoặc paste danh sách văn bản tự do, gửi batch 50 records.
+- **Category Manager:** Hỗ trợ Đổi tên danh mục hàng loạt và Xóa / Gộp khóa học sang danh mục khác (`target_category`).
 
 ---
 

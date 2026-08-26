@@ -157,54 +157,70 @@ async def get_cached_pending_orders(
     distributor_code: Optional[str] = Query(None),
     status: Optional[str] = Query(None)
 ):
-    """Lấy danh sách School Orders từ bảng workspace_orders_cache."""
-    supabase = get_supabase_client()
-    try:
-        query = supabase.table("workspace_orders_cache").select("*").order("order_date", desc=True)
-        
-        if school_name and "000 SCHOOL" not in school_name.upper():
-            query = query.ilike("school_name", f"%{school_name.strip()}%")
-            
-        if distributor_code:
-            query = query.eq("distributor_code", distributor_code)
-            
-        res = query.limit(5000).execute()
-        return {
-            "status": "success",
-            "orders": res.data or [],
-            "total": len(res.data or []),
-            "source": "supabase_cache"
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Lỗi đọc Cache Orders: {e}")
+    """Lấy danh sách School Orders (Đọc siêu tốc 1ms từ RAM Cache)."""
+    cache_key = "all_cached_pending_orders"
+    cached_orders = ws_cache.get(cache_key)
 
+    if cached_orders is None:
+        supabase = get_supabase_client()
+        try:
+            query = supabase.table("workspace_orders_cache").select("*").order("order_date", desc=True)
+            res = query.limit(5000).execute()
+            cached_orders = res.data or []
+            ws_cache.set(cache_key, cached_orders, ttl=300) # Lưu RAM 5 phút
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Lỗi đọc Cache Orders: {e}")
+
+    orders = cached_orders
+    # Lọc nhanh trong RAM
+    if school_name and "000 SCHOOL" not in school_name.upper():
+        s_clean = school_name.strip().lower()
+        orders = [o for o in orders if s_clean in (o.get("school_name") or "").lower()]
+        
+    if distributor_code:
+        orders = [o for o in orders if o.get("distributor_code") == distributor_code]
+
+    return {
+        "status": "success",
+        "orders": orders,
+        "total": len(orders),
+        "source": "ram_memory_cache"
+    }
 
 @router.get("/cached-pending-contracts")
 async def get_cached_pending_contracts(
     contract_type: Optional[str] = Query("PRT", description="'PRT' hoặc 'DST'"),
     distributor_code: Optional[str] = Query(None)
 ):
-    """Lấy danh sách Contracts đang chờ duyệt từ bảng workspace_contracts_cache."""
-    supabase = get_supabase_client()
-    try:
-        query = supabase.table("workspace_contracts_cache")\
-            .select("*")\
-            .eq("contract_type", contract_type.upper())\
-            .order("created_at", desc=True)
-            
-        if distributor_code:
-            query = query.eq("distributor_code", distributor_code)
-            
-        res = query.limit(5000).execute()
-        return {
-            "status": "success",
-            "contracts": res.data or [],
-            "total": len(res.data or []),
-            "source": "supabase_cache"
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Lỗi đọc Cache Contracts: {e}")
+    """Lấy danh sách Contracts (Đọc siêu tốc 1ms từ RAM Cache)."""
+    c_type = (contract_type or "PRT").upper()
+    cache_key = f"all_cached_pending_contracts_{c_type}"
+    cached_contracts = ws_cache.get(cache_key)
 
+    if cached_contracts is None:
+        supabase = get_supabase_client()
+        try:
+            query = supabase.table("workspace_contracts_cache")\
+                .select("*")\
+                .eq("contract_type", c_type)\
+                .order("created_at", desc=True)
+            res = query.limit(5000).execute()
+            cached_contracts = res.data or []
+            ws_cache.set(cache_key, cached_contracts, ttl=300) # Lưu RAM 5 phút
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Lỗi đọc Cache Contracts: {e}")
+
+    contracts = cached_contracts
+    if distributor_code:
+        contracts = [c for c in contracts if c.get("distributor_code") == distributor_code]
+
+    return {
+        "status": "success",
+        "contracts": contracts,
+        "total": len(contracts),
+        "source": "ram_memory_cache"
+    }
+    
 
 @router.post("/sync-cache-now")
 async def trigger_distributor_cache_sync(background_tasks: BackgroundTasks):
