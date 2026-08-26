@@ -8,7 +8,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi.middleware.gzip import GZipMiddleware
 
 # Import Services
 from app.services.gmail_service import poll_unread_gmails
@@ -44,7 +43,6 @@ async def poll_workspace_long_tasks():
     now_utc = datetime.now(timezone.utc)
     now_iso = now_utc.isoformat()
 
-    # Chỉ lấy các task đã đến hoặc quá hạn next_check_at
     res = supabase.table("bot_automation_tasks")\
         .select("*, inbox_tickets(*)")\
         .eq("bot_type", "workspace_rpa")\
@@ -92,7 +90,6 @@ async def poll_workspace_long_tasks():
                 except Exception as cof_err:
                     logger.error(f"Lỗi ghi ngược COF: {cof_err}")
 
-            # 🟢 Tải file kết quả lên Supabase Storage
             storage_path = f"results/RESULT_{request_id}_{os.path.basename(final_file_to_upload)}"
             try:
                 with open(final_file_to_upload, "rb") as f_up:
@@ -127,7 +124,6 @@ async def poll_workspace_long_tasks():
                 supabase.table("inbox_tickets").update({"status": "completed"}).eq("id", task["ticket_id"]).execute()
 
         elif status == "still_processing":
-            # Nếu vẫn đang xử lý -> Kiểm tra lại sau 60 giây
             next_60s = (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat()
             payload["next_check_at"] = next_60s
             new_log = f"\n[{now_vn}] [INFO] [workspace_rpa] [#{task_id[:8]}]: Request #{request_id} vẫn đang xử lý ({check_res.get('current_status')}). Sẽ kiểm tra lại sau 60s."
@@ -150,7 +146,7 @@ async def lifespan(app: FastAPI):
     # 3. Quét Form Feedback mỗi 5 phút
     scheduler.add_job(safe_job_wrapper, 'interval', minutes=5, args=[poll_form_feedbacks, "Quét Form Feedback"], id='sheet_cron')
 
-    # 4. Quét Live Uptime & Auth Matrix định kỳ mỗi 30 phút (Đã sửa chuẩn cú pháp)
+    # 4. Quét Live Uptime & Auth Matrix định kỳ mỗi 30 phút
     scheduler.add_job(safe_job_wrapper, 'interval', minutes=30, args=[poll_site_uptime_cron, "Quét Site Uptime & Auth Matrix"], id='site_uptime_cron', replace_existing=True)
 
     # 5. Quét Task Workspace Long-Running mỗi 3 phút
@@ -187,10 +183,9 @@ origins = [
     "*",
 ]
 
+# 🟢 Cấu hình chuẩn duy nhất cho CORSMiddleware
 app.add_middleware(
     CORSMiddleware,
-    GZipMiddleware,
-    minimum_size=1000,
     allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
