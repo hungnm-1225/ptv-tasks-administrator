@@ -64,7 +64,7 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav, isMobileNavOp
       {isLoggingOut && (
         <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950/50 backdrop-blur-sm transition-opacity duration-200">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-2xl shadow-2xl flex flex-col items-center gap-4 animate-in zoom-in-95 duration-150">
-            <Loader2 className="w-8 h-8 text-indigo-600 dark:text-indigo-400 animate-spin" />
+            <Loader2 className="w-8 h-8 text-sky-600 dark:text-sky-400 animate-spin" />
             <p className="text-slate-600 dark:text-slate-300 font-medium text-xs">Đang đăng xuất an toàn...</p>
           </div>
         </div>
@@ -82,8 +82,8 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav, isMobileNavOp
           </button>
 
           <div className="hidden sm:flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50 text-[11px] font-medium">
-              <Sparkles className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border border-sky-200/60 dark:border-sky-800/50 text-[11px] font-medium">
+              <Sparkles className="w-3 h-3 text-sky-600 dark:text-sky-400" />
               <span>Enterprise Admin Hub</span>
             </span>
           </div>
@@ -121,7 +121,7 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav, isMobileNavOp
                   className="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-700 object-cover shadow-xs"
                 />
               ) : (
-                <div className="w-8 h-8 rounded-full bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50 flex items-center justify-center font-semibold text-xs">
+                <div className="w-8 h-8 rounded-full bg-sky-50 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 border border-sky-200/60 dark:border-sky-800/50 flex items-center justify-center font-semibold text-xs">
                   <User className="w-4 h-4" />
                 </div>
               )}

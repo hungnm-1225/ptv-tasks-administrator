@@ -1191,11 +1191,11 @@ export const UnifiedInboxPage: React.FC = () => {
                       {renderStatusPill(ticket.status)}
 
                       <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-0.5">
-                        <Tag className="w-3 h-3 text-indigo-500" />
+                        <Tag className="w-3 h-3 text-sky-500" />
                         <select
                           value={ticket.category || 'other'}
                           onChange={(e) => handleCategoryChange(ticket.id, e.target.value)}
-                          className="bg-transparent text-indigo-600 dark:text-indigo-400 text-[10px] font-bold uppercase outline-none cursor-pointer"
+                          className="bg-transparent text-sky-600 dark:text-sky-400 text-[10px] font-bold uppercase outline-none cursor-pointer"
                         >
                           <option value="bug">BUG</option>
                           <option value="account_keycloak">KEYCLOAK</option>
@@ -1237,7 +1237,7 @@ export const UnifiedInboxPage: React.FC = () => {
                               ) : isExcel ? (
                                 <FileSpreadsheetIcon className="w-3 h-3 text-emerald-600" />
                               ) : (
-                                <Paperclip className="w-3 h-3 text-indigo-500" />
+                                <Paperclip className="w-3 h-3 text-sky-500" />
                               )}
                               <span className="truncate max-w-[220px]">{file.filename}</span>
                               <Eye className="w-3 h-3 text-slate-400" />
@@ -1259,18 +1259,18 @@ export const UnifiedInboxPage: React.FC = () => {
                   </a>
                 </div>
 
-                <div className="bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-100/60 dark:border-indigo-900/40 rounded-2xl p-4 space-y-2">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300">
-                    <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                <div className="bg-sky-50/40 dark:bg-sky-950/20 border border-sky-100/60 dark:border-sky-900/40 rounded-2xl p-4 space-y-2">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-sky-700 dark:text-sky-300">
+                    <Sparkles className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
                     <span>Tóm tắt & Đề xuất tự động từ Gemini AI</span>
                   </div>
                   <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed font-normal whitespace-pre-line">
                     {ticket.ai_summary || 'Hệ thống đã nhận thông tin và đang chờ Gemini AI phân tích...'}
                   </p>
                   {ticket.assigned_name && (
-                    <div className="text-[11px] text-slate-500 dark:text-slate-400 pt-2 border-t border-indigo-100/60 dark:border-indigo-900/40">
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 pt-2 border-t border-sky-100/60 dark:border-sky-900/40">
                       👤 Phân công đề xuất:{' '}
-                      <strong className="text-indigo-700 dark:text-indigo-300 font-bold">
+                      <strong className="text-sky-700 dark:text-sky-300 font-bold">
                         {ticket.assigned_name}
                       </strong>{' '}
                       ({ticket.assigned_email})

@@ -38,7 +38,7 @@ const PRESET_OVERLAYS = [
     { name: 'Đen Mờ (Dark)', color: '#000000' },
     { name: 'Trắng Sáng (Light)', color: '#ffffff' },
     { name: 'Xanh Navy (Deep Blue)', color: '#0f172a' },
-    { name: 'Indigo Đậm (Deep Indigo)', color: '#1e1b4b' },
+    { name: 'Indigo Đậm (Deep Indigo)', color: '#1e293b' },
     { name: 'Xám Khói (Slate)', color: '#334155' }
 ];
 
@@ -101,7 +101,7 @@ export const WorkBoardPage: React.FC = () => {
     const [isColumnModalOpen, setIsColumnModalOpen] = useState<boolean>(false);
     const [editingColumn, setEditingColumn] = useState<BoardColumnItem | null>(null);
     const [columnFormTitle, setColumnFormTitle] = useState<string>('');
-    const [columnFormColor, setColumnFormColor] = useState<string>('#4f46e5');
+    const [columnFormColor, setColumnFormColor] = useState<string>('#0284c7');
     const [columnFormType, setColumnFormType] = useState<string>('custom');
 
     const [isCardModalOpen, setIsCardModalOpen] = useState<boolean>(false);
@@ -287,7 +287,7 @@ export const WorkBoardPage: React.FC = () => {
                     title: quickAddTitle.trim(),
                     priority: quickAddPriority,
                     category: quickAddCategory,
-                    color: '#8b5cf6',
+                    color: '#38bdf8',
                     assigned_name: 'Hùng Nguyễn Mạnh'
                 })
             });

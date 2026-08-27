@@ -12,7 +12,7 @@ const CHART_PALETTE = [
   '#34D399', // emerald-400
   '#FBBF24', // amber-400
   '#F87171', // rose-400
-  '#818CF8', // indigo-400
+  '#818CF8', // sky-400
 ];
 
 type TimeRangeOption = '7d' | '30d' | 'this_month';
@@ -193,7 +193,7 @@ export const DashboardPage: React.FC = () => {
         <div className="bento-card p-5 sm:p-6 space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">System Health</span>
-            <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50 flex items-center justify-center shadow-xs">
+            <div className="w-9 h-9 rounded-xl bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border border-sky-200/60 dark:border-sky-800/50 flex items-center justify-center shadow-xs">
               <Activity className="w-4.5 h-4.5" />
             </div>
           </div>
@@ -224,7 +224,7 @@ export const DashboardPage: React.FC = () => {
         <div className="relative bento-card p-6 space-y-4">
           {isCatLoading && (
             <div className="absolute inset-0 bg-white/70 dark:bg-slate-900/70 backdrop-blur-xs z-10 rounded-2xl flex flex-col items-center justify-center gap-2 transition-opacity">
-              <Loader2 className="w-6 h-6 animate-spin text-indigo-600 dark:text-indigo-400" />
+              <Loader2 className="w-6 h-6 animate-spin text-sky-600 dark:text-sky-400" />
               <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Đang cập nhật danh mục...</span>
             </div>
           )}
@@ -241,7 +241,7 @@ export const DashboardPage: React.FC = () => {
                     disabled={isCatLoading}
                     onClick={() => handleCatRangeChange(r)}
                     className={`px-2.5 py-1 rounded-md transition-all ${active
-                      ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 font-semibold shadow-xs'
+                      ? 'bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 font-semibold shadow-xs'
                       : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
                       }`}
                   >
@@ -305,7 +305,7 @@ export const DashboardPage: React.FC = () => {
         <div className="relative bento-card p-6 space-y-4">
           {isTrendLoading && (
             <div className="absolute inset-0 bg-white/70 dark:bg-slate-900/70 backdrop-blur-xs z-10 rounded-2xl flex flex-col items-center justify-center gap-2 transition-opacity">
-              <Loader2 className="w-6 h-6 animate-spin text-indigo-600 dark:text-indigo-400" />
+              <Loader2 className="w-6 h-6 animate-spin text-sky-600 dark:text-sky-400" />
               <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Đang nạp xu hướng...</span>
             </div>
           )}
@@ -322,7 +322,7 @@ export const DashboardPage: React.FC = () => {
                     disabled={isTrendLoading}
                     onClick={() => handleTrendRangeChange(r)}
                     className={`px-2.5 py-1 rounded-md transition-all ${active
-                      ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 font-semibold shadow-xs'
+                      ? 'bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 font-semibold shadow-xs'
                       : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
                       }`}
                   >
