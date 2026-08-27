@@ -97,7 +97,7 @@ class OSTicketService:
             return None
 
     async def _get_text_by_candidates(self, page, candidates: List[str]) -> str:
-        """Helper tìm kiếm phần tử an toàn qua nhiều selector khác nhau."""
+        """Helper tìm kiếm phần tử an toàn qua nhiều selector độc lập."""
         for sel in candidates:
             try:
                 el = page.locator(sel).first
@@ -147,7 +147,7 @@ class OSTicketService:
                 "xpath=//tr[contains(., 'Assigned To:')]//td"
             ])
 
-            # 4. Custom Form Fields (Partner Account Request Form)
+            # 4. Custom Form Fields
             school_name = await self._get_text_by_candidates(detail_page, [
                 "#inline-answer-93",
                 "td[id*='inline-answer-93']",
@@ -217,18 +217,23 @@ class OSTicketService:
                     "attachments": entry_attachments
                 })
 
-            # File đính kèm từ Custom Form (nếu có)
-            form_file_links = detail_page.locator("td[id*='inline-answer-97'] a, xpath=//tr[contains(., 'Upload your COF File:')]//a")
-            if await form_file_links.count() > 0:
-                raw_href = await form_file_links.first.get_attribute("href")
-                fname = (await form_file_links.first.inner_text()).strip()
-                if raw_href and fname:
-                    full_url = urljoin(OSTICKET_BASE_URL + "/scp/", raw_href)
-                    storage_url = await self.upload_attachment_to_supabase(context, full_url, fname, ticket_number)
-                    if storage_url:
-                        attachments_list.insert(0, {"filename": fname, "url": storage_url})
+            # 6. File đính kèm từ Custom Form (Tách riêng từng selector an toàn 100%)
+            for form_sel in ["td[id*='inline-answer-97'] a", "#inline-answer-97 a", "xpath=//tr[contains(., 'Upload your COF File:')]//a"]:
+                try:
+                    form_file_link = detail_page.locator(form_sel).first
+                    if await form_file_link.count() > 0:
+                        raw_href = await form_file_link.get_attribute("href")
+                        fname = (await form_file_link.inner_text()).strip()
+                        if raw_href and fname:
+                            full_url = urljoin(OSTICKET_BASE_URL + "/scp/", raw_href)
+                            storage_url = await self.upload_attachment_to_supabase(context, full_url, fname, ticket_number)
+                            if storage_url:
+                                attachments_list.insert(0, {"filename": fname, "url": storage_url})
+                        break
+                except Exception:
+                    continue
 
-            # Thời gian tạo vé
+            # 7. Thời gian tạo vé
             created_at_str = await self._get_text_by_candidates(detail_page, [
                 "xpath=//tr[contains(., 'Create Date:')]//td"
             ])
