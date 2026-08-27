@@ -11,7 +11,6 @@ import {
   FileSpreadsheet,
   Activity,
   X,
-  Sparkles,
   BookOpen,
   Trello
 } from 'lucide-react';
@@ -46,16 +45,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
       {/* Mobile Backdrop Overlay */}
       {isOpen && (
         <div
-          className="fixed inset-0 z-40 bg-slate-900/60 backdrop-blur-xs lg:hidden transition-opacity duration-300 animate-in fade-in"
+          className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-xs lg:hidden transition-opacity duration-300 animate-in fade-in"
           onClick={onClose}
           aria-hidden="true"
         />
       )}
 
-      {/* Sidebar Container */}
+      {/* Sidebar Container — Enterprise Bento Rail with Glassmorphism */}
       <aside
-        className={`fixed lg:sticky top-0 left-0 z-50 lg:z-auto w-72 lg:w-64 border-r border-slate-200/80 dark:border-slate-800/80 bg-white/95 dark:bg-slate-900/95 lg:bg-white/80 lg:dark:bg-slate-900/80 backdrop-blur-md flex flex-col justify-between h-screen shrink-0 select-none transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'
-          }`}
+        className={`fixed lg:sticky top-0 left-0 z-50 lg:z-auto w-72 lg:w-64 border-r border-slate-200/80 dark:border-slate-800/80 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md flex flex-col justify-between h-screen shrink-0 select-none transition-transform duration-300 ease-out ${
+          isOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'
+        }`}
       >
         <div>
           {/* Brand Header */}
@@ -70,13 +70,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
                 <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-white dark:border-slate-900"></span>
               </div>
               <div>
-                <h1 className="font-bold text-slate-900 dark:text-slate-100 text-sm tracking-tight flex items-center gap-1.5">
+                <h1 className="font-bold text-slate-900 dark:text-white text-sm tracking-tight flex items-center gap-1.5">
                   <span>Pythaverse</span>
-                  <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 bg-violet-100 dark:bg-violet-900/60 text-violet-700 dark:text-violet-300 rounded-md">
+                  <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50 rounded-md">
                     Admin
                   </span>
                 </h1>
-                <p className="text-[10px] text-violet-600 dark:text-violet-400 font-semibold tracking-wider uppercase">
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold tracking-wider uppercase">
                   Automation Hub
                 </p>
               </div>
@@ -86,7 +86,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
             <button
               onClick={onClose}
               aria-label="Close sidebar"
-              className="lg:hidden p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              className="lg:hidden p-1.5 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -106,22 +106,24 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
                   to={item.to}
                   onClick={handleLinkClick}
                   className={({ isActive }) =>
-                    `w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all duration-150 ${isActive
-                      ? 'bg-violet-600 text-white font-semibold shadow-md shadow-violet-500/20'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100/80 dark:hover:bg-slate-800/60'
+                    `w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all duration-150 ${
+                      isActive
+                        ? 'bg-slate-100 dark:bg-slate-800/80 text-slate-900 dark:text-white font-semibold border-l-2 border-slate-900 dark:border-indigo-400 shadow-xs pl-2.5'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100/70 dark:hover:bg-slate-800/50'
                     }`
                   }
                 >
                   {({ isActive }) => (
-                    <>
-                      <div className="flex items-center gap-3">
-                        <Icon
-                          className={`w-4 h-4 transition-colors ${isActive ? 'text-white' : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-600'
-                            }`}
-                        />
-                        <span>{item.label}</span>
-                      </div>
-                    </>
+                    <div className="flex items-center gap-3">
+                      <Icon
+                        className={`w-[18px] h-[18px] transition-colors ${
+                          isActive
+                            ? 'text-slate-900 dark:text-indigo-400'
+                            : 'text-slate-400 dark:text-slate-500'
+                        }`}
+                      />
+                      <span>{item.label}</span>
+                    </div>
                   )}
                 </NavLink>
               );
@@ -129,15 +131,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
           </nav>
         </div>
 
-        {/* Footer Info */}
-        <div className="p-4 border-t border-slate-200/80 dark:border-slate-800/80 text-[11px] text-slate-500 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-900/50">
+        {/* Footer Info — version + status */}
+        <div className="p-4 border-t border-slate-200/80 dark:border-slate-800/80 text-[11px] text-slate-500 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-950/50">
           <div className="flex items-center justify-between">
             <span className="font-semibold text-slate-700 dark:text-slate-300">PTV Tasks Admin</span>
-            <span className="px-2 py-0.5 rounded-md bg-slate-200/70 dark:bg-slate-800 text-[10px] text-slate-700 dark:text-slate-300 font-mono font-bold">
+            <span className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[10px] text-slate-700 dark:text-slate-300 font-mono font-bold">
               v2.0.0
             </span>
           </div>
-          <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1.5">
+          <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5 flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
             <span>Enterprise Automation SaaS</span>
           </div>

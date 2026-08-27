@@ -35,7 +35,7 @@ const detectPlatform = (url: string, name: string): { iconName: string; colorCla
         return { iconName: 'youtube', colorClass: 'hover:text-rose-500 hover:border-rose-500/50', defaultName: 'YouTube' };
     }
     if (lowerUrl.includes('discord') || lowerName.includes('discord')) {
-        return { iconName: 'discord', colorClass: 'hover:text-indigo-400 hover:border-indigo-500/50', defaultName: 'Discord' };
+        return { iconName: 'discord', colorClass: 'hover:text-accent-2 hover:border-accent', defaultName: 'Discord' };
     }
     if (lowerUrl.includes('github.com') || lowerName.includes('github')) {
         return { iconName: 'github', colorClass: 'hover:text-slate-100 hover:border-slate-500', defaultName: 'GitHub' };
@@ -210,17 +210,17 @@ export const ProfileSettingsPage: React.FC = () => {
 
     const getSocialIcon = (iconName: string) => {
         switch (iconName) {
-            case 'github': return <Github className="w-4 h-4 text-slate-800 dark:text-slate-200" />;
+            case 'github': return <Github className="w-4 h-4 text-ink dark:text-primary-ink" />;
             case 'linkedin': return <Linkedin className="w-4 h-4 text-blue-600" />;
             case 'facebook': return <Facebook className="w-4 h-4 text-blue-500" />;
             case 'mail': return <Mail className="w-4 h-4 text-rose-500" />;
             case 'instagram': return <Instagram className="w-4 h-4 text-pink-500" />;
-            case 'threads': return <AtSign className="w-4 h-4 text-slate-800 dark:text-slate-200" />;
+            case 'threads': return <AtSign className="w-4 h-4 text-ink dark:text-primary-ink" />;
             case 'whatsapp':
             case 'zalo': return <MessageCircle className="w-4 h-4 text-emerald-500" />;
             case 'twitter': return <Twitter className="w-4 h-4 text-sky-400" />;
             case 'youtube': return <Youtube className="w-4 h-4 text-rose-600" />;
-            case 'discord': return <MessageSquare className="w-4 h-4 text-indigo-500" />;
+            case 'discord': return <MessageSquare className="w-4 h-4 text-accent" />;
             default: return <Globe className="w-4 h-4 text-cyan-500" />;
         }
     };
@@ -228,7 +228,7 @@ export const ProfileSettingsPage: React.FC = () => {
     if (loading) {
         return (
             <div className="flex h-[70vh] flex-col items-center justify-center gap-3">
-                <Loader2 className="w-8 h-8 animate-spin text-violet-600" />
+                <Loader2 className="w-8 h-8 animate-spin text-accent" />
                 <p className="text-xs text-slate-500">Đang đồng bộ hồ sơ...</p>
             </div>
         );
@@ -238,15 +238,15 @@ export const ProfileSettingsPage: React.FC = () => {
         <div className="mx-auto p-6 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-400">
 
             {/* Header Bar */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white/70 dark:bg-slate-900/70 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800/80 backdrop-blur-md shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white/70 dark:bg-ink/70 p-6 rounded-3xl border border-rule/80 dark:border-rule-2/80 backdrop-blur-md shadow-xs">
                 <div>
                     <div className="flex items-center gap-2.5 mb-1">
-                        <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Thiết Lập Chủ Quyền Tác Giả</h1>
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300 border border-violet-200 dark:border-violet-500/30">
+                        <h1 className="text-xl font-bold text-ink dark:text-primary-ink">Thiết Lập Chủ Quyền Tác Giả</h1>
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-accent-soft text-accent dark:bg-accent-soft dark:text-accent-2 border border-accent-soft dark:border-accent">
                             Admin Exclusive
                         </span>
                     </div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                    <p className="text-xs text-ink-2 dark:text-ink-3">
                         Cập nhật họ tên, avatar lưu trên Supabase Storage và hệ sinh thái MXH hiển thị ở Trang Chủ.
                     </p>
                 </div>
@@ -254,7 +254,7 @@ export const ProfileSettingsPage: React.FC = () => {
                 <button
                     onClick={handleSave}
                     disabled={saving}
-                    className="flex items-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white px-5 py-2.5 rounded-xl font-semibold text-xs transition-all shadow-md shadow-violet-500/25 active:scale-95 disabled:opacity-50 cursor-pointer"
+                    className="flex items-center gap-2 bg-accent text-white px-5 py-2.5 rounded-xl font-semibold text-xs transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer"
                 >
                     {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                     Lưu Thay Đổi Ngay
@@ -262,12 +262,12 @@ export const ProfileSettingsPage: React.FC = () => {
             </div>
 
             {/* Tabs */}
-            <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
+            <div className="flex items-center gap-2 border-b border-rule dark:border-rule-2 pb-2">
                 <button
                     onClick={() => setActiveTab('profile')}
                     className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${activeTab === 'profile'
-                        ? 'bg-violet-600 text-white shadow-sm'
-                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        ? 'bg-accent text-white shadow-sm'
+                        : 'text-ink-2 hover:text-ink dark:hover:text-primary-ink hover:bg-paper-2 dark:hover:bg-ink'
                         }`}
                 >
                     <User className="w-3.5 h-3.5" />
@@ -277,8 +277,8 @@ export const ProfileSettingsPage: React.FC = () => {
                 <button
                     onClick={() => setActiveTab('project')}
                     className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${activeTab === 'project'
-                        ? 'bg-violet-600 text-white shadow-sm'
-                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        ? 'bg-accent text-white shadow-sm'
+                        : 'text-ink-2 hover:text-ink dark:hover:text-primary-ink hover:bg-paper-2 dark:hover:bg-ink'
                         }`}
                 >
                     <Layers className="w-3.5 h-3.5" />
@@ -292,19 +292,19 @@ export const ProfileSettingsPage: React.FC = () => {
 
                     {/* Cột 1: Live Card Preview + Avatar Upload */}
                     <div className="lg:col-span-1 space-y-6">
-                        <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800/80 shadow-xs flex flex-col items-center text-center">
-                            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-4">Ảnh Đại Diện Trang Chủ</p>
+                        <div className="bg-white dark:bg-ink p-6 rounded-3xl border border-rule/80 dark:border-rule-2/80 shadow-xs flex flex-col items-center text-center">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-ink-3 mb-4">Ảnh Đại Diện Trang Chủ</p>
 
                             <div className="relative group mb-5">
                                 <img
                                     src={avatarUrl || authorConfig.avatarUrl}
                                     alt={name}
                                     onError={(e) => { (e.target as any).src = authorConfig.avatarUrl; }}
-                                    className="w-32 h-32 rounded-full border-4 border-violet-500/20 object-cover shadow-lg group-hover:opacity-90 transition duration-300"
+                                    className="w-32 h-32 rounded-full border-4 border-accent object-cover shadow-lg group-hover:opacity-90 transition duration-300"
                                 />
                                 {uploadingAvatar && (
-                                    <div className="absolute inset-0 bg-slate-900/70 rounded-full flex flex-col items-center justify-center gap-1">
-                                        <Loader2 className="w-6 h-6 text-violet-400 animate-spin" />
+                                    <div className="absolute inset-0 bg-ink/70 rounded-full flex flex-col items-center justify-center gap-1">
+                                        <Loader2 className="w-6 h-6 text-accent-2 animate-spin" />
                                         <span className="text-[9px] text-white font-medium">Đang tải...</span>
                                     </div>
                                 )}
@@ -315,7 +315,7 @@ export const ProfileSettingsPage: React.FC = () => {
                                     onClick={() => fileInputRef.current?.click()}
                                     disabled={uploadingAvatar}
                                     title="Thay đổi ảnh"
-                                    className="absolute bottom-0 right-0 p-2 bg-violet-600 hover:bg-violet-500 text-white rounded-full shadow-md transition cursor-pointer"
+                                    className="absolute bottom-0 right-0 p-2 bg-accent hover:bg-accent-2 text-white rounded-full shadow-md transition cursor-pointer"
                                 >
                                     <Camera className="w-4 h-4" />
                                 </button>
@@ -330,10 +330,10 @@ export const ProfileSettingsPage: React.FC = () => {
                                 className="hidden"
                             />
 
-                            <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">{name || 'Chưa đặt tên'}</h3>
-                            <p className="text-xs text-violet-600 dark:text-violet-400 font-medium mb-3">{title || 'Chức danh'}</p>
+                            <h3 className="text-base font-bold text-ink dark:text-primary-ink">{name || 'Chưa đặt tên'}</h3>
+                            <p className="text-xs text-accent dark:text-accent-2 font-medium mb-3">{title || 'Chức danh'}</p>
 
-                            <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                            <div className="flex items-center gap-2 text-[11px] text-ink-2 dark:text-ink-3">
                                 <Building className="w-3.5 h-3.5 shrink-0" />
                                 <span>{organization}</span>
                                 <span>•</span>
@@ -345,72 +345,72 @@ export const ProfileSettingsPage: React.FC = () => {
 
                     {/* Cột 2 & 3: Thông tin chi tiết */}
                     <div className="lg:col-span-2 space-y-6">
-                        <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800/80 shadow-xs space-y-5">
-                            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Thông Tin Cơ Bản</h3>
+                        <div className="bg-white dark:bg-ink p-6 rounded-3xl border border-rule/80 dark:border-rule-2/80 shadow-xs space-y-5">
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-ink-3">Thông Tin Cơ Bản</h3>
 
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div className="space-y-1.5">
-                                    <label className="text-xs font-medium text-slate-700 dark:text-slate-300">Họ và Tên (*)</label>
+                                    <label className="text-xs font-medium text-ink-2 dark:text-primary-ink">Họ và Tên (*)</label>
                                     <input
                                         type="text"
                                         value={name}
                                         onChange={e => setName(e.target.value)}
-                                        className="w-full bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 rounded-xl px-3.5 py-2 text-xs text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none"
+                                        className="w-full bg-paper-2 dark:bg-ink/80 border border-rule dark:border-rule-2/60 rounded-xl px-3.5 py-2 text-xs text-primary dark:text-primary-ink focus:ring-2 focus:ring-accent focus:border-accent outline-none"
                                     />
                                 </div>
 
                                 <div className="space-y-1.5">
-                                    <label className="text-xs font-medium text-slate-700 dark:text-slate-300">Chức Danh / Vị Trí (*)</label>
+                                    <label className="text-xs font-medium text-ink-2 dark:text-primary-ink">Chức Danh / Vị Trí (*)</label>
                                     <input
                                         type="text"
                                         value={title}
                                         onChange={e => setTitle(e.target.value)}
-                                        className="w-full bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 rounded-xl px-3.5 py-2 text-xs text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none"
+                                        className="w-full bg-paper-2 dark:bg-ink/80 border border-rule dark:border-rule-2/60 rounded-xl px-3.5 py-2 text-xs text-primary dark:text-primary-ink focus:ring-2 focus:ring-accent focus:border-accent outline-none"
                                     />
                                 </div>
 
                                 <div className="space-y-1.5">
-                                    <label className="text-xs font-medium text-slate-700 dark:text-slate-300">Tổ Chức / Đơn Vị</label>
+                                    <label className="text-xs font-medium text-ink-2 dark:text-primary-ink">Tổ Chức / Đơn Vị</label>
                                     <input
                                         type="text"
                                         value={organization}
                                         onChange={e => setOrganization(e.target.value)}
-                                        className="w-full bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 rounded-xl px-3.5 py-2 text-xs text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none"
+                                        className="w-full bg-paper-2 dark:bg-ink/80 border border-rule dark:border-rule-2/60 rounded-xl px-3.5 py-2 text-xs text-primary dark:text-primary-ink focus:ring-2 focus:ring-accent focus:border-accent outline-none"
                                     />
                                 </div>
 
                                 <div className="space-y-1.5">
-                                    <label className="text-xs font-medium text-slate-700 dark:text-slate-300">Địa Điểm</label>
+                                    <label className="text-xs font-medium text-ink-2 dark:text-primary-ink">Địa Điểm</label>
                                     <input
                                         type="text"
                                         value={location}
                                         onChange={e => setLocation(e.target.value)}
-                                        className="w-full bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 rounded-xl px-3.5 py-2 text-xs text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none"
+                                        className="w-full bg-paper-2 dark:bg-ink/80 border border-rule dark:border-rule-2/60 rounded-xl px-3.5 py-2 text-xs text-primary dark:text-primary-ink focus:ring-2 focus:ring-accent focus:border-accent outline-none"
                                     />
                                 </div>
                             </div>
 
                             <div className="space-y-1.5">
-                                <label className="text-xs font-medium text-slate-700 dark:text-slate-300">Giới Thiệu Tác Giả</label>
+                                <label className="text-xs font-medium text-ink-2 dark:text-primary-ink">Giới Thiệu Tác Giả</label>
                                 <textarea
                                     rows={3}
                                     value={bio}
                                     onChange={e => setBio(e.target.value)}
-                                    className="w-full bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 rounded-xl p-3.5 text-xs text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none leading-relaxed"
+                                    className="w-full bg-paper-2 dark:bg-ink/80 border border-rule dark:border-rule-2/60 rounded-xl p-3.5 text-xs text-primary dark:text-primary-ink focus:ring-2 focus:ring-accent focus:border-accent outline-none leading-relaxed"
                                 />
                             </div>
 
                             {/* Danh sách Mạng Xã Hội */}
-                            <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-4">
+                            <div className="pt-4 border-t border-rule dark:border-rule-2 space-y-4">
                                 <div className="flex items-center justify-between">
                                     <div>
-                                        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Hệ Sinh Thái Mạng Xã Hội</h3>
-                                        <p className="text-[11px] text-slate-500">Tự động nhận diện Threads, Zalo, WhatsApp, Instagram, X, YouTube, Discord...</p>
+                                        <h3 className="text-xs font-bold uppercase tracking-wider text-ink-3">Hệ Sinh Thái Mạng Xã Hội</h3>
+                                        <p className="text-[11px] text-ink-2">Tự động nhận diện Threads, Zalo, WhatsApp, Instagram, X, YouTube, Discord...</p>
                                     </div>
                                     <button
                                         type="button"
                                         onClick={handleAddSocial}
-                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300 border border-violet-200 dark:border-violet-500/30 rounded-xl text-xs font-semibold hover:bg-violet-100 transition cursor-pointer"
+                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-accent-soft text-accent dark:bg-accent-soft dark:text-accent-2 border border-accent-soft dark:border-accent rounded-xl text-xs font-semibold hover:bg-accent-soft transition cursor-pointer"
                                     >
                                         <Plus className="w-3.5 h-3.5" />
                                         <span>Thêm Liên Kết</span>
@@ -419,8 +419,8 @@ export const ProfileSettingsPage: React.FC = () => {
 
                                 <div className="space-y-3">
                                     {socials.map((social, idx) => (
-                                        <div key={idx} className="flex items-center gap-3 bg-slate-50 dark:bg-slate-800/50 p-2.5 rounded-2xl border border-slate-200/70 dark:border-slate-700/50 transition-all focus-within:border-violet-500/40">
-                                            <div className="w-9 h-9 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs flex items-center justify-center shrink-0">
+                                        <div key={idx} className="flex items-center gap-3 bg-paper-2 dark:bg-ink/50 p-2.5 rounded-2xl border border-rule/70 dark:border-rule-2/50 transition-all focus-within:border-accent">
+                                            <div className="w-9 h-9 rounded-xl bg-white dark:bg-ink border border-rule dark:border-rule-2 shadow-xs flex items-center justify-center shrink-0">
                                                 {getSocialIcon(social.iconName)}
                                             </div>
 
@@ -430,7 +430,7 @@ export const ProfileSettingsPage: React.FC = () => {
                                                     value={social.name}
                                                     onChange={(e) => handleUpdateSocialName(idx, e.target.value)}
                                                     placeholder="Tên MXH"
-                                                    className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none"
+                                                    className="w-full bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-ink dark:text-primary-ink outline-none"
                                                 />
                                             </div>
 
@@ -440,7 +440,7 @@ export const ProfileSettingsPage: React.FC = () => {
                                                     value={social.url}
                                                     onChange={(e) => handleUpdateSocialUrl(idx, e.target.value)}
                                                     placeholder="Dán link trang cá nhân (VD: https://t.me/..., https://threads.net/@...)"
-                                                    className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none"
+                                                    className="w-full bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-lg px-3 py-1.5 text-xs text-ink-2 dark:text-primary-ink focus:ring-2 focus:ring-accent focus:border-accent outline-none"
                                                 />
 
                                                 {social.url && (
@@ -449,7 +449,7 @@ export const ProfileSettingsPage: React.FC = () => {
                                                         target="_blank"
                                                         rel="noreferrer"
                                                         title="Mở thử liên kết"
-                                                        className="p-1.5 text-slate-400 hover:text-violet-600 transition shrink-0"
+                                                        className="p-1.5 text-ink-3 hover:text-accent transition shrink-0"
                                                     >
                                                         <ExternalLink className="w-3.5 h-3.5" />
                                                     </a>
@@ -459,7 +459,7 @@ export const ProfileSettingsPage: React.FC = () => {
                                                     type="button"
                                                     onClick={() => handleRemoveSocial(idx)}
                                                     title="Xóa liên kết này"
-                                                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition shrink-0 cursor-pointer"
+                                                    className="p-1.5 text-ink-3 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition shrink-0 cursor-pointer"
                                                 >
                                                     <Trash2 className="w-3.5 h-3.5" />
                                                 </button>
@@ -477,48 +477,48 @@ export const ProfileSettingsPage: React.FC = () => {
 
             {/* TAB 2: PROJECT INFO */}
             {activeTab === 'project' && (
-                <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800/80 shadow-xs space-y-6">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Thông Tin Dự Án</h3>
+                <div className="bg-white dark:bg-ink p-6 rounded-3xl border border-rule/80 dark:border-rule-2/80 shadow-xs space-y-6">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-ink-3">Thông Tin Dự Án</h3>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="space-y-1.5">
-                            <label className="text-xs font-medium text-slate-700 dark:text-slate-300">Tên Dự Án</label>
+                            <label className="text-xs font-medium text-ink-2 dark:text-primary-ink">Tên Dự Án</label>
                             <input
                                 type="text"
                                 value={projectInfo.name}
                                 onChange={e => setProjectInfo({ ...projectInfo, name: e.target.value })}
-                                className="w-full bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 rounded-xl px-3.5 py-2 text-xs text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-violet-500/20"
+                                className="w-full bg-paper-2 dark:bg-ink/80 border border-rule dark:border-rule-2/60 rounded-xl px-3.5 py-2 text-xs text-primary dark:text-primary-ink outline-none focus:ring-2 focus:ring-accent"
                             />
                         </div>
 
                         <div className="space-y-1.5">
-                            <label className="text-xs font-medium text-slate-700 dark:text-slate-300">Phiên Bản</label>
+                            <label className="text-xs font-medium text-ink-2 dark:text-primary-ink">Phiên Bản</label>
                             <input
                                 type="text"
                                 value={projectInfo.version}
                                 onChange={e => setProjectInfo({ ...projectInfo, version: e.target.value })}
-                                className="w-full bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 rounded-xl px-3.5 py-2 text-xs text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-violet-500/20"
+                                className="w-full bg-paper-2 dark:bg-ink/80 border border-rule dark:border-rule-2/60 rounded-xl px-3.5 py-2 text-xs text-primary dark:text-primary-ink outline-none focus:ring-2 focus:ring-accent"
                             />
                         </div>
                     </div>
 
                     <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-slate-700 dark:text-slate-300">Mô Tả Tổng Quan Dự Án</label>
+                        <label className="text-xs font-medium text-ink-2 dark:text-primary-ink">Mô Tả Tổng Quan Dự Án</label>
                         <textarea
                             rows={3}
                             value={projectInfo.description}
                             onChange={e => setProjectInfo({ ...projectInfo, description: e.target.value })}
-                            className="w-full bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 rounded-xl p-3.5 text-xs text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-violet-500/20"
+                            className="w-full bg-paper-2 dark:bg-ink/80 border border-rule dark:border-rule-2/60 rounded-xl p-3.5 text-xs text-primary dark:text-primary-ink outline-none focus:ring-2 focus:ring-accent"
                         />
                     </div>
 
                     <div className="space-y-2">
-                        <label className="text-xs font-medium text-slate-700 dark:text-slate-300">Điểm Nhấn Công Nghệ (Tech Stack - Phân cách bằng dấu phẩy)</label>
+                        <label className="text-xs font-medium text-ink-2 dark:text-primary-ink">Điểm Nhấn Công Nghệ (Tech Stack - Phân cách bằng dấu phẩy)</label>
                         <input
                             type="text"
                             value={Array.isArray(projectInfo.techStack) ? projectInfo.techStack.join(', ') : ''}
                             onChange={e => setProjectInfo({ ...projectInfo, techStack: e.target.value.split(',').map(s => s.trim()) })}
-                            className="w-full bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 rounded-xl px-3.5 py-2 text-xs text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-violet-500/20"
+                            className="w-full bg-paper-2 dark:bg-ink/80 border border-rule dark:border-rule-2/60 rounded-xl px-3.5 py-2 text-xs text-primary dark:text-primary-ink outline-none focus:ring-2 focus:ring-accent"
                         />
                     </div>
                 </div>

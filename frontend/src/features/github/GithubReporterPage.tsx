@@ -60,7 +60,7 @@ const IMPACTED_SYSTEMS = [
 // 🔥 BỘ RENDER MARKDOWN CHUẨN GITHUB (GFM RENDERER TÍCH HỢP)
 const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
   if (!content.trim()) {
-    return <div className="text-slate-400 italic text-xs py-8 text-center">Chưa có nội dung để xem trước...</div>;
+    return <div className="text-ink-2 italic text-xs py-8 text-center">Chưa có nội dung để xem trước...</div>;
   }
 
   // Parse inline styles: bold, inline code, links
@@ -70,11 +70,11 @@ const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
 
     return parts.map((part, index) => {
       if (part.startsWith('**') && part.endsWith('**')) {
-        return <strong key={index} className="font-bold text-slate-900 dark:text-slate-100">{part.slice(2, -2)}</strong>;
+        return <strong key={index} className="font-bold text-primary dark:text-ink">{part.slice(2, -2)}</strong>;
       }
       if (part.startsWith('`') && part.endsWith('`')) {
         return (
-          <code key={index} className="px-1.5 py-0.5 mx-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-violet-600 dark:text-violet-400 font-mono text-[11px] border border-slate-200 dark:border-slate-700">
+          <code key={index} className="px-1.5 py-0.5 mx-0.5 rounded-md bg-paper-2 dark:bg-ink text-accent dark:text-accent font-mono text-[11px] border border-rule dark:border-ink">
             {part.slice(1, -1)}
           </code>
         );
@@ -82,7 +82,7 @@ const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
       const linkMatch = part.match(/^\[(.*?)\]\((.*?)\)$/);
       if (linkMatch) {
         return (
-          <a key={index} href={linkMatch[2]} target="_blank" rel="noreferrer" className="text-sky-600 dark:text-sky-400 underline hover:text-sky-500 font-medium inline-flex items-center gap-0.5">
+          <a key={index} href={linkMatch[2]} target="_blank" rel="noreferrer" className="text-accent dark:text-accent underline hover:text-accent font-medium inline-flex items-center gap-0.5">
             <span>{linkMatch[1]}</span>
             <ExternalLink className="w-2.5 h-2.5 inline" />
           </a>
@@ -102,7 +102,7 @@ const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
     if (line.trim().startsWith('```')) {
       if (inCodeBlock) {
         renderedElements.push(
-          <div key={`code-${idx}`} className="my-3 rounded-xl bg-slate-900 text-slate-100 p-3.5 font-mono text-xs overflow-x-auto border border-slate-800 shadow-inner">
+          <div key={`code-${idx}`} className="my-3 rounded-xl bg-ink text-ink p-3.5 font-mono text-xs overflow-x-auto border border-ink shadow-inner">
             <pre>{codeBlockContent.join('\n')}</pre>
           </div>
         );
@@ -126,7 +126,7 @@ const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
       const imgUrl = imgMatch[2];
       renderedElements.push(
         <div key={idx} className="my-3.5 space-y-1.5">
-          <div className="p-1 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden shadow-xs inline-block max-w-full">
+          <div className="p-1 bg-paper-2 dark:bg-ink border border-rule dark:border-ink rounded-2xl overflow-hidden shadow-xs inline-block max-w-full">
             <img
               src={imgUrl}
               alt={altText}
@@ -134,10 +134,10 @@ const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
               onClick={() => window.open(imgUrl, '_blank')}
             />
           </div>
-          <div className="text-[11px] text-slate-500 flex items-center gap-1.5 font-mono">
-            <ImageIcon className="w-3 h-3 text-emerald-500" />
+          <div className="text-[11px] text-ink-2 flex items-center gap-1.5 font-mono">
+            <ImageIcon className="w-3 h-3 text-mint" />
             <span>{altText}</span>
-            <a href={imgUrl} target="_blank" rel="noreferrer" className="text-violet-500 hover:underline">
+            <a href={imgUrl} target="_blank" rel="noreferrer" className="text-accent hover:underline">
               [Mở tab mới]
             </a>
           </div>
@@ -149,7 +149,7 @@ const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
     // Tiêu đề ###
     if (line.startsWith('### ')) {
       renderedElements.push(
-        <h3 key={idx} className="text-base font-bold text-slate-900 dark:text-slate-100 mt-4 mb-2 pb-1 border-b border-slate-200 dark:border-slate-800">
+        <h3 key={idx} className="text-base font-bold text-primary dark:text-ink mt-4 mb-2 pb-1 border-b border-rule dark:border-ink">
           {renderInline(line.replace('### ', ''))}
         </h3>
       );
@@ -159,7 +159,7 @@ const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
     // Tiêu đề ##
     if (line.startsWith('## ')) {
       renderedElements.push(
-        <h2 key={idx} className="text-lg font-bold text-slate-900 dark:text-slate-100 mt-5 mb-2.5 pb-1 border-b border-slate-200 dark:border-slate-800">
+        <h2 key={idx} className="text-lg font-bold text-primary dark:text-ink mt-5 mb-2.5 pb-1 border-b border-rule dark:border-ink">
           {renderInline(line.replace('## ', ''))}
         </h2>
       );
@@ -168,14 +168,14 @@ const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
 
     // Đường kẻ ngang ---
     if (line.trim() === '---' || line.trim() === '***') {
-      renderedElements.push(<hr key={idx} className="my-4 border-slate-200 dark:border-slate-800" />);
+      renderedElements.push(<hr key={idx} className="my-4 border-rule dark:border-ink" />);
       return;
     }
 
     // Blockquote >
     if (line.startsWith('> ')) {
       renderedElements.push(
-        <blockquote key={idx} className="my-2 pl-3 py-1 border-l-4 border-violet-500 bg-violet-50/50 dark:bg-violet-950/20 text-slate-700 dark:text-slate-300 rounded-r-lg text-xs italic">
+        <blockquote key={idx} className="my-2 pl-3 py-1 border-l-4 border-accent bg-accent-soft/50 dark:bg-accent-soft/20 text-primary dark:text-ink rounded-r-lg text-xs italic">
           {renderInline(line.replace('> ', ''))}
         </blockquote>
       );
@@ -185,8 +185,8 @@ const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
     // Danh sách gạch đầu dòng -
     if (line.trim().startsWith('- ')) {
       renderedElements.push(
-        <div key={idx} className="flex items-start gap-2 my-1 text-xs text-slate-800 dark:text-slate-200">
-          <span className="text-violet-500 font-bold mt-0.5">•</span>
+        <div key={idx} className="flex items-start gap-2 my-1 text-xs text-primary dark:text-ink">
+          <span className="text-accent font-bold mt-0.5">•</span>
           <div className="flex-1 leading-relaxed">{renderInline(line.trim().replace('- ', ''))}</div>
         </div>
       );
@@ -197,8 +197,8 @@ const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
     const numMatch = line.trim().match(/^(\d+)\.\s+(.*)$/);
     if (numMatch) {
       renderedElements.push(
-        <div key={idx} className="flex items-start gap-2 my-1 text-xs text-slate-800 dark:text-slate-200">
-          <span className="text-violet-600 dark:text-violet-400 font-bold font-mono text-[11px]">{numMatch[1]}.</span>
+        <div key={idx} className="flex items-start gap-2 my-1 text-xs text-primary dark:text-ink">
+          <span className="text-accent dark:text-accent font-bold font-mono text-[11px]">{numMatch[1]}.</span>
           <div className="flex-1 leading-relaxed">{renderInline(numMatch[2])}</div>
         </div>
       );
@@ -213,7 +213,7 @@ const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
 
     // Đoạn văn thông thường
     renderedElements.push(
-      <p key={idx} className="text-xs text-slate-800 dark:text-slate-200 leading-relaxed my-1">
+      <p key={idx} className="text-xs text-primary dark:text-ink leading-relaxed my-1">
         {renderInline(line)}
       </p>
     );
@@ -469,7 +469,7 @@ export const GithubReporterPage: React.FC = () => {
               href={res.issue_url}
               target="_blank"
               rel="noreferrer"
-              className="text-violet-400 underline text-xs flex items-center gap-1"
+              className="text-accent underline text-xs flex items-center gap-1"
             >
               <span>Mở Issue trên GitHub</span>
               <ExternalLink className="w-3 h-3" />
@@ -494,13 +494,13 @@ export const GithubReporterPage: React.FC = () => {
     <div className="space-y-6 max-w-4xl">
       {/* Header */}
       <div>
-        <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2.5 tracking-tight">
-          <Github className="w-5 h-5 text-slate-800 dark:text-slate-200" />
+        <h2 className="text-xl font-bold text-primary dark:text-ink flex items-center gap-2.5 tracking-tight">
+          <Github className="w-5 h-5 text-primary dark:text-ink" />
           <span>GitHub Issue Dispatcher</span>
         </h2>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+        <p className="text-xs text-ink-2 dark:text-ink-2 mt-1">
           Soạn thảo và điều phối Bug Report chuẩn QA DTT vào Private Repository{' '}
-          <code className="text-violet-600 dark:text-violet-400 font-mono font-semibold">
+          <code className="text-accent dark:text-accent font-mono font-semibold">
             PTV-TechHub/Pythaverse2026
           </code>
           .
@@ -509,15 +509,15 @@ export const GithubReporterPage: React.FC = () => {
 
       {/* Banner thông báo nếu nhận từ Ticket */}
       {incomingTicket && (
-        <div className="p-4 rounded-2xl bg-violet-50/80 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-800/50 flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2.5 text-xs text-violet-900 dark:text-violet-200">
-            <TicketIcon className="w-4 h-4 text-violet-600 dark:text-violet-400 shrink-0" />
+        <div className="p-4 rounded-2xl bg-accent-soft/80 dark:bg-accent-soft/30 border border-rule dark:border-ink/50 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2.5 text-xs text-accent dark:text-accent">
+            <TicketIcon className="w-4 h-4 text-accent dark:text-accent shrink-0" />
             <span>
               Đang tạo Bug Report từ Ticket: <strong className="font-semibold">{incomingTicket.subject}</strong> (
               {incomingTicket.source.toUpperCase()})
             </span>
           </div>
-          <span className="px-2 py-0.5 bg-violet-200/80 dark:bg-violet-500/20 text-violet-800 dark:text-violet-300 text-[10px] font-bold rounded-md uppercase">
+          <span className="px-2 py-0.5 bg-accent-soft/80 dark:bg-accent-soft/20 text-accent dark:text-accent text-[10px] font-bold rounded-md uppercase">
             Auto Context & Media Loaded
           </span>
         </div>
@@ -526,31 +526,31 @@ export const GithubReporterPage: React.FC = () => {
       {/* Form Container */}
       <form
         onSubmit={handleSubmit}
-        className="bg-white dark:bg-slate-800 p-6 sm:p-7 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-5 shadow-xs"
+        className="bg-paper dark:bg-ink p-6 sm:p-7 rounded-2xl border border-rule dark:border-ink/60 space-y-5 shadow-xs"
       >
         {/* Row 1: Target Repo */}
         <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Target Repository</label>
+          <label className="text-xs font-semibold text-primary dark:text-ink">Target Repository</label>
           <input
             type="text"
             value={repo}
             onChange={(e) => setRepo(e.target.value)}
-            className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono text-slate-900 dark:text-slate-100 outline-none focus:border-violet-500"
+            className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-ink rounded-xl p-2.5 text-xs font-mono text-primary dark:text-ink outline-none focus:border-accent"
           />
         </div>
 
         {/* Row 2: Metadata Config (Priority, System, Assignees) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 rounded-xl bg-slate-50/80 dark:bg-slate-900/60 border border-slate-200/60 dark:border-slate-700/50">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 rounded-xl bg-paper-2/80 dark:bg-ink/60 border border-rule/60 dark:border-ink/50">
           {/* Priority */}
           <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 flex items-center gap-1">
-              <AlertCircle className="w-3.5 h-3.5 text-rose-500" />
+            <label className="text-[11px] font-semibold text-ink dark:text-ink-2 flex items-center gap-1">
+              <AlertCircle className="w-3.5 h-3.5 text-rose" />
               <span>Mức Độ Ưu Tiên</span>
             </label>
             <select
               value={priority}
               onChange={(e) => setPriority(e.target.value)}
-              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2 text-xs text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
+              className="w-full bg-paper dark:bg-ink border border-rule dark:border-ink rounded-lg p-2 text-xs text-primary dark:text-ink outline-none cursor-pointer"
             >
               <option value="Urgent">🔥 Urgent</option>
               <option value="High">🔴 High</option>
@@ -561,14 +561,14 @@ export const GithubReporterPage: React.FC = () => {
 
           {/* System */}
           <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 flex items-center gap-1">
-              <Layers className="w-3.5 h-3.5 text-sky-500" />
+            <label className="text-[11px] font-semibold text-ink dark:text-ink-2 flex items-center gap-1">
+              <Layers className="w-3.5 h-3.5 text-accent" />
               <span>Hệ Thống Bị Lỗi</span>
             </label>
             <select
               value={system}
               onChange={(e) => setSystem(e.target.value)}
-              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2 text-xs text-slate-800 dark:text-slate-200 outline-none cursor-pointer font-medium"
+              className="w-full bg-paper dark:bg-ink border border-rule dark:border-ink rounded-lg p-2 text-xs text-primary dark:text-ink outline-none cursor-pointer font-medium"
             >
               {IMPACTED_SYSTEMS.map((s) => (
                 <option key={s} value={s}>
@@ -580,8 +580,8 @@ export const GithubReporterPage: React.FC = () => {
 
           {/* Assignees Selection */}
           <div className="space-y-1.5 lg:col-span-2">
-            <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 flex items-center gap-1">
-              <Users className="w-3.5 h-3.5 text-violet-500" />
+            <label className="text-[11px] font-semibold text-ink dark:text-ink-2 flex items-center gap-1">
+              <Users className="w-3.5 h-3.5 text-accent" />
               <span>Người phụ trách:</span>
             </label>
             <div className="flex flex-wrap gap-1.5">
@@ -593,8 +593,8 @@ export const GithubReporterPage: React.FC = () => {
                     type="button"
                     onClick={() => toggleAssignee(a.username)}
                     className={`px-2 py-1 rounded-md text-[11px] font-mono flex items-center gap-1 border transition cursor-pointer ${isSelected
-                      ? 'bg-violet-600 text-white border-violet-600 shadow-2xs font-semibold'
-                      : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                      ? 'bg-primary text-accent-ink border-primary shadow-2xs font-semibold'
+                      : 'bg-paper dark:bg-ink text-ink dark:text-ink border-rule dark:border-ink'
                       }`}
                   >
                     {isSelected && <Check className="w-3 h-3" />}
@@ -608,8 +608,8 @@ export const GithubReporterPage: React.FC = () => {
 
         {/* Labels Selection */}
         <div className="space-y-1.5">
-          <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 flex items-center gap-1">
-            <Tag className="w-3.5 h-3.5 text-emerald-500" />
+          <label className="text-[11px] font-semibold text-ink dark:text-ink-2 flex items-center gap-1">
+            <Tag className="w-3.5 h-3.5 text-mint" />
             <span>Nhãn phân loại:</span>
           </label>
           <div className="flex flex-wrap gap-1.5">
@@ -621,8 +621,8 @@ export const GithubReporterPage: React.FC = () => {
                   type="button"
                   onClick={() => toggleLabel(l.name)}
                   className={`px-2.5 py-1 rounded-md text-[11px] font-medium border flex items-center gap-1 transition cursor-pointer ${isSelected
-                    ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 border-slate-900 shadow-2xs font-semibold'
-                    : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                    ? 'bg-ink text-accent-ink dark:bg-paper dark:text-primary border-ink shadow-2xs font-semibold'
+                    : 'bg-paper dark:bg-ink text-ink dark:text-ink border-rule dark:border-ink'
                     }`}
                 >
                   {isSelected && <Check className="w-3 h-3" />}
@@ -634,13 +634,13 @@ export const GithubReporterPage: React.FC = () => {
         </div>
 
         {/* 🎯 Ô NHẬP GHI CHÚ KHẢO SÁT & TELEMETRY CỦA QA */}
-        <div className="space-y-1.5 p-4 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-800/40">
+        <div className="space-y-1.5 p-4 rounded-xl bg-amber-soft/60 dark:bg-amber-soft/20 border border-amber-soft/70 dark:border-amber-soft/40">
           <div className="flex items-center justify-between">
-            <label className="text-xs font-bold text-amber-900 dark:text-amber-300 flex items-center gap-1.5">
-              <Wrench className="w-3.5 h-3.5 text-amber-600" />
+            <label className="text-xs font-bold text-amber dark:text-amber flex items-center gap-1.5">
+              <Wrench className="w-3.5 h-3.5 text-amber" />
               <span>Ghi chú Telemetry / Error Log Thực Tế:</span>
             </label>
-            <span className="text-[10px] text-amber-700 dark:text-amber-400">
+            <span className="text-[10px] text-amber dark:text-amber">
               Cung cấp mã lỗi, HTTP status, endpoint để Claude Code đọc
             </span>
           </div>
@@ -649,15 +649,15 @@ export const GithubReporterPage: React.FC = () => {
             placeholder="VD: Moodle API trả về 403 Forbidden ở endpoint enrol_manual_enrol_users / Payload request: {user_id: 123}..."
             value={qaNotes}
             onChange={(e) => setQaNotes(e.target.value)}
-            className="w-full bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 outline-none focus:border-amber-500 placeholder-slate-400"
+            className="w-full bg-paper dark:bg-ink border border-amber dark:border-amber rounded-lg p-2.5 text-xs text-primary dark:text-ink outline-none focus:border-amber placeholder-ink-2"
           />
         </div>
 
         {/* 📎 KHU VỰC QUẢN LÝ TỆP ĐÍNH KÈM & HÌNH ẢNH */}
-        <div className="space-y-2 p-4 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700">
+        <div className="space-y-2 p-4 rounded-xl bg-paper-2 dark:bg-ink/60 border border-rule dark:border-ink">
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
-              <Paperclip className="w-4 h-4 text-violet-600" />
+            <div className="flex items-center gap-1.5 text-xs font-bold text-primary dark:text-ink">
+              <Paperclip className="w-4 h-4 text-accent" />
               <span>Tệp Đính Kèm & Ảnh Lỗi ({attachments.length}):</span>
             </div>
 
@@ -674,7 +674,7 @@ export const GithubReporterPage: React.FC = () => {
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploadingMedia}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300 border border-violet-200 dark:border-violet-800 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-accent-soft hover:bg-accent-soft text-accent dark:bg-accent-soft/60 dark:text-accent border border-rule dark:border-ink rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
               >
                 {uploadingMedia ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UploadCloud className="w-3.5 h-3.5" />}
                 <span>Đính Kèm Tệp / Ảnh</span>
@@ -682,35 +682,35 @@ export const GithubReporterPage: React.FC = () => {
             </div>
           </div>
 
-          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+          <p className="text-[11px] text-ink-2 dark:text-ink-2">
             💡 <strong>Mẹo hay:</strong> Bạn có thể chụp ảnh màn hình bằng FastStone rồi bấm <strong>Ctrl + V</strong> trực tiếp vào ô soạn thảo Markdown bên dưới để chèn ảnh tự động!
           </p>
 
           {/* Danh sách tệp đã đính kèm */}
           {attachments.length > 0 && (
-            <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-200/60 dark:border-slate-700/50">
+            <div className="flex flex-wrap gap-2 pt-2 border-t border-rule/60 dark:border-ink/50">
               {attachments.map((file, idx) => (
                 <div
                   key={idx}
-                  className="flex items-center gap-1.5 px-2.5 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs shadow-2xs group"
+                  className="flex items-center gap-1.5 px-2.5 py-1 bg-paper dark:bg-ink border border-rule dark:border-ink rounded-lg text-xs shadow-2xs group"
                 >
                   {file.isImage ? (
-                    <ImageIcon className="w-3.5 h-3.5 text-emerald-500" />
+                    <ImageIcon className="w-3.5 h-3.5 text-mint" />
                   ) : (
-                    <FileCode className="w-3.5 h-3.5 text-violet-500" />
+                    <FileCode className="w-3.5 h-3.5 text-accent" />
                   )}
                   <a
                     href={file.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="font-medium text-slate-700 dark:text-slate-300 hover:text-violet-600 truncate max-w-[180px]"
+                    className="font-medium text-primary dark:text-ink hover:text-accent truncate max-w-[180px]"
                   >
                     {file.filename}
                   </a>
                   <button
                     type="button"
                     onClick={() => handleRemoveAttachment(idx)}
-                    className="text-slate-400 hover:text-rose-500 transition p-0.5 rounded cursor-pointer"
+                    className="text-ink-2 hover:text-rose transition p-0.5 rounded cursor-pointer"
                     title="Xóa tệp này"
                   >
                     <X className="w-3 h-3" />
@@ -726,7 +726,7 @@ export const GithubReporterPage: React.FC = () => {
           type="button"
           onClick={handleAiAutoFill}
           disabled={aiGenerating}
-          className="w-full py-3 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 text-white text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
+          className="w-full py-3 bg-primary hover:bg-primary active:bg-primary text-accent-ink text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
         >
           {aiGenerating ? (
             <>
@@ -735,7 +735,7 @@ export const GithubReporterPage: React.FC = () => {
             </>
           ) : (
             <>
-              <Sparkles className="w-4 h-4 text-violet-200" />
+              <Sparkles className="w-4 h-4 text-accent-ink" />
               <span>AI Soạn Bug Report Chuẩn Telemetry (Dành Riêng Cho Claude Code)</span>
             </>
           )}
@@ -743,29 +743,29 @@ export const GithubReporterPage: React.FC = () => {
 
         {/* Title Input */}
         <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Tiêu Đề Issue (Title)</label>
+          <label className="text-xs font-semibold text-primary dark:text-ink">Tiêu Đề Issue (Title)</label>
           <input
             type="text"
             placeholder="### [BUG][URGENT] Mô tả ngắn gọn sự cố..."
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-xs font-medium text-slate-900 dark:text-slate-100 outline-none focus:border-violet-500"
+            className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-ink rounded-xl p-3 text-xs font-medium text-primary dark:text-ink outline-none focus:border-accent"
           />
         </div>
 
         {/* Body Editor with Tabs (Write / Preview) */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+            <label className="text-xs font-semibold text-primary dark:text-ink">
               Nội Dung Chi Tiết (Markdown)
             </label>
-            <div className="flex bg-slate-100 dark:bg-slate-700/60 p-0.5 rounded-lg text-[11px]">
+            <div className="flex bg-paper-2 dark:bg-ink/60 p-0.5 rounded-lg text-[11px]">
               <button
                 type="button"
                 onClick={() => setActiveTab('write')}
                 className={`flex items-center gap-1 px-2.5 py-1 rounded-md transition cursor-pointer ${activeTab === 'write'
-                  ? 'bg-white dark:bg-slate-800 text-violet-600 dark:text-violet-400 font-semibold shadow-xs'
-                  : 'text-slate-500 dark:text-slate-400'
+                  ? 'bg-paper dark:bg-ink text-accent dark:text-accent font-semibold shadow-xs'
+                  : 'text-ink-2 dark:text-ink-2'
                   }`}
               >
                 <Edit3 className="w-3 h-3" />
@@ -775,8 +775,8 @@ export const GithubReporterPage: React.FC = () => {
                 type="button"
                 onClick={() => setActiveTab('preview')}
                 className={`flex items-center gap-1 px-2.5 py-1 rounded-md transition cursor-pointer ${activeTab === 'preview'
-                  ? 'bg-white dark:bg-slate-800 text-violet-600 dark:text-violet-400 font-semibold shadow-xs'
-                  : 'text-slate-500 dark:text-slate-400'
+                  ? 'bg-paper dark:bg-ink text-accent dark:text-accent font-semibold shadow-xs'
+                  : 'text-ink-2 dark:text-ink-2'
                   }`}
               >
                 <Eye className="w-3 h-3" />
@@ -793,20 +793,20 @@ export const GithubReporterPage: React.FC = () => {
               value={body}
               onPaste={handlePasteOnEditor}
               onChange={(e) => setBody(e.target.value)}
-              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-xs font-mono text-slate-900 dark:text-slate-100 outline-none focus:border-violet-500 leading-relaxed"
+              className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-ink rounded-xl p-3.5 text-xs font-mono text-primary dark:text-ink outline-none focus:border-accent leading-relaxed"
             />
           ) : (
-            <div className="w-full bg-slate-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 min-h-64 shadow-inner overflow-x-auto">
+            <div className="w-full bg-paper-2 dark:bg-ink/80 border border-rule dark:border-ink rounded-2xl p-5 min-h-64 shadow-inner overflow-x-auto">
               <MarkdownRenderer content={body} />
             </div>
           )}
         </div>
 
-        {/* Submit Button */}
+        {/* Submit Button - Primary CTA */}
         <button
           type="submit"
           disabled={submitting}
-          className="w-full py-3.5 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition shadow-sm hover:shadow-md flex items-center justify-center gap-2 cursor-pointer"
+          className="w-full py-3.5 bg-accent text-accent-ink hover:bg-accent active:bg-accent disabled:opacity-50 text-xs font-bold rounded-xl transition shadow-sm hover:shadow-md flex items-center justify-center gap-2 cursor-pointer"
         >
           {submitting ? (
             <>
