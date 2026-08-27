@@ -96,6 +96,19 @@ class OSTicketService:
             logger.error(f"❌ Bỏ qua lỗi upload attachment '{filename}': {e}")
             return None
 
+    async def _get_text_by_candidates(self, page, candidates: List[str]) -> str:
+        """Helper tìm kiếm phần tử an toàn qua nhiều selector khác nhau."""
+        for sel in candidates:
+            try:
+                el = page.locator(sel).first
+                if await el.count() > 0:
+                    text = (await el.inner_text()).strip()
+                    if text:
+                        return text
+            except Exception:
+                continue
+        return ""
+
     async def scrape_ticket_detail(self, context, internal_id: str, ticket_number: str) -> Optional[Dict[str, Any]]:
         """Mở chi tiết vé và bóc tách toàn bộ thông tin form cùng đầy đủ lịch sử hội thoại đa chiều."""
         detail_page = await context.new_page()
@@ -107,56 +120,60 @@ class OSTicketService:
             await detail_page.wait_for_selector(".tixTitle, #ticket_info, .ticket_info", timeout=10000)
 
             # 1. Tiêu đề
-            subject = f"Ticket #{ticket_number}"
-            title_el = detail_page.locator(".tixTitle h3, h2 a, #ticket_info h2").first
-            if await title_el.count() > 0:
-                subject = (await title_el.inner_text()).strip()
+            subject = await self._get_text_by_candidates(detail_page, [
+                ".tixTitle h3",
+                "h2 a",
+                "#ticket_info h2"
+            ]) or f"Ticket #{ticket_number}"
 
             # 2. Người gửi (Tên & Email)
-            submitter_name = "User"
-            sender_email = "support@pythaverse.space"
-            user_name_el = detail_page.locator("span[id^='user-'][id$='-name'], a[href*='users.php?id=']").first
-            user_email_el = detail_page.locator("span[id^='user-'][id$='-email'], a[href^='mailto:']").first
+            submitter_name = await self._get_text_by_candidates(detail_page, [
+                "span[id^='user-'][id$='-name']",
+                "a[href*='users.php?id=']"
+            ]) or "User"
 
-            if await user_name_el.count() > 0:
-                submitter_name = (await user_name_el.inner_text()).strip()
-            if await user_email_el.count() > 0:
-                sender_email = (await user_email_el.inner_text()).strip()
+            sender_email = await self._get_text_by_candidates(detail_page, [
+                "span[id^='user-'][id$='-email']",
+                "a[href^='mailto:']"
+            ]) or "support@pythaverse.space"
 
-            # 3. Help Topic & Thông tin bổ sung
-            help_topic = ""
-            topic_row = detail_page.locator("//tr[contains(., 'Help Topic:')]//td").first
-            if await topic_row.count() > 0:
-                help_topic = (await topic_row.inner_text()).strip()
+            # 3. Help Topic & Assigned To
+            help_topic = await self._get_text_by_candidates(detail_page, [
+                "xpath=//tr[contains(., 'Help Topic:')]//td"
+            ])
 
-            assigned_to = ""
-            assigned_el = detail_page.locator("#field_assign, //tr[contains(., 'Assigned To:')]//td").first
-            if await assigned_el.count() > 0:
-                assigned_to = (await assigned_el.inner_text()).strip()
+            assigned_to = await self._get_text_by_candidates(detail_page, [
+                "#field_assign",
+                "xpath=//tr[contains(., 'Assigned To:')]//td"
+            ])
 
-            # 4. Custom Form Fields
-            school_name = ""
-            country = ""
-            partner_name = ""
-            distributor_name = ""
-            
-            school_cell = detail_page.locator("//tr[contains(., 'School Name')]//td[2], td[id*='inline-answer-93']").first
-            if await school_cell.count() > 0:
-                school_name = (await school_cell.inner_text()).strip()
+            # 4. Custom Form Fields (Partner Account Request Form)
+            school_name = await self._get_text_by_candidates(detail_page, [
+                "#inline-answer-93",
+                "td[id*='inline-answer-93']",
+                "xpath=//tr[contains(., 'School Name for the COF:')]//td[2]",
+                "xpath=//tr[contains(., 'School Name')]//td[2]"
+            ])
 
-            country_cell = detail_page.locator("//tr[contains(., 'Country:')]//td[2], td[id*='inline-answer-118']").first
-            if await country_cell.count() > 0:
-                country = (await country_cell.inner_text()).strip()
+            country = await self._get_text_by_candidates(detail_page, [
+                "#inline-answer-118",
+                "td[id*='inline-answer-118']",
+                "xpath=//tr[contains(., 'Country:')]//td[2]"
+            ])
 
-            partner_cell = detail_page.locator("//tr[contains(., 'Partner Name')]//td[2], td[id*='inline-answer-100']").first
-            if await partner_cell.count() > 0:
-                partner_name = (await partner_cell.inner_text()).strip()
+            partner_name = await self._get_text_by_candidates(detail_page, [
+                "#inline-answer-100",
+                "td[id*='inline-answer-100']",
+                "xpath=//tr[contains(., 'Partner Name')]//td[2]"
+            ])
 
-            distributor_cell = detail_page.locator("//tr[contains(., 'Belongs to Distributor')]//td[2], td[id*='inline-answer-106']").first
-            if await distributor_cell.count() > 0:
-                distributor_name = (await distributor_cell.inner_text()).strip()
+            distributor_name = await self._get_text_by_candidates(detail_page, [
+                "#inline-answer-106",
+                "td[id*='inline-answer-106']",
+                "xpath=//tr[contains(., 'Belongs to Distributor')]//td[2]"
+            ])
 
-            # 5. Bóc tách Toàn bộ Danh sách Tin nhắn trong Thread (Lịch sử hội thoại đầy đủ)
+            # 5. Bóc tách Toàn bộ Danh sách Tin nhắn trong Thread
             thread_entries = detail_page.locator("#thread-items .thread-entry")
             total_entries = await thread_entries.count()
             
@@ -167,22 +184,13 @@ class OSTicketService:
                 entry = thread_entries.nth(i)
                 entry_class = await entry.get_attribute("class") or ""
                 
-                # Xác định loại tin nhắn (Khách gửi / Staff phản hồi)
                 is_response = "response" in entry_class
                 role_label = "STAFF (Hỗ trợ)" if is_response else "USER (Khách hàng)"
 
-                # Tác giả & Thời gian
-                poster_el = entry.locator(".header b, .header a.name").first
-                poster_name = (await poster_el.inner_text()).strip() if await poster_el.count() > 0 else "Unknown"
+                poster_name = await self._get_text_by_candidates(entry, [".header b", ".header a.name"]) or "Unknown"
+                post_time = await self._get_text_by_candidates(entry, [".header time"]) or ""
+                body_text = await self._get_text_by_candidates(entry, [".thread-body"]) or ""
 
-                time_el = entry.locator(".header time").first
-                post_time = (await time_el.inner_text()).strip() if await time_el.count() > 0 else ""
-
-                # Nội dung tin nhắn
-                body_el = entry.locator(".thread-body").first
-                body_text = (await body_el.inner_text()).strip() if await body_el.count() > 0 else ""
-
-                # File đính kèm trong tin nhắn này
                 entry_attachments = []
                 attach_links = entry.locator(".attachments a.filename, .attachments a[href*='file.php']")
                 attach_count = await attach_links.count()
@@ -210,29 +218,29 @@ class OSTicketService:
                 })
 
             # File đính kèm từ Custom Form (nếu có)
-            form_file_link = detail_page.locator("//tr[contains(., 'Upload your COF File:')]//a").first
-            if await form_file_link.count() > 0:
-                raw_href = await form_file_link.get_attribute("href")
-                fname = (await form_file_link.inner_text()).strip()
+            form_file_links = detail_page.locator("td[id*='inline-answer-97'] a, xpath=//tr[contains(., 'Upload your COF File:')]//a")
+            if await form_file_links.count() > 0:
+                raw_href = await form_file_links.first.get_attribute("href")
+                fname = (await form_file_links.first.inner_text()).strip()
                 if raw_href and fname:
                     full_url = urljoin(OSTICKET_BASE_URL + "/scp/", raw_href)
                     storage_url = await self.upload_attachment_to_supabase(context, full_url, fname, ticket_number)
                     if storage_url:
                         attachments_list.insert(0, {"filename": fname, "url": storage_url})
 
-            # Thời gian tạo vé ban đầu
-            created_at_str = ""
+            # Thời gian tạo vé
+            created_at_str = await self._get_text_by_candidates(detail_page, [
+                "xpath=//tr[contains(., 'Create Date:')]//td"
+            ])
             created_at_iso = None
-            create_date_cell = detail_page.locator("//tr[contains(., 'Create Date:')]//td").first
-            if await create_date_cell.count() > 0:
-                created_at_str = (await create_date_cell.inner_text()).strip()
+            if created_at_str:
                 try:
                     dt = datetime.strptime(created_at_str, "%d/%m/%Y %I:%M %p")
                     created_at_iso = dt.isoformat() + "+07:00"
                 except Exception:
                     pass
 
-            # Ghép nội dung hoàn chỉnh theo cấu trúc rõ ràng cho AI đọc
+            # Ghép nội dung hội thoại
             formatted_dialogue = ""
             for msg in messages_history:
                 formatted_dialogue += (
@@ -309,7 +317,6 @@ class OSTicketService:
                     try:
                         row = ticket_rows.nth(r_idx)
                         
-                        # 1. Lấy mã vé hiển thị
                         ticket_num_el = row.locator("a.preview, a[href*='tickets.php?id='], td:nth-child(2) a").first
                         if await ticket_num_el.count() == 0:
                             continue
@@ -320,16 +327,14 @@ class OSTicketService:
                             continue
                         ticket_number = num_match.group(1)
 
-                        # 2. Lấy thời gian Last Updated trên bảng danh sách (Cột 3)
                         last_updated_el = row.locator("td:nth-child(3)").first
                         last_updated_str = (await last_updated_el.inner_text()).strip() if await last_updated_el.count() > 0 else ""
 
-                        # 3. Lấy Internal ID
                         href = await ticket_num_el.get_attribute("href")
                         id_match = re.search(r'id=(\d+)', href or '')
                         internal_id = id_match.group(1) if id_match else ticket_number
 
-                        # 4. Kiểm tra vé trong Database Supabase
+                        # Kiểm tra vé trong Database Supabase
                         check_db = supabase.table("inbox_tickets")\
                             .select("id, status, metadata, attachments")\
                             .eq("source", "osticket")\
@@ -338,23 +343,19 @@ class OSTicketService:
 
                         existing_ticket = check_db.data[0] if check_db.data else None
 
-                        # Nếu vé đã có và thời gian Last Updated không hề thay đổi -> Bỏ qua
                         if existing_ticket:
                             db_last_updated = existing_ticket.get("metadata", {}).get("last_updated_raw", "")
                             if db_last_updated == last_updated_str and last_updated_str != "":
-                                continue  # Không có gì mới, lướt qua để tiết kiệm RAM
+                                continue
 
-                        # 5. Nếu là vé mới HOẶC vé cũ có phản hồi/tài nguyên mới -> Cào chi tiết
                         logger.info(f"✨ Phát hiện biến động tại vé #{ticket_number} (Cập nhật lúc: {last_updated_str}), đang đồng bộ...")
                         ticket_data = await self.scrape_ticket_detail(context, internal_id, ticket_number)
                         
                         if ticket_data:
-                            # Cập nhật thêm last_updated_raw vào metadata để làm mốc so sánh cho lần sau
                             meta = ticket_data.get("metadata", {})
                             meta["last_updated_raw"] = last_updated_str
 
                             if not existing_ticket:
-                                # 🟢 TRƯỜNG HỢP 1: TẠO VÉ MỚI
                                 insert_payload = {
                                     "source": ticket_data["source"],
                                     "source_id": ticket_data["source_id"],
@@ -374,14 +375,10 @@ class OSTicketService:
                                 insert_res = supabase.table("inbox_tickets").insert(insert_payload).execute()
                                 if insert_res.data:
                                     new_id = insert_res.data[0]["id"]
-                                    logger.info(f"💾 Đã tạo vé mới #{ticket_number}! Kích hoạt Gemini Triage...")
+                                    logger.info(f"💾 Đã lưu vé mới #{ticket_number}! Kích hoạt Gemini Triage...")
                                     await process_ticket_with_ai(new_id)
-
                             else:
-                                # 🟡 TRƯỜNG HỢP 2: CẬP NHẬT VÉ CŨ (Có tin nhắn mới / File mới)
                                 ticket_db_id = existing_ticket["id"]
-                                
-                                # Gộp danh sách file cũ và mới (tránh trùng URL)
                                 old_attachments = existing_ticket.get("attachments") or []
                                 new_attachments = ticket_data.get("attachments") or []
                                 seen_urls = {att.get("url") for att in old_attachments if isinstance(att, dict)}
@@ -396,7 +393,6 @@ class OSTicketService:
                                     "raw_content": ticket_data["raw_content"],
                                     "attachments": merged_attachments,
                                     "metadata": meta,
-                                    # Tự động Re-open nếu có tin nhắn mới mà ticket đang ở trạng thái completed
                                     "status": "pending" if existing_ticket.get("status") in ["completed", "dismissed"] else existing_ticket.get("status")
                                 }
 
