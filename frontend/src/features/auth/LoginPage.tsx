@@ -26,7 +26,7 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] dark:bg-[#0B0F17] text-slate-900 dark:text-slate-100 flex flex-col justify-center items-center p-6 relative transition-colors duration-200">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col justify-center items-center p-6 relative transition-colors duration-200">
       {/* Top controls */}
       <div className="absolute top-6 right-6 flex items-center gap-3">
         <button
@@ -53,7 +53,7 @@ export const LoginPage: React.FC = () => {
       <div className="w-full max-w-[420px] bg-white/85 dark:bg-slate-900/85 backdrop-blur-xl p-8 rounded-3xl border border-slate-200/80 dark:border-slate-800/80 shadow-xl space-y-6 animate-in zoom-in-95 duration-150">
         {/* Brand Icon */}
         <div className="flex flex-col items-center text-center space-y-2">
-          <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50 flex items-center justify-center shadow-xs">
+          <div className="w-12 h-12 rounded-2xl bg-sky-50 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 border border-sky-200/60 dark:border-sky-800/50 flex items-center justify-center shadow-xs">
             <Zap className="w-6 h-6 fill-current" />
           </div>
           <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">Pythaverse Admin SSO</h2>

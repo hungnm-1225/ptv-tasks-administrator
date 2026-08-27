@@ -103,8 +103,8 @@ const INGESTION_PIPELINES: IngestionWorkerConfig[] = [
     cronInterval: 'Chu kỳ 45 phút',
     syncType: 'distributor_cache',
     icon: Database,
-    badgeClass: 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-indigo-200/60 dark:border-indigo-800/50',
-    iconClass: 'text-indigo-600 dark:text-indigo-400'
+    badgeClass: 'bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-200/60 dark:border-sky-800/50',
+    iconClass: 'text-sky-600 dark:text-sky-400'
   }
 ];
 
@@ -124,8 +124,8 @@ const EXECUTION_ENGINES: ExecutionWorkerConfig[] = [
     description: 'Đổi mật khẩu tạm thời, kích hoạt tài khoản & xác thực email',
     engineType: '2-Tier Hybrid REST/RPA',
     icon: KeyRound,
-    badgeClass: 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-indigo-200/60 dark:border-indigo-800/50',
-    iconClass: 'text-indigo-600 dark:text-indigo-400'
+    badgeClass: 'bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-200/60 dark:border-sky-800/50',
+    iconClass: 'text-sky-600 dark:text-sky-400'
   },
   {
     key: 'lms_git_worker',
@@ -281,7 +281,7 @@ export const BotCommanderPage: React.FC = () => {
       case 'ERROR':
         return 'text-rose-400 font-semibold';
       case 'SSO_SEEDING':
-        return 'text-indigo-400 font-medium';
+        return 'text-sky-400 font-medium';
       case 'RETRY':
         return 'text-amber-400 font-medium';
       case 'CRON':
@@ -297,7 +297,7 @@ export const BotCommanderPage: React.FC = () => {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2.5 tracking-tight">
-            <Cpu className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+            <Cpu className="w-6 h-6 text-sky-600 dark:text-sky-400" />
             <span>Bot Command & Execution Center</span>
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
@@ -341,7 +341,7 @@ export const BotCommanderPage: React.FC = () => {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Zap className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+            <Zap className="w-4 h-4 text-sky-600 dark:text-sky-400" />
             <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
               1. Bộ Thu Thập Dữ Liệu Đa Kênh (Ingestion Crons)
             </h3>
@@ -384,7 +384,7 @@ export const BotCommanderPage: React.FC = () => {
                     type="button"
                     onClick={() => handleForceSync(p.syncType, p.name)}
                     disabled={isSyncing}
-                    className="flex items-center gap-1 px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50 rounded-lg text-xs font-semibold transition cursor-pointer shadow-xs"
+                    className="flex items-center gap-1 px-2.5 py-1 bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/40 dark:hover:bg-sky-900/40 text-sky-700 dark:text-sky-300 border border-sky-200/60 dark:border-sky-800/50 rounded-lg text-xs font-semibold transition cursor-pointer shadow-xs"
                   >
                     {isSyncing ? (
                       <>
@@ -393,7 +393,7 @@ export const BotCommanderPage: React.FC = () => {
                       </>
                     ) : (
                       <>
-                        <Zap className="w-3 h-3 text-indigo-600 dark:text-indigo-400 fill-indigo-600 dark:fill-indigo-400" />
+                        <Zap className="w-3 h-3 text-sky-600 dark:text-sky-400 fill-sky-600 dark:fill-sky-400" />
                         <span>Ép Quét Ngay</span>
                       </>
                     )}
@@ -409,7 +409,7 @@ export const BotCommanderPage: React.FC = () => {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Boxes className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+            <Boxes className="w-4 h-4 text-sky-600 dark:text-sky-400" />
             <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
               2. Cỗ Máy Thực Thi Tự Động (Automation Execution Engines)
             </h3>
@@ -463,7 +463,7 @@ export const BotCommanderPage: React.FC = () => {
                     disabled={isRetrying}
                     className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer shadow-xs ${isDegraded
                       ? 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/60 animate-pulse'
-                      : 'bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50'
+                      : 'bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border border-sky-200/60 dark:border-sky-800/50'
                       }`}
                   >
                     {isRetrying ? (
@@ -487,7 +487,7 @@ export const BotCommanderPage: React.FC = () => {
         {/* Terminal Header */}
         <div className="bg-slate-900/90 px-4 py-3 border-b border-slate-800 flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-2 text-xs font-mono text-slate-200">
-            <Terminal className="w-4 h-4 text-indigo-400" />
+            <Terminal className="w-4 h-4 text-sky-400" />
             <span className="font-bold text-white">Live Worker Execution Terminal</span>
             <span className="text-[10px] text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/60 flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -504,7 +504,7 @@ export const BotCommanderPage: React.FC = () => {
                 placeholder="Lọc logs theo từ khóa..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-8 pr-3 py-1 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 w-36 sm:w-56 transition"
+                className="pl-8 pr-3 py-1 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500 w-36 sm:w-56 transition"
               />
             </div>
 
@@ -512,7 +512,7 @@ export const BotCommanderPage: React.FC = () => {
               type="button"
               onClick={() => setAutoScroll(!autoScroll)}
               className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition cursor-pointer ${
-                autoScroll ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-800 text-slate-300 hover:text-white'
+                autoScroll ? 'bg-sky-600 text-white shadow-xs' : 'bg-slate-800 text-slate-300 hover:text-white'
               }`}
               title="Tự động cuộn theo log mới"
             >
@@ -551,7 +551,7 @@ export const BotCommanderPage: React.FC = () => {
               <div key={index} className={`flex items-start gap-2 hover:bg-slate-900/60 px-1.5 py-0.5 rounded transition ${getLogColorClass(log.level)}`}>
                 <span className="text-slate-500 shrink-0 select-none">[{log.timestamp}]</span>
                 <span className="shrink-0 font-bold">[{log.level}]</span>
-                <span className="text-indigo-400 shrink-0">[{log.worker}]:</span>
+                <span className="text-sky-400 shrink-0">[{log.worker}]:</span>
                 <span className="break-all">{log.message}</span>
               </div>
             ))

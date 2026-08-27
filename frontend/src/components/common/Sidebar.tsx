@@ -72,7 +72,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
               <div>
                 <h1 className="font-bold text-slate-900 dark:text-white text-sm tracking-tight flex items-center gap-1.5">
                   <span>Pythaverse</span>
-                  <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50 rounded-md">
+                  <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 bg-sky-50 text-sky-700 dark:bg-sky-950/50 dark:text-sky-300 border border-sky-200/60 dark:border-sky-800/50 rounded-md">
                     Admin
                   </span>
                 </h1>
@@ -108,7 +108,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
                   className={({ isActive }) =>
                     `w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all duration-150 ${
                       isActive
-                        ? 'bg-slate-100 dark:bg-slate-800/80 text-slate-900 dark:text-white font-semibold border-l-2 border-slate-900 dark:border-indigo-400 shadow-xs pl-2.5'
+                        ? 'bg-slate-100 dark:bg-slate-800/80 text-slate-900 dark:text-white font-semibold border-l-2 border-slate-900 dark:border-sky-400 shadow-xs pl-2.5'
                         : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100/70 dark:hover:bg-slate-800/50'
                     }`
                   }
@@ -118,7 +118,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
                       <Icon
                         className={`w-[18px] h-[18px] transition-colors ${
                           isActive
-                            ? 'text-slate-900 dark:text-indigo-400'
+                            ? 'text-slate-900 dark:text-sky-400'
                             : 'text-slate-400 dark:text-slate-500'
                         }`}
                       />
