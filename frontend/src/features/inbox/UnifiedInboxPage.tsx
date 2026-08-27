@@ -451,7 +451,10 @@ export const UnifiedInboxPage: React.FC = () => {
       const rowIdx = ticket.metadata?.row_index || 2;
       return `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/edit#gid=0&range=A${rowIdx}:P${rowIdx}`;
     } else if (ticket.source === 'osticket') {
-      return `https://support.pythaverse.space/scp/tickets.php?id=${ticket.source_id}`;
+      // 🎯 Ưu tiên mở theo doc_url (chứa Internal ID 4 số: tickets.php?id=3370)
+      if (ticket.doc_url) return ticket.doc_url;
+      const internalId = ticket.metadata?.internal_id || ticket.source_id;
+      return `https://support.pythaverse.space/scp/tickets.php?id=${internalId}`;
     }
     return '#';
   };

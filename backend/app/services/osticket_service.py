@@ -152,6 +152,7 @@ class OSTicketService:
                 "#inline-answer-93",
                 "td[id*='inline-answer-93']",
                 "xpath=//tr[contains(., 'School Name for the COF:')]//td[2]",
+                "xpath=//tr[contains(., 'School Name for the TOF:')]//td[2]",
                 "xpath=//tr[contains(., 'School Name')]//td[2]"
             ])
 
@@ -217,8 +218,8 @@ class OSTicketService:
                     "attachments": entry_attachments
                 })
 
-            # 6. File đính kèm từ Custom Form (Tách riêng từng selector an toàn 100%)
-            for form_sel in ["td[id*='inline-answer-97'] a", "#inline-answer-97 a", "xpath=//tr[contains(., 'Upload your COF File:')]//a"]:
+            # 6. File đính kèm từ Custom Form (COF / TOF File)
+            for form_sel in ["td[id*='inline-answer-97'] a", "#inline-answer-97 a", "xpath=//tr[contains(., 'Upload your COF File:')]//a", "xpath=//tr[contains(., 'Upload your TOF File:')]//a"]:
                 try:
                     form_file_link = detail_page.locator(form_sel).first
                     if await form_file_link.count() > 0:
@@ -233,17 +234,29 @@ class OSTicketService:
                 except Exception:
                     continue
 
-            # 7. Thời gian tạo vé
-            created_at_str = await self._get_text_by_candidates(detail_page, [
-                "xpath=//tr[contains(., 'Create Date:')]//td"
-            ])
+            # 7. BÓC TÁCH NGÀY TẠO VÉ THẬT (CREATE DATE)
+            created_at_str = ""
             created_at_iso = None
-            if created_at_str:
-                try:
-                    dt = datetime.strptime(created_at_str, "%d/%m/%Y %I:%M %p")
-                    created_at_iso = dt.isoformat() + "+07:00"
-                except Exception:
-                    pass
+
+            # Cách A: Lấy thẻ time ISO từ tin nhắn mở đầu
+            first_time_el = detail_page.locator("#thread-items .thread-entry.message time[datetime]").first
+            if await first_time_el.count() > 0:
+                created_at_iso = await first_time_el.get_attribute("datetime")
+                created_at_str = (await first_time_el.inner_text()).strip()
+
+            # Cách B: Lấy từ bảng thông tin Create Date
+            if not created_at_iso:
+                created_at_str = await self._get_text_by_candidates(detail_page, [
+                    "xpath=//th[contains(., 'Create Date:')]/following-sibling::td",
+                    "xpath=//tr[contains(., 'Create Date:')]//td"
+                ])
+                if created_at_str:
+                    try:
+                        # Parse định dạng: 27/08/2026 8:59 AM
+                        dt = datetime.strptime(created_at_str, "%d/%m/%Y %I:%M %p")
+                        created_at_iso = dt.strftime("%Y-%m-%dT%H:%M:%S+07:00")
+                    except Exception as dt_err:
+                        logger.warning(f"⚠️ Không parse được Create Date '{created_at_str}': {dt_err}")
 
             # Ghép nội dung hội thoại
             formatted_dialogue = ""
@@ -272,18 +285,19 @@ class OSTicketService:
 
             return {
                 "source": "osticket",
-                "source_id": ticket_number,
+                "source_id": ticket_number,                     # 🎯 Mã 6 chữ số hiển thị (#248707)
+                "doc_url": detail_url,                           # 🎯 Link mở chính xác với ID 4 số (tickets.php?id=3370)
                 "sender_email": sender_email,
                 "submitter_name": submitter_name,
                 "subject": subject,
                 "raw_content": raw_content,
-                "created_at": created_at_iso,
+                "created_at": created_at_iso,                   # 🎯 Thời gian tạo vé thực tế
                 "ticket_timestamp": created_at_str or created_at_iso,
                 "country": country,
                 "school_name": school_name,
                 "attachments": attachments_list,
                 "metadata": {
-                    "internal_id": internal_id,
+                    "internal_id": internal_id,                 # 🎯 Lưu ID 4 chữ số nội bộ
                     "ticket_number": ticket_number,
                     "help_topic": help_topic,
                     "school_name": school_name,
@@ -364,6 +378,7 @@ class OSTicketService:
                                 insert_payload = {
                                     "source": ticket_data["source"],
                                     "source_id": ticket_data["source_id"],
+                                    "doc_url": ticket_data.get("doc_url"),
                                     "sender_email": ticket_data["sender_email"],
                                     "submitter_name": ticket_data["submitter_name"],
                                     "subject": ticket_data["subject"],
@@ -396,10 +411,13 @@ class OSTicketService:
                                 update_payload = {
                                     "subject": ticket_data["subject"],
                                     "raw_content": ticket_data["raw_content"],
+                                    "doc_url": ticket_data.get("doc_url"),
                                     "attachments": merged_attachments,
                                     "metadata": meta,
                                     "status": "pending" if existing_ticket.get("status") in ["completed", "dismissed"] else existing_ticket.get("status")
                                 }
+                                if ticket_data.get("created_at"):
+                                    update_payload["created_at"] = ticket_data["created_at"]
 
                                 supabase.table("inbox_tickets").update(update_payload).eq("id", ticket_db_id).execute()
                                 logger.info(f"🔄 Đã cập nhật diễn biến mới cho vé #{ticket_number}! Kích hoạt Gemini Triage phân tích lại...")
