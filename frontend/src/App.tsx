@@ -22,9 +22,9 @@ const CoursesManagerPage = lazy(() => import('./features/courses/CoursesManagerP
 const WorkBoardPage = lazy(() => import('./features/board/WorkBoardPage').then(m => ({ default: m.WorkBoardPage })));
 
 const PageLoadingFallback: React.FC = () => (
-  <div className="min-h-[50vh] flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 gap-3">
-    <Loader2 className="w-8 h-8 animate-spin text-violet-600 dark:text-violet-400" />
-    <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Đang tải trang...</span>
+  <div className="min-h-[50vh] flex flex-col items-center justify-center text-ink-2 gap-3">
+    <Loader2 className="w-8 h-8 animate-spin text-accent" />
+    <span className="text-xs font-medium text-ink-2">Đang tải trang...</span>
   </div>
 );
 
@@ -33,9 +33,9 @@ const ProtectedRoute: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 gap-3 transition-colors">
-        <Loader2 className="w-8 h-8 animate-spin text-violet-600 dark:text-violet-400" />
-        <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Đang xác thực phiên làm việc...</span>
+      <div className="min-h-screen flex flex-col items-center justify-center text-ink-2 gap-3 transition-colors">
+        <Loader2 className="w-8 h-8 animate-spin text-accent" />
+        <span className="text-xs font-medium text-ink-2">Đang xác thực phiên làm việc...</span>
       </div>
     );
   }

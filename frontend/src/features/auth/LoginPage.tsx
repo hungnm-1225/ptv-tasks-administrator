@@ -1,6 +1,7 @@
+// frontend/src/features/auth/LoginPage.tsx
 import React, { useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Zap, ShieldCheck, ArrowRight, Sun, Moon } from 'lucide-react';
+import { Zap, ShieldCheck, Sun, Moon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { toast } from 'sonner';
@@ -25,56 +26,57 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex flex-col justify-center items-center p-6 relative transition-colors duration-200">
+    <div className="min-h-screen bg-[#F8FAFC] dark:bg-[#0B0F17] text-slate-900 dark:text-slate-100 flex flex-col justify-center items-center p-6 relative transition-colors duration-200">
       {/* Top controls */}
       <div className="absolute top-6 right-6 flex items-center gap-3">
         <button
           onClick={toggleTheme}
           title={theme === 'light' ? 'Chuyển sang Giao diện Tối' : 'Chuyển sang Giao diện Sáng'}
-          className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/60 text-slate-600 dark:text-slate-300 transition shadow-2xs"
+          className="p-2 rounded-xl bg-white/80 hover:bg-slate-100 dark:bg-slate-900/80 dark:hover:bg-slate-800 border border-slate-200/80 dark:border-slate-800/80 text-slate-600 dark:text-slate-300 transition cursor-pointer shadow-xs"
         >
           {theme === 'light' ? (
-            <Moon className="w-4 h-4 text-slate-700 hover:text-violet-600 transition-colors" />
+            <Moon className="w-4 h-4 text-slate-700" />
           ) : (
-            <Sun className="w-4 h-4 text-amber-300 hover:text-amber-200 transition-colors" />
+            <Sun className="w-4 h-4 text-amber-400" />
           )}
         </button>
 
         <Link
           to="/"
-          className="text-xs text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 font-medium transition"
+          className="text-xs text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white font-medium transition"
         >
           ← Về Trang Chủ
         </Link>
       </div>
 
-      <div className="w-full max-w-md bg-white dark:bg-slate-800 p-8 rounded-3xl border border-slate-200/80 dark:border-slate-700/60 shadow-lg space-y-6">
+      {/* Auth Bento Card — Glassmorphism & Enterprise Pastel */}
+      <div className="w-full max-w-[420px] bg-white/85 dark:bg-slate-900/85 backdrop-blur-xl p-8 rounded-3xl border border-slate-200/80 dark:border-slate-800/80 shadow-xl space-y-6 animate-in zoom-in-95 duration-150">
         {/* Brand Icon */}
         <div className="flex flex-col items-center text-center space-y-2">
-          <div className="w-12 h-12 rounded-2xl bg-violet-50 text-violet-700 border border-violet-200 dark:bg-violet-500/15 dark:text-violet-300 dark:border-violet-500/30 flex items-center justify-center shadow-xs">
+          <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50 flex items-center justify-center shadow-xs">
             <Zap className="w-6 h-6 fill-current" />
           </div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">Pythaverse Admin SSO</h2>
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">Pythaverse Admin SSO</h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             Hệ thống Quản trị & Tự Động Hóa Tác Vụ Tập Trung
           </p>
         </div>
 
-        {/* Domain Whitelist Notice */}
-        <div className="p-3.5 bg-sky-50 text-sky-800 border border-sky-200/80 dark:bg-sky-500/15 dark:text-sky-300 dark:border-sky-500/30 rounded-2xl text-xs space-y-1">
-          <div className="flex items-center gap-1.5 font-semibold">
-            <ShieldCheck className="w-4 h-4 text-sky-600 dark:text-sky-400" />
+        {/* Domain Whitelist Notice — Sky Blue Pastel */}
+        <div className="p-3.5 bg-sky-50/80 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200 border border-sky-200/60 dark:border-sky-800/50 rounded-2xl text-xs space-y-1">
+          <div className="flex items-center gap-1.5 font-semibold text-sky-700 dark:text-sky-300">
+            <ShieldCheck className="w-4 h-4" />
             <span>Yêu Cầu Tài Khoản Doanh Nghiệp</span>
           </div>
-          <p className="text-[11px] text-sky-700 dark:text-sky-300/90 leading-relaxed">
-            Chỉ chấp nhận tài khoản Google Workspace thuộc miền <strong className="font-semibold">@dtt.vn</strong> (Quản trị viên: hung.nguyenmanh@dtt.vn).
+          <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+            Chỉ chấp nhận tài khoản Google Workspace thuộc miền <strong className="font-semibold text-slate-900 dark:text-white">@dtt.vn</strong> (Quản trị viên: hung.nguyenmanh@dtt.vn).
           </p>
         </div>
 
         {/* Google SSO Button */}
         <button
           onClick={handleLogin}
-          className="cursor-pointer w-full py-3 px-4 bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-200 border border-slate-300/80 dark:border-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-3 transition shadow-xs"
+          className="cursor-pointer w-full py-3 px-4 bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700/80 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-3 transition-all shadow-xs hover:shadow-sm"
         >
           <svg className="w-4 h-4" viewBox="0 0 24 24">
             <path
@@ -100,7 +102,7 @@ export const LoginPage: React.FC = () => {
         <div className="text-center pt-2">
           <Link
             to="/"
-            className="text-[11px] text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 transition"
+            className="text-[11px] text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition"
           >
             ← Quay lại trang giới thiệu
           </Link>

@@ -210,27 +210,27 @@ export const ReportsExportPage: React.FC = () => {
     <div className="space-y-6 max-w-4xl">
       {/* Header */}
       <div>
-        <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2.5 tracking-tight">
-          <FileSpreadsheet className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+        <h2 className="text-xl font-bold text-primary flex items-center gap-2.5 tracking-tight">
+          <FileSpreadsheet className="w-5 h-5 text-mint" />
           <span>Analytics & Custom XLSX Exporter</span>
         </h2>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+        <p className="text-xs text-ink-2 mt-1">
           Tự động tổng hợp dữ liệu tickets, AI triage summary và trích xuất báo cáo đánh giá KPI chuẩn định dạng DTT.
         </p>
       </div>
 
       {/* Exporter Controls Card */}
-      <div className="bg-white dark:bg-slate-800 p-6 sm:p-7 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-6 shadow-xs">
+      <div className="bg-paper p-6 sm:p-7 rounded-2xl border border-rule space-y-6">
         {/* Template Selector */}
         <div className="space-y-2">
-          <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-            <FileText className="w-4 h-4 text-violet-600 dark:text-violet-400" />
+          <label className="text-xs font-semibold text-primary flex items-center gap-1.5">
+            <FileText className="w-4 h-4 text-accent" />
             <span>Mẫu Báo Cáo Xuất Bản</span>
           </label>
           <select
             value={template}
             onChange={(e) => setTemplate(e.target.value)}
-            className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-violet-500 transition cursor-pointer font-medium"
+            className="w-full bg-paper-2 border border-rule rounded-xl p-3 text-xs text-primary outline-none focus:border-accent transition-colors cursor-pointer font-medium"
           >
             <option value="kpi_dtt_standard">⭐ Báo Cáo Đánh Giá KPI Hàng Tháng (Chuẩn DTT - Công Thức 3Đ)</option>
             <option value="raw_tickets">📋 Danh Sách Chi Tiết Toàn Bộ Unified Tickets (Kèm AI Summary)</option>
@@ -240,29 +240,29 @@ export const ReportsExportPage: React.FC = () => {
 
         {/* Staff Information (Dành cho mẫu KPI) */}
         {template === 'kpi_dtt_standard' && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 rounded-xl bg-slate-50/80 dark:bg-slate-900/60 border border-slate-200/60 dark:border-slate-700/50">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 rounded-xl bg-paper-2 border border-rule">
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
-                <User className="w-3.5 h-3.5 text-violet-500" />
+              <label className="text-xs font-medium text-ink flex items-center gap-1.5">
+                <User className="w-3.5 h-3.5 text-accent" />
                 <span>Họ và Tên Nhân Sự</span>
               </label>
               <input
                 type="text"
                 value={staffName}
                 onChange={(e) => setStaffName(e.target.value)}
-                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-violet-500"
+                className="w-full bg-paper border border-rule rounded-lg p-2.5 text-xs text-primary outline-none focus:border-accent"
               />
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
-                <Briefcase className="w-3.5 h-3.5 text-sky-500" />
+              <label className="text-xs font-medium text-ink flex items-center gap-1.5">
+                <Briefcase className="w-3.5 h-3.5 text-accent" />
                 <span>Chức Danh / Vị Trí</span>
               </label>
               <input
                 type="text"
                 value={staffRole}
                 onChange={(e) => setStaffRole(e.target.value)}
-                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-violet-500"
+                className="w-full bg-paper border border-rule rounded-lg p-2.5 text-xs text-primary outline-none focus:border-accent"
               />
             </div>
           </div>
@@ -271,27 +271,27 @@ export const ReportsExportPage: React.FC = () => {
         {/* Date Range Picker */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-              <Calendar className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+            <label className="text-xs font-semibold text-primary flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 text-accent" />
               <span>Từ Ngày</span>
             </label>
             <input
               type="date"
               value={fromDate}
               onChange={(e) => setFromDate(e.target.value)}
-              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-violet-500"
+              className="w-full bg-paper-2 border border-rule rounded-xl p-2.5 text-xs text-primary outline-none focus:border-accent"
             />
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-              <Calendar className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+            <label className="text-xs font-semibold text-primary flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 text-accent" />
               <span>Đến Ngày</span>
             </label>
             <input
               type="date"
               value={toDate}
               onChange={(e) => setToDate(e.target.value)}
-              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-violet-500"
+              className="w-full bg-paper-2 border border-rule rounded-xl p-2.5 text-xs text-primary outline-none focus:border-accent"
             />
           </div>
         </div>
@@ -301,7 +301,7 @@ export const ReportsExportPage: React.FC = () => {
           type="button"
           onClick={handleExportXlsx}
           disabled={isExporting}
-          className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-bold rounded-xl transition shadow-sm hover:shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+          className="w-full py-3.5 bg-mint hover:bg-mint-soft text-accent-ink text-xs font-bold rounded-xl transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
         >
           {isExporting ? (
             <>

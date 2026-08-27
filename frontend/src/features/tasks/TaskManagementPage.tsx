@@ -26,11 +26,7 @@ import {
   Github,
   Mail,
   Search,
-  Filter,
-  ArrowUpDown,
   RotateCw,
-  ExternalLink,
-  Tag,
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { BotAutomationTask } from '../../types';
@@ -153,11 +149,11 @@ export const TaskManagementPage: React.FC = () => {
     let subtitle = '';
     let target = '';
     let icon = Zap;
-    let badgeColor = 'bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300 border-violet-200 dark:border-violet-800';
+    let badgeColor = 'bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-200/60 dark:border-sky-800/50';
 
     if (botType === 'workspace_rpa' || botType === 'lms_playwright') {
       icon = Building2;
-      badgeColor = 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800';
+      badgeColor = 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-indigo-200/60 dark:border-indigo-800/50';
 
       if (action === 'bulk_account_creation') {
         const school = payload.school_name || 'Trường học';
@@ -188,19 +184,19 @@ export const TaskManagementPage: React.FC = () => {
       }
     } else if (botType === 'keycloak_api') {
       icon = Key;
-      badgeColor = 'bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200 dark:border-amber-800';
+      badgeColor = 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200/60 dark:border-amber-800/50';
       const email = payload.target_email || payload.identifier || (payload.identifiers && payload.identifiers[0]) || 'User';
       title = `Quản trị Keycloak: ${email}`;
       const actions = payload.actions || [];
       subtitle = actions.length > 0 ? actions.join(' | ') : 'Reset pass / Xác thực / Trạng thái';
     } else if (botType === 'github_issue_creator') {
       icon = Github;
-      badgeColor = 'bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 border-purple-200 dark:border-purple-800';
+      badgeColor = 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700';
       title = `Tạo GitHub Issue: ${payload.title || 'Báo cáo sự cố'}`;
       subtitle = `Người phụ trách: @${payload.assignees?.join(', ') || 'QA Lead'}`;
     } else if (botType === 'feedback_doc_triage' || botType === 'google_doc_comment') {
       icon = FileText;
-      badgeColor = 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border-blue-200 dark:border-blue-800';
+      badgeColor = 'bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-200/60 dark:border-sky-800/50';
       title = `Ghi chú Google Doc & Phân công (Dòng #${payload.row_index || 2})`;
       subtitle = payload.assignee_email ? `Gán việc: ${payload.assignee_email}` : '';
     }
@@ -271,7 +267,7 @@ export const TaskManagementPage: React.FC = () => {
     }
   };
 
-  // ⚡ OPTIMISTIC UI: PHÊ DUYỆT TỨC THÌ (ĐÃ FIX TYPE)
+  // ⚡ OPTIMISTIC UI: PHÊ DUYỆT TỨC THÌ
   const handleApprove = async () => {
     if (!selectedTask) return;
     setApproving(true);
@@ -288,7 +284,6 @@ export const TaskManagementPage: React.FC = () => {
       }
     }
 
-    // 🟢 Ép kiểu 'queued' as any để thỏa mãn TypeScript
     const updatedTasks: BotAutomationTask[] = tasks.map(t => t.id === taskId ? {
       ...t,
       approval_status: 'approved' as any,
@@ -318,12 +313,11 @@ export const TaskManagementPage: React.FC = () => {
     }
   };
 
-  // ⚡ OPTIMISTIC UI: TỪ CHỐI TỨC THÌ (ĐÃ FIX TYPE)
+  // ⚡ OPTIMISTIC UI: TỪ CHỐI TỨC THÌ
   const handleReject = async (taskId: string) => {
     setRejecting(true);
     const prevTasks = [...tasks];
 
-    // 🟢 Ép kiểu 'rejected' as any và 'dismissed' as any
     const updatedTasks: BotAutomationTask[] = activeTab === 'pending'
       ? tasks.filter(t => t.id !== taskId)
       : tasks.map(t => t.id === taskId ? {
@@ -365,38 +359,38 @@ export const TaskManagementPage: React.FC = () => {
   const renderStatusBadge = (approval: string, execution: string, payload: any) => {
     if (approval === 'pending') {
       return (
-        <span className="px-2.5 py-1 bg-amber-50 text-amber-800 border border-amber-200/80 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30 text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-2xs">
+        <span className="px-2.5 py-1 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800/50 text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-xs">
           <Clock className="w-3 h-3" /> CHỜ PHÊ DUYỆT
         </span>
       );
     } else if (approval === 'approved') {
       if (execution === 'success') {
         return (
-          <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200/80 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30 text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-2xs">
+          <span className="px-2.5 py-1 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/50 text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-xs">
             <CheckCircle2 className="w-3 h-3" /> THÀNH CÔNG
           </span>
         );
       } else if (execution === 'failed') {
         return (
-          <span className="px-2.5 py-1 bg-rose-50 text-rose-700 border border-rose-200/80 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-2xs">
+          <span className="px-2.5 py-1 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200/60 dark:border-rose-800/50 text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-xs">
             <AlertTriangle className="w-3 h-3" /> THẤT BẠI
           </span>
         );
       } else if (execution === 'waiting_poll') {
         return (
-          <span className="px-2.5 py-1 bg-orange-50 text-orange-700 border border-orange-200/80 dark:bg-orange-500/15 dark:text-orange-300 dark:border-orange-500/30 text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-2xs">
+          <span className="px-2.5 py-1 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800/50 text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-xs">
             <Clock className="w-3 h-3 animate-spin" /> {payload?.request_id ? `ĐỢI BATCH #${payload.request_id}` : 'ĐANG ĐỢI POLLING'}
           </span>
         );
       }
       return (
-        <span className="px-2.5 py-1 bg-sky-50 text-sky-700 border border-sky-200/80 dark:bg-sky-500/15 dark:text-sky-300 dark:border-sky-500/30 text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-2xs">
+        <span className="px-2.5 py-1 bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border border-sky-200/60 dark:border-sky-800/50 text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-xs">
           <Loader2 className="w-3 h-3 animate-spin" /> ĐANG XỬ LÝ
         </span>
       );
     } else {
       return (
-        <span className="px-2.5 py-1 bg-slate-100 text-slate-700 border border-slate-200 dark:bg-slate-700 dark:text-slate-300 text-[10px] font-bold rounded-lg inline-flex items-center gap-1">
+        <span className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 text-[10px] font-bold rounded-lg inline-flex items-center gap-1">
           <XCircle className="w-3 h-3" /> BỊ TỪ CHỐI
         </span>
       );
@@ -432,19 +426,19 @@ export const TaskManagementPage: React.FC = () => {
   }, [tasks, activeTab, selectedBotFilter, searchQuery]);
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-12">
+    <div className="space-y-6 max-w-[1600px] mx-auto pb-12">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <div className="flex items-center gap-2.5">
-            <div className="p-2.5 bg-gradient-to-br from-violet-600 to-indigo-600 text-white rounded-2xl shadow-md shadow-violet-500/20">
+            <div className="p-2.5 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 rounded-2xl shadow-xs">
               <CheckSquare className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight">
+              <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
                 Task & Bot Automation Hub
               </h2>
-              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                 Cổng điều phối và theo dõi tiến trình thực thi của toàn bộ hệ thống Bot Workers.
               </p>
             </div>
@@ -454,7 +448,7 @@ export const TaskManagementPage: React.FC = () => {
         <button
           onClick={() => loadTasks(true)}
           disabled={loading}
-          className="flex items-center gap-1.5 px-4 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/50 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 shadow-2xs transition cursor-pointer"
+          className="flex items-center gap-1.5 px-4 py-2 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200/80 dark:border-slate-800 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-200 shadow-xs transition cursor-pointer"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           <span>Làm Mới Danh Sách</span>
@@ -462,7 +456,7 @@ export const TaskManagementPage: React.FC = () => {
       </div>
 
       {/* Bộ Điều Khiển Lọc & Tìm Kiếm */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-3.5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bento-card p-3.5">
         {/* Tabs Trạng Thái */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
           {[
@@ -473,10 +467,11 @@ export const TaskManagementPage: React.FC = () => {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${activeTab === tab.id
-                ? 'bg-violet-600 text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap cursor-pointer ${
+                activeTab === tab.id
+                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
             >
               {tab.label}
             </button>
@@ -488,7 +483,7 @@ export const TaskManagementPage: React.FC = () => {
           <select
             value={selectedBotFilter}
             onChange={(e) => setSelectedBotFilter(e.target.value)}
-            className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none cursor-pointer"
+            className="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
           >
             <option value="all">Tất cả Phân Hệ</option>
             <option value="workspace_rpa">🏢 Workspace RPA</option>
@@ -505,12 +500,12 @@ export const TaskManagementPage: React.FC = () => {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Tìm theo mã, tên trường, email..."
-              className="w-full pl-9 pr-8 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 outline-none focus:border-violet-500"
+              className="w-full pl-9 pr-8 py-1.5 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 outline-none focus:border-indigo-500 transition"
             />
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
               >
                 <X className="w-3 h-3" />
               </button>
@@ -519,26 +514,26 @@ export const TaskManagementPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Bảng Danh Sách Tác Vụ Chi Tiết - Hỗ Trợ SWR 0ms */}
+      {/* Bảng Danh Sách Tác Vụ Chi Tiết */}
       {loading && tasks.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-24 text-slate-500 dark:text-slate-400 gap-3">
-          <Loader2 className="w-8 h-8 animate-spin text-violet-600 dark:text-violet-400" />
+        <div className="flex flex-col items-center justify-center py-24 text-slate-400 gap-3">
+          <Loader2 className="w-8 h-8 animate-spin text-indigo-600 dark:text-indigo-400" />
           <span className="text-xs font-bold">Đang nạp dữ liệu tiến trình tác vụ...</span>
         </div>
       ) : filteredTasks.length === 0 ? (
-        <div className="bg-white dark:bg-slate-800 p-16 text-center rounded-3xl border border-slate-200/80 dark:border-slate-700/60 space-y-3 shadow-xs">
+        <div className="bento-card p-16 text-center space-y-3">
           <CheckSquare className="w-12 h-12 mx-auto text-slate-300 dark:text-slate-600" />
-          <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300">Không tìm thấy tác vụ nào phù hợp</h3>
-          <p className="text-xs text-slate-400 max-w-sm mx-auto">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white">Không tìm thấy tác vụ nào phù hợp</h3>
+          <p className="text-xs text-slate-500 max-w-sm mx-auto">
             Thử thay đổi từ khóa tìm kiếm hoặc chuyển tab trạng thái khác.
           </p>
         </div>
       ) : (
-        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 overflow-hidden shadow-xs">
+        <div className="bento-card overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse min-w-[900px]">
               <thead>
-                <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/75 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 font-bold uppercase text-[10px] tracking-wider">
+                <tr className="border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/75 dark:bg-slate-850/50 text-slate-500 dark:text-slate-400 font-bold uppercase text-[10px] tracking-wider">
                   <th className="p-4 pl-6">Mã Tác Vụ</th>
                   <th className="p-4">Nội Dung Nghiệp Vụ Cốt Lõi</th>
                   <th className="p-4">Nguồn Yêu Cầu</th>
@@ -547,7 +542,7 @@ export const TaskManagementPage: React.FC = () => {
                   <th className="p-4 pr-6 text-right">Thao Tác</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 text-slate-800 dark:text-slate-200">
                 {filteredTasks.map((task) => {
                   const taskIdDisplay = task.id ? `#${task.id.slice(0, 8)}` : '#TASK';
                   const info = getTaskBusinessInfo(task);
@@ -563,12 +558,14 @@ export const TaskManagementPage: React.FC = () => {
                       {/* Cột 1: Mã ID & Loại Bot */}
                       <td className="p-4 pl-6 align-top whitespace-nowrap">
                         <div className="space-y-1">
-                          <span className="font-mono text-xs font-bold text-violet-700 dark:text-violet-300">
+                          <span className="font-mono text-xs font-bold text-indigo-600 dark:text-indigo-400">
                             {taskIdDisplay}
                           </span>
-                          <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[10px] font-bold ${info.badgeColor}`}>
-                            <Icon className="w-3 h-3" />
-                            <span>{task.bot_type}</span>
+                          <div>
+                            <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[10px] font-bold ${info.badgeColor}`}>
+                              <Icon className="w-3 h-3" />
+                              <span>{task.bot_type}</span>
+                            </div>
                           </div>
                         </div>
                       </td>
@@ -576,7 +573,7 @@ export const TaskManagementPage: React.FC = () => {
                       {/* Cột 2: Nội Dung Nghiệp Vụ */}
                       <td className="p-4 align-top max-w-sm">
                         <div className="space-y-1">
-                          <div className="font-bold text-xs text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                          <div className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-1.5">
                             <span>{info.title}</span>
                           </div>
                           {info.subtitle && (
@@ -585,7 +582,7 @@ export const TaskManagementPage: React.FC = () => {
                             </div>
                           )}
                           {info.target && (
-                            <div className="text-[10px] font-mono text-violet-600 dark:text-violet-400 font-semibold">
+                            <div className="text-[10px] font-mono text-indigo-600 dark:text-indigo-400 font-semibold">
                               {info.target}
                             </div>
                           )}
@@ -595,32 +592,32 @@ export const TaskManagementPage: React.FC = () => {
                       {/* Cột 3: Nguồn Yêu Cầu */}
                       <td className="p-4 align-top whitespace-nowrap">
                         {isFromStudio ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300 border border-violet-200/80 dark:border-violet-800 text-[10px] font-extrabold shadow-2xs">
-                            <Zap className="w-3 h-3 text-violet-500" /> Tác vụ Studio Trực Tiếp
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50 text-[10px] font-bold shadow-xs">
+                            <Zap className="w-3 h-3 text-indigo-600 dark:text-indigo-400" /> Tác vụ Studio
                           </span>
                         ) : (
                           <div className="space-y-1">
                             <div className="flex items-center gap-1.5">
                               {ticket?.source === 'gmail' ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-sky-600 bg-sky-50 dark:bg-sky-950 px-2 py-0.5 rounded-md border border-sky-200 dark:border-sky-800">
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/40 px-2 py-0.5 rounded-md border border-sky-200/60 dark:border-sky-800/50">
                                   <Mail className="w-3 h-3" /> Gmail
                                 </span>
                               ) : ticket?.source === 'osticket' ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-950 px-2 py-0.5 rounded-md border border-amber-200 dark:border-amber-800">
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-md border border-amber-200/60 dark:border-amber-800/50">
                                   🎫 OS Ticket
                                 </span>
                               ) : (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800">
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-200/60 dark:border-emerald-800/50">
                                   📝 Form
                                 </span>
                               )}
                               {ticket?.category && (
-                                <span className="text-[10px] font-mono font-bold text-slate-500 uppercase">
+                                <span className="text-[10px] font-mono font-bold text-slate-500 dark:text-slate-400 uppercase">
                                   [{ticket.category}]
                                 </span>
                               )}
                             </div>
-                            <div className="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate max-w-[200px]" title={ticket?.subject || ''}>
+                            <div className="text-[11px] font-medium text-slate-800 dark:text-slate-200 truncate max-w-[200px]" title={ticket?.subject || ''}>
                               {ticket?.subject || `Ticket #${task.ticket_id?.slice(0, 8)}`}
                             </div>
                           </div>
@@ -637,17 +634,17 @@ export const TaskManagementPage: React.FC = () => {
                               href={resultUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-extrabold transition shadow-2xs cursor-pointer"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold transition shadow-xs cursor-pointer"
                             >
                               <Download className="w-3 h-3" />
-                              <span>Tải Kết Quả (.xlsx)</span>
+                              <span>Tải File (.xlsx)</span>
                             </a>
                           </div>
                         )}
                       </td>
 
                       {/* Cột 5: Thời Gian */}
-                      <td className="p-4 align-top text-slate-400 dark:text-slate-500 text-[11px] whitespace-nowrap font-mono">
+                      <td className="p-4 align-top text-slate-500 dark:text-slate-400 text-[11px] whitespace-nowrap font-mono">
                         {formatVNDateTime(task.executed_at || task.created_at)}
                       </td>
 
@@ -656,7 +653,7 @@ export const TaskManagementPage: React.FC = () => {
                         {task.approval_status === 'pending' ? (
                           <button
                             onClick={() => handleOpenReview(task)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded-xl text-xs font-bold transition shadow-2xs cursor-pointer"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold transition shadow-xs cursor-pointer"
                           >
                             <Edit3 className="w-3.5 h-3.5" />
                             <span>Duyệt & Chạy</span>
@@ -667,7 +664,7 @@ export const TaskManagementPage: React.FC = () => {
                               <button
                                 onClick={() => handleRetryTask(task.id)}
                                 disabled={retryingId === task.id}
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800 rounded-xl text-xs font-bold transition cursor-pointer"
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800 rounded-xl text-xs font-bold transition cursor-pointer"
                                 title="Chạy lại tác vụ bị lỗi này"
                               >
                                 {retryingId === task.id ? (
@@ -681,9 +678,9 @@ export const TaskManagementPage: React.FC = () => {
 
                             <button
                               onClick={() => setDetailModalTask(task)}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition cursor-pointer"
+                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer"
                             >
-                              <Terminal className="w-3.5 h-3.5 text-violet-500" />
+                              <Terminal className="w-3.5 h-3.5 text-indigo-500" />
                               <span>Chi Tiết & Log</span>
                             </button>
                           </div>
@@ -700,17 +697,17 @@ export const TaskManagementPage: React.FC = () => {
 
       {/* MODAL: CHI TIẾT & LOGS */}
       {detailModalTask && (
-        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-3xl overflow-hidden shadow-2xl space-y-4 p-6 sm:p-7">
+        <div className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-3xl overflow-hidden shadow-2xl space-y-4 p-6 sm:p-7 animate-in zoom-in-95 duration-150">
             <div className="flex items-start justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-violet-100 dark:bg-violet-950 text-violet-600 dark:text-violet-300 rounded-2xl">
+                <div className="p-2.5 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 rounded-2xl border border-indigo-200/60 dark:border-indigo-800/50">
                   <Terminal className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="text-base font-extrabold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
                     <span>Chi Tiết Tác Vụ #{detailModalTask.id?.slice(0, 8)}</span>
-                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-violet-100 dark:bg-violet-900 text-violet-700 dark:text-violet-300 font-mono font-bold">
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-mono font-bold border border-indigo-200/60 dark:border-indigo-800/50">
                       {detailModalTask.bot_type}
                     </span>
                   </h3>
@@ -721,30 +718,30 @@ export const TaskManagementPage: React.FC = () => {
               </div>
               <button
                 onClick={() => setDetailModalTask(null)}
-                className="p-1 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2">
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/80 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                <span className="text-xs font-bold text-slate-900 dark:text-white">
                   Nghiệp Vụ: {getTaskBusinessInfo(detailModalTask).title}
                 </span>
                 <div>{renderStatusBadge(detailModalTask.approval_status, detailModalTask.execution_status, detailModalTask.payload_data)}</div>
               </div>
 
               {detailModalTask.payload_data?.result_file_url && (
-                <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                  <span className="text-xs font-bold text-emerald-600 flex items-center gap-1.5">
+                <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between">
+                  <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
                     <CheckCircle2 className="w-4 h-4" /> Đã tạo thành công file kết quả:
                   </span>
                   <a
                     href={detailModalTask.payload_data.result_file_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-xs cursor-pointer"
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5" />
                     <span>Tải File (.xlsx)</span>
@@ -754,13 +751,13 @@ export const TaskManagementPage: React.FC = () => {
             </div>
 
             <div className="space-y-1.5 font-mono">
-              <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
                 <span className="flex items-center gap-1.5">
-                  <Code className="w-4 h-4 text-violet-500" />
+                  <Code className="w-4 h-4 text-indigo-500" />
                   <span>Audit Logs Thực Thi:</span>
                 </span>
               </div>
-              <div className="p-4 bg-slate-950 text-slate-200 rounded-2xl text-xs leading-relaxed max-h-56 overflow-y-auto border border-slate-800 space-y-1 scrollbar-thin">
+              <div className="p-4 bg-slate-950 text-slate-300 rounded-2xl text-xs leading-relaxed max-h-56 overflow-y-auto border border-slate-800 space-y-1 scrollbar-thin">
                 {detailModalTask.execution_logs ? (
                   detailModalTask.execution_logs.split('\n').map((line, idx) => (
                     <div
@@ -770,7 +767,7 @@ export const TaskManagementPage: React.FC = () => {
                           ? 'text-emerald-400 font-medium'
                           : line.includes('ERROR') || line.includes('failed')
                             ? 'text-rose-400 font-semibold'
-                            : 'text-slate-300'
+                            : 'text-slate-400'
                       }
                     >
                       {line}
@@ -783,10 +780,10 @@ export const TaskManagementPage: React.FC = () => {
             </div>
 
             <details className="text-xs">
-              <summary className="font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 cursor-pointer">
+              <summary className="font-bold text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white cursor-pointer">
                 ▶ Xem Tham Số Đầu Vào (Input Payload JSON)
               </summary>
-              <pre className="mt-2 p-3 bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-300 rounded-xl font-mono text-[11px] overflow-x-auto max-h-36 border border-slate-200 dark:border-slate-800">
+              <pre className="mt-2 p-3 bg-slate-950 text-slate-300 rounded-xl font-mono text-[11px] overflow-x-auto max-h-36 border border-slate-800">
                 {JSON.stringify(detailModalTask.payload_data, null, 2)}
               </pre>
             </details>
@@ -794,7 +791,7 @@ export const TaskManagementPage: React.FC = () => {
             <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
               <button
                 onClick={() => setDetailModalTask(null)}
-                className="px-5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-xl transition cursor-pointer"
+                className="px-5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold rounded-xl transition cursor-pointer"
               >
                 Đóng
               </button>
@@ -805,15 +802,15 @@ export const TaskManagementPage: React.FC = () => {
 
       {/* MODAL: PHÊ DUYỆT (HUMAN-IN-THE-LOOP) */}
       {selectedTask && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl space-y-4 animate-in zoom-in duration-200">
-            <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/70 dark:bg-slate-900/70">
+        <div className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/70 dark:bg-slate-800/40">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-300 flex items-center justify-center font-bold">
+                <div className="w-8 h-8 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50 flex items-center justify-center font-bold">
                   {selectedTask.bot_type === 'keycloak_api' ? <Key className="w-4 h-4" /> : <Code className="w-4 h-4" />}
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
                     Phê Duyệt Tác Vụ #{selectedTask.id ? selectedTask.id.slice(0, 8) : ''} ({selectedTask.bot_type})
                   </h3>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
@@ -823,14 +820,15 @@ export const TaskManagementPage: React.FC = () => {
               </div>
 
               <div className="flex items-center gap-2">
-                <div className="flex items-center bg-slate-200/80 dark:bg-slate-800 p-1 rounded-xl">
+                <div className="flex items-center bg-slate-200 dark:bg-slate-800 p-1 rounded-xl">
                   <button
                     type="button"
                     onClick={() => setModalMode('form')}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1 ${modalMode === 'form'
-                      ? 'bg-white dark:bg-slate-700 text-violet-700 dark:text-violet-300 shadow-xs'
-                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                      }`}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1 ${
+                      modalMode === 'form'
+                        ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    }`}
                   >
                     <Sliders className="w-3 h-3" /> Form
                   </button>
@@ -840,10 +838,11 @@ export const TaskManagementPage: React.FC = () => {
                       setJsonPayload(JSON.stringify(buildFinalPayload(), null, 2));
                       setModalMode('json');
                     }}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1 ${modalMode === 'json'
-                      ? 'bg-white dark:bg-slate-700 text-violet-700 dark:text-violet-300 shadow-xs'
-                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                      }`}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1 ${
+                      modalMode === 'json'
+                        ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    }`}
                   >
                     <Code className="w-3 h-3" /> JSON
                   </button>
@@ -851,7 +850,7 @@ export const TaskManagementPage: React.FC = () => {
 
                 <button
                   onClick={() => setSelectedTask(null)}
-                  className="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg transition cursor-pointer"
+                  className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg transition cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -862,9 +861,9 @@ export const TaskManagementPage: React.FC = () => {
               {modalMode === 'form' && selectedTask.bot_type === 'keycloak_api' ? (
                 <div className="space-y-5">
                   <div className="space-y-1.5">
-                    <label className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
+                    <label className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
                       <span className="flex items-center gap-1.5">
-                        <Users className="w-3.5 h-3.5 text-violet-600" />
+                        <Users className="w-3.5 h-3.5 text-indigo-500" />
                         Danh Sách Tài Khoản Hoặc Email:
                       </span>
                       <span className="text-[10px] text-slate-400 font-normal">Mỗi email 1 dòng</span>
@@ -874,12 +873,12 @@ export const TaskManagementPage: React.FC = () => {
                       value={kcIdentifiersText}
                       onChange={(e) => setKcIdentifiersText(e.target.value)}
                       placeholder="teacher1@dtt.vn&#10;teacher2@dtt.vn"
-                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-xs font-mono text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 leading-relaxed"
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-xs font-mono text-slate-900 dark:text-white outline-none focus:border-indigo-500 leading-relaxed"
                     />
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
                       Hành Động Cần Thực Thi:
                     </label>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -893,10 +892,11 @@ export const TaskManagementPage: React.FC = () => {
                           key={item.id}
                           type="button"
                           onClick={() => setKcActionType(item.id)}
-                          className={`p-2.5 rounded-xl border text-xs font-medium text-center transition cursor-pointer ${kcActionType === item.id
-                            ? 'bg-violet-50 dark:bg-violet-500/20 border-violet-500 text-violet-700 dark:text-violet-300 font-bold'
-                            : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
-                            }`}
+                          className={`p-2.5 rounded-xl border text-xs font-medium text-center transition cursor-pointer ${
+                            kcActionType === item.id
+                              ? 'bg-indigo-50 dark:bg-indigo-950/50 border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 font-bold'
+                              : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                          }`}
                         >
                           {item.label}
                         </button>
@@ -905,56 +905,59 @@ export const TaskManagementPage: React.FC = () => {
                   </div>
 
                   {kcActionType !== 'bulk_verify' && kcActionType !== 'bulk_set_status' && (
-                    <div className="space-y-2 p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200/80 dark:border-slate-700/60">
-                      <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
+                    <div className="space-y-2 p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
+                      <label className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200">
                         <Lock className="w-3.5 h-3.5 text-amber-500" />
                         Tùy Chọn Mật Khẩu Đặt Lại:
                       </label>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         <label
-                          className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs cursor-pointer transition ${kcPasswordOption === 'email_lowercase'
-                            ? 'bg-white dark:bg-slate-800 border-violet-500 text-violet-700 dark:text-violet-300 font-semibold shadow-2xs'
-                            : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
-                            }`}
+                          className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs cursor-pointer transition ${
+                            kcPasswordOption === 'email_lowercase'
+                              ? 'bg-white dark:bg-slate-900 border-indigo-500 text-indigo-700 dark:text-indigo-300 font-semibold shadow-xs'
+                              : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                          }`}
                         >
                           <input
                             type="radio"
                             name="pass_opt"
                             checked={kcPasswordOption === 'email_lowercase'}
                             onChange={() => setKcPasswordOption('email_lowercase')}
-                            className="text-violet-600 cursor-pointer"
+                            className="text-indigo-600 cursor-pointer"
                           />
                           <span>Email chữ thường</span>
                         </label>
 
                         <label
-                          className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs cursor-pointer transition ${kcPasswordOption === 'default_secure'
-                            ? 'bg-white dark:bg-slate-800 border-violet-500 text-violet-700 dark:text-violet-300 font-semibold shadow-2xs'
-                            : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
-                            }`}
+                          className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs cursor-pointer transition ${
+                            kcPasswordOption === 'default_secure'
+                              ? 'bg-white dark:bg-slate-900 border-indigo-500 text-indigo-700 dark:text-indigo-300 font-semibold shadow-xs'
+                              : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                          }`}
                         >
                           <input
                             type="radio"
                             name="pass_opt"
                             checked={kcPasswordOption === 'default_secure'}
                             onChange={() => setKcPasswordOption('default_secure')}
-                            className="text-violet-600 cursor-pointer"
+                            className="text-indigo-600 cursor-pointer"
                           />
                           <span>Pythaverse@2026</span>
                         </label>
 
                         <label
-                          className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs cursor-pointer transition ${kcPasswordOption === 'custom'
-                            ? 'bg-white dark:bg-slate-800 border-violet-500 text-violet-700 dark:text-violet-300 font-semibold shadow-2xs'
-                            : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
-                            }`}
+                          className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs cursor-pointer transition ${
+                            kcPasswordOption === 'custom'
+                              ? 'bg-white dark:bg-slate-900 border-indigo-500 text-indigo-700 dark:text-indigo-300 font-semibold shadow-xs'
+                              : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                          }`}
                         >
                           <input
                             type="radio"
                             name="pass_opt"
                             checked={kcPasswordOption === 'custom'}
                             onChange={() => setKcPasswordOption('custom')}
-                            className="text-violet-600 cursor-pointer"
+                            className="text-indigo-600 cursor-pointer"
                           />
                           <span>Tự gõ mật khẩu</span>
                         </label>
@@ -966,7 +969,7 @@ export const TaskManagementPage: React.FC = () => {
                           value={kcCustomPassword}
                           onChange={(e) => setKcCustomPassword(e.target.value)}
                           placeholder="Nhập mật khẩu tùy chỉnh..."
-                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-slate-100 outline-none focus:border-violet-500"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-indigo-500"
                         />
                       )}
                     </div>
@@ -974,7 +977,7 @@ export const TaskManagementPage: React.FC = () => {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
                         Gán Trạng Thái Tài Khoản:
                       </label>
                       <div className="flex items-center gap-1.5">
@@ -987,10 +990,11 @@ export const TaskManagementPage: React.FC = () => {
                             key={st.id}
                             type="button"
                             onClick={() => setKcTargetStatus(st.id)}
-                            className={`flex-1 py-2 px-2 text-[11px] rounded-xl border text-center transition cursor-pointer ${kcTargetStatus === st.id
-                              ? 'bg-violet-600 text-white font-bold border-violet-600 shadow-2xs'
-                              : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
-                              }`}
+                            className={`flex-1 py-2 px-2 text-[11px] rounded-xl border text-center transition cursor-pointer ${
+                              kcTargetStatus === st.id
+                                ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold border-transparent shadow-xs'
+                                : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                            }`}
                           >
                             {st.label}
                           </button>
@@ -999,21 +1003,23 @@ export const TaskManagementPage: React.FC = () => {
                     </div>
 
                     <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
                         Bắt Buộc Đổi Pass Lần Đầu?
                       </label>
                       <button
                         type="button"
                         onClick={() => setKcTemporary(!kcTemporary)}
-                        className={`w-full py-2 px-3 rounded-xl border text-xs font-semibold flex items-center justify-between transition cursor-pointer ${kcTemporary
-                          ? 'bg-amber-50 dark:bg-amber-500/15 border-amber-300 dark:border-amber-500/40 text-amber-800 dark:text-amber-300'
-                          : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500'
-                          }`}
+                        className={`w-full py-2 px-3 rounded-xl border text-xs font-semibold flex items-center justify-between transition cursor-pointer ${
+                          kcTemporary
+                            ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300'
+                            : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                        }`}
                       >
                         <span>{kcTemporary ? 'Bật: Bắt đổi khi đăng nhập' : 'Tắt: Dùng mật khẩu này luôn'}</span>
                         <span
-                          className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] text-white ${kcTemporary ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600'
-                            }`}
+                          className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] text-white ${
+                            kcTemporary ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600'
+                          }`}
                         >
                           {kcTemporary ? '✓' : '✕'}
                         </span>
@@ -1023,15 +1029,15 @@ export const TaskManagementPage: React.FC = () => {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                    <FileText className="w-3.5 h-3.5 text-violet-500" />
+                  <label className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-indigo-500" />
                     Payload JSON Điều Khiển Worker:
                   </label>
                   <textarea
                     rows={10}
                     value={jsonPayload}
                     onChange={(e) => setJsonPayload(e.target.value)}
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 text-xs font-mono text-violet-700 dark:text-violet-300 outline-none focus:border-violet-500 leading-relaxed"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-xs font-mono text-indigo-300 outline-none focus:border-indigo-500 leading-relaxed"
                   />
                 </div>
               )}
@@ -1041,7 +1047,7 @@ export const TaskManagementPage: React.FC = () => {
                   type="button"
                   disabled={rejecting}
                   onClick={() => handleReject(selectedTask.id)}
-                  className="flex items-center gap-1.5 px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-semibold transition cursor-pointer"
+                  className="flex items-center gap-1.5 px-4 py-2.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/40 text-rose-700 dark:text-rose-300 border border-rose-200/80 dark:border-rose-800/60 rounded-xl text-xs font-semibold transition cursor-pointer"
                 >
                   <XCircle className="w-3.5 h-3.5" />
                   <span>Từ Chối</span>
@@ -1051,7 +1057,7 @@ export const TaskManagementPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setSelectedTask(null)}
-                    className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium rounded-xl transition cursor-pointer"
+                    className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-medium rounded-xl transition cursor-pointer"
                   >
                     Hủy Bỏ
                   </button>
@@ -1059,7 +1065,7 @@ export const TaskManagementPage: React.FC = () => {
                     type="button"
                     onClick={handleApprove}
                     disabled={approving}
-                    className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white text-xs font-bold rounded-xl transition shadow-md shadow-emerald-500/20 cursor-pointer disabled:opacity-50"
+                    className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer disabled:opacity-50"
                   >
                     {approving ? (
                       <Loader2 className="w-4 h-4 animate-spin" />

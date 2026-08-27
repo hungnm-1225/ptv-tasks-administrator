@@ -212,7 +212,7 @@ const UptimeBar: React.FC<UptimeBarProps> = ({
     return (
       <div className="flex items-center gap-1 h-7">
         {Array.from({ length: 24 }).map((_, i) => (
-          <div key={i} className="flex-1 h-full rounded-xs bg-slate-100 dark:bg-slate-800 animate-pulse" />
+          <div key={i} className="flex-1 h-full rounded-xs bg-paper-2 dark:bg-ink animate-pulse" />
         ))}
       </div>
     );
@@ -243,8 +243,8 @@ const UptimeBar: React.FC<UptimeBarProps> = ({
             className="absolute bottom-full mb-2 z-30 pointer-events-none"
             style={{ left: `${(tooltip.x / 24) * 100}%`, transform: 'translateX(-50%)' }}
           >
-            <div className="bg-slate-950 text-white text-[11px] font-mono rounded-lg px-3 py-1.5 shadow-xl border border-slate-700 whitespace-nowrap">
-              <span className="text-slate-300 font-semibold">{tooltip.item.hour}: </span>
+            <div className="bg-ink text-white text-[11px] font-mono rounded-lg px-3 py-1.5 shadow-xl border border-rule-2 whitespace-nowrap">
+              <span className="text-primary-ink font-semibold">{tooltip.item.hour}: </span>
               <span className={tooltip.item.status === 'DOWN' ? 'text-rose-400 font-bold' : 'text-emerald-400 font-bold'}>
                 {tooltip.item.status === 'DOWN' ? '🔴 Gián đoạn' : '🟢 Hoạt động ổn định'}
               </span>
@@ -253,7 +253,7 @@ const UptimeBar: React.FC<UptimeBarProps> = ({
         )}
       </div>
 
-      <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+      <div className="flex items-center justify-between text-[10px] text-ink-3 font-mono">
         <span>24h trước</span>
         <span className="font-bold text-xs text-emerald-600 dark:text-emerald-400">
           Live Uptime {uptime_pct.toFixed(1)}%
@@ -282,7 +282,7 @@ function StatusDot({ status }: { status: MonitoredSite['last_status'] }) {
         )}
         <span className={`relative inline-flex rounded-full w-2.5 h-2.5 ${cfg.pulse}`} />
       </span>
-      <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">{cfg.label}</span>
+      <span className="text-xs font-semibold text-ink-2 dark:text-primary-ink">{cfg.label}</span>
     </span>
   );
 }
@@ -501,7 +501,7 @@ export const SiteMonitorPage: React.FC = () => {
               ● Centralized Monitor
             </span>
           </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
+          <p className="text-xs text-ink-2 dark:text-ink-3">
             Giám sát đa tầng: Uptime công khai · Xác thực phân quyền 7 Roles · CI/CD Deploy Pipelines
           </p>
         </div>
@@ -511,7 +511,7 @@ export const SiteMonitorPage: React.FC = () => {
           <button
             onClick={handleCheckAllPublic}
             disabled={checking || loading}
-            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-300 dark:disabled:bg-slate-700 text-white text-xs font-semibold rounded-xl transition shadow-sm cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-rule dark:disabled:bg-rule-2 text-white text-xs font-semibold rounded-xl transition shadow-sm cursor-pointer"
           >
             <RefreshCw className={`w-4 h-4 ${checking ? 'animate-spin' : ''}`} />
             {checking ? 'Đang kiểm tra...' : 'Check Public Uptime'}
@@ -522,7 +522,7 @@ export const SiteMonitorPage: React.FC = () => {
           <button
             onClick={handleRunAuthChecks}
             disabled={runningAuthCheck || authLoading}
-            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-300 dark:disabled:bg-slate-700 text-white text-xs font-semibold rounded-xl transition shadow-sm cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-2 disabled:bg-rule dark:disabled:bg-rule-2 text-white text-xs font-semibold rounded-xl transition shadow-sm cursor-pointer"
           >
             <Key className={`w-4 h-4 ${runningAuthCheck ? 'animate-spin' : ''}`} />
             {runningAuthCheck ? 'Đang kiểm tra SSO...' : 'Chạy Kiểm Tra Xác Thực Ngay'}
@@ -533,7 +533,7 @@ export const SiteMonitorPage: React.FC = () => {
           <button
             onClick={() => loadDeployments(true)}
             disabled={deployLoading}
-            className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-xs font-semibold rounded-xl transition shadow-sm cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2.5 bg-ink hover:bg-rule-2 dark:bg-rule-2 dark:hover:bg-rule text-white text-xs font-semibold rounded-xl transition shadow-sm cursor-pointer"
           >
             <RefreshCw className={`w-4 h-4 ${deployLoading ? 'animate-spin' : ''}`} />
             Làm mới CI/CD Deploys
@@ -542,12 +542,12 @@ export const SiteMonitorPage: React.FC = () => {
       </div>
 
       {/* ── 3-Tabs Navigation Bar ── */}
-      <div className="flex items-center gap-2 p-1.5 bg-slate-100 dark:bg-slate-800/80 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 w-fit">
+      <div className="flex items-center gap-2 p-1.5 bg-paper-2 dark:bg-ink/80 rounded-2xl border border-rule/80 dark:border-rule-2/60 w-fit">
         <button
           onClick={() => setActiveTab('public')}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer ${activeTab === 'public'
-            ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs border border-slate-200/60 dark:border-slate-700'
-            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            ? 'bg-white dark:bg-ink text-emerald-600 dark:text-emerald-400 shadow-xs border border-rule/60 dark:border-rule-2'
+            : 'text-ink-2 dark:text-ink-3 hover:text-ink dark:hover:text-primary-ink'
             }`}
         >
           <Globe className="w-4 h-4" />
@@ -557,8 +557,8 @@ export const SiteMonitorPage: React.FC = () => {
         <button
           onClick={() => setActiveTab('auth_matrix')}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer ${activeTab === 'auth_matrix'
-            ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs border border-slate-200/60 dark:border-slate-700'
-            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            ? 'bg-white dark:bg-ink text-accent dark:text-accent-2 shadow-xs border border-rule/60 dark:border-rule-2'
+            : 'text-ink-2 dark:text-ink-3 hover:text-ink dark:hover:text-primary-ink'
             }`}
         >
           <ShieldCheck className="w-4 h-4" />
@@ -568,8 +568,8 @@ export const SiteMonitorPage: React.FC = () => {
         <button
           onClick={() => setActiveTab('cicd_deploy')}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer ${activeTab === 'cicd_deploy'
-            ? 'bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-xs border border-slate-200/60 dark:border-slate-700'
-            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            ? 'bg-white dark:bg-ink text-sky-600 dark:text-sky-400 shadow-xs border border-rule/60 dark:border-rule-2'
+            : 'text-ink-2 dark:text-ink-3 hover:text-ink dark:hover:text-primary-ink'
             }`}
         >
           <GitBranch className="w-4 h-4" />
@@ -585,12 +585,12 @@ export const SiteMonitorPage: React.FC = () => {
               {[
                 { label: 'Tổng Sites', value: summary.total_sites, icon: <Globe className="w-3.5 h-3.5" />, cls: 'text-slate-700 dark:text-slate-100' },
                 { label: 'Đang UP', value: summary.up_count, icon: <Wifi className="w-3.5 h-3.5" />, cls: 'text-emerald-600 dark:text-emerald-400' },
-                { label: 'Bị DOWN', value: summary.down_count, icon: <WifiOff className="w-3.5 h-3.5" />, cls: summary.down_count > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400' },
-                { label: 'Cảnh Báo', value: summary.warning_count, icon: <AlertTriangle className="w-3.5 h-3.5" />, cls: summary.warning_count > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400' },
-                { label: 'Tạm Dừng', value: summary.paused_count, icon: <PauseCircle className="w-3.5 h-3.5" />, cls: 'text-slate-500 dark:text-slate-400' },
+                { label: 'Bị DOWN', value: summary.down_count, icon: <WifiOff className="w-3.5 h-3.5" />, cls: summary.down_count > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-ink-3' },
+                { label: 'Cảnh Báo', value: summary.warning_count, icon: <AlertTriangle className="w-3.5 h-3.5" />, cls: summary.warning_count > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-ink-3' },
+                { label: 'Tạm Dừng', value: summary.paused_count, icon: <PauseCircle className="w-3.5 h-3.5" />, cls: 'text-ink-2 dark:text-ink-3' },
                 { label: 'Avg Latency', value: `${summary.avg_latency_ms}ms`, icon: <Zap className="w-3.5 h-3.5" />, cls: 'text-sky-600 dark:text-sky-400' },
               ].map(({ label, value, icon, cls }) => (
-                <div key={label} className="bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 rounded-xl px-4 py-3 text-center space-y-1 shadow-xs">
+                <div key={label} className="bg-white dark:bg-ink/80 border border-rule/80 dark:border-rule-2/60 rounded-xl px-4 py-3 text-center space-y-1 shadow-xs">
                   <div className={`flex items-center justify-center gap-1 text-[10px] font-semibold uppercase tracking-wider ${cls}`}>
                     {icon}<span>{label}</span>
                   </div>
@@ -601,7 +601,7 @@ export const SiteMonitorPage: React.FC = () => {
           )}
 
           {loading && sites.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400">
+            <div className="flex flex-col items-center justify-center py-20 gap-3 text-ink-3">
               <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
               <p className="text-xs font-medium">Đang nạp danh sách website...</p>
             </div>
@@ -610,7 +610,7 @@ export const SiteMonitorPage: React.FC = () => {
               {sites.map(site => (
                 <div
                   key={site.id}
-                  className="bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl p-5 shadow-xs hover:border-slate-300 dark:hover:border-slate-600 transition"
+                  className="bg-white dark:bg-ink/80 border border-rule/80 dark:border-rule-2/60 rounded-2xl p-5 shadow-xs hover:border-rule-2 dark:hover:border-rule transition"
                 >
                   <div className="flex items-start justify-between gap-4 flex-wrap">
                     <div className="space-y-1 flex-1 min-w-0">
@@ -647,7 +647,7 @@ export const SiteMonitorPage: React.FC = () => {
                     <UptimeBar siteId={site.id} history={site.history || []} loading={site.historyLoading} uptime_pct={site.uptime_pct_30d ?? 100} />
                   </div>
 
-                  <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between text-xs text-slate-500">
+                  <div className="mt-3 pt-3 border-t border-rule dark:border-rule-2/60 flex items-center justify-between text-xs text-ink-2">
                     <span>{site.details || 'Hoạt động ổn định'}</span>
                     <span className="font-mono text-[10px]">{site.last_checked_at || 'Vừa xong'}</span>
                   </div>
@@ -657,7 +657,7 @@ export const SiteMonitorPage: React.FC = () => {
           )}
 
           {/* Incident Log */}
-          <div className="bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl p-5 shadow-xs">
+          <div className="bg-white dark:bg-ink/80 border border-rule/80 dark:border-rule-2/60 rounded-2xl p-5 shadow-xs">
             <div className="flex items-center gap-2 mb-3">
               <AlertTriangle className="w-4 h-4 text-amber-500" />
               <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">Incident Log (Sự cố gần đây)</h3>
@@ -672,8 +672,8 @@ export const SiteMonitorPage: React.FC = () => {
                 {incidents.map(inc => (
                   <div key={inc.id} className="py-2.5 flex items-center justify-between">
                     <div>
-                      <span className="font-semibold text-slate-800 dark:text-slate-200">{inc.site_name}</span>
-                      <span className="ml-2 text-slate-400">({formatDate(inc.started_at)})</span>
+                      <span className="font-semibold text-ink dark:text-primary-ink">{inc.site_name}</span>
+                      <span className="ml-2 text-ink-3">({formatDate(inc.started_at)})</span>
                     </div>
                     <span className="text-rose-500 font-semibold">{inc.error_msg || 'Sập tạm thời'}</span>
                   </div>
@@ -687,15 +687,15 @@ export const SiteMonitorPage: React.FC = () => {
       {/* TAB 2: XÁC THỰC & PHÂN QUYỀN */}
       {activeTab === 'auth_matrix' && (
         <div className="space-y-4 max-w-full overflow-hidden">
-          <div className="bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3 shadow-xs">
+          <div className="bg-white dark:bg-ink/80 border border-rule/80 dark:border-rule-2/60 rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3 shadow-xs">
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2">
-                <Filter className="w-4 h-4 text-slate-400" />
-                <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Lọc Site:</span>
+                <Filter className="w-4 h-4 text-ink-3" />
+                <span className="text-xs font-semibold text-ink-2 dark:text-primary-ink">Lọc Site:</span>
                 <select
                   value={authFilterSite}
                   onChange={e => setAuthFilterSite(e.target.value)}
-                  className="text-xs bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer"
+                  className="text-xs bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-lg px-2.5 py-1.5 text-ink-2 dark:text-primary-ink focus:outline-none cursor-pointer"
                 >
                   <option value="ALL">Tất cả Sites (16 tài khoản)</option>
                   <option value="pythaverse_main">Pythaverse Main Portal (7 Roles)</option>
@@ -714,7 +714,7 @@ export const SiteMonitorPage: React.FC = () => {
               <button
                 onClick={handleRunAuthChecks}
                 disabled={runningAuthCheck || authLoading}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-300 dark:disabled:bg-slate-700 text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer"
+                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-accent hover:bg-accent-2 disabled:bg-rule dark:disabled:bg-rule-2 text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer"
               >
                 <Key className={`w-3.5 h-3.5 ${runningAuthCheck ? 'animate-spin' : ''}`} />
                 {runningAuthCheck ? 'Đang quét 16 tài khoản...' : '🚀 Chạy Kiểm Tra Xác Thực Ngay'}
@@ -734,32 +734,32 @@ export const SiteMonitorPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl overflow-hidden shadow-xs">
+          <div className="bg-white dark:bg-ink/80 border border-rule/80 dark:border-rule-2/60 rounded-2xl overflow-hidden shadow-xs">
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-left">
-                <thead className="bg-slate-50/90 dark:bg-slate-900/80 border-b border-slate-200/80 dark:border-slate-700">
+                <thead className="bg-paper-2/90 dark:bg-ink/80 border-b border-rule/80 dark:border-rule-2">
                   <tr>
-                    <th className="px-4 py-3.5 font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider w-32">Site ID</th>
-                    <th className="px-4 py-3.5 font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider w-28">Vai Trò</th>
-                    <th className="px-4 py-3.5 font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider">Target Route</th>
-                    <th className="px-4 py-3.5 font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider text-center w-24">Trạng Thái</th>
-                    <th className="px-4 py-3.5 font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider text-center w-20">Độ Trễ</th>
-                    <th className="px-4 py-3.5 font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider">Chi Tiết Phản Hồi</th>
-                    <th className="px-4 py-3.5 font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider w-36 text-right">Thời Điểm Check</th>
+                    <th className="px-4 py-3.5 font-bold text-ink-2 dark:text-primary-ink uppercase tracking-wider w-32">Site ID</th>
+                    <th className="px-4 py-3.5 font-bold text-ink-2 dark:text-primary-ink uppercase tracking-wider w-28">Vai Trò</th>
+                    <th className="px-4 py-3.5 font-bold text-ink-2 dark:text-primary-ink uppercase tracking-wider">Target Route</th>
+                    <th className="px-4 py-3.5 font-bold text-ink-2 dark:text-primary-ink uppercase tracking-wider text-center w-24">Trạng Thái</th>
+                    <th className="px-4 py-3.5 font-bold text-ink-2 dark:text-primary-ink uppercase tracking-wider text-center w-20">Độ Trễ</th>
+                    <th className="px-4 py-3.5 font-bold text-ink-2 dark:text-primary-ink uppercase tracking-wider">Chi Tiết Phản Hồi</th>
+                    <th className="px-4 py-3.5 font-bold text-ink-2 dark:text-primary-ink uppercase tracking-wider w-36 text-right">Thời Điểm Check</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
                   {filteredAuthChecks.map((item, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/60 transition">
-                      <td className="px-4 py-3 font-mono font-semibold text-indigo-600 dark:text-indigo-400 whitespace-nowrap">
+                    <tr key={idx} className="hover:bg-paper-2/80 dark:hover:bg-ink/60 transition">
+                      <td className="px-4 py-3 font-mono font-semibold text-accent dark:text-accent-2 whitespace-nowrap">
                         {item.site_id}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200/60 dark:border-indigo-500/30 text-indigo-700 dark:text-indigo-300 font-bold text-[11px]">
+                        <span className="px-2 py-0.5 rounded-md bg-accent-soft dark:bg-accent-soft border border-accent-soft dark:border-accent text-accent dark:text-accent-2 font-bold text-[11px]">
                           {item.role_label}
                         </span>
                       </td>
-                      <td className="px-4 py-3 font-mono text-slate-700 dark:text-slate-300 max-w-[200px] truncate" title={item.expected_path}>
+                      <td className="px-4 py-3 font-mono text-ink-2 dark:text-primary-ink max-w-[200px] truncate" title={item.expected_path}>
                         {item.expected_path}
                       </td>
                       <td className="px-4 py-3 text-center whitespace-nowrap">
@@ -769,7 +769,7 @@ export const SiteMonitorPage: React.FC = () => {
                             ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30'
                             : item.status === 'FAIL'
                               ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30'
-                              : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400'
+                              : 'bg-paper-2 text-ink-2 border-rule dark:bg-ink dark:text-ink-3'
                           }`}>
                           {item.status === 'PASS' && <CheckCircle2 className="w-3 h-3" />}
                           {item.status === 'FAIL' && <XCircle className="w-3 h-3" />}
@@ -777,13 +777,13 @@ export const SiteMonitorPage: React.FC = () => {
                           {item.status}
                         </span>
                       </td>
-                      <td className="px-4 py-3 font-mono font-semibold text-slate-700 dark:text-slate-300 text-center whitespace-nowrap">
+                      <td className="px-4 py-3 font-mono font-semibold text-ink-2 dark:text-primary-ink text-center whitespace-nowrap">
                         {item.latency_ms > 0 ? `${item.latency_ms}ms` : '—'}
                       </td>
-                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300 max-w-[240px] truncate" title={item.details}>
+                      <td className="px-4 py-3 text-ink-2 dark:text-primary-ink max-w-[240px] truncate" title={item.details}>
                         {item.details || '—'}
                       </td>
-                      <td className="px-4 py-3 text-[11px] text-slate-400 dark:text-slate-500 font-mono whitespace-nowrap text-right">
+                      <td className="px-4 py-3 text-[11px] text-ink-3 dark:text-ink-2 font-mono whitespace-nowrap text-right">
                         {item.last_checked_at || 'Chưa check'}
                       </td>
                     </tr>
@@ -799,7 +799,7 @@ export const SiteMonitorPage: React.FC = () => {
       {activeTab === 'cicd_deploy' && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl p-5 shadow-xs flex items-center justify-between">
+            <div className="bg-white dark:bg-ink/80 border border-rule/80 dark:border-rule-2/60 rounded-2xl p-5 shadow-xs flex items-center justify-between">
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   <Globe className="w-4 h-4 text-black dark:text-white" />
@@ -812,13 +812,13 @@ export const SiteMonitorPage: React.FC = () => {
               </span>
             </div>
 
-            <div className="bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl p-5 shadow-xs flex items-center justify-between">
+            <div className="bg-white dark:bg-ink/80 border border-rule/80 dark:border-rule-2/60 rounded-2xl p-5 shadow-xs flex items-center justify-between">
               <div>
                 <div className="flex items-center gap-2 mb-1">
-                  <Server className="w-4 h-4 text-indigo-500" />
-                  <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">Backend FastAPI (Render Docker)</h3>
+                  <Server className="w-4 h-4 text-accent" />
+                  <h3 className="font-bold text-sm text-ink dark:text-primary-ink">Backend FastAPI (Render Docker)</h3>
                 </div>
-                <p className="text-xs text-slate-500">Service: ptv-tasks-backend (Python 3.11 + Chromium)</p>
+                <p className="text-xs text-ink-2">Service: ptv-tasks-backend (Python 3.11 + Chromium)</p>
               </div>
               <span className="px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold rounded-full dark:bg-emerald-500/10 dark:text-emerald-300">
                 LIVE (512MB RAM Safeguarded)
@@ -826,24 +826,24 @@ export const SiteMonitorPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl overflow-hidden shadow-xs">
-            <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-700/60 flex items-center justify-between">
-              <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">Lịch Sử Build & Deploy Gần Đây</h3>
-              <span className="text-xs text-slate-400">Hiển thị {deployments.length} bản build mới nhất</span>
+          <div className="bg-white dark:bg-ink/80 border border-rule/80 dark:border-rule-2/60 rounded-2xl overflow-hidden shadow-xs">
+            <div className="px-5 py-4 border-b border-rule dark:border-rule-2/60 flex items-center justify-between">
+              <h3 className="font-bold text-sm text-ink dark:text-primary-ink">Lịch Sử Build & Deploy Gần Đây</h3>
+              <span className="text-xs text-ink-3">Hiển thị {deployments.length} bản build mới nhất</span>
             </div>
 
-            <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
+            <div className="divide-y divide-rule dark:divide-rule-2/60">
               {deployments.map(item => (
-                <div key={item.id} className="p-4 flex items-center justify-between flex-wrap gap-3 hover:bg-slate-50/80 dark:hover:bg-slate-800/60 transition">
+                <div key={item.id} className="p-4 flex items-center justify-between flex-wrap gap-3 hover:bg-paper-2/80 dark:hover:bg-ink/60 transition">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <span className={`px-2 py-0.5 rounded-md font-mono text-[10px] font-bold uppercase ${item.provider === 'vercel'
                         ? 'bg-black text-white dark:bg-white dark:text-black'
-                        : 'bg-indigo-600 text-white'
+                        : 'bg-accent text-white'
                         }`}>
                         {item.provider}
                       </span>
-                      <span className="font-bold text-sm text-slate-900 dark:text-slate-100">{item.name}</span>
+                      <span className="font-bold text-sm text-ink dark:text-primary-ink">{item.name}</span>
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${(item.state || item.status) === 'READY' || (item.state || item.status) === 'live'
                         ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300'
                         : 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/15 dark:text-rose-300'
@@ -852,18 +852,18 @@ export const SiteMonitorPage: React.FC = () => {
                       </span>
                     </div>
 
-                    <p className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-2">
-                      <GitBranch className="w-3.5 h-3.5 text-slate-400" />
+                    <p className="text-xs text-ink-2 dark:text-primary-ink flex items-center gap-2">
+                      <GitBranch className="w-3.5 h-3.5 text-ink-3" />
                       <span className="font-medium">{item.commit_msg}</span>
-                      <span className="text-slate-400">by {item.commit_author}</span>
+                      <span className="text-ink-3">by {item.commit_author}</span>
                     </p>
                   </div>
 
                   <div className="flex items-center gap-3">
-                    <span className="text-xs text-slate-400 font-mono">{formatDate(item.created_at)}</span>
+                    <span className="text-xs text-ink-3 font-mono">{formatDate(item.created_at)}</span>
                     <button
                       onClick={() => handleViewLogs(item)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-xs font-semibold rounded-xl transition cursor-pointer"
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-ink hover:bg-rule-2 dark:bg-rule-2 dark:hover:bg-rule text-white text-xs font-semibold rounded-xl transition cursor-pointer"
                     >
                       <Terminal className="w-3.5 h-3.5" />
                       <span>Xem Build Logs</span>
@@ -879,9 +879,9 @@ export const SiteMonitorPage: React.FC = () => {
       {/* Modal Xem Live Terminal Build/Runtime Logs */}
       {logModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in fade-in zoom-in-95 duration-150">
-            <div className="px-5 py-3.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2 text-slate-200">
+          <div className="bg-ink border border-rule-2 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-5 py-3.5 bg-ink border-b border-rule-2 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-primary-ink">
                 <Terminal className="w-4 h-4 text-emerald-400" />
                 <span className="font-bold text-xs font-mono">{selectedDeployTitle}</span>
               </div>
@@ -889,7 +889,7 @@ export const SiteMonitorPage: React.FC = () => {
               <div className="flex items-center gap-2">
                 <button
                   onClick={copyLogsToClipboard}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition cursor-pointer"
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rule-2 hover:bg-rule-2 text-primary-ink text-xs font-medium transition cursor-pointer"
                 >
                   {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                   <span>{copied ? 'Đã chép' : 'Sao chép'}</span>
@@ -897,14 +897,14 @@ export const SiteMonitorPage: React.FC = () => {
 
                 <button
                   onClick={() => setLogModalOpen(false)}
-                  className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition cursor-pointer"
+                  className="p-1 rounded-lg hover:bg-rule-2 text-ink-3 hover:text-white transition cursor-pointer"
                 >
                   <XCircle className="w-5 h-5" />
                 </button>
               </div>
             </div>
 
-            <div className="p-5 flex-1 overflow-y-auto font-mono text-xs leading-relaxed text-slate-300 bg-slate-900">
+            <div className="p-5 flex-1 overflow-y-auto font-mono text-xs leading-relaxed text-primary-ink bg-ink">
               {loadingLogs ? (
                 <div className="flex items-center justify-center py-20 gap-2 text-slate-500">
                   <Loader2 className="w-5 h-5 animate-spin text-emerald-400" />

@@ -1,0 +1,12 @@
+[
+  {
+    "date": "2026-08-27",
+    "macrostructure": "Bento Grid",
+    "theme": "custom",
+    "theme_axes": "light / rounded-sans (Plus Jakarta Sans) / cool (sky-500)",
+    "vibe": "soft pastel enterprise admin, slate-sky-mint-rose-amber semantics",
+    "enrichment": "none",
+    "scope": "app",
+    "brief": "PTV Tasks Administrator — 13-page React 19 + Tailwind v4 + FastAPI enterprise admin. Replaced 286 violet/indigo/fuchsia violations with Enterprise Pastel OKLCH palette. Bento Grid macrostructure, no gradients, no purple, sky-500 accent. AuthContext ALLOWED_ADMIN_EMAIL whitelist preserved unchanged."
+  }
+]

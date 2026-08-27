@@ -35,7 +35,8 @@ interface IngestionWorkerConfig {
   cronInterval: string;
   syncType: string;
   icon: React.ElementType;
-  iconColor: string;
+  badgeClass: string;
+  iconClass: string;
 }
 
 interface ExecutionWorkerConfig {
@@ -44,7 +45,8 @@ interface ExecutionWorkerConfig {
   description: string;
   engineType: string;
   icon: React.ElementType;
-  iconColor: string;
+  badgeClass: string;
+  iconClass: string;
 }
 
 // ⚡ TRỢ THỦ PERSISTENT STORAGE (LƯU LOCALSTORAGE - 0MS INSTANT RENDER)
@@ -71,7 +73,8 @@ const INGESTION_PIPELINES: IngestionWorkerConfig[] = [
     cronInterval: 'Chu kỳ 5 phút',
     syncType: 'gmail',
     icon: Mail,
-    iconColor: 'text-sky-500 bg-sky-500/10 border-sky-500/20'
+    badgeClass: 'bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-200/60 dark:border-sky-800/50',
+    iconClass: 'text-sky-600 dark:text-sky-400'
   },
   {
     key: 'osticket_sync_worker',
@@ -80,7 +83,8 @@ const INGESTION_PIPELINES: IngestionWorkerConfig[] = [
     cronInterval: 'Chu kỳ 5 phút',
     syncType: 'osticket',
     icon: LifeBuoy,
-    iconColor: 'text-amber-500 bg-amber-500/10 border-amber-500/20'
+    badgeClass: 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200/60 dark:border-amber-800/50',
+    iconClass: 'text-amber-600 dark:text-amber-400'
   },
   {
     key: 'feedback_sheet_worker',
@@ -89,7 +93,8 @@ const INGESTION_PIPELINES: IngestionWorkerConfig[] = [
     cronInterval: 'Chu kỳ 5 phút',
     syncType: 'sheet',
     icon: FileSpreadsheet,
-    iconColor: 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20'
+    badgeClass: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200/60 dark:border-emerald-800/50',
+    iconClass: 'text-emerald-600 dark:text-emerald-400'
   },
   {
     key: 'distributor_cache_worker',
@@ -98,7 +103,8 @@ const INGESTION_PIPELINES: IngestionWorkerConfig[] = [
     cronInterval: 'Chu kỳ 45 phút',
     syncType: 'distributor_cache',
     icon: Database,
-    iconColor: 'text-violet-500 bg-violet-500/10 border-violet-500/20'
+    badgeClass: 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-indigo-200/60 dark:border-indigo-800/50',
+    iconClass: 'text-indigo-600 dark:text-indigo-400'
   }
 ];
 
@@ -109,7 +115,8 @@ const EXECUTION_ENGINES: ExecutionWorkerConfig[] = [
     description: 'Tạo đơn, cấp phép 4 cấp, nộp batch user & ghi ngược COF',
     engineType: 'Playwright Chromium',
     icon: Boxes,
-    iconColor: 'text-amber-500 bg-amber-500/10 border-amber-500/20'
+    badgeClass: 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200/60 dark:border-amber-800/50',
+    iconClass: 'text-amber-600 dark:text-amber-400'
   },
   {
     key: 'keycloak_api_worker',
@@ -117,7 +124,8 @@ const EXECUTION_ENGINES: ExecutionWorkerConfig[] = [
     description: 'Đổi mật khẩu tạm thời, kích hoạt tài khoản & xác thực email',
     engineType: '2-Tier Hybrid REST/RPA',
     icon: KeyRound,
-    iconColor: 'text-violet-500 bg-violet-500/10 border-violet-500/20'
+    badgeClass: 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-indigo-200/60 dark:border-indigo-800/50',
+    iconClass: 'text-indigo-600 dark:text-indigo-400'
   },
   {
     key: 'lms_git_worker',
@@ -125,7 +133,8 @@ const EXECUTION_ENGINES: ExecutionWorkerConfig[] = [
     description: 'Ghi danh khóa học Moodle theo vai trò & tạo Group lớp',
     engineType: 'Hybrid Automator',
     icon: GraduationCap,
-    iconColor: 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20'
+    badgeClass: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200/60 dark:border-emerald-800/50',
+    iconClass: 'text-emerald-600 dark:text-emerald-400'
   },
   {
     key: 'github_dispatcher',
@@ -133,7 +142,8 @@ const EXECUTION_ENGINES: ExecutionWorkerConfig[] = [
     description: 'Tạo Bug Issue Markdown vào Private Repo kèm telemetry log',
     engineType: 'GitHub REST API v3',
     icon: GitPullRequest,
-    iconColor: 'text-purple-500 bg-purple-500/10 border-purple-500/20'
+    badgeClass: 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700',
+    iconClass: 'text-slate-700 dark:text-slate-300'
   }
 ];
 
@@ -243,7 +253,6 @@ export const BotCommanderPage: React.FC = () => {
 
   const handleClearLogs = () => {
     const nowLocal = new Date().toLocaleString('sv-SE', { hour12: false }).replace('T', ' ');
-    // 🟢 Thêm kiểu : BotTerminalLog[] để thỏa mãn TypeScript Strict Union
     const cleared: BotTerminalLog[] = [{
       timestamp: nowLocal,
       level: 'INFO',
@@ -272,7 +281,7 @@ export const BotCommanderPage: React.FC = () => {
       case 'ERROR':
         return 'text-rose-400 font-semibold';
       case 'SSO_SEEDING':
-        return 'text-violet-400 font-medium';
+        return 'text-indigo-400 font-medium';
       case 'RETRY':
         return 'text-amber-400 font-medium';
       case 'CRON':
@@ -287,8 +296,8 @@ export const BotCommanderPage: React.FC = () => {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2.5 tracking-tight">
-            <Cpu className="w-6 h-6 text-violet-600 dark:text-violet-400" />
+          <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2.5 tracking-tight">
+            <Cpu className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
             <span>Bot Command & Execution Center</span>
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
@@ -298,7 +307,7 @@ export const BotCommanderPage: React.FC = () => {
 
         <div className="flex items-center gap-2 flex-wrap">
           {/* Badge Human in the loop */}
-          <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/20 text-xs font-semibold">
+          <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/50 text-xs font-semibold shadow-xs">
             <ShieldCheck className="w-4 h-4" />
             <span>Human-in-the-Loop Active</span>
           </span>
@@ -308,7 +317,7 @@ export const BotCommanderPage: React.FC = () => {
             type="button"
             onClick={handlePurgeMemory}
             disabled={purgingRam}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-500/10 dark:hover:bg-amber-500/20 border border-amber-200 dark:border-amber-500/30 rounded-xl text-xs font-semibold text-amber-700 dark:text-amber-300 transition shadow-xs cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/40 border border-amber-200/80 dark:border-amber-800/60 rounded-xl text-xs font-semibold text-amber-700 dark:text-amber-300 transition-all shadow-xs cursor-pointer"
             title="Kích hoạt Garbage Collector giải phóng RAM máy chủ Render"
           >
             <Sparkles className={`w-3.5 h-3.5 ${purgingRam ? 'animate-spin' : ''}`} />
@@ -320,7 +329,7 @@ export const BotCommanderPage: React.FC = () => {
             type="button"
             onClick={() => loadBotData(true, true)}
             disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-300 transition shadow-xs cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-800 dark:text-slate-200 transition-all shadow-xs cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             <span>Đồng bộ</span>
@@ -332,12 +341,12 @@ export const BotCommanderPage: React.FC = () => {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Zap className="w-4 h-4 text-sky-500" />
+            <Zap className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
             <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
               1. Bộ Thu Thập Dữ Liệu Đa Kênh (Ingestion Crons)
             </h3>
           </div>
-          <span className="text-[11px] text-slate-400">Hệ thống quét tự động ngầm — Bấm nút để ép quét ngay lập tức</span>
+          <span className="text-[11px] text-slate-500 dark:text-slate-400">Hệ thống quét tự động ngầm — Bấm nút để ép quét ngay lập tức</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -348,26 +357,26 @@ export const BotCommanderPage: React.FC = () => {
             return (
               <div
                 key={p.key}
-                className="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 flex flex-col justify-between space-y-3 shadow-xs hover:border-slate-300 dark:hover:border-slate-600 transition"
+                className="bento-card p-5 flex flex-col justify-between space-y-4"
               >
                 <div>
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className={`p-2 rounded-xl border ${p.iconColor}`}>
-                        <IconComp className="w-4 h-4" />
+                    <div className="flex items-center gap-2.5">
+                      <div className={`p-2 rounded-xl border ${p.badgeClass}`}>
+                        <IconComp className={`w-4 h-4 ${p.iconClass}`} />
                       </div>
-                      <span className="text-xs font-bold text-slate-900 dark:text-slate-100">{p.name}</span>
+                      <span className="text-xs font-bold text-slate-900 dark:text-white">{p.name}</span>
                     </div>
-                    <span className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold bg-emerald-50 dark:bg-emerald-500/10 px-2 py-0.5 rounded-full">
-                      <CheckCircle2 className="w-3 h-3" />
+                    <span className="flex items-center gap-1 text-[10px] text-emerald-700 dark:text-emerald-300 font-semibold bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/60 dark:border-emerald-800/50 px-2 py-0.5 rounded-full shadow-xs">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                       <span>ONLINE</span>
                     </span>
                   </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2 line-clamp-2 leading-relaxed">{p.description}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-2.5 line-clamp-2 leading-relaxed">{p.description}</p>
                 </div>
 
-                <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-700/60">
-                  <span className="text-[10px] text-slate-400 font-mono bg-slate-100 dark:bg-slate-700/60 px-2 py-0.5 rounded-md">
+                <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
                     {p.cronInterval}
                   </span>
 
@@ -375,7 +384,7 @@ export const BotCommanderPage: React.FC = () => {
                     type="button"
                     onClick={() => handleForceSync(p.syncType, p.name)}
                     disabled={isSyncing}
-                    className="flex items-center gap-1 px-2.5 py-1 bg-sky-50 hover:bg-sky-100 dark:bg-sky-500/10 dark:hover:bg-sky-500/20 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-500/30 rounded-lg text-[11px] font-semibold transition cursor-pointer"
+                    className="flex items-center gap-1 px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50 rounded-lg text-xs font-semibold transition cursor-pointer shadow-xs"
                   >
                     {isSyncing ? (
                       <>
@@ -384,7 +393,7 @@ export const BotCommanderPage: React.FC = () => {
                       </>
                     ) : (
                       <>
-                        <Zap className="w-3 h-3 text-sky-500 fill-sky-500" />
+                        <Zap className="w-3 h-3 text-indigo-600 dark:text-indigo-400 fill-indigo-600 dark:fill-indigo-400" />
                         <span>Ép Quét Ngay</span>
                       </>
                     )}
@@ -400,12 +409,12 @@ export const BotCommanderPage: React.FC = () => {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Boxes className="w-4 h-4 text-violet-500" />
+            <Boxes className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
             <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
               2. Cỗ Máy Thực Thi Tự Động (Automation Execution Engines)
             </h3>
           </div>
-          <span className="text-[11px] text-slate-400">Tiếp nhận và thực thi các tác vụ sau khi được Quản trị viên duyệt</span>
+          <span className="text-[11px] text-slate-500 dark:text-slate-400">Tiếp nhận và thực thi các tác vụ sau khi được Quản trị viên duyệt</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -418,33 +427,33 @@ export const BotCommanderPage: React.FC = () => {
             return (
               <div
                 key={w.key}
-                className="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 flex flex-col justify-between space-y-3 shadow-xs hover:border-slate-300 dark:hover:border-slate-600 transition"
+                className="bento-card p-5 flex flex-col justify-between space-y-4"
               >
                 <div>
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className={`p-2 rounded-xl border ${w.iconColor}`}>
-                        <IconComp className="w-4 h-4" />
+                    <div className="flex items-center gap-2.5">
+                      <div className={`p-2 rounded-xl border ${w.badgeClass}`}>
+                        <IconComp className={`w-4 h-4 ${w.iconClass}`} />
                       </div>
-                      <span className="text-xs font-bold text-slate-900 dark:text-slate-100">{w.name}</span>
+                      <span className="text-xs font-bold text-slate-900 dark:text-white">{w.name}</span>
                     </div>
                     {isDegraded ? (
-                      <span className="flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400 font-semibold bg-amber-50 dark:bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-500/20">
+                      <span className="flex items-center gap-1 text-[10px] text-amber-700 dark:text-amber-300 font-semibold bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-full border border-amber-200/80 dark:border-amber-800/60 shadow-xs">
                         <AlertTriangle className="w-3 h-3" />
                         <span>{statusInfo.failed_count} LỖI</span>
                       </span>
                     ) : (
-                      <span className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold bg-emerald-50 dark:bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                      <span className="flex items-center gap-1 text-[10px] text-emerald-700 dark:text-emerald-300 font-semibold bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/60 dark:border-emerald-800/50 px-2 py-0.5 rounded-full shadow-xs">
                         <CheckCircle2 className="w-3 h-3" />
                         <span>READY</span>
                       </span>
                     )}
                   </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2 line-clamp-2 leading-relaxed">{w.description}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-2.5 line-clamp-2 leading-relaxed">{w.description}</p>
                 </div>
 
-                <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-700/60">
-                  <span className="text-[10px] text-slate-400 font-mono bg-slate-100 dark:bg-slate-700/60 px-2 py-0.5 rounded-md">
+                <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
                     {w.engineType}
                   </span>
 
@@ -452,9 +461,9 @@ export const BotCommanderPage: React.FC = () => {
                     type="button"
                     onClick={() => handleRetryWorker(w.key, w.name)}
                     disabled={isRetrying}
-                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition cursor-pointer ${isDegraded
-                      ? 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-500/40 animate-pulse'
-                      : 'bg-violet-50 hover:bg-violet-100 dark:bg-violet-500/10 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-500/30'
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer shadow-xs ${isDegraded
+                      ? 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/60 animate-pulse'
+                      : 'bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50'
                       }`}
                   >
                     {isRetrying ? (
@@ -474,33 +483,37 @@ export const BotCommanderPage: React.FC = () => {
       </div>
 
       {/* SECTION 3: LIVE TERMINAL CONSOLE */}
-      <div className="bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
+      <div className="bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden shadow-2xl">
         {/* Terminal Header */}
-        <div className="bg-slate-900 px-4 py-3 border-b border-slate-800 flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-2 text-xs font-mono text-slate-300">
-            <Terminal className="w-4 h-4 text-violet-400" />
-            <span className="font-semibold text-slate-100">Live Worker Execution Terminal</span>
-            <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">Real-time Stream</span>
+        <div className="bg-slate-900/90 px-4 py-3 border-b border-slate-800 flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-2 text-xs font-mono text-slate-200">
+            <Terminal className="w-4 h-4 text-indigo-400" />
+            <span className="font-bold text-white">Live Worker Execution Terminal</span>
+            <span className="text-[10px] text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/60 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              Real-time Stream
+            </span>
           </div>
 
           {/* Controls */}
           <div className="flex items-center gap-2">
             <div className="relative">
-              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 placeholder="Lọc logs theo từ khóa..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-8 pr-3 py-1 bg-slate-800 border border-slate-700 rounded-lg text-[11px] text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500 w-36 sm:w-56 transition"
+                className="pl-8 pr-3 py-1 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 w-36 sm:w-56 transition"
               />
             </div>
 
             <button
               type="button"
               onClick={() => setAutoScroll(!autoScroll)}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition cursor-pointer ${autoScroll ? 'bg-violet-600/30 text-violet-300 border border-violet-500/40' : 'bg-slate-800 text-slate-400 hover:text-slate-200'
-                }`}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition cursor-pointer ${
+                autoScroll ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-800 text-slate-300 hover:text-white'
+              }`}
               title="Tự động cuộn theo log mới"
             >
               <ArrowDownCircle className="w-3.5 h-3.5" />
@@ -510,7 +523,7 @@ export const BotCommanderPage: React.FC = () => {
             <button
               type="button"
               onClick={handleCopyLogs}
-              className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-[11px] text-slate-300 transition cursor-pointer"
+              className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-medium transition cursor-pointer"
               title="Sao chép toàn bộ logs"
             >
               <Copy className="w-3.5 h-3.5" />
@@ -520,7 +533,7 @@ export const BotCommanderPage: React.FC = () => {
             <button
               type="button"
               onClick={handleClearLogs}
-              className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-[11px] text-slate-300 transition cursor-pointer"
+              className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-medium transition cursor-pointer"
               title="Xóa màn hình"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -529,7 +542,7 @@ export const BotCommanderPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Terminal Body - Hỗ trợ SWR 0ms */}
+        {/* Terminal Body */}
         <div className="p-4 bg-slate-950 font-mono text-xs space-y-1.5 h-80 overflow-y-auto leading-relaxed scrollbar-thin scrollbar-thumb-slate-800">
           {filteredLogs.length === 0 ? (
             <div className="text-slate-500 italic py-10 text-center">Không tìm thấy dòng nhật ký nào phù hợp.</div>
@@ -538,7 +551,7 @@ export const BotCommanderPage: React.FC = () => {
               <div key={index} className={`flex items-start gap-2 hover:bg-slate-900/60 px-1.5 py-0.5 rounded transition ${getLogColorClass(log.level)}`}>
                 <span className="text-slate-500 shrink-0 select-none">[{log.timestamp}]</span>
                 <span className="shrink-0 font-bold">[{log.level}]</span>
-                <span className="text-sky-400/90 shrink-0">[{log.worker}]:</span>
+                <span className="text-indigo-400 shrink-0">[{log.worker}]:</span>
                 <span className="break-all">{log.message}</span>
               </div>
             ))

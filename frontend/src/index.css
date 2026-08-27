@@ -2,30 +2,164 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Enterprise Bento Grid & Pastel Design System
+ * Inspired by Linear / Vercel SaaS modern aesthetic
+ * Primary: Slate-900 / Indigo-600
+ * Accent & Status: Sky, Mint/Emerald, Warm Amber, Rose, Slate Pastel
+ * Light Background: #F8FAFC (slate-50)
+ * Dark Background: #0B0F17 (slate-950)
+ */
+
+@theme inline {
+  /* ── Paper (surface hierarchy) ─────────────────────── */
+  --color-paper:        oklch(98.4% 0.003 247);
+  --color-paper-2:       oklch(96%   0.008 250);
+  --color-paper-3:       oklch(99%   0.002 247);
+
+  /* ── Ink (text) ────────────────────────────────────── */
+  --color-ink:           oklch(22%  0.020 250);
+  --color-ink-2:        oklch(45%  0.015 250);
+  --color-ink-3:        oklch(60%  0.012 250);
+
+  /* ── Rule (borders) ────────────────────────────────── */
+  --color-rule:         oklch(88%  0.008 250);
+  --color-rule-2:       oklch(80%  0.010 250);
+
+  /* ── Primary (slate-800 / slate-900 headings/active nav) ───────── */
+  --color-primary:       oklch(32%  0.020 250);
+  --color-primary-ink:   oklch(98.4% 0.003 247);
+
+  /* ── Accent (sky-500 & indigo-600) ───────── */
+  --color-accent:       oklch(58%  0.140 220);
+  --color-accent-2:     oklch(72%  0.110 220);
+  --color-accent-soft:  oklch(95%  0.030 220);
+  --color-accent-ink:   oklch(99%  0.003 247);
+
+  /* ── Semantic: mint (success) · rose (destructive) · amber (warning) ── */
+  --color-mint:         oklch(72%  0.120 158);
+  --color-mint-soft:    oklch(95%  0.040 158);
+  --color-rose:         oklch(65%  0.180 15);
+  --color-rose-soft:    oklch(95%  0.040 15);
+  --color-amber:        oklch(76%  0.160 80);
+  --color-amber-soft:   oklch(96%  0.050 80);
+
+  /* ── Focus ring ─────────────────────────────────────── */
+  --color-focus:        oklch(58%  0.140 220);
+
+  /* ── Overlay ───────────────────────────────────────── */
+  --color-overlay:      oklch(22%  0.020 250 / 0.45);
+
+  /* ── Typography ────────────────────────────────────── */
+  --font-display: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-body:    "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono:    "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* ── Spacing (4pt scale — density 8/10) ────────────── */
+  --spacing-2xs: 0.25rem;  /*  4px */
+  --spacing-xs:  0.5rem;   /*  8px */
+  --spacing-sm:  0.75rem;  /* 12px */
+  --spacing-md:  1rem;     /* 16px */
+  --spacing-lg:  1.5rem;   /* 24px */
+  --spacing-xl:  2rem;     /* 32px */
+  --spacing-2xl: 3rem;     /* 48px */
+
+  /* ── Text scale ────────────────────────────────────── */
+  --text-xs:    0.75rem;
+  --text-sm:    0.8125rem;
+  --text-md:    0.875rem;
+  --text-lg:    1rem;
+  --text-xl:    1.125rem;
+  --text-2xl:   1.375rem;
+  --text-3xl:   1.75rem;
+  --text-4xl:   2.25rem;
+
+  /* ── Border radius ─────────────────────────────────── */
+  --radius-input: 0.5rem;   /*  8px — buttons, inputs */
+  --radius-card:  1rem;     /* 16px — Bento cells */
+  --radius-pill:  9999px;
+  --radius-lg:    1.5rem;   /* 24px — feature cards */
+
+  /* ── Motion ────────────────────────────────────────── */
+  --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-short:   150ms;
+  --dur-base:    200ms;
+  --dur-long:    280ms;
+
+  /* ── Chart palette (semantic order) ───────────────── */
+  --color-chart-1: oklch(58%  0.140 220); /* sky  */
+  --color-chart-2: oklch(72%  0.120 158); /* mint */
+  --color-chart-3: oklch(76%  0.160 80);  /* amber*/
+  --color-chart-4: oklch(65%  0.180 15);  /* rose */
+  --color-chart-5: oklch(60%  0.080 270); /* iris */
+  --color-chart-6: oklch(72%  0.080 195); /* cyan */
+}
+
 @layer base {
   :root {
     color-scheme: light;
+    --bg-page: #F8FAFC;
+    --bg-surface: rgba(255, 255, 255, 0.85);
   }
   .dark {
     color-scheme: dark;
+    --bg-page: #0B0F17;
+    --bg-surface: rgba(15, 23, 42, 0.85);
   }
 
   body {
-    background-color: #f8fafc;
-    color: #0f172a;
-    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: var(--bg-page);
+    color: #0F172A;
+    font-family: "Plus Jakarta Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    transition: background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), color 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: background-color 200ms cubic-bezier(0.16, 1, 0.3, 1),
+                color 200ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .dark body {
-    background-color: #0f172a;
-    color: #f8fafc;
+    background-color: var(--bg-page);
+    color: #F1F5F9;
+  }
+
+  /* Page entrance — one orchestrated fade, no slide */
+  @keyframes page-enter {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  main {
+    animation: page-enter 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* Reduced motion — instant */
+  @media (prefers-reduced-motion: reduce) {
+    main { animation: none; }
+    * { transition-duration: 0ms !important; animation-duration: 0ms !important; }
   }
 }
 
-/* Subtle Scrollbars for Light and Dark modes */
+/* ── Custom Bento & Pastel Design Utilities ──────────────── */
+.bento-card {
+  background-color: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.03);
+  border-radius: 1rem;
+  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.bento-card:hover {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+}
+.dark .bento-card {
+  background-color: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(30, 41, 59, 0.8);
+  box-shadow: none;
+}
+.dark .bento-card:hover {
+  border-color: rgba(51, 65, 85, 0.9);
+}
+
+/* Subtle Scrollbars — light + dark */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -34,15 +168,22 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: oklch(75% 0.010 250);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: oklch(65% 0.012 250);
 }
 .dark ::-webkit-scrollbar-thumb {
-  background: #334155;
+  background: oklch(38% 0.015 250);
 }
 .dark ::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+  background: oklch(50% 0.015 250);
+}
+
+/* Focus ring — appears instantly, never animates */
+:focus-visible {
+  outline: 2px solid oklch(58% 0.140 220);
+  outline-offset: 2px;
+  border-radius: 4px;
 }

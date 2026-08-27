@@ -828,10 +828,10 @@ export const AutomationStudioPage: React.FC = () => {
             <CheckCircle2 className="w-4 h-4" />
             <span>Đã kích hoạt Worker tự động hóa!</span>
           </div>
-          <div className="text-xs text-slate-300">Tác vụ đang được thực thi dưới nền.</div>
+          <div className="text-xs text-primary-ink">Tác vụ đang được thực thi dưới nền.</div>
           <button
             onClick={() => navigate('/bots')}
-            className="text-violet-400 hover:text-violet-300 underline text-xs font-semibold cursor-pointer block mt-1 transition"
+            className="text-accent-2 hover:text-accent-2 underline text-xs font-semibold cursor-pointer block mt-1 transition"
           >
             Mở Bot Command Center xem Live Terminal ➔
           </button>
@@ -850,19 +850,19 @@ export const AutomationStudioPage: React.FC = () => {
       {/* Header Trang */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div className="flex items-center gap-3">
-          <div className="p-3 bg-gradient-to-br from-violet-600 to-indigo-600 text-white rounded-2xl shadow-md shadow-violet-500/20">
+          <div className="p-3 bg-accent text-white rounded-2xl shadow-md">
             <Zap className="w-6 h-6" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight">
+              <h2 className="text-xl sm:text-2xl font-extrabold text-ink dark:text-primary-ink tracking-tight">
                 Automation Studio
               </h2>
-              <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-violet-100 text-violet-700 dark:bg-violet-900/60 dark:text-violet-300 uppercase tracking-wider">
+              <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-accent-soft text-accent dark:bg-accent/60 dark:text-accent-2 uppercase tracking-wider">
                 Direct Engine
               </span>
             </div>
-            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+            <p className="text-xs sm:text-sm text-ink-2 dark:text-ink-3 mt-0.5">
               Khởi tạo và điều phối các chuỗi tác vụ tự động hóa độc lập.
             </p>
           </div>
@@ -870,20 +870,20 @@ export const AutomationStudioPage: React.FC = () => {
 
         <button
           onClick={() => navigate('/bots')}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-violet-600 dark:hover:text-violet-400 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-2xs hover:shadow-xs transition"
+          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-ink-2 dark:text-primary-ink hover:text-accent dark:hover:text-accent-2 bg-white dark:bg-ink border border-rule dark:border-rule-2 shadow-2xs hover:shadow-xs transition"
         >
-          <Terminal className="w-3.5 h-3.5 text-violet-500" />
+          <Terminal className="w-3.5 h-3.5 text-accent" />
           <span>Xem Bot Center</span>
           <ArrowRight className="w-3.5 h-3.5" />
         </button>
       </div>
 
       {/* Panel Form Chính */}
-      <div className="space-y-6 bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
+      <div className="space-y-6 bg-white dark:bg-ink p-6 sm:p-8 rounded-3xl border border-rule/80 dark:border-rule-2 shadow-xs">
         {/* Bước 1: Chọn Cỗ Máy Tự Động Hóa */}
         <div className="space-y-2.5">
-          <label className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
-            <span className="w-5 h-5 rounded-full bg-violet-100 dark:bg-violet-900/50 text-violet-600 dark:text-violet-300 flex items-center justify-center text-[10px] font-extrabold">
+          <label className="text-xs font-bold text-ink dark:text-primary-ink uppercase tracking-wider flex items-center gap-2">
+            <span className="w-5 h-5 rounded-full bg-accent-soft dark:bg-accent/50 text-accent dark:text-accent-2 flex items-center justify-center text-[10px] font-extrabold">
               1
             </span>
             <span>Chọn Cỗ Máy Tự Động Hóa:</span>
@@ -903,13 +903,13 @@ export const AutomationStudioPage: React.FC = () => {
                   type="button"
                   onClick={() => setSelectedBotType(tab.id as any)}
                   className={`flex flex-col items-start gap-1 p-4 rounded-2xl border text-left transition-all duration-150 cursor-pointer ${isSel
-                    ? 'bg-gradient-to-br from-violet-600 to-indigo-600 text-white border-transparent shadow-md shadow-violet-500/25'
-                    : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700/80 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    ? 'bg-accent text-white border-transparent shadow-md'
+                    : 'bg-paper-2 dark:bg-ink/60 border-rule dark:border-rule-2/80 text-ink dark:text-primary-ink hover:bg-paper-2 dark:hover:bg-ink'
                     }`}
                 >
-                  <Icon className={`w-5 h-5 ${isSel ? 'text-white' : 'text-violet-600 dark:text-violet-400'}`} />
+                  <Icon className={`w-5 h-5 ${isSel ? 'text-white' : 'text-accent dark:text-accent-2'}`} />
                   <span className="text-xs font-bold mt-1">{tab.label}</span>
-                  <span className={`text-[10px] ${isSel ? 'text-violet-100' : 'text-slate-400'}`}>{tab.desc}</span>
+                  <span className={`text-[10px] ${isSel ? 'text-primary-ink' : 'text-ink-3'}`}>{tab.desc}</span>
                 </button>
               );
             })}
@@ -918,16 +918,16 @@ export const AutomationStudioPage: React.FC = () => {
 
         {/* Bước 2: Cấu Hình Chi Tiết Phân Hệ Workspace */}
         {selectedBotType === 'workspace_rpa' && (
-          <div className="space-y-6 p-6 rounded-2xl bg-violet-50/50 dark:bg-violet-950/20 border border-violet-200/70 dark:border-violet-800/40">
+          <div className="space-y-6 p-6 rounded-2xl bg-accent-soft/50 dark:bg-accent-soft/20 border border-accent-soft/70 dark:border-accent-soft/40">
             <div className="space-y-2">
-              <label className="text-xs font-bold text-violet-900 dark:text-violet-300 flex items-center gap-1.5">
-                <span className="w-5 h-5 rounded-full bg-violet-200 dark:bg-violet-900/60 text-violet-700 dark:text-violet-300 flex items-center justify-center text-[10px] font-extrabold">
+              <label className="text-xs font-bold text-accent dark:text-accent-2 flex items-center gap-1.5">
+                <span className="w-5 h-5 rounded-full bg-accent-soft dark:bg-accent/60 text-accent dark:text-accent-2 flex items-center justify-center text-[10px] font-extrabold">
                   2
                 </span>
                 <span>Chọn Phân Luồng Nghiệp Vụ Cốt Lõi:</span>
               </label>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-violet-100/60 dark:bg-violet-900/40 p-2 rounded-2xl text-xs font-medium">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-accent-soft/60 dark:bg-accent/40 p-2 rounded-2xl text-xs font-medium">
                 {[
                   { id: 'approve', label: '1. Phê Duyệt', icon: FileCheck },
                   { id: 'create_and_approve', label: '2. Tạo & Duyệt', icon: Zap },
@@ -947,8 +947,8 @@ export const AutomationStudioPage: React.FC = () => {
                         setSelectedItemCode('');
                       }}
                       className={`py-3 px-3 rounded-xl text-center transition-all cursor-pointer flex items-center justify-center gap-1.5 text-xs ${isCur
-                        ? 'bg-white dark:bg-slate-800 font-bold text-violet-700 dark:text-violet-300 shadow-2xs'
-                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                        ? 'bg-white dark:bg-ink font-bold text-accent dark:text-accent-2 shadow-2xs'
+                        : 'text-ink-2 dark:text-ink-3 hover:text-ink dark:hover:text-primary-ink'
                         }`}
                     >
                       <MIcon className="w-4 h-4" />
@@ -962,12 +962,12 @@ export const AutomationStudioPage: React.FC = () => {
             {/* Ô TÌM KIẾM ĐỐI TƯỢNG */}
             {workspaceMainCategory !== 'approve' && workspaceMainCategory !== 'lms_enroll' && (
               <div className="space-y-2 relative" ref={entityDropdownRef}>
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                <label className="text-xs font-bold text-ink dark:text-primary-ink flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
                     {currentEntityMode === 'school' ? (
-                      <Building2 className="w-3.5 h-3.5 text-violet-600" />
+                      <Building2 className="w-3.5 h-3.5 text-accent" />
                     ) : currentEntityMode === 'partner' ? (
-                      <Briefcase className="w-3.5 h-3.5 text-indigo-600" />
+                      <Briefcase className="w-3.5 h-3.5 text-accent" />
                     ) : (
                       <Store className="w-3.5 h-3.5 text-amber-600" />
                     )}
@@ -980,7 +980,7 @@ export const AutomationStudioPage: React.FC = () => {
                     </span>
                   </span>
                   {(selectedSchool || selectedPartner || selectedDistributor) && (
-                    <span className="text-xs text-violet-600 font-bold font-mono">
+                    <span className="text-xs text-accent font-bold font-mono">
                       {currentEntityMode === 'school'
                         ? selectedSchool?.school_code
                         : currentEntityMode === 'partner'
@@ -991,7 +991,7 @@ export const AutomationStudioPage: React.FC = () => {
                 </label>
 
                 <div className="relative">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <Search className="w-4 h-4 text-ink-3 absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
                     value={entitySearchQuery}
@@ -1007,7 +1007,7 @@ export const AutomationStudioPage: React.FC = () => {
                           ? 'Tìm kiếm đối tác theo tên hoặc mã...'
                           : 'Tìm kiếm nhà phân phối theo tên hoặc mã...'
                     }
-                    className="w-full pl-10 pr-10 bg-white dark:bg-slate-800 border border-violet-200 dark:border-violet-700/80 rounded-xl p-3 text-xs text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition shadow-2xs"
+                    className="w-full pl-10 pr-10 bg-white dark:bg-ink border border-accent-soft dark:border-accent-soft/80 rounded-xl p-3 text-xs text-ink dark:text-primary-ink outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition shadow-2xs"
                   />
                   {entitySearchQuery && (
                     <button
@@ -1018,7 +1018,7 @@ export const AutomationStudioPage: React.FC = () => {
                         setSelectedPartner(null);
                         setSelectedDistributor(null);
                       }}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-3 hover:text-ink-2 p-1 cursor-pointer"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -1026,7 +1026,7 @@ export const AutomationStudioPage: React.FC = () => {
                 </div>
 
                 {isEntityDropdownOpen && (
-                  <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl max-h-60 overflow-y-auto p-1.5 space-y-1">
+                  <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-2xl shadow-xl max-h-60 overflow-y-auto p-1.5 space-y-1">
                     {currentEntityMode === 'school' &&
                       schoolsList
                         .filter((s) => s.school_name.toLowerCase().includes(entitySearchQuery.toLowerCase()))
@@ -1042,16 +1042,16 @@ export const AutomationStudioPage: React.FC = () => {
                               setEntitySearchQuery(s.school_name);
                               setIsEntityDropdownOpen(false);
                             }}
-                            className="w-full text-left p-3 rounded-xl text-xs hover:bg-violet-50 dark:hover:bg-slate-700/60 flex items-center justify-between cursor-pointer transition"
+                            className="w-full text-left p-3 rounded-xl text-xs hover:bg-accent-soft dark:hover:bg-rule-2/60 flex items-center justify-between cursor-pointer transition"
                           >
                             <div>
-                              <div className="font-bold text-slate-800 dark:text-slate-200">{s.school_name}</div>
-                              <div className="text-[11px] text-slate-400 font-mono">
+                              <div className="font-bold text-ink dark:text-primary-ink">{s.school_name}</div>
+                              <div className="text-[11px] text-ink-3 font-mono">
                                 Mã: {s.school_code} | Tuyến: {s.partner_name} ➔ {s.distributor_name}
                               </div>
                             </div>
                             {selectedSchool?.school_code === s.school_code && (
-                              <Check className="w-4 h-4 text-violet-600" />
+                              <Check className="w-4 h-4 text-accent" />
                             )}
                           </button>
                         ))}
@@ -1068,13 +1068,13 @@ export const AutomationStudioPage: React.FC = () => {
                               setEntitySearchQuery(p.name);
                               setIsEntityDropdownOpen(false);
                             }}
-                            className="w-full text-left p-3 rounded-xl text-xs hover:bg-indigo-50 dark:hover:bg-slate-700/60 flex items-center justify-between cursor-pointer transition"
+                            className="w-full text-left p-3 rounded-xl text-xs hover:bg-accent-soft dark:hover:bg-rule-2/60 flex items-center justify-between cursor-pointer transition"
                           >
                             <div>
-                              <div className="font-bold text-slate-800 dark:text-slate-200">{p.name}</div>
-                              <div className="text-[11px] text-slate-400 font-mono">Mã đối tác: {p.code}</div>
+                              <div className="font-bold text-ink dark:text-primary-ink">{p.name}</div>
+                              <div className="text-[11px] text-ink-3 font-mono">Mã đối tác: {p.code}</div>
                             </div>
-                            {selectedPartner?.name === p.name && <Check className="w-4 h-4 text-indigo-600" />}
+                            {selectedPartner?.name === p.name && <Check className="w-4 h-4 text-accent" />}
                           </button>
                         ))}
 
@@ -1090,11 +1090,11 @@ export const AutomationStudioPage: React.FC = () => {
                               setEntitySearchQuery(d.name);
                               setIsEntityDropdownOpen(false);
                             }}
-                            className="w-full text-left p-3 rounded-xl text-xs hover:bg-amber-50 dark:hover:bg-slate-700/60 flex items-center justify-between cursor-pointer transition"
+                            className="w-full text-left p-3 rounded-xl text-xs hover:bg-amber-50 dark:hover:bg-rule-2/60 flex items-center justify-between cursor-pointer transition"
                           >
                             <div>
-                              <div className="font-bold text-slate-800 dark:text-slate-200">{d.name}</div>
-                              <div className="text-[11px] text-slate-400 font-mono">Mã phân phối: {d.code}</div>
+                              <div className="font-bold text-ink dark:text-primary-ink">{d.name}</div>
+                              <div className="text-[11px] text-ink-3 font-mono">Mã phân phối: {d.code}</div>
                             </div>
                             {selectedDistributor?.name === d.name && <Check className="w-4 h-4 text-amber-600" />}
                           </button>
@@ -1124,23 +1124,23 @@ export const AutomationStudioPage: React.FC = () => {
                         setParsedOrderCourses([]);
                       }}
                       className={`p-3 rounded-xl border text-left transition cursor-pointer ${approveSubFlow === sub.id
-                        ? 'bg-violet-600 text-white border-transparent shadow-xs'
-                        : 'bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50'
+                        ? 'bg-accent text-white border-transparent shadow-xs'
+                        : 'bg-white dark:bg-ink/90 border-rule dark:border-rule-2 text-ink dark:text-primary-ink hover:bg-paper-2'
                         }`}
                     >
                       <div className="font-bold text-xs">{sub.label}</div>
-                      <div className={`text-[10px] ${approveSubFlow === sub.id ? 'text-violet-100' : 'text-slate-400'}`}>
+                      <div className={`text-[10px] ${approveSubFlow === sub.id ? 'text-primary-ink' : 'text-ink-3'}`}>
                         {sub.desc}
                       </div>
                     </button>
                   ))}
                 </div>
 
-                <div className="p-5 bg-white dark:bg-slate-800/90 rounded-2xl border border-violet-200 dark:border-slate-700 space-y-4 shadow-2xs">
+                <div className="p-5 bg-white dark:bg-ink/90 rounded-2xl border border-accent-soft dark:border-rule-2 space-y-4 shadow-2xs">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-violet-900 dark:text-violet-200 flex items-center justify-between">
+                    <label className="text-xs font-bold text-accent dark:text-primary-ink flex items-center justify-between">
                       <span className="flex items-center gap-1.5">
-                        <Search className="w-3.5 h-3.5 text-violet-600" />
+                        <Search className="w-3.5 h-3.5 text-accent" />
                         <span>
                           {approveSubFlow === 'approve_school_order'
                             ? 'Tìm Kiếm Đơn Hàng (Theo Mã Đơn, Tên Trường, hoặc Tên Đối Tác):'
@@ -1150,7 +1150,7 @@ export const AutomationStudioPage: React.FC = () => {
                         </span>
                       </span>
                       {selectedItemCode && (
-                        <span className="text-xs text-violet-600 dark:text-violet-400 font-mono font-bold">
+                        <span className="text-xs text-accent dark:text-accent-2 font-mono font-bold">
                           Đang chọn: {selectedItemCode}
                         </span>
                       )}
@@ -1162,13 +1162,13 @@ export const AutomationStudioPage: React.FC = () => {
                         value={universalSearchQuery}
                         onChange={(e) => setUniversalSearchQuery(e.target.value)}
                         placeholder="Gõ từ khóa để lọc danh sách bên dưới (VD: SCH-..., THCS Lê Quý Đôn, DTTE...)"
-                        className="w-full bg-slate-50 dark:bg-slate-900 border border-violet-300 dark:border-violet-700 rounded-xl p-3 pr-10 text-xs font-semibold outline-none focus:ring-2 focus:ring-violet-500/20"
+                        className="w-full bg-paper-2 dark:bg-ink border border-accent-soft dark:border-accent-soft rounded-xl p-3 pr-10 text-xs font-semibold outline-none focus:ring-2 focus:ring-accent/20"
                       />
                       {universalSearchQuery && (
                         <button
                           type="button"
                           onClick={() => setUniversalSearchQuery('')}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-3 hover:text-ink-2 p-1 cursor-pointer"
                         >
                           <X className="w-3.5 h-3.5" />
                         </button>
@@ -1178,7 +1178,7 @@ export const AutomationStudioPage: React.FC = () => {
 
                   {approveSubFlow === 'admin_approve_contract' && (
                     <div className="space-y-1.5 pt-1">
-                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                      <label className="text-xs font-bold text-ink dark:text-primary-ink flex items-center justify-between">
                         <span className="flex items-center gap-1">
                           <span>Lý Do Phê Duyệt Sales Admin:</span>
                           <span className="text-rose-500 font-bold">* (Tối thiểu 15 ký tự)</span>
@@ -1197,8 +1197,8 @@ export const AutomationStudioPage: React.FC = () => {
                         value={adminJustification}
                         onChange={(e) => setAdminJustification(e.target.value)}
                         placeholder="Nhập lý do phê duyệt chính thức..."
-                        className={`w-full bg-slate-50 dark:bg-slate-900 border rounded-xl p-2.5 text-xs outline-none transition ${adminJustification.trim().length >= 15
-                          ? 'border-slate-200 dark:border-slate-700 focus:border-violet-500'
+                        className={`w-full bg-paper-2 dark:bg-ink border rounded-xl p-2.5 text-xs outline-none transition ${adminJustification.trim().length >= 15
+                          ? 'border-rule dark:border-rule-2 focus:border-accent'
                           : 'border-rose-400 focus:border-rose-500'
                           }`}
                       />
@@ -1206,16 +1206,16 @@ export const AutomationStudioPage: React.FC = () => {
                   )}
 
                   {/* DANH SÁCH HIỂN THỊ ĐƠN HÀNG (0MS SỐNG QUA CẢ CTRL+SHIFT+R) */}
-                  <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-700">
+                  <div className="space-y-3 pt-2 border-t border-rule dark:border-rule-2">
                     <div className="flex items-center justify-between flex-wrap gap-2">
-                      <div className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                        <Filter className="w-3.5 h-3.5 text-violet-600" />
+                      <div className="text-xs font-bold text-ink dark:text-primary-ink flex items-center gap-1.5">
+                        <Filter className="w-3.5 h-3.5 text-accent" />
                         <span>
                           Danh Sách Đơn Hàng ({filteredCacheList.length}/{scrapedPendingList.length}):
                         </span>
                       </div>
 
-                      <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-[11px] font-semibold">
+                      <div className="flex items-center bg-paper-2 dark:bg-ink p-1 rounded-xl text-[11px] font-semibold">
                         {[
                           { id: 'pending', label: '⏳ Chờ duyệt' },
                           { id: 'approved', label: '✅ Đã duyệt' },
@@ -1227,8 +1227,8 @@ export const AutomationStudioPage: React.FC = () => {
                             type="button"
                             onClick={() => setStatusFilter(st.id as any)}
                             className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${statusFilter === st.id
-                              ? 'bg-white dark:bg-slate-700 text-violet-700 dark:text-violet-300 font-bold shadow-2xs'
-                              : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                              ? 'bg-white dark:bg-rule-2 text-accent dark:text-accent-2 font-bold shadow-2xs'
+                              : 'text-ink-2 hover:text-ink dark:hover:text-primary-ink'
                               }`}
                           >
                             {st.label}
@@ -1237,14 +1237,14 @@ export const AutomationStudioPage: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="max-h-56 overflow-y-auto space-y-1.5 p-1.5 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800 scrollbar-thin">
+                    <div className="max-h-56 overflow-y-auto space-y-1.5 p-1.5 bg-paper-2 dark:bg-ink/60 rounded-xl border border-rule dark:border-rule-2 scrollbar-thin">
                       {isScrapingLive && scrapedPendingList.length === 0 ? (
-                        <div className="py-6 flex items-center justify-center gap-2 text-xs text-slate-500">
-                          <Loader2 className="w-4 h-4 animate-spin text-violet-600" />
+                        <div className="py-6 flex items-center justify-center gap-2 text-xs text-ink-2">
+                          <Loader2 className="w-4 h-4 animate-spin text-accent" />
                           <span>Đang nạp danh sách...</span>
                         </div>
                       ) : filteredCacheList.length === 0 ? (
-                        <div className="text-center py-6 text-xs text-slate-400">
+                        <div className="text-center py-6 text-xs text-ink-3">
                           Không có đơn hàng / hợp đồng nào khớp với từ khóa tìm kiếm.
                         </div>
                       ) : (
@@ -1279,20 +1279,20 @@ export const AutomationStudioPage: React.FC = () => {
                                 toast.success(`Đã chọn: ${itemCode}`);
                               }}
                               className={`w-full text-left p-3 rounded-xl text-xs flex items-center justify-between cursor-pointer transition ${isSelected
-                                ? 'bg-violet-100 dark:bg-violet-950/80 border-2 border-violet-500 text-violet-900 dark:text-violet-100 font-bold shadow-xs'
-                                : 'hover:bg-slate-200/60 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-transparent'
+                                ? 'bg-accent-soft dark:bg-accent-soft/80 border-2 border-accent text-accent dark:text-primary-ink font-bold shadow-xs'
+                                : 'hover:bg-rule/60 dark:hover:bg-ink text-ink dark:text-primary-ink border border-transparent'
                                 }`}
                             >
                               <div className="space-y-0.5">
-                                <div className="font-mono text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                                <div className="font-mono text-xs font-bold text-ink dark:text-primary-ink flex items-center gap-2">
                                   <span>{itemCode}</span>
                                   {isSelected && (
-                                    <span className="text-[10px] px-2 py-0.2 bg-violet-600 text-white rounded-md font-sans">
+                                    <span className="text-[10px] px-2 py-0.2 bg-accent text-white rounded-md font-sans">
                                       Đang chọn
                                     </span>
                                   )}
                                 </div>
-                                <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                <div className="text-[11px] text-ink-2 dark:text-ink-3">
                                   {item.school_name ? `${item.school_name} | ` : ''}
                                   {item.partner_name || item.sender_name ? `${item.partner_name || item.sender_name} ➔ ` : ''}
                                   {item.distributor_name || item.receiver_name ? `${item.distributor_name || item.receiver_name} | ` : ''}
@@ -1315,8 +1315,8 @@ export const AutomationStudioPage: React.FC = () => {
                   </div>
 
                   {/* KHUNG CHI TIẾT KHÓA HỌC */}
-                  <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-700">
-                    <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
+                  <div className="space-y-2 pt-2 border-t border-rule dark:border-rule-2">
+                    <div className="flex items-center justify-between text-xs font-bold text-ink dark:text-primary-ink">
                       <span className="flex items-center gap-1.5">
                         <BookOpen className="w-4 h-4 text-sky-600" />
                         <span>
@@ -1341,61 +1341,61 @@ export const AutomationStudioPage: React.FC = () => {
                           >
                             <div>
                               <div className="font-bold text-sky-900 dark:text-sky-200">{pc.course_name}</div>
-                              <div className="text-[11px] text-slate-500 font-mono">
+                              <div className="text-[11px] text-ink-2 font-mono">
                                 Phân loại: {pc.category}
                               </div>
                             </div>
-                            <span className="px-3 py-1 bg-white dark:bg-slate-800 text-sky-700 dark:text-sky-300 rounded-lg font-extrabold border border-sky-200 dark:border-sky-700">
+                            <span className="px-3 py-1 bg-white dark:bg-ink text-sky-700 dark:text-sky-300 rounded-lg font-extrabold border border-sky-200 dark:border-sky-700">
                               {pc.licenses} Giấy phép
                             </span>
                           </div>
                         ))}
                       </div>
                     ) : selectedCachedItem ? (
-                      <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800 text-xs space-y-1">
-                        <div className="font-bold text-slate-800 dark:text-slate-200">
+                      <div className="p-3.5 bg-paper-2 dark:bg-ink/60 rounded-xl border border-rule dark:border-rule-2 text-xs space-y-1">
+                        <div className="font-bold text-ink dark:text-primary-ink">
                           Hợp đồng: {selectedItemCode}
                         </div>
-                        <div className="text-slate-500 text-[11px]">
+                        <div className="text-ink-2 text-[11px]">
                           Ghi chú: {selectedCachedItem.notes || 'Không có ghi chú thêm.'}
                         </div>
                       </div>
                     ) : (
-                      <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900 text-slate-400 text-xs text-center border border-dashed border-slate-200 dark:border-slate-800">
+                      <div className="p-4 rounded-xl bg-paper-2 dark:bg-ink text-ink-3 text-xs text-center border border-dashed border-rule dark:border-rule-2">
                         Vui lòng click chọn 1 đơn hàng/hợp đồng từ danh sách trên để xem chi tiết.
                       </div>
                     )}
                   </div>
 
                   {/* THIẾT LẬP DỰ PHÒNG */}
-                  <div className="pt-2 border-t border-slate-100 dark:border-slate-700">
+                  <div className="pt-2 border-t border-rule dark:border-rule-2">
                     <button
                       type="button"
                       onClick={() => setShowAutoTopupSettings(!showAutoTopupSettings)}
-                      className="text-xs font-bold text-violet-700 dark:text-violet-300 flex items-center gap-1.5 hover:underline cursor-pointer"
+                      className="text-xs font-bold text-accent dark:text-accent-2 flex items-center gap-1.5 hover:underline cursor-pointer"
                     >
                       <SlidersHorizontal className="w-3.5 h-3.5" />
                       <span>{showAutoTopupSettings ? 'Ẩn thiết lập dự phòng khi thiếu License' : '⚙️ Tùy chỉnh thông số tạo hợp đồng tự động (Khi thiếu License)'}</span>
                     </button>
 
                     {showAutoTopupSettings && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 p-3.5 bg-slate-50 dark:bg-slate-900/80 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 p-3.5 bg-paper-2 dark:bg-ink/80 rounded-xl border border-rule dark:border-rule-2 text-xs">
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-slate-500 uppercase">Contact Info (Tạo đơn dự phòng):</label>
+                          <label className="text-[10px] font-bold text-ink-2 uppercase">Contact Info (Tạo đơn dự phòng):</label>
                           <input
                             type="text"
                             value={contactInfo}
                             onChange={(e) => setContactInfo(e.target.value)}
-                            className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2 text-xs outline-none"
+                            className="w-full bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-lg p-2 text-xs outline-none"
                           />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-slate-500 uppercase">Ghi chú Contract Notes:</label>
+                          <label className="text-[10px] font-bold text-ink-2 uppercase">Ghi chú Contract Notes:</label>
                           <input
                             type="text"
                             value={additionalNotes}
                             onChange={(e) => setAdditionalNotes(e.target.value)}
-                            className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2 text-xs outline-none"
+                            className="w-full bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-lg p-2 text-xs outline-none"
                           />
                         </div>
                       </div>
@@ -1419,42 +1419,42 @@ export const AutomationStudioPage: React.FC = () => {
                       type="button"
                       onClick={() => setCreateApproveSubFlow(sub.id as any)}
                       className={`p-3 rounded-xl border text-left transition cursor-pointer ${createApproveSubFlow === sub.id
-                        ? 'bg-violet-600 text-white border-transparent shadow-xs'
-                        : 'bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50'
+                        ? 'bg-accent text-white border-transparent shadow-xs'
+                        : 'bg-white dark:bg-ink/90 border-rule dark:border-rule-2 text-ink dark:text-primary-ink hover:bg-paper-2'
                         }`}
                     >
                       <div className="font-bold text-xs">{sub.label}</div>
-                      <div className={`text-[10px] ${createApproveSubFlow === sub.id ? 'text-violet-100' : 'text-slate-400'}`}>
+                      <div className={`text-[10px] ${createApproveSubFlow === sub.id ? 'text-primary-ink' : 'text-ink-3'}`}>
                         {sub.desc}
                       </div>
                     </button>
                   ))}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-white dark:bg-slate-800/90 rounded-2xl border border-violet-200 dark:border-slate-700 shadow-2xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-white dark:bg-ink/90 rounded-2xl border border-accent-soft dark:border-rule-2 shadow-2xs">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Thông Tin Liên Hệ:</label>
+                    <label className="text-xs font-bold text-ink dark:text-primary-ink">Thông Tin Liên Hệ:</label>
                     <input
                       type="text"
                       value={contactInfo}
                       onChange={(e) => setContactInfo(e.target.value)}
-                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs outline-none"
+                      className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs outline-none"
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Ghi Chú Bổ Sung:</label>
+                    <label className="text-xs font-bold text-ink dark:text-primary-ink">Ghi Chú Bổ Sung:</label>
                     <input
                       type="text"
                       value={additionalNotes}
                       onChange={(e) => setAdditionalNotes(e.target.value)}
-                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs outline-none"
+                      className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs outline-none"
                     />
                   </div>
                 </div>
 
                 <div className="space-y-4 pt-2">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-violet-900 dark:text-violet-300 flex items-center gap-1.5">
+                    <label className="text-xs font-bold text-accent dark:text-accent-2 flex items-center gap-1.5">
                       <BookOpen className="w-4 h-4 text-sky-600" />
                       <span>Danh Sách Khóa Học Cấp Phép ({selectedCourses.length} Môn):</span>
                     </label>
@@ -1474,9 +1474,9 @@ export const AutomationStudioPage: React.FC = () => {
                     return (
                       <div
                         key={idx}
-                        className="p-4 bg-white dark:bg-slate-800/90 rounded-2xl border border-violet-200/80 dark:border-slate-700 space-y-3 relative shadow-2xs"
+                        className="p-4 bg-white dark:bg-ink/90 rounded-2xl border border-accent-soft/80 dark:border-rule-2 space-y-3 relative shadow-2xs"
                       >
-                        <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
+                        <div className="flex items-center justify-between text-xs font-bold text-ink dark:text-primary-ink">
                           <span>Khóa học #{idx + 1}</span>
                           {selectedCourses.length > 1 && (
                             <button
@@ -1491,7 +1491,7 @@ export const AutomationStudioPage: React.FC = () => {
 
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">Phân loại:</label>
+                            <label className="text-[10px] font-bold text-ink-2 uppercase">Phân loại:</label>
                             <select
                               value={cRow.category}
                               onChange={(e) => {
@@ -1508,7 +1508,7 @@ export const AutomationStudioPage: React.FC = () => {
                                 };
                                 setSelectedCourses(updated);
                               }}
-                              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-semibold cursor-pointer outline-none"
+                              className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs font-semibold cursor-pointer outline-none"
                             >
                               {workspaceCategoriesList.map((cat) => (
                                 <option key={cat} value={cat}>
@@ -1519,7 +1519,7 @@ export const AutomationStudioPage: React.FC = () => {
                           </div>
 
                           <div className="sm:col-span-2">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">
+                            <label className="text-[10px] font-bold text-ink-2 uppercase">
                               Chọn môn học ({filteredCourses.length} môn):
                             </label>
                             <select
@@ -1538,7 +1538,7 @@ export const AutomationStudioPage: React.FC = () => {
                                   setSelectedCourses(updated);
                                 }
                               }}
-                              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-semibold cursor-pointer outline-none truncate"
+                              className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs font-semibold cursor-pointer outline-none truncate"
                             >
                               {filteredCourses.map((c) => (
                                 <option key={c.course_id} value={c.course_id}>
@@ -1551,7 +1551,7 @@ export const AutomationStudioPage: React.FC = () => {
 
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">Số lượng Giấy phép:</label>
+                            <label className="text-[10px] font-bold text-ink-2 uppercase">Số lượng Giấy phép:</label>
                             <input
                               type="number"
                               value={cRow.licenses}
@@ -1561,11 +1561,11 @@ export const AutomationStudioPage: React.FC = () => {
                                 updated[idx].licenses = parseInt(e.target.value) || 1;
                                 setSelectedCourses(updated);
                               }}
-                              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-bold outline-none"
+                              className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2 text-xs font-bold outline-none"
                             />
                           </div>
                           <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">Ngày Bắt Đầu:</label>
+                            <label className="text-[10px] font-bold text-ink-2 uppercase">Ngày Bắt Đầu:</label>
                             <input
                               type="text"
                               value={cRow.start_date}
@@ -1575,11 +1575,11 @@ export const AutomationStudioPage: React.FC = () => {
                                 updated[idx].start_date = e.target.value;
                                 setSelectedCourses(updated);
                               }}
-                              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-mono outline-none"
+                              className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2 text-xs font-mono outline-none"
                             />
                           </div>
                           <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase">Ngày Kết Thúc (1 Năm):</label>
+                            <label className="text-[10px] font-bold text-ink-2 uppercase">Ngày Kết Thúc (1 Năm):</label>
                             <input
                               type="text"
                               value={cRow.end_date}
@@ -1589,7 +1589,7 @@ export const AutomationStudioPage: React.FC = () => {
                                 updated[idx].end_date = e.target.value;
                                 setSelectedCourses(updated);
                               }}
-                              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-mono outline-none"
+                              className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2 text-xs font-mono outline-none"
                             />
                           </div>
                         </div>
@@ -1602,18 +1602,18 @@ export const AutomationStudioPage: React.FC = () => {
 
             {/* MỤC 3: TẠO TÀI KHOẢN HÀNG LOẠT */}
             {workspaceMainCategory === 'bulk_accounts' && (
-              <div className="p-6 bg-white dark:bg-slate-800/90 rounded-3xl border border-violet-200 dark:border-slate-700 space-y-4 shadow-2xs">
+              <div className="p-6 bg-white dark:bg-ink/90 rounded-3xl border border-accent-soft dark:border-rule-2 space-y-4 shadow-2xs">
                 <div className="flex items-center gap-3">
-                  <div className="p-2.5 bg-violet-100 dark:bg-violet-950 text-violet-600 dark:text-violet-300 rounded-xl">
+                  <div className="p-2.5 bg-accent-soft dark:bg-accent-soft text-accent dark:text-accent-2 rounded-xl">
                     <Users className="w-5 h-5" />
                   </div>
                   <div>
-                    <div className="font-bold text-xs text-slate-800 dark:text-slate-200">
+                    <div className="font-bold text-xs text-ink dark:text-primary-ink">
                       Nộp File Excel Tạo Tài Khoản Hàng Loạt
                     </div>
-                    <div className="text-[11px] text-slate-400">
+                    <div className="text-[11px] text-ink-3">
                       Trường áp dụng:{' '}
-                      <span className="font-bold text-violet-600 font-mono">
+                      <span className="font-bold text-accent font-mono">
                         {selectedSchool?.school_name || 'Vui lòng chọn trường ở ô trên'}
                       </span>
                     </div>
@@ -1636,27 +1636,27 @@ export const AutomationStudioPage: React.FC = () => {
 
                 <div
                   onClick={() => fileInputRef.current?.click()}
-                  className="border-2 border-dashed border-violet-300 dark:border-violet-700/80 hover:border-violet-500 dark:hover:border-violet-500 rounded-2xl p-8 text-center cursor-pointer transition bg-violet-50/40 dark:bg-violet-950/20 flex flex-col items-center justify-center gap-2"
+                  className="border-2 border-dashed border-accent-soft dark:border-accent-soft/80 hover:border-accent dark:hover:border-accent rounded-2xl p-8 text-center cursor-pointer transition bg-accent-soft/40 dark:bg-accent-soft/20 flex flex-col items-center justify-center gap-2"
                 >
-                  <div className="p-3 bg-white dark:bg-slate-800 rounded-full shadow-2xs text-violet-600 dark:text-violet-300">
+                  <div className="p-3 bg-white dark:bg-ink rounded-full shadow-2xs text-accent dark:text-accent-2">
                     <UploadCloud className="w-6 h-6" />
                   </div>
                   {uploadedAccountsFile ? (
                     <div className="space-y-1">
-                      <div className="font-bold text-xs text-slate-900 dark:text-slate-100 flex items-center justify-center gap-1.5">
+                      <div className="font-bold text-xs text-ink dark:text-primary-ink flex items-center justify-center gap-1.5">
                         <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
                         <span>{uploadedAccountsFile.name}</span>
                       </div>
-                      <div className="text-[11px] text-slate-400 font-mono">
+                      <div className="text-[11px] text-ink-3 font-mono">
                         Kích thước: {Math.round(uploadedAccountsFile.size / 1024)} KB | Bấm để chọn file khác
                       </div>
                     </div>
                   ) : (
                     <div className="space-y-1">
-                      <div className="font-bold text-xs text-slate-800 dark:text-slate-200">
+                      <div className="font-bold text-xs text-ink dark:text-primary-ink">
                         Bấm hoặc kéo thả file Excel (.xlsx, .csv) vào đây
                       </div>
-                      <div className="text-[11px] text-slate-400">
+                      <div className="text-[11px] text-ink-3">
                         File mẫu chuẩn gồm 7 cột thông tin học sinh và giáo viên.
                       </div>
                     </div>
@@ -1667,20 +1667,20 @@ export const AutomationStudioPage: React.FC = () => {
 
             {/* MỤC 4: GHI DANH LMS */}
             {workspaceMainCategory === 'lms_enroll' && (
-              <div className="p-6 bg-white dark:bg-slate-800/90 rounded-3xl border border-emerald-200/80 dark:border-emerald-800/50 space-y-5 shadow-2xs">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
+              <div className="p-6 bg-white dark:bg-ink/90 rounded-3xl border border-emerald-200/80 dark:border-emerald-800/50 space-y-5 shadow-2xs">
+                <div className="flex items-center justify-between pb-3 border-b border-rule dark:border-rule-2">
                   <div className="flex items-center gap-3">
                     <div className="p-2.5 bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-300 rounded-xl">
                       <GraduationCap className="w-5 h-5" />
                     </div>
                     <div>
-                      <div className="font-extrabold text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                      <div className="font-extrabold text-sm text-ink dark:text-primary-ink flex items-center gap-2">
                         <span>Ghi Danh & Gia Hạn Khóa Học PLearn LMS</span>
                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-mono font-bold">
                           learn.pythaverse.space
                         </span>
                       </div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">
+                      <div className="text-xs text-ink-2 dark:text-ink-3">
                         Dữ liệu khóa học từ bảng <span className="font-mono font-bold text-emerald-600">lms_courses</span> ({lmsCoursesList.length} môn).
                       </div>
                     </div>
@@ -1689,7 +1689,7 @@ export const AutomationStudioPage: React.FC = () => {
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">
+                    <label className="text-[10px] font-bold text-ink-2 uppercase">
                       Phân loại ({lmsCategoriesList.length} Categories):
                     </label>
                     <select
@@ -1703,7 +1703,7 @@ export const AutomationStudioPage: React.FC = () => {
                           setLmsCourseName(match[0].course_name);
                         }
                       }}
-                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-semibold outline-none truncate cursor-pointer"
+                      className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs font-semibold outline-none truncate cursor-pointer"
                     >
                       {lmsCategoriesList.map((cat) => (
                         <option key={cat} value={cat}>
@@ -1714,7 +1714,7 @@ export const AutomationStudioPage: React.FC = () => {
                   </div>
 
                   <div className="sm:col-span-2">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">
+                    <label className="text-[10px] font-bold text-ink-2 uppercase">
                       Chọn khóa học LMS ({lmsCoursesList.filter((c) => c.category === lmsCourseCategory).length} môn):
                     </label>
                     <select
@@ -1725,7 +1725,7 @@ export const AutomationStudioPage: React.FC = () => {
                         const target = lmsCoursesList.find((c) => c.course_id === cId);
                         if (target) setLmsCourseName(target.course_name);
                       }}
-                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-semibold outline-none truncate cursor-pointer"
+                      className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs font-semibold outline-none truncate cursor-pointer"
                     >
                       {lmsCoursesList
                         .filter((c) => c.category === lmsCourseCategory)
@@ -1739,68 +1739,68 @@ export const AutomationStudioPage: React.FC = () => {
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2 sm:col-span-2">
-                    <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                      <Calendar className="w-3.5 h-3.5 text-violet-600" />
+                  <div className="p-4 bg-paper-2 dark:bg-ink/60 rounded-2xl border border-rule dark:border-rule-2 space-y-2 sm:col-span-2">
+                    <label className="text-xs font-bold text-ink dark:text-primary-ink flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-accent" />
                       <span>Thời Hạn Quyền Truy Cập (Mặc Định 1 Năm):</span>
                     </label>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">Ngày Bắt Đầu:</label>
+                        <label className="text-[10px] font-bold text-ink-2 uppercase">Ngày Bắt Đầu:</label>
                         <input
                           type="text"
                           value={lmsStartDate}
                           onChange={(e) => setLmsStartDate(e.target.value)}
                           placeholder="dd-mm-yyyy"
-                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono font-bold outline-none"
+                          className="w-full bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs font-mono font-bold outline-none"
                         />
                       </div>
                       <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">Ngày Hết Hạn:</label>
+                        <label className="text-[10px] font-bold text-ink-2 uppercase">Ngày Hết Hạn:</label>
                         <input
                           type="text"
                           value={lmsEndDate}
                           onChange={(e) => setLmsEndDate(e.target.value)}
                           placeholder="dd-mm-yyyy"
-                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono font-bold outline-none"
+                          className="w-full bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs font-mono font-bold outline-none"
                         />
                       </div>
                     </div>
                   </div>
 
-                  <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2 flex flex-col justify-between">
+                  <div className="p-4 bg-paper-2 dark:bg-ink/60 rounded-2xl border border-rule dark:border-rule-2 space-y-2 flex flex-col justify-between">
                     <div>
-                      <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                      <label className="text-xs font-bold text-ink dark:text-primary-ink flex items-center gap-1.5">
                         <Users className="w-3.5 h-3.5 text-emerald-600" />
                         <span>Tên Nhóm / Group (Tùy chọn):</span>
                       </label>
-                      <p className="text-[10px] text-slate-500 mt-1">Tự động gom các học viên vào Group.</p>
+                      <p className="text-[10px] text-ink-2 mt-1">Tự động gom các học viên vào Group.</p>
                     </div>
                     <input
                       type="text"
                       value={lmsGroupName}
                       onChange={(e) => setLmsGroupName(e.target.value)}
                       placeholder="VD: DEMO_TEACHER_2026"
-                      className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-semibold outline-none"
+                      className="w-full bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs font-semibold outline-none"
                     />
                   </div>
                 </div>
 
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                    <label className="text-xs font-bold text-ink dark:text-primary-ink flex items-center gap-1.5">
                       <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
                       <span>Phương Thức Gán Vai Trò:</span>
                     </label>
 
-                    <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold">
+                    <div className="flex items-center bg-paper-2 dark:bg-ink p-1 rounded-xl text-xs font-semibold">
                       <button
                         type="button"
                         onClick={() => setLmsRoleMode('multi_role')}
                         className={`px-3 py-1 rounded-lg transition cursor-pointer ${lmsRoleMode === 'multi_role'
-                          ? 'bg-white dark:bg-slate-700 text-emerald-700 dark:text-emerald-300 font-bold shadow-2xs'
-                          : 'text-slate-500'
+                          ? 'bg-white dark:bg-rule-2 text-emerald-700 dark:text-emerald-300 font-bold shadow-2xs'
+                          : 'text-ink-2'
                           }`}
                       >
                         Phân Chia 3 Vai Trò
@@ -1809,8 +1809,8 @@ export const AutomationStudioPage: React.FC = () => {
                         type="button"
                         onClick={() => setLmsRoleMode('same_role')}
                         className={`px-3 py-1 rounded-lg transition cursor-pointer ${lmsRoleMode === 'same_role'
-                          ? 'bg-white dark:bg-slate-700 text-emerald-700 dark:text-emerald-300 font-bold shadow-2xs'
-                          : 'text-slate-500'
+                          ? 'bg-white dark:bg-rule-2 text-emerald-700 dark:text-emerald-300 font-bold shadow-2xs'
+                          : 'text-ink-2'
                           }`}
                       >
                         Cùng Một Vai Trò
@@ -1819,13 +1819,13 @@ export const AutomationStudioPage: React.FC = () => {
                   </div>
 
                   {lmsRoleMode === 'same_role' ? (
-                    <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
+                    <div className="p-4 bg-paper-2 dark:bg-ink/60 rounded-2xl border border-rule dark:border-rule-2 space-y-3">
                       <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">Chọn Vai Trò Áp Dụng:</label>
+                        <label className="text-[10px] font-bold text-ink-2 uppercase">Chọn Vai Trò Áp Dụng:</label>
                         <select
                           value={lmsSingleRole}
                           onChange={(e) => setLmsSingleRole(e.target.value as any)}
-                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-bold outline-none cursor-pointer"
+                          className="w-full bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs font-bold outline-none cursor-pointer"
                         >
                           <option value="student">🎓 Học Viên (Student)</option>
                           <option value="non_editing_teacher">👨‍🏫 Giáo Viên Trợ Giảng (Non-editing Teacher)</option>
@@ -1835,7 +1835,7 @@ export const AutomationStudioPage: React.FC = () => {
 
                       <div>
                         <div className="flex justify-between items-center mb-1">
-                          <label className="text-[10px] font-bold text-slate-500 uppercase">
+                          <label className="text-[10px] font-bold text-ink-2 uppercase">
                             Danh Sách Email (Mỗi dòng 1 email):
                           </label>
                           <span className="text-[10px] font-mono font-bold text-emerald-600">
@@ -1847,13 +1847,13 @@ export const AutomationStudioPage: React.FC = () => {
                           value={lmsBulkSingleEmails}
                           onChange={(e) => setLmsBulkSingleEmails(e.target.value)}
                           placeholder="user1@pythaverse.space&#10;user2@pythaverse.space"
-                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-xs font-mono outline-none focus:border-emerald-500"
+                          className="w-full bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-3 text-xs font-mono outline-none focus:border-emerald-500"
                         />
                       </div>
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                      <div className="p-3.5 bg-paper-2 dark:bg-ink/60 rounded-2xl border border-rule dark:border-rule-2 space-y-2">
                         <div className="flex justify-between items-center">
                           <label className="text-[11px] font-bold text-sky-700 dark:text-sky-300">🎓 Học Viên (Student):</label>
                           <span className="text-[10px] font-mono text-sky-600 font-bold">
@@ -1865,11 +1865,11 @@ export const AutomationStudioPage: React.FC = () => {
                           value={lmsStudentEmails}
                           onChange={(e) => setLmsStudentEmails(e.target.value)}
                           placeholder="student1@pythaverse.space&#10;student2@pythaverse.space"
-                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono outline-none focus:border-sky-500"
+                          className="w-full bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs font-mono outline-none focus:border-sky-500"
                         />
                       </div>
 
-                      <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                      <div className="p-3.5 bg-paper-2 dark:bg-ink/60 rounded-2xl border border-rule dark:border-rule-2 space-y-2">
                         <div className="flex justify-between items-center">
                           <label className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
                             👨‍🏫 Trợ Giảng (Non-editing Teacher):
@@ -1883,14 +1883,14 @@ export const AutomationStudioPage: React.FC = () => {
                           value={lmsTeacherEmails}
                           onChange={(e) => setLmsTeacherEmails(e.target.value)}
                           placeholder="teacher1@pythaverse.space&#10;teacher2@pythaverse.space"
-                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono outline-none focus:border-emerald-500"
+                          className="w-full bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs font-mono outline-none focus:border-emerald-500"
                         />
                       </div>
 
-                      <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                      <div className="p-3.5 bg-paper-2 dark:bg-ink/60 rounded-2xl border border-rule dark:border-rule-2 space-y-2">
                         <div className="flex justify-between items-center">
-                          <label className="text-[11px] font-bold text-purple-700 dark:text-purple-300">🛡️ Quản Lý (Manager):</label>
-                          <span className="text-[10px] font-mono text-purple-600 font-bold">
+                          <label className="text-[11px] font-bold text-accent dark:text-accent-2">🛡️ Quản Lý (Manager):</label>
+                          <span className="text-[10px] font-mono text-accent font-bold">
                             {lmsManagerEmails.split('\n').filter((x) => x.trim().length > 0).length}
                           </span>
                         </div>
@@ -1899,7 +1899,7 @@ export const AutomationStudioPage: React.FC = () => {
                           value={lmsManagerEmails}
                           onChange={(e) => setLmsManagerEmails(e.target.value)}
                           placeholder="manager1@pythaverse.space"
-                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono outline-none focus:border-purple-500"
+                          className="w-full bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs font-mono outline-none focus:border-accent"
                         />
                       </div>
                     </div>
@@ -1924,7 +1924,7 @@ export const AutomationStudioPage: React.FC = () => {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+              <label className="text-xs font-bold text-ink dark:text-primary-ink">
                 Email hoặc Username Cần Xử Lý:
               </label>
               <input
@@ -1932,7 +1932,7 @@ export const AutomationStudioPage: React.FC = () => {
                 value={kcTargetEmail}
                 onChange={(e) => setKcTargetEmail(e.target.value)}
                 placeholder="VD: teacher@pythaverse.space"
-                className="w-full bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700/80 rounded-xl p-3 text-xs font-bold text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-amber-500/20"
+                className="w-full bg-white dark:bg-ink border border-amber-300 dark:border-amber-700/80 rounded-xl p-3 text-xs font-bold text-ink dark:text-primary-ink outline-none focus:ring-2 focus:ring-amber-500/20"
               />
             </div>
 
@@ -1940,8 +1940,8 @@ export const AutomationStudioPage: React.FC = () => {
               {/* 1. Reset Pass */}
               <div
                 className={`p-4 rounded-2xl border transition-all ${kcEnableResetPass
-                  ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
-                  : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
+                  ? 'bg-white dark:bg-ink border-amber-400 shadow-2xs'
+                  : 'bg-paper-2 dark:bg-ink/60 border-rule dark:border-rule-2 opacity-75'
                   }`}
               >
                 <div className="flex items-center justify-between">
@@ -1949,23 +1949,23 @@ export const AutomationStudioPage: React.FC = () => {
                     <div
                       className={`p-2 rounded-xl ${kcEnableResetPass
                         ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300'
-                        : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
+                        : 'bg-rule text-ink-3 dark:bg-ink'
                         }`}
                     >
                       <KeyRound className="w-4 h-4" />
                     </div>
                     <div>
-                      <div className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      <div className="text-xs font-bold text-ink dark:text-primary-ink">
                         1. Đặt Lại Mật Khẩu Tạm Thời
                       </div>
-                      <div className="text-[10px] text-slate-400">Gán mật khẩu khởi tạo an toàn</div>
+                      <div className="text-[10px] text-ink-3">Gán mật khẩu khởi tạo an toàn</div>
                     </div>
                   </div>
 
                   <button
                     type="button"
                     onClick={() => setKcEnableResetPass(!kcEnableResetPass)}
-                    className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${kcEnableResetPass ? 'bg-amber-500 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
+                    className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${kcEnableResetPass ? 'bg-amber-500 justify-end' : 'bg-rule-2 dark:bg-rule-2 justify-start'
                       }`}
                   >
                     <span className="w-4 h-4 bg-white rounded-full shadow-md" />
@@ -1973,28 +1973,28 @@ export const AutomationStudioPage: React.FC = () => {
                 </div>
 
                 {kcEnableResetPass && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 mt-3 border-t border-slate-100 dark:border-slate-700">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 mt-3 border-t border-rule dark:border-rule-2">
                     <div>
-                      <label className="text-[10px] font-bold text-slate-500 uppercase">Mật khẩu mới:</label>
+                      <label className="text-[10px] font-bold text-ink-2 uppercase">Mật khẩu mới:</label>
                       <input
                         type="text"
                         value={kcTempPass}
                         onChange={(e) => setKcTempPass(e.target.value)}
-                        className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-mono font-bold outline-none"
+                        className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2 text-xs font-mono font-bold outline-none"
                       />
                     </div>
                     <div className="flex items-center gap-2 pt-4">
                       <button
                         type="button"
                         onClick={() => setKcForceChange(!kcForceChange)}
-                        className={`w-4 h-4 rounded border flex items-center justify-center cursor-pointer transition ${kcForceChange ? 'bg-amber-500 border-amber-500 text-white' : 'border-slate-300 dark:border-slate-600'
+                        className={`w-4 h-4 rounded border flex items-center justify-center cursor-pointer transition ${kcForceChange ? 'bg-amber-500 border-amber-500 text-white' : 'border-rule-2 dark:border-rule-2'
                           }`}
                       >
                         {kcForceChange && <Check className="w-3 h-3" />}
                       </button>
                       <label
                         onClick={() => setKcForceChange(!kcForceChange)}
-                        className="text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer"
+                        className="text-xs font-medium text-ink dark:text-primary-ink cursor-pointer"
                       >
                         Bắt buộc đổi khi đăng nhập
                       </label>
@@ -2006,8 +2006,8 @@ export const AutomationStudioPage: React.FC = () => {
               {/* 2. Email Verified */}
               <div
                 className={`p-4 rounded-2xl border transition-all ${kcEnableVerify
-                  ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
-                  : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
+                  ? 'bg-white dark:bg-ink border-amber-400 shadow-2xs'
+                  : 'bg-paper-2 dark:bg-ink/60 border-rule dark:border-rule-2 opacity-75'
                   }`}
               >
                 <div className="flex items-center justify-between">
@@ -2015,21 +2015,21 @@ export const AutomationStudioPage: React.FC = () => {
                     <div
                       className={`p-2 rounded-xl ${kcEnableVerify
                         ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300'
-                        : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
+                        : 'bg-rule text-ink-3 dark:bg-ink'
                         }`}
                     >
                       <ShieldCheck className="w-4 h-4" />
                     </div>
                     <div>
-                      <div className="text-xs font-bold text-slate-800 dark:text-slate-200">2. Xác Thực Email</div>
-                      <div className="text-[10px] text-slate-400">Gỡ lỗi tài khoản chưa xác thực email</div>
+                      <div className="text-xs font-bold text-ink dark:text-primary-ink">2. Xác Thực Email</div>
+                      <div className="text-[10px] text-ink-3">Gỡ lỗi tài khoản chưa xác thực email</div>
                     </div>
                   </div>
 
                   <button
                     type="button"
                     onClick={() => setKcEnableVerify(!kcEnableVerify)}
-                    className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${kcEnableVerify ? 'bg-amber-500 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
+                    className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${kcEnableVerify ? 'bg-amber-500 justify-end' : 'bg-rule-2 dark:bg-rule-2 justify-start'
                       }`}
                   >
                     <span className="w-4 h-4 bg-white rounded-full shadow-md" />
@@ -2037,13 +2037,13 @@ export const AutomationStudioPage: React.FC = () => {
                 </div>
 
                 {kcEnableVerify && (
-                  <div className="flex items-center gap-3 pt-3 mt-3 border-t border-slate-100 dark:border-slate-700 text-xs">
+                  <div className="flex items-center gap-3 pt-3 mt-3 border-t border-rule dark:border-rule-2 text-xs">
                     <button
                       type="button"
                       onClick={() => setKcVerifyAction('verify')}
                       className={`flex-1 py-2 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcVerifyAction === 'verify'
                         ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
-                        : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                        : 'border-rule dark:border-rule-2 text-ink-2'
                         }`}
                     >
                       ✓ Đã Xác Thực
@@ -2053,7 +2053,7 @@ export const AutomationStudioPage: React.FC = () => {
                       onClick={() => setKcVerifyAction('unverify')}
                       className={`flex-1 py-2 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcVerifyAction === 'unverify'
                         ? 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
-                        : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                        : 'border-rule dark:border-rule-2 text-ink-2'
                         }`}
                     >
                       ✗ Gỡ Xác Thực
@@ -2065,8 +2065,8 @@ export const AutomationStudioPage: React.FC = () => {
               {/* 3. Account Status */}
               <div
                 className={`p-4 rounded-2xl border transition-all ${kcEnableStatus
-                  ? 'bg-white dark:bg-slate-800 border-amber-400 shadow-2xs'
-                  : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 opacity-75'
+                  ? 'bg-white dark:bg-ink border-amber-400 shadow-2xs'
+                  : 'bg-paper-2 dark:bg-ink/60 border-rule dark:border-rule-2 opacity-75'
                   }`}
               >
                 <div className="flex items-center justify-between">
@@ -2074,23 +2074,23 @@ export const AutomationStudioPage: React.FC = () => {
                     <div
                       className={`p-2 rounded-xl ${kcEnableStatus
                         ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-300'
-                        : 'bg-slate-200 text-slate-400 dark:bg-slate-800'
+                        : 'bg-rule text-ink-3 dark:bg-ink'
                         }`}
                     >
                       <UserX className="w-4 h-4" />
                     </div>
                     <div>
-                      <div className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      <div className="text-xs font-bold text-ink dark:text-primary-ink">
                         3. Trạng Thái Hoạt Động
                       </div>
-                      <div className="text-[10px] text-slate-400">Khóa hoặc kích hoạt lại người dùng</div>
+                      <div className="text-[10px] text-ink-3">Khóa hoặc kích hoạt lại người dùng</div>
                     </div>
                   </div>
 
                   <button
                     type="button"
                     onClick={() => setKcEnableStatus(!kcEnableStatus)}
-                    className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${kcEnableStatus ? 'bg-amber-500 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
+                    className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${kcEnableStatus ? 'bg-amber-500 justify-end' : 'bg-rule-2 dark:bg-rule-2 justify-start'
                       }`}
                   >
                     <span className="w-4 h-4 bg-white rounded-full shadow-md" />
@@ -2098,13 +2098,13 @@ export const AutomationStudioPage: React.FC = () => {
                 </div>
 
                 {kcEnableStatus && (
-                  <div className="flex items-center gap-3 pt-3 mt-3 border-t border-slate-100 dark:border-slate-700 text-xs">
+                  <div className="flex items-center gap-3 pt-3 mt-3 border-t border-rule dark:border-rule-2 text-xs">
                     <button
                       type="button"
                       onClick={() => setKcStatusAction('enable')}
                       className={`flex-1 py-2 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcStatusAction === 'enable'
                         ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
-                        : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                        : 'border-rule dark:border-rule-2 text-ink-2'
                         }`}
                     >
                       ✓ Kích Hoạt
@@ -2114,7 +2114,7 @@ export const AutomationStudioPage: React.FC = () => {
                       onClick={() => setKcStatusAction('disable')}
                       className={`flex-1 py-2 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcStatusAction === 'disable'
                         ? 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
-                        : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                        : 'border-rule dark:border-rule-2 text-ink-2'
                         }`}
                     >
                       ✗ Vô Hiệu Hóa
@@ -2139,7 +2139,7 @@ export const AutomationStudioPage: React.FC = () => {
                 type="button"
                 disabled={isGeneratingDocComment}
                 onClick={handleAIGenerateDocComment}
-                className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-bold shadow-2xs hover:from-blue-500 hover:to-indigo-500 cursor-pointer transition disabled:opacity-50"
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-accent text-white rounded-xl font-bold shadow-2xs cursor-pointer transition disabled:opacity-50"
               >
                 {isGeneratingDocComment ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
                 <span>AI Đọc Doc & Soạn Ghi Chú Tag</span>
@@ -2151,11 +2151,11 @@ export const AutomationStudioPage: React.FC = () => {
               value={docUrl}
               onChange={(e) => setDocUrl(e.target.value)}
               placeholder="https://docs.google.com/document/d/..."
-              className="w-full bg-white dark:bg-slate-800 border border-blue-300 dark:border-blue-700 rounded-xl p-3 text-xs outline-none"
+              className="w-full bg-white dark:bg-ink border border-blue-300 dark:border-blue-700 rounded-xl p-3 text-xs outline-none"
             />
 
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+              <label className="text-xs font-bold text-ink dark:text-primary-ink">
                 Email Nhân Sự Cần Giao Việc (@dtt.vn):
               </label>
               <input
@@ -2163,21 +2163,21 @@ export const AutomationStudioPage: React.FC = () => {
                 value={assigneeEmail}
                 onChange={(e) => setAssigneeEmail(e.target.value)}
                 placeholder="hung.nguyenmanh@dtt.vn"
-                className="w-full bg-white dark:bg-slate-800 border border-blue-300 dark:border-blue-700 rounded-xl p-2.5 text-xs outline-none"
+                className="w-full bg-white dark:bg-ink border border-blue-300 dark:border-blue-700 rounded-xl p-2.5 text-xs outline-none"
               />
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+              <label className="text-xs font-bold text-ink dark:text-primary-ink flex items-center justify-between">
                 <span>Nội Dung Cần Gắn Bình Luận / Tag Vào Doc:</span>
-                <span className="text-[11px] text-slate-400">Tự động gắn vào trang đầu</span>
+                <span className="text-[11px] text-ink-3">Tự động gắn vào trang đầu</span>
               </label>
               <textarea
                 rows={3}
                 value={feedbackCommentContent}
                 onChange={(e) => setFeedbackCommentContent(e.target.value)}
                 placeholder="Nhập nội dung comment..."
-                className="w-full bg-white dark:bg-slate-800 border border-blue-300 dark:border-blue-700 rounded-xl p-3 text-xs outline-none focus:ring-2 focus:ring-blue-500/20"
+                className="w-full bg-white dark:bg-ink border border-blue-300 dark:border-blue-700 rounded-xl p-3 text-xs outline-none focus:ring-2 focus:ring-blue-500/20"
               />
             </div>
           </div>
@@ -2189,7 +2189,7 @@ export const AutomationStudioPage: React.FC = () => {
             type="button"
             disabled={submitting}
             onClick={handleOpenConfirmModal}
-            className="w-full py-4 bg-gradient-to-r from-violet-600 via-indigo-600 to-purple-600 hover:from-violet-500 hover:to-indigo-500 text-white text-sm font-extrabold rounded-2xl transition flex items-center justify-center gap-2 shadow-lg shadow-violet-500/25 cursor-pointer disabled:opacity-50 active:scale-[0.99]"
+            className="w-full py-4 bg-accent text-white text-sm font-extrabold rounded-2xl transition flex items-center justify-center gap-2 shadow-lg cursor-pointer disabled:opacity-50 active:scale-[0.99]"
           >
             <Zap className="w-5 h-5 text-amber-300 fill-amber-300" />
             <span>Kiểm Tra & Kích Hoạt Worker Chạy Ngay (1-Click)</span>
@@ -2199,18 +2199,18 @@ export const AutomationStudioPage: React.FC = () => {
 
       {/* CONFIRMATION MODAL */}
       {isConfirmModalOpen && preparedPayload && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="max-w-xl w-full bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden p-6 sm:p-7 space-y-5">
-            <div className="flex items-start justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/70 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="max-w-xl w-full bg-white dark:bg-ink rounded-3xl border border-rule dark:border-rule-2 shadow-2xl overflow-hidden p-6 sm:p-7 space-y-5">
+            <div className="flex items-start justify-between pb-3 border-b border-rule dark:border-rule-2">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 rounded-2xl">
                   <ShieldCheck className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="text-base font-extrabold text-slate-900 dark:text-slate-100">
+                  <h3 className="text-base font-extrabold text-ink dark:text-primary-ink">
                     Xác Nhận Kích Hoạt Worker Tự Động
                   </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                  <p className="text-xs text-ink-2 dark:text-ink-3">
                     Vui lòng kiểm tra lại thông số nghiệp vụ trước khi Worker can thiệp hệ thống.
                   </p>
                 </div>
@@ -2218,36 +2218,36 @@ export const AutomationStudioPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsConfirmModalOpen(false)}
-                className="p-1 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                className="p-1 rounded-xl text-ink-3 hover:text-ink-2 dark:hover:text-primary-ink hover:bg-paper-2 dark:hover:bg-ink transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-4 rounded-2xl bg-violet-50/70 dark:bg-violet-950/30 border border-violet-200/80 dark:border-violet-800/50 space-y-2.5">
+            <div className="p-4 rounded-2xl bg-accent-soft/70 dark:bg-accent-soft/30 border border-accent-soft/80 dark:border-accent-soft/50 space-y-2.5">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-violet-900 dark:text-violet-200">
+                <span className="text-xs font-bold text-accent dark:text-primary-ink">
                   {preparedPayload.summary.engineName}
                 </span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-200 dark:bg-violet-900 text-violet-800 dark:text-violet-200 font-mono font-bold">
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-accent-soft dark:bg-accent text-accent dark:text-primary-ink font-mono font-bold">
                   {preparedPayload.bot_type}
                 </span>
               </div>
 
               <div>
-                <div className="text-xs font-extrabold text-slate-800 dark:text-slate-200">
+                <div className="text-xs font-extrabold text-ink dark:text-primary-ink">
                   {preparedPayload.summary.actionTitle}
                 </div>
-                <div className="text-xs text-violet-700 dark:text-violet-300 font-bold font-mono mt-0.5">
+                <div className="text-xs text-accent dark:text-accent-2 font-bold font-mono mt-0.5">
                   👉 {preparedPayload.summary.targetEntity}
                 </div>
               </div>
 
               {preparedPayload.summary.detailsList.length > 0 && (
-                <div className="pt-2 border-t border-violet-200/60 dark:border-violet-800/40 space-y-1">
+                <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 space-y-1">
                   {preparedPayload.summary.detailsList.map((dt, idx) => (
-                    <div key={idx} className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
+                    <div key={idx} className="text-[11px] text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
                       <span>{dt}</span>
                     </div>
                   ))}
@@ -2256,14 +2256,14 @@ export const AutomationStudioPage: React.FC = () => {
             </div>
 
             <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-[11px] font-bold text-slate-600 dark:text-slate-400">
+              <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 dark:text-slate-300">
                 <span className="flex items-center gap-1">
-                  <Code2 className="w-3.5 h-3.5 text-violet-500" />
+                  <Code2 className="w-3.5 h-3.5 text-indigo-500" />
                   <span>Tham Số Thực Thi (Payload JSON):</span>
                 </span>
                 <span className="text-[10px] text-slate-400 font-mono">Tự động đồng bộ</span>
               </div>
-              <pre className="p-3 bg-slate-950 text-slate-200 rounded-xl text-[11px] font-mono overflow-x-auto max-h-36 border border-slate-800 scrollbar-thin">
+              <pre className="p-3.5 bg-slate-950 text-indigo-300 rounded-xl text-[11px] font-mono overflow-x-auto max-h-36 border border-slate-800 scrollbar-thin">
                 {JSON.stringify(preparedPayload.payload_data, null, 2)}
               </pre>
             </div>
@@ -2273,7 +2273,7 @@ export const AutomationStudioPage: React.FC = () => {
                 type="button"
                 onClick={() => setIsConfirmModalOpen(false)}
                 disabled={submitting}
-                className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
               >
                 Hủy Bỏ
               </button>
@@ -2282,7 +2282,7 @@ export const AutomationStudioPage: React.FC = () => {
                 type="button"
                 onClick={handleConfirmExecute}
                 disabled={submitting}
-                className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-extrabold transition shadow-md shadow-violet-500/20 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-xs flex items-center gap-2 cursor-pointer disabled:opacity-50"
               >
                 {submitting ? (
                   <>
