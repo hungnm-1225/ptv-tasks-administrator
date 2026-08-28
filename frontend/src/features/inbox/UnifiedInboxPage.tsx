@@ -1,6 +1,6 @@
-// frontend/src/features/inbox/UnifiedInboxPage.tsx
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   Sparkles,
   ArrowRight,
@@ -20,7 +20,6 @@ import {
   Calendar,
   ArrowUpDown,
   Image as ImageIcon,
-  Github,
   Bot,
   CheckCircle2,
   X,
@@ -40,19 +39,23 @@ import {
   ShieldCheck,
   UserX,
   Zap,
-  Sliders,
   SlidersHorizontal,
   FileCheck,
   Users,
   GraduationCap,
   UserCheck,
   UploadCloud,
-  FileSpreadsheet,
-  Filter,
   Briefcase,
   Store,
   Send,
-  Code2
+  Code2,
+  GitPullRequest,
+  Target,
+  RefreshCw,
+  AlertCircle,
+  ClipboardCheck,
+  Upload,
+  Info
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { InboxTicket, BotType } from '../../types';
@@ -111,7 +114,6 @@ interface ScrapedPendingItem {
   courses_data?: any[];
 }
 
-// ⚡ TRỢ THỦ PERSISTENT STORAGE (0MS)
 const getInboxCache = <T,>(key: string): T | null => {
   try {
     const raw = localStorage.getItem(`ptv_inbox_${key}`);
@@ -187,6 +189,7 @@ export const UnifiedInboxPage: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
+  const [activeCategoryDropdown, setActiveCategoryDropdown] = useState<string | null>(null);
 
   const filterCacheKey = useMemo(() => {
     return `list_${selectedStatus}_${selectedCategory}_${selectedSource}_${sortOrder}`;
@@ -203,30 +206,25 @@ export const UnifiedInboxPage: React.FC = () => {
   const [previewFile, setPreviewFile] = useState<{ filename: string; url: string } | null>(null);
 
   // =========================================================================
-  // 🚀 STATE ĐẦY ĐỦ CỦA SMART ACTION MODAL (STUDIO CLONE)
+  // 🚀 STATE STUDIO PRO MODAL
   // =========================================================================
   const [taskModalTicket, setTaskModalTicket] = useState<InboxTicket | null>(null);
-  const [selectedBotType, setSelectedBotType] = useState<'workspace_rpa' | 'keycloak_api' | 'feedback_doc_triage' | 'github_issue_creator'>('workspace_rpa');
+  const [selectedBotType, setSelectedBotType] = useState<'workspace_rpa' | 'keycloak_api' | 'feedback_doc_triage'>('workspace_rpa');
 
-  // 4 Mục chính Workspace RPA
   const [workspaceMainCategory, setWorkspaceMainCategory] = useState<'approve' | 'create_and_approve' | 'bulk_accounts' | 'lms_enroll'>('create_and_approve');
   const [approveSubFlow, setApproveSubFlow] = useState<'approve_school_order' | 'approve_partner_contract' | 'admin_approve_contract'>('approve_school_order');
   const [createApproveSubFlow, setCreateApproveSubFlow] = useState<'end_to_end' | 'partner_create_chain' | 'distributor_create_chain'>('end_to_end');
 
   const [contactInfo, setContactInfo] = useState<string>('Admin Automation Hub (operation@pythaverse.space)');
   const [additionalNotes, setAdditionalNotes] = useState<string>('Pythaverse Auto-Pipeline Managed');
-  const [showAutoTopupSettings, setShowAutoTopupSettings] = useState<boolean>(false);
 
   const [universalSearchQuery, setUniversalSearchQuery] = useState<string>('');
   const [selectedItemCode, setSelectedItemCode] = useState<string>('');
   const [selectedCachedItem, setSelectedCachedItem] = useState<ScrapedPendingItem | null>(null);
   const [adminJustification, setAdminJustification] = useState<string>('Afiq requests and approves the requests, Hung QA processes the contract via Automation Hub');
-
   const [scrapedPendingList, setScrapedPendingList] = useState<ScrapedPendingItem[]>([]);
   const [isScrapingLive, setIsScrapingLive] = useState<boolean>(false);
-  const [isLoadingOrderDetails, setIsLoadingOrderDetails] = useState<boolean>(false);
   const [parsedOrderCourses, setParsedOrderCourses] = useState<any[]>([]);
-  const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
 
   // Metadata Phả hệ & Khóa học
   const [schoolsList, setSchoolsList] = useState<HierarchySchoolItem[]>(() => getInboxCache<HierarchySchoolItem[]>('schools') || []);
@@ -289,9 +287,9 @@ export const UnifiedInboxPage: React.FC = () => {
   const [docUrl, setDocUrl] = useState<string>('');
   const [assigneeEmail, setAssigneeEmail] = useState<string>('hung.nguyenmanh@dtt.vn');
   const [feedbackCommentContent, setFeedbackCommentContent] = useState<string>('Kính gửi anh/chị, em xin phép chuyển thông tin phản hồi này để team kỹ thuật rà soát và hỗ trợ giải quyết.');
-  const [isGeneratingDocComment, setIsGeneratingDocComment] = useState<boolean>(false);
 
   const [creatingTask, setCreatingTask] = useState<boolean>(false);
+  const [runningImmediate, setRunningImmediate] = useState<boolean>(false);
   const [extractingCof, setExtractingCof] = useState<boolean>(false);
   const [payloadText, setPayloadText] = useState<string>('');
   const [viewMode, setViewMode] = useState<'form' | 'json'>('form');
@@ -299,7 +297,7 @@ export const UnifiedInboxPage: React.FC = () => {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const SPREADSHEET_ID = '1rZgFBD2PuZWL1jvQefcYZztCQvo99Lhx0GATTKvj1Go';
 
-  // Nạp tickets
+  // Nạp danh sách tickets
   const loadTickets = useCallback(async (forceSpinner = false) => {
     const cached = getInboxCache<InboxTicket[]>('all_tickets_master');
     if (cached && !forceSpinner) {
@@ -372,43 +370,55 @@ export const UnifiedInboxPage: React.FC = () => {
     loadTickets();
   }, [loadTickets]);
 
+  // Click outside listener
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (entityDropdownRef.current && !entityDropdownRef.current.contains(event.target as Node)) {
         setIsEntityDropdownOpen(false);
       }
+      setActiveCategoryDropdown(null);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const uniquePartners = useMemo(() => {
-    const map = new Map<string, { name: string; code: string }>();
-    schoolsList.forEach((s) => {
-      if (s.partner_name && !map.has(s.partner_name)) {
-        map.set(s.partner_name, { name: s.partner_name, code: s.partner_code || 'PAR' });
+  // Nạp danh sách đơn hàng Cache khi chọn tab Approve
+  const handleFetchCachedList = async () => {
+    setIsScrapingLive(true);
+    try {
+      let freshData: ScrapedPendingItem[] = [];
+      if (approveSubFlow === 'approve_school_order') {
+        const res = await fetchApi<any>(`/workspace/cached-pending-orders`);
+        freshData = res?.orders || [];
+      } else if (approveSubFlow === 'approve_partner_contract') {
+        const res = await fetchApi<any>(`/workspace/cached-pending-contracts?contract_type=PRT`);
+        freshData = res?.contracts || [];
+      } else if (approveSubFlow === 'admin_approve_contract') {
+        const res = await fetchApi<any>(`/workspace/cached-pending-contracts?contract_type=DST`);
+        freshData = res?.contracts || [];
       }
-    });
-    return Array.from(map.values());
-  }, [schoolsList]);
+      setScrapedPendingList(freshData);
+    } catch (err) {
+      console.warn('Lỗi đọc dữ liệu Cache:', err);
+    } finally {
+      setIsScrapingLive(false);
+    }
+  };
 
-  const uniqueDistributors = useMemo(() => {
-    const map = new Map<string, { name: string; code: string }>();
-    schoolsList.forEach((s) => {
-      if (s.distributor_name && !map.has(s.distributor_name)) {
-        map.set(s.distributor_name, { name: s.distributor_name, code: s.distributor_code || 'DST' });
-      }
-    });
-    return Array.from(map.values());
-  }, [schoolsList]);
+  useEffect(() => {
+    if (taskModalTicket && selectedBotType === 'workspace_rpa' && workspaceMainCategory === 'approve') {
+      handleFetchCachedList();
+    }
+  }, [approveSubFlow, workspaceMainCategory, selectedBotType, taskModalTicket]);
 
-  const currentEntityMode = useMemo<'school' | 'partner' | 'distributor'>(() => {
-    if (createApproveSubFlow === 'partner_create_chain') return 'partner';
-    if (createApproveSubFlow === 'distributor_create_chain') return 'distributor';
-    return 'school';
-  }, [createApproveSubFlow]);
+  const stats = useMemo(() => {
+    const total = tickets.length;
+    const pending = tickets.filter((t) => !t.status || t.status === 'pending').length;
+    const processing = tickets.filter((t) => t.status === 'processing' || t.status === 'waiting_poll').length;
+    const resolved = tickets.filter((t) => t.status === 'completed').length;
+    return { total, pending, processing, resolved };
+  }, [tickets]);
 
-  // Bộ lọc ticket
   const filteredTickets = useMemo(() => {
     let result = [...tickets];
     if (selectedSource !== 'all') result = result.filter((t) => t.source === selectedSource);
@@ -443,6 +453,15 @@ export const UnifiedInboxPage: React.FC = () => {
     return result;
   }, [tickets, selectedSource, selectedCategory, selectedStatus, searchQuery, sortOrder]);
 
+  const resetFilters = () => {
+    setSearchQuery('');
+    setSelectedSource('all');
+    setSelectedCategory('all');
+    setSelectedStatus('all');
+    setSortOrder('desc');
+    toast.info('Đã xóa tất cả bộ lọc');
+  };
+
   const getDirectSourceUrl = (ticket: InboxTicket) => {
     if (ticket.source === 'gmail') {
       return `https://mail.google.com/mail/u/0/#search/id%3A${ticket.source_id}`;
@@ -451,7 +470,6 @@ export const UnifiedInboxPage: React.FC = () => {
       const rowIdx = ticket.metadata?.row_index || 2;
       return `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/edit#gid=0&range=A${rowIdx}:P${rowIdx}`;
     } else if (ticket.source === 'osticket') {
-      // 🎯 Ưu tiên mở theo doc_url (chứa Internal ID 4 số: tickets.php?id=3370)
       if (ticket.doc_url) return ticket.doc_url;
       const internalId = ticket.metadata?.internal_id || ticket.source_id;
       return `https://support.pythaverse.space/scp/tickets.php?id=${internalId}`;
@@ -535,14 +553,15 @@ export const UnifiedInboxPage: React.FC = () => {
   };
 
   // =========================================================================
-  // ⚡ AUTO-MAPPING THÔNG MINH TỪ TICKET VÀO POPUP STUDIO
+  // ⚡ AUTO-PREFILL THÔNG MINH TỪ REQUEST VÀO MODAL STUDIO
   // =========================================================================
   const handleOpenTaskModal = (ticket: InboxTicket) => {
     setTaskModalTicket(ticket);
     setViewMode('form');
 
-    // 1. Tự động truy vết trường học từ Subject / Raw Content / Metadata
     const fullText = `${ticket.subject || ''} ${ticket.raw_content || ''} ${ticket.submitter_name || ''} ${ticket.metadata?.school_name || ''}`.toLowerCase();
+
+    // 1. Tự động nhận diện trường học từ phả hệ
     const matchedSchool =
       schoolsList.find(
         (s) =>
@@ -559,13 +578,14 @@ export const UnifiedInboxPage: React.FC = () => {
       setSelectedDistributor({ name: matchedSchool.distributor_name, code: matchedSchool.distributor_code || 'DST' });
     }
 
-    // 2. Điền sẵn email Keycloak & Doc Url
     setKcTargetEmail(ticket.sender_email);
     setDocUrl(ticket.doc_url || '');
     setAssigneeEmail(ticket.assigned_email || 'hung.nguyenmanh@dtt.vn');
 
-    // 3. Khởi tạo khóa học mặc định nếu danh sách trống
-    if (selectedCourses.length === 0) {
+    // 2. Điền thông tin COF nếu backend đã parse sẵn trong metadata
+    if (ticket.metadata?.cof_courses && ticket.metadata.cof_courses.length > 0) {
+      setSelectedCourses(ticket.metadata.cof_courses);
+    } else {
       const defaultCourse =
         workspaceCoursesList.find((c) => c.category === 'SWRP') ||
         workspaceCoursesList[0] || {
@@ -588,8 +608,8 @@ export const UnifiedInboxPage: React.FC = () => {
       ]);
     }
 
-    // 4. Smart Engine Selection dựa vào AI Category & Source
-    let botType: 'workspace_rpa' | 'keycloak_api' | 'feedback_doc_triage' | 'github_issue_creator' = 'workspace_rpa';
+    // 3. Phân loại Cỗ máy theo phân loại AI Triage
+    let botType: 'workspace_rpa' | 'keycloak_api' | 'feedback_doc_triage' = 'workspace_rpa';
     let mainCat: 'approve' | 'create_and_approve' | 'bulk_accounts' | 'lms_enroll' = 'create_and_approve';
 
     if (ticket.category === 'account_keycloak') {
@@ -598,7 +618,6 @@ export const UnifiedInboxPage: React.FC = () => {
     } else if (ticket.category === 'lms_enroll') {
       botType = 'workspace_rpa';
       mainCat = 'lms_enroll';
-      // Trích xuất email từ raw_content nếu có
       const emailMatches = ticket.raw_content?.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [];
       const cleanEmails = Array.from(new Set(emailMatches.filter(e => !e.includes('pythaverse.space') && !e.includes('dtt.vn'))));
       if (cleanEmails.length > 0) {
@@ -606,7 +625,6 @@ export const UnifiedInboxPage: React.FC = () => {
       }
     } else if (ticket.category === 'license') {
       botType = 'workspace_rpa';
-      // Nếu có file đính kèm là excel -> Gợi ý nộp bulk account
       const hasExcelAttach = ticket.attachments?.some((a: any) => a.filename?.endsWith('.xlsx') || a.filename?.endsWith('.xls'));
       if (hasExcelAttach) {
         mainCat = 'create_and_approve';
@@ -621,7 +639,7 @@ export const UnifiedInboxPage: React.FC = () => {
     setWorkspaceMainCategory(mainCat);
   };
 
-  // ⚡ TỰ ĐỘNG TÍNH TOÁN VÀ SINH PAYLOAD JSON REAL-TIME
+  // ⚡ TỰ ĐỘNG TÍNH TOÁN PAYLOAD JSON ĐỒNG BỘ
   const computedPayload = useMemo(() => {
     const tId = taskModalTicket?.id || null;
     const firstAttachmentUrl = taskModalTicket?.attachments?.[0]?.url || '';
@@ -790,13 +808,6 @@ export const UnifiedInboxPage: React.FC = () => {
         comment_content: feedbackCommentContent,
         row_index: taskModalTicket?.metadata?.row_index || 1,
       };
-    } else if (selectedBotType === 'github_issue_creator') {
-      payload = {
-        action: 'create_github_issue',
-        ticket_id: tId,
-        title: `[BUG] ${taskModalTicket?.subject || 'Báo lỗi hệ thống'}`,
-        assignees: ['nguyenthetrung5-PTV', 'thetrungdtt'],
-      };
     }
 
     return payload;
@@ -842,7 +853,6 @@ export const UnifiedInboxPage: React.FC = () => {
     feedbackCommentContent,
   ]);
 
-  // Đồng bộ payloadText khi form thay đổi
   useEffect(() => {
     setPayloadText(JSON.stringify(computedPayload, null, 2));
   }, [computedPayload]);
@@ -909,7 +919,8 @@ export const UnifiedInboxPage: React.FC = () => {
     }
   };
 
-  const handleConfirmCreateTask = async () => {
+  // ⚡ HÀM GỬI TÁC VỤ (HỖ TRỢ CẢ "ĐƯA VÀO HÀNG ĐỢI" VÀ "CHẠY NGAY 1-CLICK")
+  const handleSubmitBotTask = async (runImmediately: boolean) => {
     if (!taskModalTicket) return;
 
     let finalPayloadData = {};
@@ -920,14 +931,15 @@ export const UnifiedInboxPage: React.FC = () => {
       return;
     }
 
-    setCreatingTask(true);
+    if (runImmediately) setRunningImmediate(true);
+    else setCreatingTask(true);
+
     try {
       let actualBotType: BotType | 'lms_playwright' = selectedBotType;
       if (selectedBotType === 'workspace_rpa' && workspaceMainCategory === 'lms_enroll') {
         actualBotType = 'lms_playwright';
       }
 
-      // Xử lý upload file nếu có file mới
       if (workspaceMainCategory === 'bulk_accounts' && uploadedAccountsFile) {
         toast.info('Đang tải file Excel lên hệ thống lưu trữ...');
         const cleanFileName = `inbox_accounts/${Date.now()}_${uploadedAccountsFile.name.replace(/\s+/g, '_')}`;
@@ -951,24 +963,44 @@ export const UnifiedInboxPage: React.FC = () => {
           ticket_id: taskModalTicket.id,
           bot_type: actualBotType,
           payload_data: finalPayloadData,
+          run_immediately: runImmediately,
+          approval_status: runImmediately ? 'approved' : 'pending',
         }),
       });
 
-      toast.success(
-        <div className="space-y-1">
-          <div className="font-bold flex items-center gap-1.5 text-emerald-400">
-            <CheckCircle2 className="w-4 h-4" />
-            <span>Đã đưa tác vụ vào Hàng Đợi Phê Duyệt!</span>
-          </div>
-          <button
-            onClick={() => navigate('/tasks')}
-            className="text-accent-2 hover:text-accent underline text-xs font-semibold cursor-pointer block mt-1 transition"
-          >
-            Chuyển đến Task & Approval Hub để duyệt ➔
-          </button>
-        </div>,
-        { duration: 5000 }
-      );
+      if (runImmediately) {
+        toast.success(
+          <div className="space-y-1">
+            <div className="font-bold flex items-center gap-1.5 text-emerald-400">
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Đã kích hoạt Worker chạy ngay!</span>
+            </div>
+            <button
+              onClick={() => navigate('/bots')}
+              className="text-indigo-400 hover:underline text-xs font-semibold cursor-pointer block mt-1 transition"
+            >
+              Mở Bot Command Center xem Live Terminal ➔
+            </button>
+          </div>,
+          { duration: 5000 }
+        );
+      } else {
+        toast.success(
+          <div className="space-y-1">
+            <div className="font-bold flex items-center gap-1.5 text-emerald-400">
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Đã đưa tác vụ vào Hàng Đợi Phê Duyệt!</span>
+            </div>
+            <button
+              onClick={() => navigate('/tasks')}
+              className="text-indigo-600 dark:text-indigo-400 hover:underline text-xs font-semibold cursor-pointer block mt-1 transition"
+            >
+              Chuyển đến Task & Approval Hub để duyệt ➔
+            </button>
+          </div>,
+          { duration: 5000 }
+        );
+      }
 
       setTaskModalTicket(null);
       await loadTickets(true);
@@ -976,6 +1008,7 @@ export const UnifiedInboxPage: React.FC = () => {
       toast.error('Lỗi tạo tác vụ: ' + (err as Error).message);
     } finally {
       setCreatingTask(false);
+      setRunningImmediate(false);
     }
   };
 
@@ -983,25 +1016,25 @@ export const UnifiedInboxPage: React.FC = () => {
     switch (source) {
       case 'gmail':
         return (
-          <span className="px-2 py-0.5 bg-sky-50 text-sky-700 border border-sky-200/80 dark:bg-sky-500/15 dark:text-sky-300 dark:border-sky-500/30 text-[10px] font-semibold rounded-lg flex items-center gap-1 shadow-2xs">
-            <Mail className="w-3 h-3" /> GMAIL
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-rose-50 text-rose-800 dark:bg-rose-950/50 dark:text-rose-300 border border-rose-200 dark:border-rose-800 shadow-2xs">
+            <Mail className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" /> GMAIL
           </span>
         );
       case 'google_form':
         return (
-          <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200/80 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30 text-[10px] font-semibold rounded-lg flex items-center gap-1 shadow-2xs">
-            <FileText className="w-3 h-3" /> FORM
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-purple-50 text-purple-800 dark:bg-purple-950/50 dark:text-purple-300 border border-purple-200 dark:border-purple-800 shadow-2xs">
+            <FileText className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" /> FORM
           </span>
         );
       case 'osticket':
         return (
-          <span className="px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200/80 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30 text-[10px] font-semibold rounded-lg flex items-center gap-1 shadow-2xs">
-            <Ticket className="w-3 h-3" /> OS TICKET
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200 dark:border-amber-800 shadow-2xs">
+            <Ticket className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" /> OS TICKET
           </span>
         );
       default:
         return (
-          <span className="px-2 py-0.5 bg-paper-2 text-ink border border-rule dark:bg-rule-2 dark:text-primary-ink text-[10px] font-semibold rounded-lg">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
             {source.toUpperCase()}
           </span>
         );
@@ -1012,68 +1045,198 @@ export const UnifiedInboxPage: React.FC = () => {
     switch (status) {
       case 'completed':
         return (
-          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300 text-[10px] font-bold rounded-md flex items-center gap-1">
-            <CheckCircle2 className="w-3 h-3" /> ĐÃ XỬ LÝ
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 shadow-2xs">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> ĐÃ XỬ LÝ
           </span>
         );
       case 'processing':
       case 'waiting_poll':
         return (
-          <span className="px-2 py-0.5 bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-300 text-[10px] font-bold rounded-md flex items-center gap-1 animate-pulse">
-            <Clock className="w-3 h-3" /> ĐANG XỬ LÝ
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-sky-50 text-sky-800 dark:bg-sky-950/50 dark:text-sky-300 border border-sky-200 dark:border-sky-800 shadow-2xs">
+            <RefreshCw className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400 animate-spin" /> ĐANG XỬ LÝ
           </span>
         );
       case 'dismissed':
         return (
-          <span className="px-2 py-0.5 bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-300 text-[10px] font-bold rounded-md flex items-center gap-1">
-            <XCircle className="w-3 h-3" /> ĐÃ BỎ QUA
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+            <XCircle className="w-3.5 h-3.5 text-slate-500" /> ĐÃ BỎ QUA
           </span>
         );
       default:
         return (
-          <span className="px-2 py-0.5 bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300 text-[10px] font-bold rounded-md">
-            CHỜ XỬ LÝ
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200 dark:border-amber-800 shadow-2xs">
+            <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" /> CHỜ XỬ LÝ
           </span>
         );
     }
   };
 
+  const getCategoryBadge = (category: string, ticketId: string) => {
+    const isDropdownOpen = activeCategoryDropdown === ticketId;
+    const catLabel =
+      category === 'bug'
+        ? 'System Bugs'
+        : category === 'account_keycloak'
+          ? 'Keycloak/Account'
+          : category === 'lms_enroll'
+            ? 'LMS Enroll'
+            : category === 'license'
+              ? 'License'
+              : 'Khác';
+
+    return (
+      <div className="relative inline-block">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setActiveCategoryDropdown(isDropdownOpen ? null : ticketId);
+          }}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors shadow-2xs cursor-pointer"
+        >
+          <Tag className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
+          <span>{catLabel.toUpperCase()}</span>
+          <ChevronDown className="w-3 h-3 ml-0.5 opacity-70" />
+        </button>
+
+        {isDropdownOpen && (
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="absolute left-0 mt-1.5 w-48 bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100"
+          >
+            <div className="px-3 py-1 text-[10px] uppercase font-bold text-slate-400">
+              Đổi Phân Loại
+            </div>
+            {[
+              { id: 'bug', label: '🐛 System Bugs' },
+              { id: 'account_keycloak', label: '🔑 Keycloak/Account' },
+              { id: 'lms_enroll', label: '🎓 LMS Enroll' },
+              { id: 'license', label: '📜 License' },
+              { id: 'other', label: '📌 Khác' },
+            ].map((opt) => (
+              <button
+                key={opt.id}
+                onClick={() => {
+                  handleCategoryChange(ticketId, opt.id);
+                  setActiveCategoryDropdown(null);
+                }}
+                className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer ${category === opt.id
+                  ? 'font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-950/30'
+                  : 'text-slate-700 dark:text-slate-300'
+                  }`}
+              >
+                <span>{opt.label}</span>
+                {category === opt.id && <Check className="w-3.5 h-3.5 text-indigo-600" />}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
-    <div className="space-y-6 w-full pb-10">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.3 }}
+      className="space-y-6 max-w-7xl mx-auto pb-16"
+      onClick={() => setActiveCategoryDropdown(null)}
+    >
+      {/* 1. Header Bar */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
-            Unified Inbox Feed
-          </h1>
-          <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white font-sans">
+              Unified Inbox Feed
+            </h1>
+            <span className="px-3 py-1 text-xs font-bold rounded-full bg-teal-50 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300 border border-teal-200 dark:border-teal-800 shadow-2xs">
+              Tổng cộng: {tickets.length} ticket
+            </span>
+          </div>
+          <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 max-w-3xl leading-relaxed">
             Hợp nhất yêu cầu từ Gmail Workspace, Google Form và OS Ticket với sự hỗ trợ từ Gemini AI Triage.
           </p>
         </div>
-
-        <div className="flex items-center gap-2 text-xs font-semibold">
-          <span className="px-3 py-1 bg-accent-soft text-accent dark:bg-ink dark:text-accent-2 border border-accent-soft dark:border-rule-2 rounded-xl shadow-2xs">
-            Tổng cộng: {tickets.length} ticket
-          </span>
-          {searchQuery.trim() && (
-            <span className="px-3 py-1 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/50 rounded-xl shadow-2xs animate-in fade-in">
-              Khớp tìm kiếm: {filteredTickets.length}
-            </span>
-          )}
-        </div>
       </div>
 
-      {/* THANH CÔNG CỤ LỌC & TÌM KIẾM */}
-      <div className="bg-white dark:bg-ink/90 p-3.5 rounded-2xl border border-rule/80 dark:border-rule-2/60 shadow-xs space-y-3">
-        <div className="relative w-full">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+      {/* 2. Bento Metric Summary Tiles */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <motion.div
+          whileHover={{ y: -2 }}
+          transition={{ duration: 0.2 }}
+          className="bg-blue-50 dark:bg-blue-950/40 rounded-[2rem] p-5 border border-blue-100 dark:border-blue-900/50 flex flex-col justify-between shadow-xs"
+        >
+          <span className="text-xs font-bold text-blue-500 uppercase tracking-widest">
+            Tổng số yêu cầu
+          </span>
+          <div className="mt-3">
+            <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white font-mono">
+              {stats.total}
+            </div>
+            <div className="text-xs text-blue-400 font-medium">100% feed đồng bộ</div>
+          </div>
+        </motion.div>
+
+        <motion.div
+          whileHover={{ y: -2 }}
+          transition={{ duration: 0.2 }}
+          className="bg-amber-50 dark:bg-amber-950/40 rounded-[2rem] p-5 border border-amber-100 dark:border-amber-900/50 flex flex-col justify-between shadow-xs"
+        >
+          <span className="text-xs font-bold text-amber-600 dark:text-amber-400 uppercase tracking-widest">
+            Chờ xử lý
+          </span>
+          <div className="mt-3">
+            <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white font-mono">
+              {stats.pending}
+            </div>
+            <div className="text-xs text-amber-500 font-medium">Cần thực thi ngay</div>
+          </div>
+        </motion.div>
+
+        <motion.div
+          whileHover={{ y: -2 }}
+          transition={{ duration: 0.2 }}
+          className="bg-purple-50 dark:bg-purple-950/40 rounded-[2rem] p-5 border border-purple-100 dark:border-purple-900/50 flex flex-col justify-between shadow-xs"
+        >
+          <span className="text-xs font-bold text-purple-500 uppercase tracking-widest">
+            Đang xử lý
+          </span>
+          <div className="mt-3">
+            <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white font-mono">
+              {stats.processing}
+            </div>
+            <div className="text-xs text-purple-400 font-medium">Đang chạy qua Bot/Worker</div>
+          </div>
+        </motion.div>
+
+        <motion.div
+          whileHover={{ y: -2 }}
+          transition={{ duration: 0.2 }}
+          className="bg-emerald-50 dark:bg-emerald-950/40 rounded-[2rem] p-5 border border-emerald-100 dark:border-emerald-900/50 flex flex-col justify-between shadow-xs"
+        >
+          <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">
+            Đã giải quyết
+          </span>
+          <div className="mt-3">
+            <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white font-mono">
+              {stats.resolved}
+            </div>
+            <div className="text-xs text-emerald-500 font-medium">Hoàn tất quy trình</div>
+          </div>
+        </motion.div>
+      </div>
+
+      {/* 3. Bento Search & Filter Control Bar */}
+      <div className="p-5 sm:p-6 rounded-[2rem] bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+        <div className="relative">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input
             ref={searchInputRef}
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Tìm nhanh theo tiêu đề, người gửi, tóm tắt AI, mã ID, nội dung, trường học..."
-            className="w-full pl-10 pr-10 py-2.5 bg-paper-2 dark:bg-ink/90 border border-rule dark:border-rule-2 rounded-xl text-xs font-medium text-ink dark:text-primary-ink placeholder-ink-3 outline-none focus:border-accent focus:ring-2 focus:ring-accent transition-all shadow-2xs"
+            className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all shadow-2xs"
           />
           {searchQuery && (
             <button
@@ -1081,97 +1244,112 @@ export const UnifiedInboxPage: React.FC = () => {
                 setSearchQuery('');
                 searchInputRef.current?.focus();
               }}
-              title="Xóa tìm kiếm"
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-md transition cursor-pointer"
+              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 cursor-pointer"
             >
               <X className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
 
-        <div className="flex items-center justify-between flex-wrap gap-2.5 pt-1 border-t border-rule dark:border-rule-2/50">
-          <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl px-2.5 py-1.5 shadow-2xs">
-              <span className="text-[11px] font-semibold text-slate-500 dark:text-ink-3 whitespace-nowrap">Nguồn:</span>
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-slate-100 dark:border-slate-800">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 shadow-2xs">
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">Nguồn:</span>
               <select
                 value={selectedSource}
                 onChange={(e) => setSelectedSource(e.target.value)}
-                className="bg-transparent text-xs font-semibold text-ink dark:text-primary-ink outline-none cursor-pointer"
+                className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
               >
-                <option value="all" className="bg-white dark:bg-ink">Tất cả Nguồn</option>
-                <option value="gmail" className="bg-white dark:bg-ink">✉️ Gmail</option>
-                <option value="google_form" className="bg-white dark:bg-ink">📝 Google Form</option>
-                <option value="osticket" className="bg-white dark:bg-ink">🎫 OS Ticket</option>
+                <option value="all" className="bg-white dark:bg-slate-900">Tất cả Nguồn</option>
+                <option value="gmail" className="bg-white dark:bg-slate-900">✉️ Gmail</option>
+                <option value="google_form" className="bg-white dark:bg-slate-900">📝 Google Form</option>
+                <option value="osticket" className="bg-white dark:bg-slate-900">🎫 OS Ticket</option>
               </select>
             </div>
 
-            <div className="flex items-center gap-1.5 bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl px-2.5 py-1.5 shadow-2xs">
-              <span className="text-[11px] font-semibold text-slate-500 dark:text-ink-3 whitespace-nowrap">Phân loại:</span>
+            <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 shadow-2xs">
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">Phân loại:</span>
               <select
                 value={selectedCategory}
                 onChange={(e) => setSelectedCategory(e.target.value)}
-                className="bg-transparent text-xs font-semibold text-ink dark:text-primary-ink outline-none cursor-pointer"
+                className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
               >
-                <option value="all" className="bg-white dark:bg-ink">Tất cả Category</option>
-                <option value="bug" className="bg-white dark:bg-ink">🐛 System Bugs</option>
-                <option value="account_keycloak" className="bg-white dark:bg-ink">🔑 Keycloak/Account</option>
-                <option value="lms_enroll" className="bg-white dark:bg-ink">🎓 LMS Enroll</option>
-                <option value="license" className="bg-white dark:bg-ink">📜 License</option>
-                <option value="other" className="bg-white dark:bg-ink">📌 Khác</option>
+                <option value="all" className="bg-white dark:bg-slate-900">Tất cả Category</option>
+                <option value="bug" className="bg-white dark:bg-slate-900">🐛 System Bugs</option>
+                <option value="account_keycloak" className="bg-white dark:bg-slate-900">🔑 Keycloak/Account</option>
+                <option value="lms_enroll" className="bg-white dark:bg-slate-900">🎓 LMS Enroll</option>
+                <option value="license" className="bg-white dark:bg-slate-900">📜 License</option>
+                <option value="other" className="bg-white dark:bg-slate-900">📌 Khác</option>
               </select>
             </div>
 
-            <div className="flex items-center gap-1.5 bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl px-2.5 py-1.5 shadow-2xs">
-              <span className="text-[11px] font-semibold text-slate-500 dark:text-ink-3 whitespace-nowrap">Trạng thái:</span>
+            <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 shadow-2xs">
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">Trạng thái:</span>
               <select
                 value={selectedStatus}
                 onChange={(e) => setSelectedStatus(e.target.value)}
-                className="bg-transparent text-xs font-semibold text-ink dark:text-primary-ink outline-none cursor-pointer"
+                className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
               >
-                <option value="all" className="bg-white dark:bg-ink">Tất cả trạng thái</option>
-                <option value="pending" className="bg-white dark:bg-ink">⏳ Chờ xử lý</option>
-                <option value="processing" className="bg-white dark:bg-ink">🔄 Đang xử lý</option>
-                <option value="completed" className="bg-white dark:bg-ink">✅ Đã giải quyết</option>
-                <option value="dismissed" className="bg-white dark:bg-ink">🗑️ Đã bỏ qua</option>
+                <option value="all" className="bg-white dark:bg-slate-900">Tất cả trạng thái</option>
+                <option value="pending" className="bg-white dark:bg-slate-900">⏳ Chờ xử lý</option>
+                <option value="processing" className="bg-white dark:bg-slate-900">🔄 Đang xử lý</option>
+                <option value="completed" className="bg-white dark:bg-slate-900">✅ Đã giải quyết</option>
+                <option value="dismissed" className="bg-white dark:bg-slate-900">🗑️ Đã bỏ qua</option>
               </select>
             </div>
           </div>
 
-          <button
-            onClick={() => setSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'))}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-paper-2 hover:bg-paper-2 dark:bg-ink dark:hover:bg-rule-2 border border-rule dark:border-rule-2 rounded-xl text-xs font-medium text-ink dark:text-primary-ink shadow-2xs transition shrink-0 cursor-pointer"
-          >
-            <ArrowUpDown className="w-3.5 h-3.5 text-accent dark:text-accent-2" />
-            <span>{sortOrder === 'desc' ? 'Mới nhất ➔ Cũ nhất' : 'Cũ nhất ➔ Mới nhất'}</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'))}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+            >
+              <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+              <span>{sortOrder === 'desc' ? 'Mới nhất ➔ Cũ nhất' : 'Cũ nhất ➔ Mới nhất'}</span>
+            </button>
+
+            {(searchQuery || selectedSource !== 'all' || selectedCategory !== 'all' || selectedStatus !== 'all') && (
+              <button
+                onClick={resetFilters}
+                className="px-2.5 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-xs font-medium hover:bg-rose-100 transition-colors cursor-pointer"
+              >
+                Xóa lọc
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Danh Sách Tickets */}
+      {/* 4. Danh Sách Ticket */}
       {loading && tickets.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-slate-500 gap-3">
-          <Loader2 className="w-7 h-7 animate-spin text-accent" />
-          <span className="text-xs font-medium">Đang nạp danh sách ticket...</span>
+        <div className="space-y-4 animate-pulse">
+          {[1, 2, 3].map((idx) => (
+            <div
+              key={idx}
+              className="p-6 sm:p-7 rounded-[2.5rem] bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 space-y-4 shadow-xs"
+            >
+              <div className="h-6 w-3/4 bg-slate-200 dark:bg-slate-800 rounded-lg" />
+              <div className="h-20 w-full bg-slate-100 dark:bg-slate-800/40 rounded-2xl" />
+            </div>
+          ))}
         </div>
       ) : filteredTickets.length === 0 ? (
-        <div className="bg-white dark:bg-ink p-12 text-center rounded-2xl border border-rule/80 dark:border-rule-2/60 space-y-3">
-          <Inbox className="w-10 h-10 mx-auto text-slate-400" />
-          <h3 className="text-sm font-semibold text-ink dark:text-primary-ink">
-            {searchQuery
-              ? `Không tìm thấy ticket nào khớp với từ khóa "${searchQuery}"`
-              : 'Không có ticket nào trong bộ lọc này'}
+        <div className="p-12 text-center rounded-[2.5rem] bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+          <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-slate-800 flex items-center justify-center mx-auto mb-3 text-indigo-500">
+            <Inbox className="w-6 h-6" />
+          </div>
+          <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">
+            Không tìm thấy yêu cầu nào phù hợp
           </h3>
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              className="text-xs font-semibold text-accent hover:underline cursor-pointer"
-            >
-              Xóa bộ lọc tìm kiếm
-            </button>
-          )}
+          <button
+            onClick={resetFilters}
+            className="mt-4 px-4 py-2 text-xs font-semibold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shadow-sm cursor-pointer"
+          >
+            Đặt lại bộ lọc
+          </button>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-5">
           {filteredTickets.map((ticket) => {
             const isExpanded = expandedContent[ticket.id] || false;
             const directUrl = getDirectSourceUrl(ticket);
@@ -1182,129 +1360,133 @@ export const UnifiedInboxPage: React.FC = () => {
             const displayTime = formatDateTime(ticket.created_at || ticket.ticket_timestamp);
 
             return (
-              <div
+              <motion.div
                 key={ticket.id}
-                className="bento-card p-5 sm:p-6 space-y-4 hover:border-slate-300 dark:hover:border-slate-700 transition-all"
+                id={`ticket-card-${ticket.id}`}
+                whileHover={{ y: -1 }}
+                transition={{ duration: 0.2 }}
+                className="p-6 sm:p-7 rounded-[2.5rem] bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs hover:shadow-md transition-all duration-200 space-y-4"
               >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="space-y-2 flex-1 min-w-0">
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      {renderSourceBadge(ticket.source)}
-                      {renderStatusPill(ticket.status)}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {renderSourceBadge(ticket.source)}
+                    {renderStatusPill(ticket.status || 'pending')}
+                    {getCategoryBadge(ticket.category || 'other', ticket.id)}
 
-                      <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-0.5">
-                        <Tag className="w-3 h-3 text-indigo-500" />
-                        <select
-                          value={ticket.category || 'other'}
-                          onChange={(e) => handleCategoryChange(ticket.id, e.target.value)}
-                          className="bg-transparent text-indigo-600 dark:text-indigo-400 text-[10px] font-bold uppercase outline-none cursor-pointer"
-                        >
-                          <option value="bug">BUG</option>
-                          <option value="account_keycloak">KEYCLOAK</option>
-                          <option value="lms_enroll">LMS ENROLL</option>
-                          <option value="license">LICENSE</option>
-                          <option value="other">OTHER</option>
-                        </select>
-                      </div>
-
-                      <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate max-w-[200px]">
+                    <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 pl-1">
+                      <span className="font-semibold text-slate-800 dark:text-slate-200 truncate max-w-[200px]">
                         {ticket.submitter_name || ticket.sender_email}
                       </span>
-
-                      <span className="text-xs text-slate-400 flex items-center gap-1">
-                        <Calendar className="w-3 h-3" />
+                      <span>•</span>
+                      <div className="flex items-center gap-1">
+                        <Calendar className="w-3 h-3 opacity-60" />
                         <span>{displayTime}</span>
-                      </span>
-                    </div>
-
-                    <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white leading-snug">
-                      {ticket.subject || 'Không có tiêu đề'}
-                    </h3>
-
-                    {attachments.length > 0 && (
-                      <div className="flex items-center gap-2 flex-wrap pt-1">
-                        {attachments.map((file: any, idx: number) => {
-                          const isExcel = file.filename?.endsWith('.xlsx') || file.filename?.endsWith('.xls');
-                          const isImage = file.filename?.endsWith('.png') || file.filename?.endsWith('.jpg') || file.filename?.endsWith('.jpeg');
-
-                          return (
-                            <button
-                              key={idx}
-                              type="button"
-                              onClick={() => setPreviewFile(file)}
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 text-[11px] font-medium rounded-lg transition shadow-2xs cursor-pointer"
-                            >
-                              {isImage ? (
-                                <ImageIcon className="w-3 h-3 text-emerald-500" />
-                              ) : isExcel ? (
-                                <FileSpreadsheetIcon className="w-3 h-3 text-emerald-600" />
-                              ) : (
-                                <Paperclip className="w-3 h-3 text-indigo-500" />
-                              )}
-                              <span className="truncate max-w-[220px]">{file.filename}</span>
-                              <Eye className="w-3 h-3 text-slate-400" />
-                            </button>
-                          );
-                        })}
                       </div>
-                    )}
+                    </div>
                   </div>
 
                   <a
                     href={directUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-sky-700 dark:text-sky-300 text-xs font-semibold rounded-xl transition shrink-0 shadow-2xs cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/50 border border-sky-200 dark:border-sky-800 hover:bg-sky-100 transition-colors shadow-2xs"
                   >
                     <span>Mở trang gốc</span>
                     <ExternalLink className="w-3.5 h-3.5" />
                   </a>
                 </div>
 
-                <div className="bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-100/60 dark:border-indigo-900/40 rounded-2xl p-4 space-y-2">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300">
-                    <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                    <span>Tóm tắt & Đề xuất tự động từ Gemini AI</span>
-                  </div>
-                  <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed font-normal whitespace-pre-line">
-                    {ticket.ai_summary || 'Hệ thống đã nhận thông tin và đang chờ Gemini AI phân tích...'}
-                  </p>
-                  {ticket.assigned_name && (
-                    <div className="text-[11px] text-slate-500 dark:text-slate-400 pt-2 border-t border-indigo-100/60 dark:border-indigo-900/40">
-                      👤 Phân công đề xuất:{' '}
-                      <strong className="text-indigo-700 dark:text-indigo-300 font-bold">
-                        {ticket.assigned_name}
-                      </strong>{' '}
-                      ({ticket.assigned_email})
-                    </div>
+                <div>
+                  <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white tracking-tight leading-snug">
+                    {ticket.subject || 'Không có tiêu đề'}
+                  </h2>
+                  {ticket.metadata?.school_name && (
+                    <p className="text-xs font-medium text-indigo-600 dark:text-indigo-400 mt-0.5 flex items-center gap-1">
+                      <Building2 className="w-3.5 h-3.5" />
+                      <span>{ticket.metadata.school_name}</span>
+                    </p>
                   )}
                 </div>
 
-                {isExpanded && (
-                  <div className="p-4 bg-paper-2 dark:bg-ink/90 rounded-xl border border-rule dark:border-rule-2 text-xs text-ink dark:text-primary-ink whitespace-pre-wrap max-h-72 overflow-y-auto font-mono leading-relaxed shadow-inner">
-                    {cleanRawContent || '(Không có nội dung văn bản gốc)'}
+                {attachments.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pt-0.5">
+                    {attachments.map((file: any, idx: number) => {
+                      const isExcel = file.filename?.endsWith('.xlsx') || file.filename?.endsWith('.xls');
+                      const isImage = file.filename?.endsWith('.png') || file.filename?.endsWith('.jpg') || file.filename?.endsWith('.jpeg');
+
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setPreviewFile(file)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-50 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-indigo-200 hover:bg-indigo-50/40 transition-all shadow-2xs group cursor-pointer"
+                        >
+                          {isImage ? (
+                            <ImageIcon className="w-3.5 h-3.5 text-emerald-500" />
+                          ) : isExcel ? (
+                            <FileSpreadsheetIcon className="w-3.5 h-3.5 text-emerald-600" />
+                          ) : (
+                            <Paperclip className="w-3.5 h-3.5 text-indigo-500" />
+                          )}
+                          <span className="truncate max-w-[200px]">{file.filename}</span>
+                          <Eye className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 ml-0.5 transition-colors" />
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
 
-                <div className="flex items-center justify-between pt-1 flex-wrap gap-2">
+                {/* Gemini AI Summary Box */}
+                <div className="p-5 sm:p-6 rounded-[2rem] bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40 space-y-3 shadow-xs">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1 rounded-lg bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300">
+                      <Sparkles className="w-4 h-4" />
+                    </div>
+                    <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                      Tóm tắt & Đề xuất tự động từ Gemini AI
+                    </span>
+                  </div>
+
+                  <div className="p-3.5 rounded-2xl bg-white/80 dark:bg-slate-900/80 border border-emerald-100/70 dark:border-emerald-900/30 text-xs shadow-xs space-y-1">
+                    <p className="text-slate-700 dark:text-slate-300 font-normal leading-relaxed whitespace-pre-line">
+                      {ticket.ai_summary || 'Hệ thống đã nhận thông tin và đang chờ Gemini AI phân tích...'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Collapsible raw content */}
+                <div className="pt-1">
                   <button
                     type="button"
                     onClick={() =>
                       setExpandedContent((prev) => ({ ...prev, [ticket.id]: !prev[ticket.id] }))
                     }
-                    className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-ink dark:text-ink-3 dark:hover:text-slate-200 font-medium transition cursor-pointer"
+                    className="flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors cursor-pointer"
                   >
-                    <FileCode className="w-3.5 h-3.5 text-slate-400" />
+                    <FileCode className="w-3.5 h-3.5" />
                     <span>{isExpanded ? 'Thu gọn nội dung gốc' : 'Xem nội dung gốc'}</span>
                     {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                   </button>
 
-                  <div className="flex items-center gap-2 flex-wrap">
+                  {isExpanded && (
+                    <div className="mt-2.5 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 font-mono whitespace-pre-wrap leading-relaxed shadow-inner max-h-72 overflow-y-auto">
+                      {cleanRawContent || '(Không có nội dung văn bản gốc)'}
+                    </div>
+                  )}
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <div className="text-[11px] font-mono text-slate-400">
+                    Mã tham chiếu: #{ticket.source_id || ticket.id.slice(0, 8)}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
                     {isDismissed ? (
                       <button
                         onClick={() => handleRestoreTask(ticket.id)}
                         disabled={actionLoading === ticket.id}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-paper-2 hover:bg-rule text-ink text-xs font-medium rounded-xl transition shadow-2xs cursor-pointer"
+                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 transition-colors shadow-2xs cursor-pointer"
                       >
                         {actionLoading === ticket.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
                         <span>Khôi phục Hòm Thư</span>
@@ -1313,7 +1495,7 @@ export const UnifiedInboxPage: React.FC = () => {
                       <button
                         onClick={() => handleRestoreTask(ticket.id)}
                         disabled={actionLoading === ticket.id}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-paper-2 hover:bg-rule text-ink text-xs font-medium rounded-xl transition cursor-pointer"
+                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 transition-colors shadow-2xs cursor-pointer"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
                         <span>Mở lại Ticket</span>
@@ -1323,7 +1505,7 @@ export const UnifiedInboxPage: React.FC = () => {
                         <button
                           onClick={() => handleDismissTask(ticket.id)}
                           disabled={actionLoading === ticket.id}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/80 text-xs font-medium rounded-xl transition shadow-2xs cursor-pointer"
+                          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-300 border border-rose-100 dark:border-rose-900 hover:bg-rose-100 transition-colors shadow-2xs cursor-pointer"
                         >
                           {actionLoading === ticket.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
                           <span>Bỏ qua</span>
@@ -1332,7 +1514,7 @@ export const UnifiedInboxPage: React.FC = () => {
                         <button
                           onClick={() => handleCompleteTask(ticket.id)}
                           disabled={actionLoading === ticket.id}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/80 text-xs font-semibold rounded-xl transition shadow-2xs cursor-pointer"
+                          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-100 dark:border-emerald-900 hover:bg-emerald-100 transition-colors shadow-2xs cursor-pointer"
                         >
                           {actionLoading === ticket.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCheck className="w-3.5 h-3.5" />}
                           <span>Hoàn thành</span>
@@ -1340,15 +1522,15 @@ export const UnifiedInboxPage: React.FC = () => {
 
                         <button
                           onClick={() => navigate('/github', { state: { ticket } })}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white dark:bg-paper-2 dark:hover:bg-white dark:text-ink text-xs font-semibold rounded-xl transition shadow-xs cursor-pointer"
+                          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-900 text-white dark:bg-slate-800 dark:text-slate-100 hover:bg-slate-800 transition-colors shadow-2xs cursor-pointer"
                         >
-                          <Github className="w-3.5 h-3.5" />
+                          <GitPullRequest className="w-3.5 h-3.5" />
                           <span>Tạo Issue GitHub</span>
                         </button>
 
                         <button
                           onClick={() => handleOpenTaskModal(ticket)}
-                          className="flex items-center gap-2 px-3.5 py-1.5 bg-accent hover:bg-accent active:bg-accent-2 text-white text-xs font-semibold rounded-xl transition shadow-xs cursor-pointer"
+                          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shadow-sm cursor-pointer"
                         >
                           <Bot className="w-3.5 h-3.5" />
                           <span>Tạo Tác Vụ Bot</span>
@@ -1358,125 +1540,52 @@ export const UnifiedInboxPage: React.FC = () => {
                     )}
                   </div>
                 </div>
-              </div>
+              </motion.div>
             );
           })}
         </div>
       )}
 
-      {/* MODAL XEM TRƯỚC FILE */}
-      {previewFile && (
-        <div
-          onClick={(e) => { if (e.target === e.currentTarget) setPreviewFile(null); }}
-          className="fixed inset-0 z-50 bg-white/75 dark:bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-150"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-3xl w-full max-w-6xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] my-auto"
-          >
-            <div className="flex items-center justify-between p-4 border-b border-rule dark:border-rule-2">
-              <div className="flex items-center gap-2 truncate">
-                <Paperclip className="w-4 h-4 text-accent" />
-                <span className="text-xs font-bold text-ink dark:text-primary-ink truncate">
-                  {previewFile.filename}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <a
-                  href={previewFile.url}
-                  download={previewFile.filename}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-1 px-3 py-1 bg-accent-soft hover:bg-accent-soft text-accent text-xs font-medium rounded-lg transition cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Tải Về Máy</span>
-                </a>
-                <button
-                  onClick={() => setPreviewFile(null)}
-                  className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex-1 p-4 overflow-auto flex items-center justify-center bg-paper-2 dark:bg-ink">
-              {previewFile.filename?.match(/\.(png|jpg|jpeg|gif|webp)$/i) ? (
-                <img
-                  src={previewFile.url}
-                  alt={previewFile.filename}
-                  className="max-w-full max-h-[75vh] object-contain rounded-xl shadow-md"
-                />
-              ) : previewFile.filename?.endsWith('.pdf') ? (
-                <iframe
-                  src={previewFile.url}
-                  title={previewFile.filename}
-                  className="w-full h-[75vh] rounded-xl border border-rule"
-                />
-              ) : (
-                <div className="text-center p-8 space-y-3">
-                  <FileSpreadsheetIcon className="w-12 h-12 mx-auto text-emerald-600" />
-                  <div className="text-xs font-medium text-ink dark:text-primary-ink">
-                    File bảng tính Excel: <strong>{previewFile.filename}</strong>
-                  </div>
-                  <a
-                    href={previewFile.url}
-                    download
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-xs"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>Tải File Excel Về Máy</span>
-                  </a>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ========================================================================= */}
-      {/* 🚀 SMART ACTION MODAL (BẢN CLONE HOÀN HẢO TỪ AUTOMATION STUDIO) */}
+      {/* 🚀 STUDIO PRO MODAL (HOÀN CHỈNH 100% NHƯ STUDIO) */}
       {/* ========================================================================= */}
       {taskModalTicket && (
         <div
           onClick={(e) => { if (e.target === e.currentTarget) setTaskModalTicket(null); }}
-          className="fixed inset-0 z-50 bg-white/75 dark:bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-150"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-3xl w-full max-w-5xl shadow-2xl overflow-hidden space-y-5 p-6 sm:p-8 max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95 duration-150 my-auto"
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-5xl shadow-2xl overflow-hidden p-6 sm:p-8 max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95 duration-150 my-auto"
           >
-
             {/* Header Modal */}
-            <div className="flex items-center justify-between pb-3 border-b border-rule dark:border-rule-2 flex-wrap gap-2 shrink-0">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 flex-wrap gap-2 shrink-0">
               <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-accent text-white rounded-2xl shadow-md">
-                  <Bot className="w-5 h-5" />
+                <div className="p-2.5 bg-indigo-600 text-white rounded-2xl shadow-md">
+                  <Zap className="w-5 h-5" />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="text-base font-extrabold text-ink dark:text-primary-ink tracking-tight">
-                      Điều Phối Tác Vụ Tự Động Hóa
+                    <h3 className="text-base font-extrabold text-slate-900 dark:text-white tracking-tight">
+                      Automation Studio Pro (Điều Phối Cho Request)
                     </h3>
-                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-accent-soft dark:bg-ink/60 text-accent dark:text-accent-2 font-bold uppercase">
-                      Smart Triage
+                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 font-bold uppercase">
+                      Auto Pre-filled
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500 dark:text-ink-3">
-                    Bắn tác vụ vào Hàng đợi Phê duyệt Human-in-the-Loop hoặc duyệt chạy ngay.
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Dữ liệu đã được tự động điền dựa trên phân tích Request #{taskModalTicket.source_id || taskModalTicket.id.slice(0, 8)}.
                   </p>
                 </div>
               </div>
 
               <div className="flex items-center gap-2">
-                {/* Switch chế độ Form / JSON */}
-                <div className="flex items-center bg-paper-2 dark:bg-ink p-1 rounded-xl text-xs font-semibold">
+                <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold">
                   <button
                     type="button"
                     onClick={() => setViewMode('form')}
                     className={`px-3 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 ${viewMode === 'form'
-                      ? 'bg-white dark:bg-rule-2 text-accent dark:text-accent-2 font-bold shadow-2xs'
+                      ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 font-bold shadow-2xs'
                       : 'text-slate-500'
                       }`}
                   >
@@ -1487,7 +1596,7 @@ export const UnifiedInboxPage: React.FC = () => {
                     type="button"
                     onClick={() => setViewMode('json')}
                     className={`px-3 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 ${viewMode === 'json'
-                      ? 'bg-white dark:bg-rule-2 text-accent dark:text-accent-2 font-bold shadow-2xs'
+                      ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 font-bold shadow-2xs'
                       : 'text-slate-500'
                       }`}
                   >
@@ -1499,50 +1608,31 @@ export const UnifiedInboxPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setTaskModalTicket(null)}
-                  className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-paper-2 dark:hover:bg-slate-800 transition cursor-pointer"
+                  className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
             </div>
 
-            {/* Thông tin Ticket đầu vào */}
-            <div className="p-3.5 rounded-2xl bg-paper-2 dark:bg-ink/90 border border-rule/80 dark:border-rule-2 text-xs space-y-1.5 shrink-0">
-              <div className="font-bold text-ink dark:text-primary-ink truncate">
-                📌 {taskModalTicket.subject || 'Không có tiêu đề'}
-              </div>
-              <div className="text-[11px] text-slate-500 flex items-center gap-3 flex-wrap">
-                <span>Người gửi: <strong className="text-ink dark:text-primary-ink">{taskModalTicket.sender_email}</strong></span>
-                <span>•</span>
-                <span>Nguồn: <strong>{taskModalTicket.source.toUpperCase()}</strong></span>
-                {taskModalTicket.metadata?.school_name && (
-                  <>
-                    <span>•</span>
-                    <span>Trường theo Ticket: <strong className="text-accent">{taskModalTicket.metadata.school_name}</strong></span>
-                  </>
-                )}
-              </div>
-            </div>
-
             {/* Thân Modal cuộn */}
-            <div className="flex-1 overflow-y-auto space-y-5 pr-1 scrollbar-thin">
+            <div className="flex-1 overflow-y-auto space-y-5 pr-1 py-3">
               {viewMode === 'form' ? (
                 <>
                   {/* BƯỚC 1: CHỌN CỖ MÁY BOT */}
                   <div className="space-y-2">
-                    <label className="text-xs font-bold text-ink dark:text-primary-ink uppercase tracking-wider flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-accent-soft dark:bg-ink/50 text-accent dark:text-accent-2 flex items-center justify-center text-[10px] font-extrabold">
+                    <label className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                      <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px] font-extrabold">
                         1
                       </span>
                       <span>Chọn Cỗ Máy Tự Động Hóa:</span>
                     </label>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                       {[
-                        { id: 'workspace_rpa', label: 'Workspace & LMS', icon: Building2, desc: 'License, Order & LMS' },
+                        { id: 'workspace_rpa', label: 'Workspace & LMS', icon: Building2, desc: 'Đơn Hàng, Hợp Đồng & LMS' },
                         { id: 'keycloak_api', label: 'Keycloak IDP', icon: KeyRound, desc: 'Quản Trị Người Dùng' },
-                        { id: 'feedback_doc_triage', label: 'Feedback Sheet', icon: FileText, desc: 'Tag Doc & Comment' },
-                        { id: 'github_issue_creator', label: 'GitHub Issue', icon: Github, desc: 'Báo Lỗi Dev' },
+                        { id: 'feedback_doc_triage', label: 'Feedback Sheet', icon: FileText, desc: 'Ghi Chú & Tag Doc Tự Động' },
                       ].map((tab) => {
                         const Icon = tab.icon;
                         const isSel = selectedBotType === tab.id;
@@ -1551,26 +1641,26 @@ export const UnifiedInboxPage: React.FC = () => {
                             key={tab.id}
                             type="button"
                             onClick={() => setSelectedBotType(tab.id as any)}
-                            className={`flex flex-col items-start gap-1 p-3 rounded-2xl border text-left transition cursor-pointer ${isSel
-                              ? 'bg-accent text-white border-transparent shadow-md'
-                              : 'bg-paper-2 dark:bg-ink/60 border-rule dark:border-rule-2/80 text-ink dark:text-primary-ink hover:bg-paper-2'
+                            className={`flex flex-col items-start gap-1 p-3.5 rounded-2xl border text-left transition cursor-pointer ${isSel
+                              ? 'bg-indigo-600 text-white border-transparent shadow-md'
+                              : 'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100'
                               }`}
                           >
-                            <Icon className={`w-4 h-4 ${isSel ? 'text-white' : 'text-accent dark:text-accent-2'}`} />
+                            <Icon className={`w-4 h-4 ${isSel ? 'text-white' : 'text-indigo-600 dark:text-indigo-400'}`} />
                             <span className="text-xs font-bold mt-1">{tab.label}</span>
-                            <span className={`text-[10px] ${isSel ? 'text-accent-2' : 'text-ink-3'}`}>{tab.desc}</span>
+                            <span className={`text-[10px] ${isSel ? 'text-indigo-200' : 'text-slate-400'}`}>{tab.desc}</span>
                           </button>
                         );
                       })}
                     </div>
                   </div>
 
-                  {/* BƯỚC 2A: WORKSPACE & LMS PIPELINE */}
+                  {/* BƯỚC 2A: WORKSPACE & LMS */}
                   {selectedBotType === 'workspace_rpa' && (
-                    <div className="space-y-5 p-5 rounded-2xl bg-accent-soft/50 dark:bg-ink/20 border border-accent-soft dark:border-rule-2/40">
+                    <div className="space-y-4 p-5 rounded-2xl bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/40">
                       <div className="flex items-center justify-between flex-wrap gap-2">
-                        <label className="text-xs font-bold text-accent dark:text-accent-2 flex items-center gap-1.5">
-                          <span className="w-5 h-5 rounded-full bg-accent-soft dark:bg-ink/60 text-accent dark:text-accent-2 flex items-center justify-center text-[10px] font-extrabold">
+                        <label className="text-xs font-bold text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5">
+                          <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px] font-extrabold">
                             2
                           </span>
                           <span>Chọn Phân Luồng Nghiệp Vụ Cốt Lõi:</span>
@@ -1580,21 +1670,21 @@ export const UnifiedInboxPage: React.FC = () => {
                           type="button"
                           onClick={handleAutoExtractCof}
                           disabled={extractingCof}
-                          className="flex items-center gap-1.5 px-3 py-1 bg-white dark:bg-ink text-accent dark:text-accent-2 border border-accent-soft dark:border-rule-2 text-xs font-semibold rounded-xl transition cursor-pointer shadow-2xs hover:bg-accent-soft"
+                          className="flex items-center gap-1.5 px-3 py-1 bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 text-xs font-semibold rounded-xl transition cursor-pointer shadow-2xs hover:bg-indigo-50"
                         >
                           {extractingCof ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
-                          <span>AI Bóc Tách File COF</span>
+                          <span>AI Tái Bóc Tách File COF</span>
                         </button>
                       </div>
 
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-accent-soft/60 dark:bg-ink/40 p-1.5 rounded-2xl text-xs font-medium">
+                      {/* 4 Tabs Nghiệp vụ như Studio */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-100 dark:bg-slate-800 p-1.5 rounded-2xl text-xs font-medium">
                         {[
-                          { id: 'create_and_approve', label: '1. Tạo & Duyệt', icon: Zap },
-                          { id: 'approve', label: '2. Phê Duyệt', icon: FileCheck },
+                          { id: 'approve', label: '1. Phê Duyệt', icon: ClipboardCheck },
+                          { id: 'create_and_approve', label: '2. Tạo & Duyệt', icon: Zap },
                           { id: 'bulk_accounts', label: '3. Tạo Tài Khoản', icon: Users },
                           { id: 'lms_enroll', label: '4. Ghi Danh LMS', icon: GraduationCap },
                         ].map((mTab) => {
-                          const MIcon = mTab.icon;
                           const isCur = workspaceMainCategory === mTab.id;
                           return (
                             <button
@@ -1605,50 +1695,106 @@ export const UnifiedInboxPage: React.FC = () => {
                                 setParsedOrderCourses([]);
                               }}
                               className={`py-2.5 px-2 rounded-xl text-center transition-all cursor-pointer flex items-center justify-center gap-1.5 text-xs ${isCur
-                                ? 'bg-white dark:bg-ink font-bold text-accent dark:text-accent-2 shadow-2xs'
-                                : 'text-slate-600 dark:text-ink-3 hover:text-ink'
+                                ? 'bg-white dark:bg-slate-900 font-bold text-indigo-600 dark:text-indigo-400 shadow-2xs'
+                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                                 }`}
                             >
-                              <MIcon className="w-3.5 h-3.5" />
                               <span>{mTab.label}</span>
                             </button>
                           );
                         })}
                       </div>
 
-                      {/* Ô TÌM KIẾM ĐỐI TƯỢNG PHẢ HỆ */}
-                      {workspaceMainCategory !== 'approve' && workspaceMainCategory !== 'lms_enroll' && (
-                        <div className="space-y-2 relative" ref={entityDropdownRef}>
-                          <label className="text-xs font-bold text-ink dark:text-primary-ink flex items-center justify-between">
-                            <span className="flex items-center gap-1.5">
-                              {currentEntityMode === 'school' ? (
-                                <Building2 className="w-3.5 h-3.5 text-accent" />
-                              ) : currentEntityMode === 'partner' ? (
-                                <Briefcase className="w-3.5 h-3.5 text-accent" />
-                              ) : (
-                                <Store className="w-3.5 h-3.5 text-amber-600" />
-                              )}
-                              <span>
-                                {currentEntityMode === 'school'
-                                  ? 'Trường học áp dụng (Chọn trường thụ hưởng):'
-                                  : currentEntityMode === 'partner'
-                                    ? 'Đối tác phụ trách (Chọn đối tác):'
-                                    : 'Nhà phân phối (Chọn nhà phân phối):'}
-                              </span>
-                            </span>
-                            {(selectedSchool || selectedPartner || selectedDistributor) && (
-                              <span className="text-xs text-accent font-bold font-mono">
-                                {currentEntityMode === 'school'
-                                  ? selectedSchool?.school_code
-                                  : currentEntityMode === 'partner'
-                                    ? selectedPartner?.code
-                                    : selectedDistributor?.code}
-                              </span>
-                            )}
-                          </label>
+                      {/* LUỒNG 1: PHÊ DUYỆT ĐƠN HÀNG/HỢP ĐỒNG */}
+                      {workspaceMainCategory === 'approve' && (
+                        <div className="space-y-4 pt-1">
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            {[
+                              { id: 'approve_school_order', label: 'Đơn Hàng Trường', desc: 'Duyệt Order của Trường' },
+                              { id: 'approve_partner_contract', label: 'Hợp Đồng Đối Tác', desc: 'Duyệt Contract PRT' },
+                              { id: 'admin_approve_contract', label: 'Hợp Đồng Quản Trị', desc: 'Duyệt Contract DST' },
+                            ].map((sub) => (
+                              <button
+                                key={sub.id}
+                                type="button"
+                                onClick={() => {
+                                  setApproveSubFlow(sub.id as any);
+                                  setSelectedItemCode('');
+                                  setSelectedCachedItem(null);
+                                }}
+                                className={`rounded-xl border p-3 text-left transition cursor-pointer ${approveSubFlow === sub.id
+                                  ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40'
+                                  : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
+                                  }`}
+                              >
+                                <p className="text-xs font-bold text-slate-800 dark:text-slate-200">{sub.label}</p>
+                                <p className="text-[10px] text-slate-400">{sub.desc}</p>
+                              </button>
+                            ))}
+                          </div>
 
                           <div className="relative">
-                            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                            <input
+                              type="text"
+                              value={universalSearchQuery}
+                              onChange={(e) => setUniversalSearchQuery(e.target.value)}
+                              placeholder="Tìm kiếm mã đơn / tên trường trong danh sách..."
+                              className="w-full pl-3 pr-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs"
+                            />
+                          </div>
+
+                          <div className="max-h-48 overflow-y-auto space-y-1.5 border border-slate-200 dark:border-slate-800 rounded-xl p-2 bg-white dark:bg-slate-900">
+                            {isScrapingLive ? (
+                              <div className="p-4 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                                <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
+                                <span>Đang nạp danh sách cache...</span>
+                              </div>
+                            ) : scrapedPendingList.length === 0 ? (
+                              <div className="p-4 text-center text-xs text-slate-400">Không có mục nào trong danh sách cache.</div>
+                            ) : (
+                              scrapedPendingList.map((item, idx) => {
+                                const code = item.order_code || item.contract_code || `ITEM-${idx}`;
+                                const isSel = selectedItemCode === code;
+                                return (
+                                  <div
+                                    key={idx}
+                                    onClick={() => {
+                                      setSelectedItemCode(code);
+                                      setSelectedCachedItem(item);
+                                      if (item.courses_data) setParsedOrderCourses(item.courses_data);
+                                    }}
+                                    className={`p-2.5 rounded-xl border text-xs cursor-pointer transition ${isSel ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40' : 'border-slate-100 dark:border-slate-800'}`}
+                                  >
+                                    <div className="flex justify-between font-bold">
+                                      <span>{code}</span>
+                                      <span className="text-[10px] text-amber-600">{item.status || 'Pending'}</span>
+                                    </div>
+                                    <div className="text-[11px] text-slate-500">{item.school_name || item.sender_name}</div>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* LUỒNG 2: TẠO MỚI & DUYỆT TRỌN GÓI */}
+                      {workspaceMainCategory === 'create_and_approve' && (
+                        <div className="space-y-4">
+                          {/* Trường học áp dụng */}
+                          <div className="space-y-1.5 relative" ref={entityDropdownRef}>
+                            <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center justify-between">
+                              <span className="flex items-center gap-1.5">
+                                <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+                                <span>Trường Học Áp Dụng (Phả hệ 480 trường):</span>
+                              </span>
+                              {selectedSchool && (
+                                <span className="text-xs text-indigo-600 font-bold font-mono">
+                                  {selectedSchool.school_code}
+                                </span>
+                              )}
+                            </label>
+
                             <input
                               type="text"
                               value={entitySearchQuery}
@@ -1657,103 +1803,63 @@ export const UnifiedInboxPage: React.FC = () => {
                                 setEntitySearchQuery(e.target.value);
                                 setIsEntityDropdownOpen(true);
                               }}
-                              placeholder="Tìm kiếm trường học theo tên hoặc mã trường..."
-                              className="w-full pl-10 pr-10 bg-white dark:bg-ink border border-accent-soft dark:border-rule-2 rounded-xl p-2.5 text-xs text-ink dark:text-primary-ink outline-none focus:ring-2 focus:ring-accent"
+                              placeholder="Tra cứu trong 480 trường..."
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs text-slate-900 dark:text-white outline-none"
                             />
-                            {entitySearchQuery && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEntitySearchQuery('');
-                                  setSelectedSchool(null);
-                                }}
-                                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
-                              >
-                                <X className="w-3.5 h-3.5" />
-                              </button>
+
+                            {isEntityDropdownOpen && (
+                              <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-56 overflow-y-auto p-1.5 space-y-1">
+                                {schoolsList
+                                  .filter((s) => s.school_name.toLowerCase().includes(entitySearchQuery.toLowerCase()) || s.school_code.toLowerCase().includes(entitySearchQuery.toLowerCase()))
+                                  .slice(0, 30)
+                                  .map((s) => (
+                                    <button
+                                      key={s.school_code}
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedSchool(s);
+                                        setSelectedPartner({ name: s.partner_name, code: s.partner_code || 'PAR' });
+                                        setSelectedDistributor({ name: s.distributor_name, code: s.distributor_code || 'DST' });
+                                        setEntitySearchQuery(s.school_name);
+                                        setIsEntityDropdownOpen(false);
+                                      }}
+                                      className="w-full text-left p-2.5 rounded-xl text-xs hover:bg-indigo-50 dark:hover:bg-slate-800 flex items-center justify-between cursor-pointer"
+                                    >
+                                      <div>
+                                        <div className="font-bold text-slate-800 dark:text-slate-200">{s.school_name}</div>
+                                        <div className="text-[11px] text-slate-400 font-mono">
+                                          Mã: {s.school_code} | Tuyến: {s.partner_name} ➔ {s.distributor_name}
+                                        </div>
+                                      </div>
+                                      {selectedSchool?.school_code === s.school_code && <Check className="w-4 h-4 text-indigo-600" />}
+                                    </button>
+                                  ))}
+                              </div>
+                            )}
+
+                            {selectedSchool && (
+                              <div className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-slate-800 text-[11px] font-mono text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 shadow-2xs">
+                                <Layers className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                                <span>{selectedSchool.full_lineage}</span>
+                              </div>
                             )}
                           </div>
 
-                          {isEntityDropdownOpen && (
-                            <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-2xl shadow-xl max-h-56 overflow-y-auto p-1.5 space-y-1">
-                              {schoolsList
-                                .filter((s) => s.school_name.toLowerCase().includes(entitySearchQuery.toLowerCase()) || s.school_code.toLowerCase().includes(entitySearchQuery.toLowerCase()))
-                                .slice(0, 30)
-                                .map((s) => (
-                                  <button
-                                    key={s.school_code}
-                                    type="button"
-                                    onClick={() => {
-                                      setSelectedSchool(s);
-                                      setSelectedPartner({ name: s.partner_name, code: s.partner_code || 'PAR' });
-                                      setSelectedDistributor({ name: s.distributor_name, code: s.distributor_code || 'DST' });
-                                      setEntitySearchQuery(s.school_name);
-                                      setIsEntityDropdownOpen(false);
-                                    }}
-                                    className="w-full text-left p-2.5 rounded-xl text-xs hover:bg-accent-soft dark:hover:bg-rule-2/60 flex items-center justify-between cursor-pointer"
-                                  >
-                                    <div>
-                                      <div className="font-bold text-ink dark:text-primary-ink">{s.school_name}</div>
-                                      <div className="text-[11px] text-slate-400 font-mono">
-                                        Mã: {s.school_code} | Tuyến: {s.partner_name} ➔ {s.distributor_name}
-                                      </div>
-                                    </div>
-                                    {selectedSchool?.school_code === s.school_code && <Check className="w-4 h-4 text-accent" />}
-                                  </button>
-                                ))}
-                            </div>
-                          )}
-
-                          {selectedSchool && (
-                            <div className="p-2.5 rounded-xl bg-white dark:bg-ink border border-accent-soft dark:border-rule-2/80 text-[11px] font-mono text-accent dark:text-accent-2 flex items-center gap-1.5 shadow-2xs">
-                              <Layers className="w-3.5 h-3.5 text-accent shrink-0" />
-                              <span>{selectedSchool.full_lineage}</span>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* MỤC 1: TẠO MỚI & DUYỆT CHUỖI */}
-                      {workspaceMainCategory === 'create_and_approve' && (
-                        <div className="space-y-4">
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                            {[
-                              { id: 'end_to_end', label: 'Trọn Gói Toàn Trình', desc: 'Trường ➔ Quản trị ➔ LMS' },
-                              { id: 'partner_create_chain', label: 'Đối Tác Tạo & Duyệt', desc: 'Đối tác ➔ Quản trị' },
-                              { id: 'distributor_create_chain', label: 'Nhà Phân Phối Tạo', desc: 'Phân phối ➔ Quản trị' },
-                            ].map((sub) => (
-                              <button
-                                key={sub.id}
-                                type="button"
-                                onClick={() => setCreateApproveSubFlow(sub.id as any)}
-                                className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${createApproveSubFlow === sub.id
-                                  ? 'bg-accent text-accent-ink border-transparent shadow-xs'
-                                  : 'bg-paper-2 border-rule-2 text-ink-2 hover:bg-paper'
-                                  }`}
-                              >
-                                <div className="font-bold text-xs">{sub.label}</div>
-                                <div className={`text-[10px] ${createApproveSubFlow === sub.id ? 'text-accent-ink' : 'text-ink-3'}`}>
-                                  {sub.desc}
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-
-                          {/* Danh Sách Khóa Học Cấp Phép */}
+                          {/* Danh Sách Khóa Học */}
                           <div className="space-y-3 pt-1">
                             <div className="flex items-center justify-between">
-                              <label className="text-xs font-bold text-accent dark:text-accent-2 flex items-center gap-1.5">
-                                <BookOpen className="w-4 h-4 text-sky-600" />
-                                <span>Danh Sách Khóa Học Cấp Phép ({selectedCourses.length} Môn):</span>
+                              <label className="text-xs font-bold text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5">
+                                <BookOpen className="w-4 h-4 text-indigo-600" />
+                                <span>Danh Sách Khóa Học ({selectedCourses.length} Môn):</span>
                               </label>
 
                               <button
                                 type="button"
                                 onClick={handleAddCourseRow}
-                                className="flex items-center gap-1 text-xs px-3 py-1 bg-sky-50 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800/60 rounded-xl font-bold hover:bg-sky-100 cursor-pointer shadow-2xs transition"
+                                className="flex items-center gap-1 text-xs px-3 py-1 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-xl font-bold hover:bg-indigo-100 cursor-pointer shadow-2xs transition"
                               >
                                 <Plus className="w-3.5 h-3.5" />
-                                <span>Thêm Môn Học</span>
+                                <span>Thêm Khóa Học</span>
                               </button>
                             </div>
 
@@ -1762,9 +1868,9 @@ export const UnifiedInboxPage: React.FC = () => {
                               return (
                                 <div
                                   key={idx}
-                                  className="p-3.5 bg-paper-2 rounded-2xl border border-accent-soft space-y-2.5 shadow-2xs"
+                                  className="p-3.5 bg-white dark:bg-slate-900 rounded-2xl border border-indigo-100 dark:border-slate-800 space-y-2 shadow-2xs"
                                 >
-                                  <div className="flex items-center justify-between text-xs font-bold text-ink dark:text-primary-ink">
+                                  <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
                                     <span>Khóa học #{idx + 1}</span>
                                     {selectedCourses.length > 1 && (
                                       <button
@@ -1777,7 +1883,7 @@ export const UnifiedInboxPage: React.FC = () => {
                                     )}
                                   </div>
 
-                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                     <div>
                                       <label className="text-[10px] font-bold text-slate-500 uppercase">Phân loại:</label>
                                       <select
@@ -1796,7 +1902,7 @@ export const UnifiedInboxPage: React.FC = () => {
                                           };
                                           setSelectedCourses(updated);
                                         }}
-                                        className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2 text-xs font-semibold cursor-pointer outline-none"
+                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-semibold"
                                       >
                                         {workspaceCategoriesList.map((cat) => (
                                           <option key={cat} value={cat}>{cat}</option>
@@ -1805,7 +1911,7 @@ export const UnifiedInboxPage: React.FC = () => {
                                     </div>
 
                                     <div className="sm:col-span-2">
-                                      <label className="text-[10px] font-bold text-slate-500 uppercase">Chọn môn học ({filteredCourses.length} môn):</label>
+                                      <label className="text-[10px] font-bold text-slate-500 uppercase">Chọn khóa học:</label>
                                       <select
                                         value={cRow.course_id}
                                         onChange={(e) => {
@@ -1822,7 +1928,7 @@ export const UnifiedInboxPage: React.FC = () => {
                                             setSelectedCourses(updated);
                                           }
                                         }}
-                                        className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2 text-xs font-semibold cursor-pointer outline-none truncate"
+                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-semibold truncate"
                                       >
                                         {filteredCourses.map((c) => (
                                           <option key={c.course_id} value={c.course_id}>
@@ -1833,7 +1939,7 @@ export const UnifiedInboxPage: React.FC = () => {
                                     </div>
                                   </div>
 
-                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                     <div>
                                       <label className="text-[10px] font-bold text-slate-500 uppercase">Licenses:</label>
                                       <input
@@ -1845,35 +1951,33 @@ export const UnifiedInboxPage: React.FC = () => {
                                           updated[idx].licenses = parseInt(e.target.value) || 1;
                                           setSelectedCourses(updated);
                                         }}
-                                        className="w-full bg-paper-2 dark:bg-ink border border-rule rounded-xl p-2 text-xs font-bold outline-none"
+                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-bold"
                                       />
                                     </div>
                                     <div>
-                                      <label className="text-[10px] font-bold text-slate-500 uppercase">Ngày Bắt Đầu:</label>
+                                      <label className="text-[10px] font-bold text-slate-500 uppercase">Start Date:</label>
                                       <input
                                         type="text"
                                         value={cRow.start_date}
-                                        placeholder="dd-mm-yyyy"
                                         onChange={(e) => {
                                           const updated = [...selectedCourses];
                                           updated[idx].start_date = e.target.value;
                                           setSelectedCourses(updated);
                                         }}
-                                        className="w-full bg-paper-2 dark:bg-ink border border-rule rounded-xl p-2 text-xs font-mono outline-none"
+                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-mono"
                                       />
                                     </div>
                                     <div>
-                                      <label className="text-[10px] font-bold text-slate-500 uppercase">Ngày Hết Hạn:</label>
+                                      <label className="text-[10px] font-bold text-slate-500 uppercase">End Date:</label>
                                       <input
                                         type="text"
                                         value={cRow.end_date}
-                                        placeholder="dd-mm-yyyy"
                                         onChange={(e) => {
                                           const updated = [...selectedCourses];
                                           updated[idx].end_date = e.target.value;
                                           setSelectedCourses(updated);
                                         }}
-                                        className="w-full bg-paper-2 dark:bg-ink border border-rule rounded-xl p-2 text-xs font-mono outline-none"
+                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-mono"
                                       />
                                     </div>
                                   </div>
@@ -1884,23 +1988,9 @@ export const UnifiedInboxPage: React.FC = () => {
                         </div>
                       )}
 
-                      {/* MỤC 3: TẠO TÀI KHOẢN BATCH */}
+                      {/* LUỒNG 3: TẠO TÀI KHOẢN BATCH */}
                       {workspaceMainCategory === 'bulk_accounts' && (
-                        <div className="p-4 bg-paper-2 rounded-2xl border border-accent-soft space-y-3 shadow-2xs">
-                          <div className="flex items-center gap-2.5">
-                            <div className="p-2 bg-accent-soft text-accent rounded-xl">
-                              <Users className="w-4 h-4" />
-                            </div>
-                            <div>
-                              <div className="font-bold text-xs text-primary">
-                                Nộp File Excel Tạo Tài Khoản Hàng Loạt
-                              </div>
-                              <div className="text-[10px] text-ink-2">
-                                Trường: <strong className="text-accent">{selectedSchool?.school_name}</strong>
-                              </div>
-                            </div>
-                          </div>
-
+                        <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-indigo-100 dark:border-slate-800 space-y-3 shadow-2xs">
                           <input
                             type="file"
                             ref={fileInputRef}
@@ -1917,19 +2007,19 @@ export const UnifiedInboxPage: React.FC = () => {
 
                           <div
                             onClick={() => fileInputRef.current?.click()}
-                            className="border-2 border-dashed border-accent-soft hover:border-accent rounded-xl p-6 text-center cursor-pointer transition bg-accent-soft/40 flex flex-col items-center justify-center gap-1.5"
+                            className="border-2 border-dashed border-indigo-200 dark:border-slate-700 hover:border-indigo-500 rounded-2xl p-6 text-center cursor-pointer transition bg-slate-50 dark:bg-slate-800/40 flex flex-col items-center justify-center gap-1.5"
                           >
-                            <UploadCloud className="w-6 h-6 text-accent" />
+                            <UploadCloud className="w-6 h-6 text-indigo-600" />
                             {uploadedAccountsFile ? (
-                              <span className="font-bold text-xs text-primary">
+                              <span className="font-bold text-xs text-indigo-600">
                                 📎 {uploadedAccountsFile.name} ({Math.round(uploadedAccountsFile.size / 1024)} KB)
                               </span>
                             ) : taskModalTicket.attachments?.length ? (
-                              <span className="text-xs text-accent font-semibold">
-                                Sẽ dùng file đính kèm từ Ticket: {taskModalTicket.attachments[0].filename} (Bấm để đổi)
+                              <span className="text-xs text-indigo-600 font-semibold">
+                                Sẽ dùng file từ Ticket: {taskModalTicket.attachments[0].filename} (Bấm để đổi)
                               </span>
                             ) : (
-                              <span className="text-xs text-ink-2">
+                              <span className="text-xs text-slate-400">
                                 Bấm hoặc kéo thả file Excel vào đây
                               </span>
                             )}
@@ -1937,40 +2027,12 @@ export const UnifiedInboxPage: React.FC = () => {
                         </div>
                       )}
 
-                      {/* MỤC 4: GHI DANH LMS */}
+                      {/* LUỒNG 4: GHI DANH LMS */}
                       {workspaceMainCategory === 'lms_enroll' && (
-                        <div className="p-4 bg-white dark:bg-ink rounded-2xl border border-emerald-200 space-y-4 shadow-2xs">
-                          <div className="flex items-center gap-2">
-                            <GraduationCap className="w-4 h-4 text-emerald-600" />
-                            <span className="font-extrabold text-xs text-ink dark:text-primary-ink">
-                              Ghi Danh Khóa Học PLearn LMS (learn.pythaverse.space)
-                            </span>
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-emerald-200 dark:border-emerald-900/50 space-y-3 shadow-2xs">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             <div>
-                              <label className="text-[10px] font-bold text-slate-500 uppercase">Phân loại:</label>
-                              <select
-                                value={lmsCourseCategory}
-                                onChange={(e) => {
-                                  const cat = e.target.value;
-                                  setLmsCourseCategory(cat);
-                                  const match = lmsCoursesList.filter((c) => c.category === cat);
-                                  if (match.length > 0) {
-                                    setLmsCourseId(match[0].course_id);
-                                    setLmsCourseName(match[0].course_name);
-                                  }
-                                }}
-                                className="w-full bg-paper-2 dark:bg-ink border border-rule rounded-xl p-2 text-xs font-semibold outline-none cursor-pointer"
-                              >
-                                {lmsCategoriesList.map((cat) => (
-                                  <option key={cat} value={cat}>{cat}</option>
-                                ))}
-                              </select>
-                            </div>
-
-                            <div className="sm:col-span-2">
-                              <label className="text-[10px] font-bold text-slate-500 uppercase">Khóa học LMS ({lmsCoursesList.filter((c) => c.category === lmsCourseCategory).length} môn):</label>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase">Khóa học LMS:</label>
                               <select
                                 value={lmsCourseId}
                                 onChange={(e) => {
@@ -1979,52 +2041,28 @@ export const UnifiedInboxPage: React.FC = () => {
                                   const target = lmsCoursesList.find((c) => c.course_id === cId);
                                   if (target) setLmsCourseName(target.course_name);
                                 }}
-                                className="w-full bg-paper-2 dark:bg-ink border border-rule rounded-xl p-2 text-xs font-semibold outline-none cursor-pointer truncate"
+                                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-semibold truncate"
                               >
-                                {lmsCoursesList
-                                  .filter((c) => c.category === lmsCourseCategory)
-                                  .map((c) => (
-                                    <option key={c.course_id} value={c.course_id}>
-                                      {c.course_name} (ID: {c.course_id})
-                                    </option>
-                                  ))}
+                                {lmsCoursesList.map((c) => (
+                                  <option key={c.course_id} value={c.course_id}>
+                                    {c.course_name} (ID: {c.course_id})
+                                  </option>
+                                ))}
                               </select>
                             </div>
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                             <div>
-                              <label className="text-[10px] font-bold text-slate-500 uppercase">Ngày Bắt Đầu / Hết Hạn:</label>
-                              <div className="flex items-center gap-2">
-                                <input
-                                  type="text"
-                                  value={lmsStartDate}
-                                  onChange={(e) => setLmsStartDate(e.target.value)}
-                                  className="w-full bg-paper-2 dark:bg-ink border border-rule rounded-xl p-2 text-xs font-mono"
-                                />
-                                <span className="text-slate-400">➔</span>
-                                <input
-                                  type="text"
-                                  value={lmsEndDate}
-                                  onChange={(e) => setLmsEndDate(e.target.value)}
-                                  className="w-full bg-paper-2 dark:bg-ink border border-rule rounded-xl p-2 text-xs font-mono"
-                                />
-                              </div>
-                            </div>
-
-                            <div>
-                              <label className="text-[10px] font-bold text-slate-500 uppercase">Tên Nhóm / Group (Tùy chọn):</label>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase">Tên Nhóm / Group:</label>
                               <input
                                 type="text"
                                 value={lmsGroupName}
                                 onChange={(e) => setLmsGroupName(e.target.value)}
                                 placeholder="VD: CLASS_2026"
-                                className="w-full bg-paper-2 dark:bg-ink border border-rule rounded-xl p-2 text-xs"
+                                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs"
                               />
                             </div>
                           </div>
 
-                          <div className="space-y-2">
+                          <div className="space-y-1">
                             <label className="text-[11px] font-bold text-sky-700 dark:text-sky-300">
                               🎓 Danh Sách Email Học Viên (Mỗi dòng 1 email):
                             </label>
@@ -2032,8 +2070,7 @@ export const UnifiedInboxPage: React.FC = () => {
                               rows={4}
                               value={lmsStudentEmails}
                               onChange={(e) => setLmsStudentEmails(e.target.value)}
-                              placeholder="student1@pythaverse.space&#10;student2@pythaverse.space"
-                              className="w-full bg-paper-2 dark:bg-ink border border-rule rounded-xl p-2.5 text-xs font-mono outline-none"
+                              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono outline-none"
                             />
                           </div>
                         </div>
@@ -2043,194 +2080,110 @@ export const UnifiedInboxPage: React.FC = () => {
 
                   {/* BƯỚC 2B: KEYCLOAK IDENTITY */}
                   {selectedBotType === 'keycloak_api' && (
-                    <div className="space-y-4 p-5 rounded-2xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-800/40">
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs font-bold text-amber-900 dark:text-amber-300 flex items-center gap-1.5">
-                          <KeyRound className="w-4 h-4 text-amber-600" />
-                          <span>Quản Trị Danh Tính Keycloak:</span>
-                        </label>
-                        <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold">
-                          Bảo vệ 3 lớp
-                        </span>
-                      </div>
-
+                    <div className="space-y-3 p-5 rounded-2xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-800/40">
                       <div className="space-y-1">
-                        <label className="text-xs font-bold text-ink dark:text-primary-ink">
-                          Email hoặc Username Cần Xử Lý:
+                        <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                          Email Cần Xử Lý:
                         </label>
                         <input
                           type="text"
                           value={kcTargetEmail}
                           onChange={(e) => setKcTargetEmail(e.target.value)}
-                          className="w-full bg-white dark:bg-ink border border-amber-300 rounded-xl p-2.5 text-xs font-bold outline-none"
+                          className="w-full bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 rounded-xl p-2.5 text-xs font-bold outline-none"
                         />
                       </div>
 
-                      <div className="space-y-3">
-                        {/* Reset Pass */}
-                        <div className="p-3.5 rounded-2xl border bg-white dark:bg-ink border-amber-400 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <KeyRound className="w-4 h-4 text-amber-600" />
-                              <span className="text-xs font-bold text-ink dark:text-primary-ink">1. Đặt Lại Mật Khẩu Tạm Thời</span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setKcEnableResetPass(!kcEnableResetPass)}
-                              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${kcEnableResetPass ? 'bg-amber-500 justify-end' : 'bg-slate-300 justify-start'}`}
-                            >
-                              <span className="w-4 h-4 bg-white rounded-full shadow-md" />
-                            </button>
-                          </div>
-                          {kcEnableResetPass && (
-                            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-rule">
-                              <input
-                                type="text"
-                                value={kcTempPass}
-                                onChange={(e) => setKcTempPass(e.target.value)}
-                                className="w-full bg-paper-2 border border-rule rounded-xl p-1.5 text-xs font-mono font-bold"
-                              />
-                              <label className="text-xs flex items-center gap-1.5 text-slate-600">
-                                <input
-                                  type="checkbox"
-                                  checked={kcForceChange}
-                                  onChange={(e) => setKcForceChange(e.target.checked)}
-                                />
-                                <span>Bắt buộc đổi mật khẩu</span>
-                              </label>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Email Verified */}
-                        <div className="p-3.5 rounded-2xl border bg-white dark:bg-ink border-amber-400 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                              <span className="text-xs font-bold text-ink dark:text-primary-ink">2. Xác Thực Email (Email Verified)</span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setKcEnableVerify(!kcEnableVerify)}
-                              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${kcEnableVerify ? 'bg-amber-500 justify-end' : 'bg-slate-300 justify-start'}`}
-                            >
-                              <span className="w-4 h-4 bg-white rounded-full shadow-md" />
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Status */}
-                        <div className="p-3.5 rounded-2xl border bg-white dark:bg-ink border-amber-400 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <UserX className="w-4 h-4 text-rose-600" />
-                              <span className="text-xs font-bold text-ink dark:text-primary-ink">3. Trạng Thái Hoạt Động (Account Status)</span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setKcEnableStatus(!kcEnableStatus)}
-                              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${kcEnableStatus ? 'bg-amber-500 justify-end' : 'bg-slate-300 justify-start'}`}
-                            >
-                              <span className="w-4 h-4 bg-white rounded-full shadow-md" />
-                            </button>
-                          </div>
-                        </div>
+                      <div className="p-3 rounded-xl border bg-white dark:bg-slate-900 border-amber-300 dark:border-amber-700 flex items-center justify-between">
+                        <span className="text-xs font-bold">1. Đổi Mật Khẩu Tạm Thời</span>
+                        <input
+                          type="text"
+                          value={kcTempPass}
+                          onChange={(e) => setKcTempPass(e.target.value)}
+                          className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-1 text-xs font-mono font-bold w-36 text-center"
+                        />
                       </div>
                     </div>
                   )}
 
-                  {/* BƯỚC 2C: FEEDBACK SHEET & GOOGLE DOC */}
+                  {/* BƯỚC 2C: FEEDBACK SHEET */}
                   {selectedBotType === 'feedback_doc_triage' && (
-                    <div className="space-y-3 p-5 rounded-2xl bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs font-bold text-blue-900 flex items-center gap-1.5">
-                          <FileText className="w-4 h-4 text-blue-600" />
-                          <span>Đường Dẫn Google Doc Báo Cáo:</span>
-                        </label>
-                      </div>
-
-                      <input
-                        type="text"
-                        value={docUrl}
-                        onChange={(e) => setDocUrl(e.target.value)}
-                        placeholder="https://docs.google.com/document/d/..."
-                        className="w-full bg-white dark:bg-ink border border-blue-300 rounded-xl p-2.5 text-xs outline-none"
-                      />
-
+                    <div className="space-y-3 p-5 rounded-2xl bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40">
                       <div className="space-y-1">
-                        <label className="text-xs font-bold text-ink">Email Phân Công (@dtt.vn):</label>
+                        <label className="text-xs font-bold text-slate-800 dark:text-slate-200">Google Doc URL:</label>
+                        <input
+                          type="text"
+                          value={docUrl}
+                          onChange={(e) => setDocUrl(e.target.value)}
+                          className="w-full bg-white dark:bg-slate-900 border border-blue-300 dark:border-blue-700 rounded-xl p-2.5 text-xs outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-800 dark:text-slate-200">Email Phân Công (@dtt.vn):</label>
                         <input
                           type="email"
                           value={assigneeEmail}
                           onChange={(e) => setAssigneeEmail(e.target.value)}
-                          className="w-full bg-white dark:bg-ink border border-blue-300 rounded-xl p-2.5 text-xs outline-none"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="text-xs font-bold text-ink">Nội Dung Comment Gắn Vào Doc:</label>
-                        <textarea
-                          rows={3}
-                          value={feedbackCommentContent}
-                          onChange={(e) => setFeedbackCommentContent(e.target.value)}
-                          className="w-full bg-white dark:bg-ink border border-blue-300 rounded-xl p-2.5 text-xs outline-none"
+                          className="w-full bg-white dark:bg-slate-900 border border-blue-300 dark:border-blue-700 rounded-xl p-2.5 text-xs outline-none"
                         />
                       </div>
                     </div>
                   )}
                 </>
               ) : (
-                /* CHẾ ĐỘ JSON RAW */
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-xs font-bold text-primary">
-                    <span className="flex items-center gap-1.5">
-                      <Code2 className="w-4 h-4 text-accent" />
-                      <span>Chỉnh Sửa Trực Tiếp Tham Số Thực Thi (Payload JSON):</span>
-                    </span>
-                    <span className="text-[10px] text-ink-3 font-mono">Đồng bộ 2 chiều</span>
-                  </div>
-                  <textarea
-                    rows={12}
-                    value={payloadText}
-                    onChange={(e) => setPayloadText(e.target.value)}
-                    className="w-full bg-ink text-primary-ink rounded-2xl p-4 text-xs font-mono outline-none border border-rule-2 focus:border-accent leading-relaxed shadow-inner"
-                  />
-                </div>
+                /* CHẾ ĐỘ JSON */
+                <textarea
+                  rows={14}
+                  value={payloadText}
+                  onChange={(e) => setPayloadText(e.target.value)}
+                  className="w-full bg-slate-900 text-emerald-400 rounded-2xl p-4 text-xs font-mono outline-none border border-slate-800 leading-relaxed shadow-inner"
+                />
               )}
             </div>
 
-            {/* Footer Modal */}
-            <div className="flex items-center justify-end gap-3 pt-3 border-t border-rule shrink-0">
+            {/* Footer Modal: 2 Nút Đưa vào Hàng Đợi & Chạy Ngay 1-Click */}
+            <div className="flex items-center justify-between gap-3 pt-3 border-t border-slate-100 dark:border-slate-800 shrink-0">
               <button
                 type="button"
                 onClick={() => setTaskModalTicket(null)}
-                className="px-4 py-2.5 rounded-xl border border-rule-2 text-xs font-bold text-ink-2 hover:bg-paper-2 transition cursor-pointer"
+                className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
               >
                 Hủy Bỏ
               </button>
 
-              <button
-                type="button"
-                disabled={creatingTask}
-                onClick={handleConfirmCreateTask}
-                className="px-6 py-2.5 bg-accent hover:bg-accent-2 text-accent-ink text-xs font-extrabold rounded-xl transition flex items-center gap-2 shadow-sm cursor-pointer disabled:opacity-50"
-              >
-                {creatingTask ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Đang Lưu...</span>
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-4 h-4" />
-                    <span>Lưu Tác Vụ Vào Hàng Đợi Duyệt</span>
-                  </>
-                )}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={creatingTask || runningImmediate}
+                  onClick={() => handleSubmitBotTask(false)}
+                  className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {creatingTask ? <Loader2 className="w-4 h-4 animate-spin" /> : <Clock className="w-4 h-4 text-amber-500" />}
+                  <span>Đưa Vào Hàng Đợi Duyệt</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={creatingTask || runningImmediate}
+                  onClick={() => handleSubmitBotTask(true)}
+                  className="px-6 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:brightness-110 text-white text-xs font-extrabold rounded-xl transition flex items-center gap-2 shadow-md cursor-pointer disabled:opacity-50"
+                >
+                  {runningImmediate ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Đang Khởi Chạy...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-4 h-4 text-amber-300" />
+                      <span>Kích Hoạt Chạy Ngay (1-Click)</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 };

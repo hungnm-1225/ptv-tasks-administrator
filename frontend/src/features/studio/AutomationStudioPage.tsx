@@ -1,10 +1,11 @@
 // frontend/src/features/studio/AutomationStudioPage.tsx
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   Zap,
   Building2,
-  KeyRound,
+  Key,
   FileText,
   BookOpen,
   Search,
@@ -35,6 +36,11 @@ import {
   Send,
   Sparkles,
   SlidersHorizontal,
+  Upload,
+  Download,
+  Info,
+  ChevronRight,
+  ClipboardCheck,
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { BotType } from '../../types';
@@ -190,6 +196,7 @@ export const AutomationStudioPage: React.FC = () => {
 
   // File Upload
   const [uploadedAccountsFile, setUploadedAccountsFile] = useState<File | null>(null);
+  const [isDragging, setIsDragging] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Tính ngày mặc định
@@ -383,10 +390,10 @@ export const AutomationStudioPage: React.FC = () => {
   };
 
   useEffect(() => {
-    if (workspaceMainCategory === 'approve') {
+    if (selectedBotType === 'workspace_rpa' && workspaceMainCategory === 'approve') {
       handleFetchCachedList();
     }
-  }, [approveSubFlow, workspaceMainCategory]);
+  }, [approveSubFlow, workspaceMainCategory, selectedBotType]);
 
   const filteredCacheList = useMemo(() => {
     return scrapedPendingList.filter((item) => {
@@ -831,7 +838,7 @@ export const AutomationStudioPage: React.FC = () => {
           <div className="text-xs text-primary-ink">Tác vụ đang được thực thi dưới nền.</div>
           <button
             onClick={() => navigate('/bots')}
-            className="text-accent-2 hover:text-accent-2 underline text-xs font-semibold cursor-pointer block mt-1 transition"
+            className="text-indigo-600 dark:text-indigo-400 hover:underline text-xs font-semibold cursor-pointer block mt-1 transition"
           >
             Mở Bot Command Center xem Live Terminal ➔
           </button>
@@ -846,142 +853,623 @@ export const AutomationStudioPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 w-full pb-10">
-      {/* Header Trang */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
-            Automation Studio
-          </h1>
-          <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
-            Khởi tạo và điều phối các chuỗi tác vụ tự động hóa độc lập.
-          </p>
-        </div>
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.3 }}
+      className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 pb-24"
+    >
+      {/* 1. Header Card Bento */}
+      <div
+        id="automation-studio-header-card"
+        className="relative overflow-hidden rounded-[2rem] border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 sm:p-7 shadow-xs"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex items-start gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-md shadow-indigo-500/20">
+              <Zap className="h-6 w-6" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white font-sans">
+                  Automation Studio
+                </h1>
+                <span className="inline-flex items-center rounded-full bg-indigo-50 dark:bg-indigo-950/80 px-2.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:text-indigo-300 ring-1 ring-inset ring-indigo-300/40 uppercase tracking-wider">
+                  BENTO DIRECT ENGINE
+                </span>
+              </div>
+              <p className="mt-1 text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+                Khởi tạo và điều phối các chuỗi tác vụ tự động hóa độc lập với kiến trúc Bento Grid.
+              </p>
+            </div>
+          </div>
 
-        <button
-          onClick={() => navigate('/bots')}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-ink-2 dark:text-primary-ink hover:text-accent dark:hover:text-accent-2 bg-white dark:bg-ink border border-rule dark:border-rule-2 shadow-2xs hover:shadow-xs transition"
-        >
-          <Terminal className="w-3.5 h-3.5 text-accent" />
-          <span>Xem Bot Center</span>
-          <ArrowRight className="w-3.5 h-3.5" />
-        </button>
-      </div>
-
-      {/* Panel Form Chính */}
-      <div className="space-y-6 bg-white dark:bg-ink p-6 sm:p-8 rounded-3xl border border-rule/80 dark:border-rule-2 shadow-xs">
-        {/* Bước 1: Chọn Cỗ Máy Tự Động Hóa */}
-        <div className="space-y-2.5">
-          <label className="text-xs font-bold text-ink dark:text-primary-ink uppercase tracking-wider flex items-center gap-2">
-            <span className="w-5 h-5 rounded-full bg-accent-soft dark:bg-accent/50 text-accent dark:text-accent-2 flex items-center justify-center text-[10px] font-extrabold">
-              1
-            </span>
-            <span>Chọn Cỗ Máy Tự Động Hóa:</span>
-          </label>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {[
-              { id: 'workspace_rpa', label: 'Workspace & LMS', icon: Building2, desc: 'Đơn Hàng, Hợp Đồng & LMS' },
-              { id: 'keycloak_api', label: 'Keycloak IDP', icon: KeyRound, desc: 'Quản Trị Người Dùng' },
-              { id: 'feedback_doc_triage', label: 'Feedback Sheet', icon: FileText, desc: 'Ghi Chú & Tag Doc Tự Động' },
-            ].map((tab) => {
-              const Icon = tab.icon;
-              const isSel = selectedBotType === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setSelectedBotType(tab.id as any)}
-                  className={`flex flex-col items-start gap-1 p-4 rounded-2xl border text-left transition-all duration-150 cursor-pointer ${isSel
-                    ? 'bg-accent text-white border-transparent shadow-md'
-                    : 'bg-paper-2 dark:bg-ink/60 border-rule dark:border-rule-2/80 text-ink dark:text-primary-ink hover:bg-paper-2 dark:hover:bg-ink'
-                    }`}
-                >
-                  <Icon className={`w-5 h-5 ${isSel ? 'text-white' : 'text-accent dark:text-accent-2'}`} />
-                  <span className="text-xs font-bold mt-1">{tab.label}</span>
-                  <span className={`text-[10px] ${isSel ? 'text-primary-ink' : 'text-ink-3'}`}>{tab.desc}</span>
-                </button>
-              );
-            })}
+          <div className="flex items-center gap-3">
+            <button
+              id="btn-goto-bot-center"
+              onClick={() => navigate('/bots')}
+              className="group flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/80 px-4 py-2.5 text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-xs hover:border-indigo-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all cursor-pointer"
+            >
+              <span>Xem Bot Center</span>
+              <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+            </button>
           </div>
         </div>
+      </div>
 
-        {/* Bước 2: Cấu Hình Chi Tiết Phân Hệ Workspace */}
-        {selectedBotType === 'workspace_rpa' && (
-          <div className="space-y-6 p-6 rounded-2xl bg-accent-soft/50 dark:bg-accent-soft/20 border border-accent-soft/70 dark:border-accent-soft/40">
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-accent dark:text-accent-2 flex items-center gap-1.5">
-                <span className="w-5 h-5 rounded-full bg-accent-soft dark:bg-accent/60 text-accent dark:text-accent-2 flex items-center justify-center text-[10px] font-extrabold">
-                  2
-                </span>
-                <span>Chọn Phân Luồng Nghiệp Vụ Cốt Lõi:</span>
-              </label>
+      {/* 2. 4 Bento Pastel Stats Cards */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Stat 1: Tác Vụ Tự Động */}
+        <motion.div
+          whileHover={{ y: -2 }}
+          transition={{ duration: 0.2 }}
+          className="rounded-3xl border border-blue-100 dark:border-blue-950/60 bg-blue-50/90 dark:bg-blue-950/30 p-5 flex flex-col justify-between shadow-xs"
+        >
+          <div>
+            <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-widest mb-1">
+              Tác Vụ Tự Động
+            </p>
+            <h3 className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono">24,850</h3>
+          </div>
+          <div className="flex items-center text-xs text-blue-500 font-medium mt-3">
+            <span className="mr-1 font-bold">↑ 12%</span>
+            <span className="opacity-60 text-slate-500 dark:text-slate-400">so với tháng trước</span>
+          </div>
+        </motion.div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-accent-soft/60 dark:bg-accent/40 p-2 rounded-2xl text-xs font-medium">
-                {[
-                  { id: 'approve', label: '1. Phê Duyệt', icon: FileCheck },
-                  { id: 'create_and_approve', label: '2. Tạo & Duyệt', icon: Zap },
-                  { id: 'bulk_accounts', label: '3. Tạo Tài Khoản', icon: Users },
-                  { id: 'lms_enroll', label: '4. Ghi Danh LMS', icon: GraduationCap },
-                ].map((mTab) => {
-                  const MIcon = mTab.icon;
-                  const isCur = workspaceMainCategory === mTab.id;
-                  return (
-                    <button
-                      key={mTab.id}
-                      type="button"
-                      onClick={() => {
-                        setWorkspaceMainCategory(mTab.id as any);
-                        setParsedOrderCourses([]);
-                        setSelectedCachedItem(null);
-                        setSelectedItemCode('');
-                      }}
-                      className={`py-3 px-3 rounded-xl text-center transition-all cursor-pointer flex items-center justify-center gap-1.5 text-xs ${isCur
-                        ? 'bg-white dark:bg-ink font-bold text-accent dark:text-accent-2 shadow-2xs'
-                        : 'text-ink-2 dark:text-ink-3 hover:text-ink dark:hover:text-primary-ink'
-                        }`}
-                    >
-                      <MIcon className="w-4 h-4" />
-                      <span>{mTab.label}</span>
-                    </button>
-                  );
-                })}
+        {/* Stat 2: Đơn Hàng & License */}
+        <motion.div
+          whileHover={{ y: -2 }}
+          transition={{ duration: 0.2 }}
+          className="rounded-3xl border border-purple-100 dark:border-purple-950/60 bg-purple-50/90 dark:bg-purple-950/30 p-5 flex flex-col justify-between shadow-xs"
+        >
+          <div>
+            <p className="text-xs font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-widest mb-1">
+              Đơn Hàng & License
+            </p>
+            <h3 className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono">
+              {schoolsList.length > 0 ? `${schoolsList.length}+` : '490+'}
+            </h3>
+          </div>
+          <div className="flex items-center text-xs text-purple-500 font-medium mt-3">
+            <span className="mr-1 font-bold">480 Trường</span>
+            <span className="opacity-60 text-slate-500 dark:text-slate-400">+ 158 PRT/DST</span>
+          </div>
+        </motion.div>
+
+        {/* Stat 3: Tỷ Lệ Tự Động Hóa */}
+        <motion.div
+          whileHover={{ y: -2 }}
+          transition={{ duration: 0.2 }}
+          className="rounded-3xl border border-orange-100 dark:border-orange-950/60 bg-orange-50/90 dark:bg-orange-950/30 p-5 flex flex-col justify-between shadow-xs"
+        >
+          <div>
+            <p className="text-xs font-semibold text-orange-600 dark:text-orange-400 uppercase tracking-widest mb-1">
+              Duyệt Tự Động
+            </p>
+            <h3 className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono">98.6%</h3>
+          </div>
+          <div className="flex items-center text-xs text-orange-500 font-medium mt-3">
+            <span className="mr-1 font-bold">Zero-error</span>
+            <span className="opacity-60 text-slate-500 dark:text-slate-400">pipeline 4 cấp</span>
+          </div>
+        </motion.div>
+
+        {/* Stat 4: Mục Tiêu Hệ Thống */}
+        <motion.div
+          whileHover={{ y: -2 }}
+          transition={{ duration: 0.2 }}
+          className="rounded-3xl border border-emerald-100 dark:border-emerald-950/60 bg-emerald-50/90 dark:bg-emerald-950/30 p-5 flex flex-col justify-between shadow-xs"
+        >
+          <div className="flex justify-between items-start mb-2">
+            <div>
+              <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 uppercase tracking-widest mb-0.5">
+                Mục Tiêu Năm
+              </p>
+              <h4 className="text-base font-bold text-emerald-900 dark:text-emerald-200">Kỳ 2026 - 2027</h4>
+            </div>
+            <div className="w-8 h-8 rounded-full bg-white dark:bg-emerald-900/60 flex items-center justify-center text-emerald-500 shadow-xs text-sm">
+              🎯
+            </div>
+          </div>
+          <div className="space-y-1.5 mt-1">
+            <div className="h-2 w-full bg-emerald-200/60 dark:bg-emerald-900/60 rounded-full overflow-hidden">
+              <div className="h-full w-3/4 bg-emerald-500 rounded-full" />
+            </div>
+            <p className="text-[11px] text-emerald-700 dark:text-emerald-300 font-medium">
+              Đã hoàn thành 75% chỉ tiêu năm. Tiếp tục duy trì phong độ!
+            </p>
+          </div>
+        </motion.div>
+      </div>
+
+      {/* 3. Bước 1: Chọn Cỗ Máy Tự Động Hóa (3 Pastel Bento Cards) */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between px-1">
+          <div className="flex items-center gap-2">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 text-[11px] font-bold text-white shadow-xs">
+              1
+            </span>
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+              Chọn Cỗ Máy Tự Động Hóa
+            </h2>
+          </div>
+          <span className="text-[11px] text-slate-400">3 Động cơ khả dụng</span>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
+          {/* Card 1: Workspace & LMS */}
+          <button
+            id="engine-card-workspace"
+            onClick={() => setSelectedBotType('workspace_rpa')}
+            className={`group relative flex flex-col justify-between rounded-3xl border p-5 text-left transition-all duration-150 cursor-pointer ${selectedBotType === 'workspace_rpa'
+                ? 'border-indigo-600 bg-indigo-600 text-white shadow-md shadow-indigo-500/20 ring-2 ring-indigo-500/30'
+                : 'border-blue-100 dark:border-blue-950/60 bg-blue-50/50 dark:bg-slate-900 hover:border-blue-300 hover:shadow-xs'
+              }`}
+          >
+            <div className="flex items-center gap-3.5">
+              <div
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl transition-colors ${selectedBotType === 'workspace_rpa'
+                    ? 'bg-white/20 text-white'
+                    : 'bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400'
+                  }`}
+              >
+                <Building2 className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className={`text-sm font-bold tracking-tight ${selectedBotType === 'workspace_rpa' ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
+                  Workspace & LMS
+                </h3>
+                <p className={`text-xs mt-0.5 ${selectedBotType === 'workspace_rpa' ? 'text-blue-100' : 'text-slate-500 dark:text-slate-400'}`}>
+                  Đơn Hàng, Hợp Đồng & LMS
+                </p>
               </div>
             </div>
 
-            {/* Ô TÌM KIẾM ĐỐI TƯỢNG */}
-            {workspaceMainCategory !== 'approve' && workspaceMainCategory !== 'lms_enroll' && (
-              <div className="space-y-2 relative" ref={entityDropdownRef}>
-                <label className="text-xs font-bold text-ink dark:text-primary-ink flex items-center justify-between">
+            {selectedBotType === 'workspace_rpa' && (
+              <div className="mt-3 flex items-center justify-end">
+                <span className="flex items-center gap-1 rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-white">
+                  <Check className="h-3 w-3" /> Đang chọn
+                </span>
+              </div>
+            )}
+          </button>
+
+          {/* Card 2: Keycloak IDP */}
+          <button
+            id="engine-card-keycloak"
+            onClick={() => setSelectedBotType('keycloak_api')}
+            className={`group relative flex flex-col justify-between rounded-3xl border p-5 text-left transition-all duration-150 cursor-pointer ${selectedBotType === 'keycloak_api'
+                ? 'border-purple-600 bg-purple-600 text-white shadow-md shadow-purple-500/20 ring-2 ring-purple-500/30'
+                : 'border-purple-100 dark:border-purple-950/60 bg-purple-50/50 dark:bg-slate-900 hover:border-purple-300 hover:shadow-xs'
+              }`}
+          >
+            <div className="flex items-center gap-3.5">
+              <div
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl transition-colors ${selectedBotType === 'keycloak_api'
+                    ? 'bg-white/20 text-white'
+                    : 'bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400'
+                  }`}
+              >
+                <Key className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className={`text-sm font-bold tracking-tight ${selectedBotType === 'keycloak_api' ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
+                  Keycloak IDP
+                </h3>
+                <p className={`text-xs mt-0.5 ${selectedBotType === 'keycloak_api' ? 'text-purple-100' : 'text-slate-500 dark:text-slate-400'}`}>
+                  Quản Trị Người Dùng
+                </p>
+              </div>
+            </div>
+
+            {selectedBotType === 'keycloak_api' && (
+              <div className="mt-3 flex items-center justify-end">
+                <span className="flex items-center gap-1 rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-white">
+                  <Check className="h-3 w-3" /> Đang chọn
+                </span>
+              </div>
+            )}
+          </button>
+
+          {/* Card 3: Feedback Sheet */}
+          <button
+            id="engine-card-feedback"
+            onClick={() => setSelectedBotType('feedback_doc_triage')}
+            className={`group relative flex flex-col justify-between rounded-3xl border p-5 text-left transition-all duration-150 cursor-pointer ${selectedBotType === 'feedback_doc_triage'
+                ? 'border-emerald-600 bg-emerald-600 text-white shadow-md shadow-emerald-500/20 ring-2 ring-emerald-500/30'
+                : 'border-emerald-100 dark:border-emerald-950/60 bg-emerald-50/50 dark:bg-slate-900 hover:border-emerald-300 hover:shadow-xs'
+              }`}
+          >
+            <div className="flex items-center gap-3.5">
+              <div
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl transition-colors ${selectedBotType === 'feedback_doc_triage'
+                    ? 'bg-white/20 text-white'
+                    : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400'
+                  }`}
+              >
+                <FileText className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className={`text-sm font-bold tracking-tight ${selectedBotType === 'feedback_doc_triage' ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
+                  Feedback Sheet
+                </h3>
+                <p className={`text-xs mt-0.5 ${selectedBotType === 'feedback_doc_triage' ? 'text-emerald-100' : 'text-slate-500 dark:text-slate-400'}`}>
+                  Ghi Chú & Tag Doc Tự Động
+                </p>
+              </div>
+            </div>
+
+            {selectedBotType === 'feedback_doc_triage' && (
+              <div className="mt-3 flex items-center justify-end">
+                <span className="flex items-center gap-1 rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-white">
+                  <Check className="h-3 w-3" /> Đang chọn
+                </span>
+              </div>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* 4. Bước 2: Workspace & LMS Engine Workplace */}
+      {selectedBotType === 'workspace_rpa' && (
+        <div className="space-y-5 rounded-[2rem] border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 sm:p-7 shadow-xs">
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 text-[11px] font-bold text-white">
+                2
+              </span>
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                Chọn Phân Luồng Nghiệp Vụ Cốt Lõi:
+              </h2>
+            </div>
+
+            {/* 4 Core Workflow Tabs */}
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {[
+                { id: 'approve', label: '1. Phê Duyệt', icon: ClipboardCheck },
+                { id: 'create_and_approve', label: '2. Tạo & Duyệt', icon: Zap },
+                { id: 'bulk_accounts', label: '3. Tạo Tài Khoản', icon: Users },
+                { id: 'lms_enroll', label: '4. Ghi Danh LMS', icon: GraduationCap },
+              ].map((mTab) => {
+                const MIcon = mTab.icon;
+                const isCur = workspaceMainCategory === mTab.id;
+                return (
+                  <button
+                    key={mTab.id}
+                    onClick={() => {
+                      setWorkspaceMainCategory(mTab.id as any);
+                      setParsedOrderCourses([]);
+                      setSelectedCachedItem(null);
+                      setSelectedItemCode('');
+                    }}
+                    className={`flex items-center justify-center gap-2 rounded-xl py-3 px-3 text-xs font-semibold transition-all cursor-pointer ${isCur
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                  >
+                    <MIcon className="h-4 w-4" />
+                    <span>{mTab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* WORKFLOW 1: PHÊ DUYỆT */}
+          {workspaceMainCategory === 'approve' && (
+            <div className="space-y-5 pt-2">
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                {[
+                  { id: 'approve_school_order', label: 'Đơn Hàng Trường', desc: 'Duyệt Order của Trường' },
+                  { id: 'approve_partner_contract', label: 'Hợp Đồng Đối Tác', desc: 'Duyệt Contract PRT' },
+                  { id: 'admin_approve_contract', label: 'Hợp Đồng Quản Trị', desc: 'Duyệt Contract DST' },
+                ].map((sub) => (
+                  <button
+                    key={sub.id}
+                    onClick={() => {
+                      setApproveSubFlow(sub.id as any);
+                      setUniversalSearchQuery('');
+                      setSelectedItemCode('');
+                      setSelectedCachedItem(null);
+                      setParsedOrderCourses([]);
+                    }}
+                    className={`rounded-2xl border p-4 text-left transition-all cursor-pointer ${approveSubFlow === sub.id
+                        ? 'border-indigo-600 bg-indigo-50/80 dark:bg-indigo-950/40 ring-1 ring-indigo-500'
+                        : 'border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 hover:bg-slate-50 dark:hover:bg-slate-800/60'
+                      }`}
+                  >
+                    <p className={`text-xs font-bold ${approveSubFlow === sub.id ? 'text-indigo-700 dark:text-indigo-300' : 'text-slate-800 dark:text-slate-200'}`}>
+                      {sub.label}
+                    </p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{sub.desc}</p>
+                  </button>
+                ))}
+              </div>
+
+              {/* Search Bar Bento */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
-                    {currentEntityMode === 'school' ? (
-                      <Building2 className="w-3.5 h-3.5 text-accent" />
-                    ) : currentEntityMode === 'partner' ? (
-                      <Briefcase className="w-3.5 h-3.5 text-accent" />
-                    ) : (
-                      <Store className="w-3.5 h-3.5 text-amber-600" />
-                    )}
+                    <Search className="h-3.5 w-3.5 text-indigo-600" />
                     <span>
-                      {currentEntityMode === 'school'
-                        ? 'Trường học áp dụng (Chọn trường thụ hưởng):'
-                        : currentEntityMode === 'partner'
-                          ? 'Đối tác phụ trách (Chọn đối tác):'
-                          : 'Nhà phân phối (Chọn nhà phân phối):'}
+                      {approveSubFlow === 'approve_school_order' && 'Tìm Kiếm Đơn Hàng (Theo Mã Đơn, Tên Trường, hoặc Tên Đối Tác):'}
+                      {approveSubFlow === 'approve_partner_contract' && 'Tìm Kiếm Hợp Đồng (Theo Mã PRT, Tên Đối Tác, hoặc Nhà Phân Phối):'}
+                      {approveSubFlow === 'admin_approve_contract' && 'Tìm Kiếm Hợp Đồng (Theo Mã DST, hoặc Tên Nhà Phân Phối):'}
                     </span>
                   </span>
-                  {(selectedSchool || selectedPartner || selectedDistributor) && (
-                    <span className="text-xs text-accent font-bold font-mono">
-                      {currentEntityMode === 'school'
-                        ? selectedSchool?.school_code
-                        : currentEntityMode === 'partner'
-                          ? selectedPartner?.code
-                          : selectedDistributor?.code}
+                  {selectedItemCode && (
+                    <span className="text-xs text-indigo-600 font-mono font-bold">
+                      Đang chọn: {selectedItemCode}
                     </span>
                   )}
                 </label>
-
                 <div className="relative">
-                  <Search className="w-4 h-4 text-ink-3 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={universalSearchQuery}
+                    onChange={(e) => setUniversalSearchQuery(e.target.value)}
+                    placeholder="Gõ từ khóa để lọc danh sách bên dưới (VD: SCH-..., PRT-..., DST-..., THCS Lê Quý Đôn, DTTE...)"
+                    className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 px-4 py-2.5 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-900 focus:outline-hidden transition-all"
+                  />
+                  {universalSearchQuery && (
+                    <button
+                      onClick={() => setUniversalSearchQuery('')}
+                      className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Special Field: Sales Admin Reason for Hợp Đồng Quản Trị */}
+              {approveSubFlow === 'admin_approve_contract' && (
+                <div className="rounded-2xl border border-amber-200/80 dark:border-amber-900/40 bg-amber-50/40 dark:bg-amber-950/20 p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                      Lý Do Phê Duyệt Sales Admin: <span className="text-rose-500">* (Tối thiểu 15 ký tự)</span>
+                    </label>
+                    <span className={`text-[11px] font-mono font-medium ${adminJustification.trim().length >= 15 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500'}`}>
+                      {adminJustification.trim().length}/15 ký tự
+                    </span>
+                  </div>
+                  <textarea
+                    rows={2}
+                    value={adminJustification}
+                    onChange={(e) => setAdminJustification(e.target.value)}
+                    placeholder="Nhập lý do phê duyệt Sales Admin..."
+                    className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3.5 py-2 text-xs text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
+                  />
+                </div>
+              )}
+
+              {/* Order List Header & Status Filter Pills */}
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-1 border-t border-slate-100 dark:border-slate-800/80">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                    Danh Sách Đơn Hàng ({filteredCacheList.length}/{scrapedPendingList.length}):
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                  {[
+                    { id: 'pending', label: '⏳ Chờ duyệt' },
+                    { id: 'approved', label: '✅ Đã duyệt' },
+                    { id: 'rejected', label: '❌ Bị từ chối' },
+                    { id: 'all', label: '📑 Tất cả' },
+                  ].map((st) => (
+                    <button
+                      key={st.id}
+                      onClick={() => setStatusFilter(st.id as any)}
+                      className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${statusFilter === st.id
+                          ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/80 dark:text-indigo-300 font-semibold ring-1 ring-indigo-300/60'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
+                        }`}
+                    >
+                      <span>{st.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Dual-Pane: Interactive Order List & Detail Inspector */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                <div className="lg:col-span-7 space-y-2.5 max-h-[360px] overflow-y-auto pr-1">
+                  {isScrapingLive && scrapedPendingList.length === 0 ? (
+                    <div className="py-8 flex items-center justify-center gap-2 text-xs text-slate-400">
+                      <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
+                      <span>Đang nạp danh sách từ Cache...</span>
+                    </div>
+                  ) : filteredCacheList.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 p-8 text-center text-xs text-slate-400">
+                      Không tìm thấy đơn hàng hoặc hợp đồng phù hợp với điều kiện tìm kiếm.
+                    </div>
+                  ) : (
+                    filteredCacheList.map((item, pIdx) => {
+                      const itemCode = item.order_code || item.contract_code || item.data_id || `ITEM-${pIdx}`;
+                      const isSelected = selectedItemCode === itemCode;
+                      const isPending =
+                        (item.status || '').toLowerCase().includes('pending') ||
+                        (item.status || '').toLowerCase().includes('awaiting');
+
+                      return (
+                        <div
+                          key={pIdx}
+                          onClick={() => {
+                            setSelectedItemCode(itemCode);
+                            setSelectedCachedItem(item);
+                            if (approveSubFlow === 'approve_school_order') {
+                              if (item.courses_data && item.courses_data.length > 0) {
+                                setParsedOrderCourses(item.courses_data);
+                              } else {
+                                handleLoadOrderDetails(itemCode, item.school_name);
+                              }
+                            } else {
+                              if (item.courses_data && item.courses_data.length > 0) {
+                                setParsedOrderCourses(item.courses_data);
+                              } else {
+                                setParsedOrderCourses([]);
+                              }
+                            }
+                            toast.success(`Đã chọn: ${itemCode}`);
+                          }}
+                          className={`cursor-pointer rounded-2xl border p-3.5 transition-all ${isSelected
+                              ? 'border-indigo-600 bg-indigo-50/50 dark:bg-indigo-950/30 shadow-xs ring-1 ring-indigo-500'
+                              : 'border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-700'
+                            }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="space-y-1">
+                              <span className="font-mono text-xs font-bold text-slate-900 dark:text-white">
+                                {itemCode}
+                              </span>
+                              <p className="text-xs text-slate-600 dark:text-slate-300">
+                                {item.school_name || item.sender_name || 'Đơn vị gửi'}
+                              </p>
+                              <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                                <span>{item.partner_name || item.sender_name}</span>
+                                <span>➔</span>
+                                <span>{item.distributor_name || item.receiver_name}</span>
+                                <span>|</span>
+                                <span className="font-mono">{item.order_date || item.contract_date || item.created_at}</span>
+                              </div>
+                            </div>
+
+                            <span
+                              className={`shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${isPending
+                                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
+                                  : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300'
+                                }`}
+                            >
+                              {item.status || 'Chờ duyệt'}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Right Column: Detail Inspector Card */}
+                <div className="lg:col-span-5">
+                  <div className="h-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/40 p-4 space-y-4">
+                    <div className="flex items-center justify-between border-b border-slate-200/80 dark:border-slate-800 pb-2.5">
+                      <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
+                        <BookOpen className="h-4 w-4 text-indigo-600" />
+                        <span>Chi Tiết Khóa Học & Giấy Phép</span>
+                      </div>
+                      {selectedItemCode && (
+                        <span className="font-mono text-[10px] text-slate-400 font-bold">
+                          {selectedItemCode}
+                        </span>
+                      )}
+                    </div>
+
+                    {parsedOrderCourses.length > 0 ? (
+                      <div className="space-y-2">
+                        {parsedOrderCourses.map((course, idx) => (
+                          <div
+                            key={idx}
+                            className="flex items-center justify-between rounded-xl bg-white dark:bg-slate-900 p-3 text-xs border border-slate-100 dark:border-slate-800 shadow-2xs"
+                          >
+                            <div>
+                              <p className="font-semibold text-slate-800 dark:text-slate-200 truncate max-w-[190px]">
+                                {course.course_name || course.name}
+                              </p>
+                              <p className="text-slate-400 font-mono text-[10px]">
+                                Phân loại: {course.category}
+                              </p>
+                            </div>
+                            <span className="rounded-lg bg-indigo-50 dark:bg-indigo-950 px-2.5 py-1 font-bold font-mono text-indigo-700 dark:text-indigo-300 text-xs">
+                              {course.licenses || course.quantity} licenses
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : selectedCachedItem ? (
+                      <div className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 space-y-1.5 text-xs">
+                        <p className="font-bold text-slate-900 dark:text-white">
+                          {selectedCachedItem.school_name || selectedItemCode}
+                        </p>
+                        <p className="text-[11px] text-slate-500">
+                          Ghi chú: {selectedCachedItem.notes || 'Không có ghi chú thêm.'}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="flex h-48 flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 dark:border-slate-800 p-6 text-center text-xs text-slate-400">
+                        <Info className="h-6 w-6 text-slate-300 mb-2" />
+                        <span>Vui lòng click chọn 1 đơn hàng/hợp đồng từ danh sách trên để xem chi tiết.</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Collapsible Backup Settings */}
+              <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 p-3.5 space-y-3">
+                <button
+                  onClick={() => setShowAutoTopupSettings(!showAutoTopupSettings)}
+                  className="flex w-full items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-indigo-600 transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center gap-2">
+                    <SlidersHorizontal className="h-3.5 w-3.5 text-indigo-600" />
+                    <span>
+                      {showAutoTopupSettings ? 'Ẩn thiết lập dự phòng khi thiếu License' : 'Tùy chỉnh thông số tạo hợp đồng tự động (Khi thiếu License)'}
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-indigo-600 font-medium">
+                    {showAutoTopupSettings ? 'Thu gọn' : 'Mở rộng'}
+                  </span>
+                </button>
+
+                {showAutoTopupSettings && (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 pt-2 border-t border-slate-200/60 dark:border-slate-800">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
+                        Contact Info (Tạo đơn dự phòng):
+                      </label>
+                      <input
+                        type="text"
+                        value={contactInfo}
+                        onChange={(e) => setContactInfo(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
+                        Ghi chú Contract Notes:
+                      </label>
+                      <input
+                        type="text"
+                        value={additionalNotes}
+                        onChange={(e) => setAdditionalNotes(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* WORKFLOW 2: TẠO & DUYỆT */}
+          {workspaceMainCategory === 'create_and_approve' && (
+            <div className="space-y-5 pt-2">
+              {/* School Search Target */}
+              <div className="space-y-1.5 relative" ref={entityDropdownRef}>
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Building2 className="h-3.5 w-3.5 text-indigo-600" />
+                    <span>Trường học áp dụng (Trong 480 trường phả hệ):</span>
+                  </span>
+                  {selectedSchool && (
+                    <span className="text-xs text-indigo-600 font-bold font-mono">
+                      Mã: {selectedSchool.school_code}
+                    </span>
+                  )}
+                </label>
+                <div className="relative">
                   <input
                     type="text"
                     value={entitySearchQuery}
@@ -990,623 +1478,255 @@ export const AutomationStudioPage: React.FC = () => {
                       setEntitySearchQuery(e.target.value);
                       setIsEntityDropdownOpen(true);
                     }}
-                    placeholder={
-                      currentEntityMode === 'school'
-                        ? 'Tìm kiếm trường học theo tên hoặc mã trường...'
-                        : currentEntityMode === 'partner'
-                          ? 'Tìm kiếm đối tác theo tên hoặc mã...'
-                          : 'Tìm kiếm nhà phân phối theo tên hoặc mã...'
-                    }
-                    className="w-full pl-10 pr-10 bg-white dark:bg-ink border border-accent-soft dark:border-accent-soft/80 rounded-xl p-3 text-xs text-ink dark:text-primary-ink outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition shadow-2xs"
+                    placeholder="Tìm kiếm trường học theo tên hoặc mã trường..."
+                    className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 px-4 py-2.5 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-hidden"
                   />
-                  {entitySearchQuery && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEntitySearchQuery('');
-                        setSelectedSchool(null);
-                        setSelectedPartner(null);
-                        setSelectedDistributor(null);
-                      }}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-3 hover:text-ink-2 p-1 cursor-pointer"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
+                  <Search className="absolute right-3 top-2.5 h-4 w-4 text-slate-400" />
                 </div>
 
                 {isEntityDropdownOpen && (
-                  <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-2xl shadow-xl max-h-60 overflow-y-auto p-1.5 space-y-1">
-                    {currentEntityMode === 'school' &&
-                      schoolsList
-                        .filter((s) => s.school_name.toLowerCase().includes(entitySearchQuery.toLowerCase()))
-                        .slice(0, 30)
-                        .map((s) => (
-                          <button
-                            key={s.school_code}
-                            type="button"
-                            onClick={() => {
-                              setSelectedSchool(s);
-                              setSelectedPartner({ name: s.partner_name, code: s.partner_code });
-                              setSelectedDistributor({ name: s.distributor_name, code: s.distributor_code });
-                              setEntitySearchQuery(s.school_name);
-                              setIsEntityDropdownOpen(false);
-                            }}
-                            className="w-full text-left p-3 rounded-xl text-xs hover:bg-accent-soft dark:hover:bg-rule-2/60 flex items-center justify-between cursor-pointer transition"
-                          >
-                            <div>
-                              <div className="font-bold text-ink dark:text-primary-ink">{s.school_name}</div>
-                              <div className="text-[11px] text-ink-3 font-mono">
-                                Mã: {s.school_code} | Tuyến: {s.partner_name} ➔ {s.distributor_name}
-                              </div>
+                  <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-60 overflow-y-auto p-1.5 space-y-1">
+                    {schoolsList
+                      .filter((s) => s.school_name.toLowerCase().includes(entitySearchQuery.toLowerCase()) || s.school_code.toLowerCase().includes(entitySearchQuery.toLowerCase()))
+                      .slice(0, 30)
+                      .map((s) => (
+                        <button
+                          key={s.school_code}
+                          type="button"
+                          onClick={() => {
+                            setSelectedSchool(s);
+                            setSelectedPartner({ name: s.partner_name, code: s.partner_code });
+                            setSelectedDistributor({ name: s.distributor_name, code: s.distributor_code });
+                            setEntitySearchQuery(s.school_name);
+                            setIsEntityDropdownOpen(false);
+                          }}
+                          className="w-full text-left p-3 rounded-xl text-xs hover:bg-indigo-50 dark:hover:bg-slate-800 flex items-center justify-between cursor-pointer transition"
+                        >
+                          <div>
+                            <div className="font-bold text-slate-900 dark:text-white">{s.school_name}</div>
+                            <div className="text-[11px] text-slate-400 font-mono">
+                              Mã: {s.school_code} | Tuyến: {s.partner_name} ➔ {s.distributor_name}
                             </div>
-                            {selectedSchool?.school_code === s.school_code && (
-                              <Check className="w-4 h-4 text-accent" />
-                            )}
-                          </button>
-                        ))}
-
-                    {currentEntityMode === 'partner' &&
-                      uniquePartners
-                        .filter((p) => p.name.toLowerCase().includes(entitySearchQuery.toLowerCase()))
-                        .map((p, idx) => (
-                          <button
-                            key={idx}
-                            type="button"
-                            onClick={() => {
-                              setSelectedPartner(p);
-                              setEntitySearchQuery(p.name);
-                              setIsEntityDropdownOpen(false);
-                            }}
-                            className="w-full text-left p-3 rounded-xl text-xs hover:bg-accent-soft dark:hover:bg-rule-2/60 flex items-center justify-between cursor-pointer transition"
-                          >
-                            <div>
-                              <div className="font-bold text-ink dark:text-primary-ink">{p.name}</div>
-                              <div className="text-[11px] text-ink-3 font-mono">Mã đối tác: {p.code}</div>
-                            </div>
-                            {selectedPartner?.name === p.name && <Check className="w-4 h-4 text-accent" />}
-                          </button>
-                        ))}
-
-                    {currentEntityMode === 'distributor' &&
-                      uniqueDistributors
-                        .filter((d) => d.name.toLowerCase().includes(entitySearchQuery.toLowerCase()))
-                        .map((d, idx) => (
-                          <button
-                            key={idx}
-                            type="button"
-                            onClick={() => {
-                              setSelectedDistributor(d);
-                              setEntitySearchQuery(d.name);
-                              setIsEntityDropdownOpen(false);
-                            }}
-                            className="w-full text-left p-3 rounded-xl text-xs hover:bg-amber-50 dark:hover:bg-rule-2/60 flex items-center justify-between cursor-pointer transition"
-                          >
-                            <div>
-                              <div className="font-bold text-ink dark:text-primary-ink">{d.name}</div>
-                              <div className="text-[11px] text-ink-3 font-mono">Mã phân phối: {d.code}</div>
-                            </div>
-                            {selectedDistributor?.name === d.name && <Check className="w-4 h-4 text-amber-600" />}
-                          </button>
-                        ))}
+                          </div>
+                          {selectedSchool?.school_code === s.school_code && (
+                            <Check className="w-4 h-4 text-indigo-600" />
+                          )}
+                        </button>
+                      ))}
                   </div>
                 )}
               </div>
-            )}
 
-            {/* MỤC 1: PHÊ DUYỆT */}
-            {workspaceMainCategory === 'approve' && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {[
-                    { id: 'approve_school_order', label: 'Đơn Hàng Trường', desc: 'Duyệt Order của Trường' },
-                    { id: 'approve_partner_contract', label: 'Hợp Đồng Đối Tác', desc: 'Duyệt Contract PRT' },
-                    { id: 'admin_approve_contract', label: 'Hợp Đồng Quản Trị', desc: 'Duyệt Contract DST' },
-                  ].map((sub) => (
-                    <button
-                      key={sub.id}
-                      type="button"
-                      onClick={() => {
-                        setApproveSubFlow(sub.id as any);
-                        setUniversalSearchQuery('');
-                        setSelectedItemCode('');
-                        setSelectedCachedItem(null);
-                        setParsedOrderCourses([]);
-                      }}
-                      className={`p-3 rounded-xl border text-left transition cursor-pointer ${approveSubFlow === sub.id
-                        ? 'bg-accent text-white border-transparent shadow-xs'
-                        : 'bg-white dark:bg-ink/90 border-rule dark:border-rule-2 text-ink dark:text-primary-ink hover:bg-paper-2'
-                        }`}
-                    >
-                      <div className="font-bold text-xs">{sub.label}</div>
-                      <div className={`text-[10px] ${approveSubFlow === sub.id ? 'text-primary-ink' : 'text-ink-3'}`}>
-                        {sub.desc}
-                      </div>
-                    </button>
-                  ))}
+              {/* 3 Flow Mode Bento Cards */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                {[
+                  { id: 'end_to_end', label: 'Trọn Gói Toàn Trình', desc: 'Trường ➔ Quản trị ➔ LMS' },
+                  { id: 'partner_create_chain', label: 'Đối Tác Tạo & Duyệt', desc: 'Đối tác ➔ Quản trị' },
+                  { id: 'distributor_create_chain', label: 'Nhà Phân Phối Tạo & Duyệt', desc: 'Nhà phân phối ➔ Quản trị' },
+                ].map((sub) => (
+                  <button
+                    key={sub.id}
+                    onClick={() => setCreateApproveSubFlow(sub.id as any)}
+                    className={`rounded-2xl border p-4 text-left transition-all cursor-pointer ${createApproveSubFlow === sub.id
+                        ? 'border-indigo-600 bg-indigo-50/80 dark:bg-indigo-950/40 ring-1 ring-indigo-500'
+                        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50'
+                      }`}
+                  >
+                    <p className={`text-xs font-bold ${createApproveSubFlow === sub.id ? 'text-indigo-700 dark:text-indigo-300' : 'text-slate-900 dark:text-white'}`}>
+                      {sub.label}
+                    </p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">{sub.desc}</p>
+                  </button>
+                ))}
+              </div>
+
+              {/* Contact info & notes */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase">
+                    Thông Tin Liên Hệ:
+                  </label>
+                  <input
+                    type="text"
+                    value={contactInfo}
+                    onChange={(e) => setContactInfo(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 px-3.5 py-2 text-xs text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
+                  />
                 </div>
-
-                <div className="p-5 bg-white dark:bg-ink/90 rounded-2xl border border-accent-soft dark:border-rule-2 space-y-4 shadow-2xs">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-accent dark:text-primary-ink flex items-center justify-between">
-                      <span className="flex items-center gap-1.5">
-                        <Search className="w-3.5 h-3.5 text-accent" />
-                        <span>
-                          {approveSubFlow === 'approve_school_order'
-                            ? 'Tìm Kiếm Đơn Hàng (Theo Mã Đơn, Tên Trường, hoặc Tên Đối Tác):'
-                            : approveSubFlow === 'approve_partner_contract'
-                              ? 'Tìm Kiếm Hợp Đồng (Theo Mã PRT, Tên Đối Tác, hoặc Nhà Phân Phối):'
-                              : 'Tìm Kiếm Hợp Đồng (Theo Mã DST, hoặc Tên Nhà Phân Phối):'}
-                        </span>
-                      </span>
-                      {selectedItemCode && (
-                        <span className="text-xs text-accent dark:text-accent-2 font-mono font-bold">
-                          Đang chọn: {selectedItemCode}
-                        </span>
-                      )}
-                    </label>
-
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={universalSearchQuery}
-                        onChange={(e) => setUniversalSearchQuery(e.target.value)}
-                        placeholder="Gõ từ khóa để lọc danh sách bên dưới (VD: SCH-..., THCS Lê Quý Đôn, DTTE...)"
-                        className="w-full bg-paper-2 dark:bg-ink border border-accent-soft dark:border-accent-soft rounded-xl p-3 pr-10 text-xs font-semibold outline-none focus:ring-2 focus:ring-accent/20"
-                      />
-                      {universalSearchQuery && (
-                        <button
-                          type="button"
-                          onClick={() => setUniversalSearchQuery('')}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-3 hover:text-ink-2 p-1 cursor-pointer"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {approveSubFlow === 'admin_approve_contract' && (
-                    <div className="space-y-1.5 pt-1">
-                      <label className="text-xs font-bold text-ink dark:text-primary-ink flex items-center justify-between">
-                        <span className="flex items-center gap-1">
-                          <span>Lý Do Phê Duyệt Sales Admin:</span>
-                          <span className="text-rose-500 font-bold">* (Tối thiểu 15 ký tự)</span>
-                        </span>
-                        <span
-                          className={`text-[11px] font-mono font-bold ${adminJustification.trim().length >= 15
-                            ? 'text-emerald-600 dark:text-emerald-400'
-                            : 'text-rose-500'
-                            }`}
-                        >
-                          {adminJustification.trim().length}/15 ký tự
-                        </span>
-                      </label>
-                      <textarea
-                        rows={2}
-                        value={adminJustification}
-                        onChange={(e) => setAdminJustification(e.target.value)}
-                        placeholder="Nhập lý do phê duyệt chính thức..."
-                        className={`w-full bg-paper-2 dark:bg-ink border rounded-xl p-2.5 text-xs outline-none transition ${adminJustification.trim().length >= 15
-                          ? 'border-rule dark:border-rule-2 focus:border-accent'
-                          : 'border-rose-400 focus:border-rose-500'
-                          }`}
-                      />
-                    </div>
-                  )}
-
-                  {/* DANH SÁCH HIỂN THỊ ĐƠN HÀNG (0MS SỐNG QUA CẢ CTRL+SHIFT+R) */}
-                  <div className="space-y-3 pt-2 border-t border-rule dark:border-rule-2">
-                    <div className="flex items-center justify-between flex-wrap gap-2">
-                      <div className="text-xs font-bold text-ink dark:text-primary-ink flex items-center gap-1.5">
-                        <Filter className="w-3.5 h-3.5 text-accent" />
-                        <span>
-                          Danh Sách Đơn Hàng ({filteredCacheList.length}/{scrapedPendingList.length}):
-                        </span>
-                      </div>
-
-                      <div className="flex items-center bg-paper-2 dark:bg-ink p-1 rounded-xl text-[11px] font-semibold">
-                        {[
-                          { id: 'pending', label: '⏳ Chờ duyệt' },
-                          { id: 'approved', label: '✅ Đã duyệt' },
-                          { id: 'rejected', label: '❌ Bị từ chối' },
-                          { id: 'all', label: '📋 Tất cả' },
-                        ].map((st) => (
-                          <button
-                            key={st.id}
-                            type="button"
-                            onClick={() => setStatusFilter(st.id as any)}
-                            className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${statusFilter === st.id
-                              ? 'bg-white dark:bg-rule-2 text-accent dark:text-accent-2 font-bold shadow-2xs'
-                              : 'text-ink-2 hover:text-ink dark:hover:text-primary-ink'
-                              }`}
-                          >
-                            {st.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="max-h-56 overflow-y-auto space-y-1.5 p-1.5 bg-paper-2 dark:bg-ink/60 rounded-xl border border-rule dark:border-rule-2 scrollbar-thin">
-                      {isScrapingLive && scrapedPendingList.length === 0 ? (
-                        <div className="py-6 flex items-center justify-center gap-2 text-xs text-ink-2">
-                          <Loader2 className="w-4 h-4 animate-spin text-accent" />
-                          <span>Đang nạp danh sách...</span>
-                        </div>
-                      ) : filteredCacheList.length === 0 ? (
-                        <div className="text-center py-6 text-xs text-ink-3">
-                          Không có đơn hàng / hợp đồng nào khớp với từ khóa tìm kiếm.
-                        </div>
-                      ) : (
-                        filteredCacheList.map((item, pIdx) => {
-                          const itemCode = item.order_code || item.contract_code || item.data_id || `ITEM-${pIdx}`;
-                          const isSelected = selectedItemCode === itemCode;
-                          const isPending =
-                            (item.status || '').toLowerCase().includes('pending') ||
-                            (item.status || '').toLowerCase().includes('awaiting');
-
-                          return (
-                            <button
-                              key={pIdx}
-                              type="button"
-                              onClick={() => {
-                                setSelectedItemCode(itemCode);
-                                setSelectedCachedItem(item);
-
-                                if (approveSubFlow === 'approve_school_order') {
-                                  if (item.courses_data && item.courses_data.length > 0) {
-                                    setParsedOrderCourses(item.courses_data);
-                                  } else {
-                                    handleLoadOrderDetails(itemCode, item.school_name);
-                                  }
-                                } else {
-                                  if (item.courses_data && item.courses_data.length > 0) {
-                                    setParsedOrderCourses(item.courses_data);
-                                  } else {
-                                    setParsedOrderCourses([]);
-                                  }
-                                }
-                                toast.success(`Đã chọn: ${itemCode}`);
-                              }}
-                              className={`w-full text-left p-3 rounded-xl text-xs flex items-center justify-between cursor-pointer transition ${isSelected
-                                ? 'bg-accent-soft dark:bg-accent-soft/80 border-2 border-accent text-accent dark:text-primary-ink font-bold shadow-xs'
-                                : 'hover:bg-rule/60 dark:hover:bg-ink text-ink dark:text-primary-ink border border-transparent'
-                                }`}
-                            >
-                              <div className="space-y-0.5">
-                                <div className="font-mono text-xs font-bold text-ink dark:text-primary-ink flex items-center gap-2">
-                                  <span>{itemCode}</span>
-                                  {isSelected && (
-                                    <span className="text-[10px] px-2 py-0.2 bg-accent text-white rounded-md font-sans">
-                                      Đang chọn
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="text-[11px] text-ink-2 dark:text-ink-3">
-                                  {item.school_name ? `${item.school_name} | ` : ''}
-                                  {item.partner_name || item.sender_name ? `${item.partner_name || item.sender_name} ➔ ` : ''}
-                                  {item.distributor_name || item.receiver_name ? `${item.distributor_name || item.receiver_name} | ` : ''}
-                                  {item.order_date || item.contract_date || item.created_at || ''}
-                                </div>
-                              </div>
-                              <span
-                                className={`text-[10px] px-2.5 py-1 rounded-full font-bold ${isPending
-                                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                                  : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                                  }`}
-                              >
-                                {item.status || 'Chờ duyệt'}
-                              </span>
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-
-                  {/* KHUNG CHI TIẾT KHÓA HỌC */}
-                  <div className="space-y-2 pt-2 border-t border-rule dark:border-rule-2">
-                    <div className="flex items-center justify-between text-xs font-bold text-ink dark:text-primary-ink">
-                      <span className="flex items-center gap-1.5">
-                        <BookOpen className="w-4 h-4 text-sky-600" />
-                        <span>
-                          Chi Tiết Khóa Học & Số Lượng Giấy Phép
-                          {parsedOrderCourses.length > 0 ? ` (${parsedOrderCourses.length} môn):` : ':'}
-                        </span>
-                      </span>
-                      {isLoadingOrderDetails && (
-                        <span className="text-[11px] text-sky-600 flex items-center gap-1">
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                          <span>Đang bóc tách chi tiết...</span>
-                        </span>
-                      )}
-                    </div>
-
-                    {parsedOrderCourses.length > 0 ? (
-                      <div className="space-y-2">
-                        {parsedOrderCourses.map((pc, pIdx) => (
-                          <div
-                            key={pIdx}
-                            className="p-3 bg-sky-50 dark:bg-sky-950/40 rounded-xl border border-sky-200 dark:border-sky-800/60 text-xs flex items-center justify-between"
-                          >
-                            <div>
-                              <div className="font-bold text-sky-900 dark:text-sky-200">{pc.course_name}</div>
-                              <div className="text-[11px] text-ink-2 font-mono">
-                                Phân loại: {pc.category}
-                              </div>
-                            </div>
-                            <span className="px-3 py-1 bg-white dark:bg-ink text-sky-700 dark:text-sky-300 rounded-lg font-extrabold border border-sky-200 dark:border-sky-700">
-                              {pc.licenses} Giấy phép
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : selectedCachedItem ? (
-                      <div className="p-3.5 bg-paper-2 dark:bg-ink/60 rounded-xl border border-rule dark:border-rule-2 text-xs space-y-1">
-                        <div className="font-bold text-ink dark:text-primary-ink">
-                          Hợp đồng: {selectedItemCode}
-                        </div>
-                        <div className="text-ink-2 text-[11px]">
-                          Ghi chú: {selectedCachedItem.notes || 'Không có ghi chú thêm.'}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="p-4 rounded-xl bg-paper-2 dark:bg-ink text-ink-3 text-xs text-center border border-dashed border-rule dark:border-rule-2">
-                        Vui lòng click chọn 1 đơn hàng/hợp đồng từ danh sách trên để xem chi tiết.
-                      </div>
-                    )}
-                  </div>
-
-                  {/* THIẾT LẬP DỰ PHÒNG */}
-                  <div className="pt-2 border-t border-rule dark:border-rule-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowAutoTopupSettings(!showAutoTopupSettings)}
-                      className="text-xs font-bold text-accent dark:text-accent-2 flex items-center gap-1.5 hover:underline cursor-pointer"
-                    >
-                      <SlidersHorizontal className="w-3.5 h-3.5" />
-                      <span>{showAutoTopupSettings ? 'Ẩn thiết lập dự phòng khi thiếu License' : '⚙️ Tùy chỉnh thông số tạo hợp đồng tự động (Khi thiếu License)'}</span>
-                    </button>
-
-                    {showAutoTopupSettings && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 p-3.5 bg-paper-2 dark:bg-ink/80 rounded-xl border border-rule dark:border-rule-2 text-xs">
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-ink-2 uppercase">Contact Info (Tạo đơn dự phòng):</label>
-                          <input
-                            type="text"
-                            value={contactInfo}
-                            onChange={(e) => setContactInfo(e.target.value)}
-                            className="w-full bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-lg p-2 text-xs outline-none"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-ink-2 uppercase">Ghi chú Contract Notes:</label>
-                          <input
-                            type="text"
-                            value={additionalNotes}
-                            onChange={(e) => setAdditionalNotes(e.target.value)}
-                            className="w-full bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-lg p-2 text-xs outline-none"
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase">
+                    Ghi Chú Bổ Sung:
+                  </label>
+                  <input
+                    type="text"
+                    value={additionalNotes}
+                    onChange={(e) => setAdditionalNotes(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 px-3.5 py-2 text-xs text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
+                  />
                 </div>
               </div>
-            )}
 
-            {/* MỤC 2: TẠO MỚI & DUYỆT CHUỖI */}
-            {workspaceMainCategory === 'create_and_approve' && (
-              <div className="space-y-5">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {[
-                    { id: 'end_to_end', label: 'Trọn Gói Toàn Trình', desc: 'Trường ➔ Quản trị ➔ LMS' },
-                    { id: 'partner_create_chain', label: 'Đối Tác Tạo & Duyệt', desc: 'Đối tác ➔ Quản trị' },
-                    { id: 'distributor_create_chain', label: 'Nhà Phân Phối Tạo & Duyệt', desc: 'Nhà phân phối ➔ Quản trị' },
-                  ].map((sub) => (
-                    <button
-                      key={sub.id}
-                      type="button"
-                      onClick={() => setCreateApproveSubFlow(sub.id as any)}
-                      className={`p-3 rounded-xl border text-left transition cursor-pointer ${createApproveSubFlow === sub.id
-                        ? 'bg-accent text-white border-transparent shadow-xs'
-                        : 'bg-white dark:bg-ink/90 border-rule dark:border-rule-2 text-ink dark:text-primary-ink hover:bg-paper-2'
-                        }`}
+              {/* Course License List Builder */}
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
+                    <BookOpen className="h-4 w-4 text-indigo-600" />
+                    <span>Danh Sách Khóa Học Cấp Phép ({selectedCourses.length} Môn):</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddCourseRow}
+                    className="flex items-center gap-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 px-3 py-1.5 text-xs font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition-colors cursor-pointer"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>Thêm Môn Học</span>
+                  </button>
+                </div>
+
+                {selectedCourses.map((cRow, idx) => {
+                  const filteredCourses = workspaceCoursesList.filter((c) => c.category === cRow.category);
+                  return (
+                    <div
+                      key={idx}
+                      className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 p-4 space-y-3"
                     >
-                      <div className="font-bold text-xs">{sub.label}</div>
-                      <div className={`text-[10px] ${createApproveSubFlow === sub.id ? 'text-primary-ink' : 'text-ink-3'}`}>
-                        {sub.desc}
+                      <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
+                        <span>Khóa học #{idx + 1}</span>
+                        {selectedCourses.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveCourseRow(idx)}
+                            className="text-rose-500 hover:text-rose-700 p-1 cursor-pointer"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
                       </div>
-                    </button>
-                  ))}
-                </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-white dark:bg-ink/90 rounded-2xl border border-accent-soft dark:border-rule-2 shadow-2xs">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-ink dark:text-primary-ink">Thông Tin Liên Hệ:</label>
-                    <input
-                      type="text"
-                      value={contactInfo}
-                      onChange={(e) => setContactInfo(e.target.value)}
-                      className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs outline-none"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-ink dark:text-primary-ink">Ghi Chú Bổ Sung:</label>
-                    <input
-                      type="text"
-                      value={additionalNotes}
-                      onChange={(e) => setAdditionalNotes(e.target.value)}
-                      className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-4 pt-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-accent dark:text-accent-2 flex items-center gap-1.5">
-                      <BookOpen className="w-4 h-4 text-sky-600" />
-                      <span>Danh Sách Khóa Học Cấp Phép ({selectedCourses.length} Môn):</span>
-                    </label>
-
-                    <button
-                      type="button"
-                      onClick={handleAddCourseRow}
-                      className="flex items-center gap-1 text-xs px-3.5 py-1.5 bg-sky-50 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800/60 rounded-xl font-bold hover:bg-sky-100 cursor-pointer shadow-2xs transition"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Thêm Môn Học</span>
-                    </button>
-                  </div>
-
-                  {selectedCourses.map((cRow, idx) => {
-                    const filteredCourses = workspaceCoursesList.filter((c) => c.category === cRow.category);
-                    return (
-                      <div
-                        key={idx}
-                        className="p-4 bg-white dark:bg-ink/90 rounded-2xl border border-accent-soft/80 dark:border-rule-2 space-y-3 relative shadow-2xs"
-                      >
-                        <div className="flex items-center justify-between text-xs font-bold text-ink dark:text-primary-ink">
-                          <span>Khóa học #{idx + 1}</span>
-                          {selectedCourses.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveCourseRow(idx)}
-                              className="text-rose-500 hover:text-rose-700 p-1 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        <div>
+                          <label className="text-[10px] font-bold uppercase text-slate-500">Phân loại:</label>
+                          <select
+                            value={cRow.category}
+                            onChange={(e) => {
+                              const cat = e.target.value;
+                              const match = workspaceCoursesList.filter((c) => c.category === cat);
+                              const first = match[0] || workspaceCoursesList[0];
+                              const updated = [...selectedCourses];
+                              updated[idx] = {
+                                ...updated[idx],
+                                category: cat,
+                                course_id: first.course_id,
+                                course_name: first.course_name,
+                                lms_url: first.lms_url,
+                              };
+                              setSelectedCourses(updated);
+                            }}
+                            className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs text-slate-900 dark:text-white"
+                          >
+                            {workspaceCategoriesList.map((cat) => (
+                              <option key={cat} value={cat}>
+                                {cat}
+                              </option>
+                            ))}
+                          </select>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                          <div>
-                            <label className="text-[10px] font-bold text-ink-2 uppercase">Phân loại:</label>
-                            <select
-                              value={cRow.category}
-                              onChange={(e) => {
-                                const cat = e.target.value;
-                                const match = workspaceCoursesList.filter((c) => c.category === cat);
-                                const first = match[0] || workspaceCoursesList[0];
+                        <div className="sm:col-span-2">
+                          <label className="text-[10px] font-bold uppercase text-slate-500">Chọn môn học ({filteredCourses.length} môn):</label>
+                          <select
+                            value={cRow.course_id}
+                            onChange={(e) => {
+                              const cId = parseInt(e.target.value);
+                              const target = workspaceCoursesList.find((c) => c.course_id === cId);
+                              if (target) {
                                 const updated = [...selectedCourses];
                                 updated[idx] = {
                                   ...updated[idx],
-                                  category: cat,
-                                  course_id: first.course_id,
-                                  course_name: first.course_name,
-                                  lms_url: first.lms_url,
+                                  course_id: target.course_id,
+                                  course_name: target.course_name,
+                                  lms_url: target.lms_url,
                                 };
                                 setSelectedCourses(updated);
-                              }}
-                              className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs font-semibold cursor-pointer outline-none"
-                            >
-                              {workspaceCategoriesList.map((cat) => (
-                                <option key={cat} value={cat}>
-                                  {cat}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div className="sm:col-span-2">
-                            <label className="text-[10px] font-bold text-ink-2 uppercase">
-                              Chọn môn học ({filteredCourses.length} môn):
-                            </label>
-                            <select
-                              value={cRow.course_id}
-                              onChange={(e) => {
-                                const cId = parseInt(e.target.value);
-                                const target = workspaceCoursesList.find((c) => c.course_id === cId);
-                                if (target) {
-                                  const updated = [...selectedCourses];
-                                  updated[idx] = {
-                                    ...updated[idx],
-                                    course_id: target.course_id,
-                                    course_name: target.course_name,
-                                    lms_url: target.lms_url,
-                                  };
-                                  setSelectedCourses(updated);
-                                }
-                              }}
-                              className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs font-semibold cursor-pointer outline-none truncate"
-                            >
-                              {filteredCourses.map((c) => (
-                                <option key={c.course_id} value={c.course_id}>
-                                  {c.course_name} (ID: {c.course_id})
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                          <div>
-                            <label className="text-[10px] font-bold text-ink-2 uppercase">Số lượng Giấy phép:</label>
-                            <input
-                              type="number"
-                              value={cRow.licenses}
-                              min={1}
-                              onChange={(e) => {
-                                const updated = [...selectedCourses];
-                                updated[idx].licenses = parseInt(e.target.value) || 1;
-                                setSelectedCourses(updated);
-                              }}
-                              className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2 text-xs font-bold outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-ink-2 uppercase">Ngày Bắt Đầu:</label>
-                            <input
-                              type="text"
-                              value={cRow.start_date}
-                              placeholder="dd-mm-yyyy"
-                              onChange={(e) => {
-                                const updated = [...selectedCourses];
-                                updated[idx].start_date = e.target.value;
-                                setSelectedCourses(updated);
-                              }}
-                              className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2 text-xs font-mono outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-ink-2 uppercase">Ngày Kết Thúc (1 Năm):</label>
-                            <input
-                              type="text"
-                              value={cRow.end_date}
-                              placeholder="dd-mm-yyyy"
-                              onChange={(e) => {
-                                const updated = [...selectedCourses];
-                                updated[idx].end_date = e.target.value;
-                                setSelectedCourses(updated);
-                              }}
-                              className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2 text-xs font-mono outline-none"
-                            />
-                          </div>
+                              }
+                            }}
+                            className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs text-slate-900 dark:text-white truncate"
+                          >
+                            {filteredCourses.map((c) => (
+                              <option key={c.course_id} value={c.course_id}>
+                                {c.course_name} (ID: {c.course_id})
+                              </option>
+                            ))}
+                          </select>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
 
-            {/* MỤC 3: TẠO TÀI KHOẢN HÀNG LOẠT */}
-            {workspaceMainCategory === 'bulk_accounts' && (
-              <div className="p-6 bg-white dark:bg-ink/90 rounded-3xl border border-accent-soft dark:border-rule-2 space-y-4 shadow-2xs">
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        <div>
+                          <label className="text-[10px] font-bold uppercase text-slate-500">Số lượng giấy phép:</label>
+                          <input
+                            type="number"
+                            value={cRow.licenses}
+                            min={1}
+                            onChange={(e) => {
+                              const updated = [...selectedCourses];
+                              updated[idx].licenses = parseInt(e.target.value) || 1;
+                              setSelectedCourses(updated);
+                            }}
+                            className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-mono font-bold text-slate-900 dark:text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold uppercase text-slate-500">Ngày bắt đầu:</label>
+                          <input
+                            type="text"
+                            value={cRow.start_date}
+                            placeholder="dd-mm-yyyy"
+                            onChange={(e) => {
+                              const updated = [...selectedCourses];
+                              updated[idx].start_date = e.target.value;
+                              setSelectedCourses(updated);
+                            }}
+                            className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-mono text-slate-900 dark:text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold uppercase text-slate-500">Ngày kết thúc:</label>
+                          <input
+                            type="text"
+                            value={cRow.end_date}
+                            placeholder="dd-mm-yyyy"
+                            onChange={(e) => {
+                              const updated = [...selectedCourses];
+                              updated[idx].end_date = e.target.value;
+                              setSelectedCourses(updated);
+                            }}
+                            className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-mono text-slate-900 dark:text-white"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* WORKFLOW 3: TẠO TÀI KHOẢN */}
+          {workspaceMainCategory === 'bulk_accounts' && (
+            <div className="space-y-5 pt-2">
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-5 space-y-4">
                 <div className="flex items-center gap-3">
-                  <div className="p-2.5 bg-accent-soft dark:bg-accent-soft text-accent dark:text-accent-2 rounded-xl">
-                    <Users className="w-5 h-5" />
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
+                    <Users className="h-5 w-5" />
                   </div>
                   <div>
-                    <div className="font-bold text-xs text-ink dark:text-primary-ink">
+                    <h3 className="text-xs font-bold text-slate-900 dark:text-white">
                       Nộp File Excel Tạo Tài Khoản Hàng Loạt
-                    </div>
-                    <div className="text-[11px] text-ink-3">
-                      Trường áp dụng:{' '}
-                      <span className="font-bold text-accent font-mono">
-                        {selectedSchool?.school_name || 'Vui lòng chọn trường ở ô trên'}
-                      </span>
-                    </div>
+                    </h3>
+                    <p className="text-[11px] text-indigo-600 dark:text-indigo-400">
+                      Trường áp dụng: {selectedSchool?.school_name || 'Vui lòng chọn trường ở ô trên'}
+                    </p>
                   </div>
                 </div>
 
@@ -1625,527 +1745,525 @@ export const AutomationStudioPage: React.FC = () => {
                 />
 
                 <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDragging(true);
+                  }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDragging(false);
+                    if (e.dataTransfer.files?.[0]) {
+                      const file = e.dataTransfer.files[0];
+                      setUploadedAccountsFile(file);
+                      toast.success(`Đã nhận file: ${file.name}`);
+                    }
+                  }}
                   onClick={() => fileInputRef.current?.click()}
-                  className="border-2 border-dashed border-accent-soft dark:border-accent-soft/80 hover:border-accent dark:hover:border-accent rounded-2xl p-8 text-center cursor-pointer transition bg-accent-soft/40 dark:bg-accent-soft/20 flex flex-col items-center justify-center gap-2"
+                  className={`flex flex-col items-center justify-center rounded-2xl border-2 border-dashed p-8 text-center transition-all cursor-pointer ${isDragging
+                      ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/30'
+                      : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900/80 hover:border-indigo-400'
+                    }`}
                 >
-                  <div className="p-3 bg-white dark:bg-ink rounded-full shadow-2xs text-accent dark:text-accent-2">
-                    <UploadCloud className="w-6 h-6" />
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-600 mb-3">
+                    <Upload className="h-6 w-6" />
                   </div>
+
                   {uploadedAccountsFile ? (
                     <div className="space-y-1">
-                      <div className="font-bold text-xs text-ink dark:text-primary-ink flex items-center justify-center gap-1.5">
-                        <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                        <span>{uploadedAccountsFile.name}</span>
-                      </div>
-                      <div className="text-[11px] text-ink-3 font-mono">
-                        Kích thước: {Math.round(uploadedAccountsFile.size / 1024)} KB | Bấm để chọn file khác
-                      </div>
+                      <p className="text-xs font-bold text-slate-900 dark:text-white">
+                        {uploadedAccountsFile.name} ({Math.round(uploadedAccountsFile.size / 1024)} KB)
+                      </p>
+                      <p className="text-[11px] text-emerald-600 font-semibold">
+                        Đã nạp file thành công. Sẵn sàng tạo tài khoản!
+                      </p>
+                      <span className="text-[10px] text-slate-400 block pt-1">
+                        Bấm để chọn file khác thay thế
+                      </span>
                     </div>
                   ) : (
-                    <div className="space-y-1">
-                      <div className="font-bold text-xs text-ink dark:text-primary-ink">
+                    <div>
+                      <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
                         Bấm hoặc kéo thả file Excel (.xlsx, .csv) vào đây
-                      </div>
-                      <div className="text-[11px] text-ink-3">
+                      </p>
+                      <p className="mt-1 text-[11px] text-slate-400">
                         File mẫu chuẩn gồm 7 cột thông tin học sinh và giáo viên.
-                      </div>
+                      </p>
                     </div>
                   )}
                 </div>
               </div>
-            )}
+            </div>
+          )}
 
-            {/* MỤC 4: GHI DANH LMS */}
-            {workspaceMainCategory === 'lms_enroll' && (
-              <div className="p-6 bg-white dark:bg-ink/90 rounded-3xl border border-emerald-200/80 dark:border-emerald-800/50 space-y-5 shadow-2xs">
-                <div className="flex items-center justify-between pb-3 border-b border-rule dark:border-rule-2">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-300 rounded-xl">
-                      <GraduationCap className="w-5 h-5" />
+          {/* WORKFLOW 4: GHI DANH LMS */}
+          {workspaceMainCategory === 'lms_enroll' && (
+            <div className="space-y-5 pt-2">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-2xl border border-emerald-200/70 dark:border-emerald-900/40 bg-emerald-50/40 dark:bg-emerald-950/20 p-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400">
+                    <GraduationCap className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-xs font-bold text-slate-900 dark:text-white">
+                        Ghi Danh & Gia Hạn Khóa Học PLearn LMS
+                      </h3>
+                      <span className="rounded-full bg-emerald-100 dark:bg-emerald-900/60 px-2 py-0.5 font-mono text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
+                        learn.pythaverse.space
+                      </span>
                     </div>
-                    <div>
-                      <div className="font-extrabold text-sm text-ink dark:text-primary-ink flex items-center gap-2">
-                        <span>Ghi Danh & Gia Hạn Khóa Học PLearn LMS</span>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-mono font-bold">
-                          learn.pythaverse.space
-                        </span>
-                      </div>
-                      <div className="text-xs text-ink-2 dark:text-ink-3">
-                        Dữ liệu khóa học từ bảng <span className="font-mono font-bold text-emerald-600">lms_courses</span> ({lmsCoursesList.length} môn).
-                      </div>
-                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      Dữ liệu khóa học từ bảng <span className="font-mono text-emerald-600">lms_courses</span> ({lmsCoursesList.length} môn).
+                    </p>
                   </div>
                 </div>
+              </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="text-[10px] font-bold text-ink-2 uppercase">
-                      Phân loại ({lmsCategoriesList.length} Categories):
-                    </label>
-                    <select
-                      value={lmsCourseCategory}
-                      onChange={(e) => {
-                        const cat = e.target.value;
-                        setLmsCourseCategory(cat);
-                        const match = lmsCoursesList.filter((c) => c.category === cat);
-                        if (match.length > 0) {
-                          setLmsCourseId(match[0].course_id);
-                          setLmsCourseName(match[0].course_name);
-                        }
-                      }}
-                      className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs font-semibold outline-none truncate cursor-pointer"
-                    >
-                      {lmsCategoriesList.map((cat) => (
-                        <option key={cat} value={cat}>
-                          {cat}
+              {/* Category & Course Selectors */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold uppercase text-slate-600 dark:text-slate-400">
+                    Phân loại ({lmsCategoriesList.length} Categories):
+                  </label>
+                  <select
+                    value={lmsCourseCategory}
+                    onChange={(e) => {
+                      const cat = e.target.value;
+                      setLmsCourseCategory(cat);
+                      const match = lmsCoursesList.filter((c) => c.category === cat);
+                      if (match.length > 0) {
+                        setLmsCourseId(match[0].course_id);
+                        setLmsCourseName(match[0].course_name);
+                      }
+                    }}
+                    className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 px-3.5 py-2.5 text-xs text-slate-900 dark:text-white cursor-pointer"
+                  >
+                    {lmsCategoriesList.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold uppercase text-slate-600 dark:text-slate-400">
+                    Chọn khóa học LMS ({lmsCoursesList.filter((c) => c.category === lmsCourseCategory).length} môn):
+                  </label>
+                  <select
+                    value={lmsCourseId}
+                    onChange={(e) => {
+                      const cId = parseInt(e.target.value);
+                      setLmsCourseId(cId);
+                      const target = lmsCoursesList.find((c) => c.course_id === cId);
+                      if (target) setLmsCourseName(target.course_name);
+                    }}
+                    className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 px-3.5 py-2.5 text-xs text-slate-900 dark:text-white truncate cursor-pointer"
+                  >
+                    {lmsCoursesList
+                      .filter((c) => c.category === lmsCourseCategory)
+                      .map((c) => (
+                        <option key={c.course_id} value={c.course_id}>
+                          {c.course_name} (ID: {c.course_id})
                         </option>
                       ))}
-                    </select>
-                  </div>
-
-                  <div className="sm:col-span-2">
-                    <label className="text-[10px] font-bold text-ink-2 uppercase">
-                      Chọn khóa học LMS ({lmsCoursesList.filter((c) => c.category === lmsCourseCategory).length} môn):
-                    </label>
-                    <select
-                      value={lmsCourseId}
-                      onChange={(e) => {
-                        const cId = parseInt(e.target.value);
-                        setLmsCourseId(cId);
-                        const target = lmsCoursesList.find((c) => c.course_id === cId);
-                        if (target) setLmsCourseName(target.course_name);
-                      }}
-                      className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs font-semibold outline-none truncate cursor-pointer"
-                    >
-                      {lmsCoursesList
-                        .filter((c) => c.category === lmsCourseCategory)
-                        .map((c) => (
-                          <option key={c.course_id} value={c.course_id}>
-                            {c.course_name} (ID: {c.course_id})
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="p-4 bg-paper-2 dark:bg-ink/60 rounded-2xl border border-rule dark:border-rule-2 space-y-2 sm:col-span-2">
-                    <label className="text-xs font-bold text-ink dark:text-primary-ink flex items-center gap-1.5">
-                      <Calendar className="w-3.5 h-3.5 text-accent" />
-                      <span>Thời Hạn Quyền Truy Cập (Mặc Định 1 Năm):</span>
-                    </label>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-[10px] font-bold text-ink-2 uppercase">Ngày Bắt Đầu:</label>
-                        <input
-                          type="text"
-                          value={lmsStartDate}
-                          onChange={(e) => setLmsStartDate(e.target.value)}
-                          placeholder="dd-mm-yyyy"
-                          className="w-full bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs font-mono font-bold outline-none"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-bold text-ink-2 uppercase">Ngày Hết Hạn:</label>
-                        <input
-                          type="text"
-                          value={lmsEndDate}
-                          onChange={(e) => setLmsEndDate(e.target.value)}
-                          placeholder="dd-mm-yyyy"
-                          className="w-full bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs font-mono font-bold outline-none"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="p-4 bg-paper-2 dark:bg-ink/60 rounded-2xl border border-rule dark:border-rule-2 space-y-2 flex flex-col justify-between">
-                    <div>
-                      <label className="text-xs font-bold text-ink dark:text-primary-ink flex items-center gap-1.5">
-                        <Users className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Tên Nhóm / Group (Tùy chọn):</span>
-                      </label>
-                      <p className="text-[10px] text-ink-2 mt-1">Tự động gom các học viên vào Group.</p>
-                    </div>
-                    <input
-                      type="text"
-                      value={lmsGroupName}
-                      onChange={(e) => setLmsGroupName(e.target.value)}
-                      placeholder="VD: DEMO_TEACHER_2026"
-                      className="w-full bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs font-semibold outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-ink dark:text-primary-ink flex items-center gap-1.5">
-                      <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Phương Thức Gán Vai Trò:</span>
-                    </label>
-
-                    <div className="flex items-center bg-paper-2 dark:bg-ink p-1 rounded-xl text-xs font-semibold">
-                      <button
-                        type="button"
-                        onClick={() => setLmsRoleMode('multi_role')}
-                        className={`px-3 py-1 rounded-lg transition cursor-pointer ${lmsRoleMode === 'multi_role'
-                          ? 'bg-white dark:bg-rule-2 text-emerald-700 dark:text-emerald-300 font-bold shadow-2xs'
-                          : 'text-ink-2'
-                          }`}
-                      >
-                        Phân Chia 3 Vai Trò
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setLmsRoleMode('same_role')}
-                        className={`px-3 py-1 rounded-lg transition cursor-pointer ${lmsRoleMode === 'same_role'
-                          ? 'bg-white dark:bg-rule-2 text-emerald-700 dark:text-emerald-300 font-bold shadow-2xs'
-                          : 'text-ink-2'
-                          }`}
-                      >
-                        Cùng Một Vai Trò
-                      </button>
-                    </div>
-                  </div>
-
-                  {lmsRoleMode === 'same_role' ? (
-                    <div className="p-4 bg-paper-2 dark:bg-ink/60 rounded-2xl border border-rule dark:border-rule-2 space-y-3">
-                      <div>
-                        <label className="text-[10px] font-bold text-ink-2 uppercase">Chọn Vai Trò Áp Dụng:</label>
-                        <select
-                          value={lmsSingleRole}
-                          onChange={(e) => setLmsSingleRole(e.target.value as any)}
-                          className="w-full bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs font-bold outline-none cursor-pointer"
-                        >
-                          <option value="student">🎓 Học Viên (Student)</option>
-                          <option value="non_editing_teacher">👨‍🏫 Giáo Viên Trợ Giảng (Non-editing Teacher)</option>
-                          <option value="manager">🛡️ Quản Lý Khóa Học (Manager)</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <div className="flex justify-between items-center mb-1">
-                          <label className="text-[10px] font-bold text-ink-2 uppercase">
-                            Danh Sách Email (Mỗi dòng 1 email):
-                          </label>
-                          <span className="text-[10px] font-mono font-bold text-emerald-600">
-                            {lmsBulkSingleEmails.split('\n').filter((x) => x.trim().length > 0).length} emails
-                          </span>
-                        </div>
-                        <textarea
-                          rows={4}
-                          value={lmsBulkSingleEmails}
-                          onChange={(e) => setLmsBulkSingleEmails(e.target.value)}
-                          placeholder="user1@pythaverse.space&#10;user2@pythaverse.space"
-                          className="w-full bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-3 text-xs font-mono outline-none focus:border-emerald-500"
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div className="p-3.5 bg-paper-2 dark:bg-ink/60 rounded-2xl border border-rule dark:border-rule-2 space-y-2">
-                        <div className="flex justify-between items-center">
-                          <label className="text-[11px] font-bold text-sky-700 dark:text-sky-300">🎓 Học Viên (Student):</label>
-                          <span className="text-[10px] font-mono text-sky-600 font-bold">
-                            {lmsStudentEmails.split('\n').filter((x) => x.trim().length > 0).length}
-                          </span>
-                        </div>
-                        <textarea
-                          rows={5}
-                          value={lmsStudentEmails}
-                          onChange={(e) => setLmsStudentEmails(e.target.value)}
-                          placeholder="student1@pythaverse.space&#10;student2@pythaverse.space"
-                          className="w-full bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs font-mono outline-none focus:border-sky-500"
-                        />
-                      </div>
-
-                      <div className="p-3.5 bg-paper-2 dark:bg-ink/60 rounded-2xl border border-rule dark:border-rule-2 space-y-2">
-                        <div className="flex justify-between items-center">
-                          <label className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
-                            👨‍🏫 Trợ Giảng (Non-editing Teacher):
-                          </label>
-                          <span className="text-[10px] font-mono text-emerald-600 font-bold">
-                            {lmsTeacherEmails.split('\n').filter((x) => x.trim().length > 0).length}
-                          </span>
-                        </div>
-                        <textarea
-                          rows={5}
-                          value={lmsTeacherEmails}
-                          onChange={(e) => setLmsTeacherEmails(e.target.value)}
-                          placeholder="teacher1@pythaverse.space&#10;teacher2@pythaverse.space"
-                          className="w-full bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs font-mono outline-none focus:border-emerald-500"
-                        />
-                      </div>
-
-                      <div className="p-3.5 bg-paper-2 dark:bg-ink/60 rounded-2xl border border-rule dark:border-rule-2 space-y-2">
-                        <div className="flex justify-between items-center">
-                          <label className="text-[11px] font-bold text-accent dark:text-accent-2">🛡️ Quản Lý (Manager):</label>
-                          <span className="text-[10px] font-mono text-accent font-bold">
-                            {lmsManagerEmails.split('\n').filter((x) => x.trim().length > 0).length}
-                          </span>
-                        </div>
-                        <textarea
-                          rows={5}
-                          value={lmsManagerEmails}
-                          onChange={(e) => setLmsManagerEmails(e.target.value)}
-                          placeholder="manager1@pythaverse.space"
-                          className="w-full bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2.5 text-xs font-mono outline-none focus:border-accent"
-                        />
-                      </div>
-                    </div>
-                  )}
+                  </select>
                 </div>
               </div>
-            )}
-          </div>
-        )}
 
-        {/* Keycloak Config */}
-        {selectedBotType === 'keycloak_api' && (
-          <div className="space-y-4 p-6 rounded-2xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-800/40">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-amber-900 dark:text-amber-300 flex items-center gap-1.5">
-                <KeyRound className="w-4 h-4 text-amber-600" />
-                <span>Quản Trị Danh Tính Keycloak:</span>
-              </label>
-              <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200 font-bold">
-                Bảo vệ 3 lớp
-              </span>
+              {/* Access Duration & Group Name */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-3.5 space-y-2">
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                    <Calendar className="h-3.5 w-3.5 text-indigo-600" />
+                    <span>Thời Hạn Quyền Truy Cập (Mặc Định 1 Năm):</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <span className="text-[10px] text-slate-400 uppercase font-semibold">Ngày bắt đầu:</span>
+                      <input
+                        type="text"
+                        value={lmsStartDate}
+                        onChange={(e) => setLmsStartDate(e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-2.5 py-1.5 font-mono text-xs text-slate-900 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 uppercase font-semibold">Ngày hết hạn:</span>
+                      <input
+                        type="text"
+                        value={lmsEndDate}
+                        onChange={(e) => setLmsEndDate(e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-2.5 py-1.5 font-mono text-xs text-slate-900 dark:text-white"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-3.5 space-y-2">
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                    <Users className="h-3.5 w-3.5 text-indigo-600" />
+                    <span>Tên Nhóm / Group (Tùy chọn):</span>
+                  </label>
+                  <span className="text-[10px] text-slate-400 block">Tự động gom các học viên vào Group.</span>
+                  <input
+                    type="text"
+                    value={lmsGroupName}
+                    onChange={(e) => setLmsGroupName(e.target.value)}
+                    placeholder="VD: DEMO_TEACHER_2026"
+                    className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-1.5 font-mono text-xs text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              {/* Role Assignment Mode */}
+              <div className="space-y-3 pt-1">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200">
+                    <UserCheck className="h-4 w-4 text-indigo-600" />
+                    <span>Phương Thức Gán Vai Trò:</span>
+                  </div>
+
+                  <div className="flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1">
+                    <button
+                      type="button"
+                      onClick={() => setLmsRoleMode('multi_role')}
+                      className={`rounded-lg px-3 py-1 text-xs font-semibold transition-all cursor-pointer ${lmsRoleMode === 'multi_role'
+                          ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400'
+                        }`}
+                    >
+                      Phân Chia 3 Vai Trò
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLmsRoleMode('same_role')}
+                      className={`rounded-lg px-3 py-1 text-xs font-semibold transition-all cursor-pointer ${lmsRoleMode === 'same_role'
+                          ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400'
+                        }`}
+                    >
+                      Cùng Một Vai Trò
+                    </button>
+                  </div>
+                </div>
+
+                {lmsRoleMode === 'multi_role' ? (
+                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
+                    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-3.5 space-y-2">
+                      <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
+                        <span>🎓 Học Viên (Student):</span>
+                        <span className="font-mono text-indigo-600">
+                          {lmsStudentEmails.split('\n').filter((x) => x.trim().length > 0).length}
+                        </span>
+                      </div>
+                      <textarea
+                        rows={4}
+                        value={lmsStudentEmails}
+                        onChange={(e) => setLmsStudentEmails(e.target.value)}
+                        placeholder="student1@pythaverse.space&#10;student2@pythaverse.space"
+                        className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2.5 font-mono text-[11px] text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
+                      />
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-3.5 space-y-2">
+                      <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
+                        <span>🧑‍🏫 Trợ Giảng (Non-editing Teacher):</span>
+                        <span className="font-mono text-amber-600">
+                          {lmsTeacherEmails.split('\n').filter((x) => x.trim().length > 0).length}
+                        </span>
+                      </div>
+                      <textarea
+                        rows={4}
+                        value={lmsTeacherEmails}
+                        onChange={(e) => setLmsTeacherEmails(e.target.value)}
+                        placeholder="teacher1@pythaverse.space&#10;teacher2@pythaverse.space"
+                        className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2.5 font-mono text-[11px] text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
+                      />
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-3.5 space-y-2">
+                      <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
+                        <span>🛡️ Quản Lý (Manager):</span>
+                        <span className="font-mono text-emerald-600">
+                          {lmsManagerEmails.split('\n').filter((x) => x.trim().length > 0).length}
+                        </span>
+                      </div>
+                      <textarea
+                        rows={4}
+                        value={lmsManagerEmails}
+                        onChange={(e) => setLmsManagerEmails(e.target.value)}
+                        placeholder="manager1@pythaverse.space"
+                        className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2.5 font-mono text-[11px] text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-4 space-y-3">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold uppercase text-slate-600 dark:text-slate-400">
+                        Chọn vai trò áp dụng:
+                      </label>
+                      <select
+                        value={lmsSingleRole}
+                        onChange={(e) => setLmsSingleRole(e.target.value as any)}
+                        className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3.5 py-2 text-xs text-slate-900 dark:text-white cursor-pointer"
+                      >
+                        <option value="student">🎓 Học Viên (Student)</option>
+                        <option value="non_editing_teacher">🧑‍🏫 Trợ Giảng (Non-editing Teacher)</option>
+                        <option value="manager">🛡️ Quản Lý (Manager)</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-300">
+                        <span>DANH SÁCH EMAIL (MỖI DÒNG 1 EMAIL):</span>
+                        <span className="font-mono text-[11px] text-indigo-600">
+                          {lmsBulkSingleEmails.split('\n').filter((x) => x.trim().length > 0).length} emails
+                        </span>
+                      </div>
+                      <textarea
+                        rows={4}
+                        value={lmsBulkSingleEmails}
+                        onChange={(e) => setLmsBulkSingleEmails(e.target.value)}
+                        placeholder="user1@pythaverse.space&#10;user2@pythaverse.space"
+                        className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2.5 font-mono text-xs text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 5. Keycloak IDP Engine Workplace */}
+      {selectedBotType === 'keycloak_api' && (
+        <div className="space-y-5 rounded-[2rem] border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 sm:p-7 shadow-xs">
+          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/80 pb-3">
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
+              <Key className="h-4 w-4 text-amber-500" />
+              <span>Quản Trị Danh Tính Keycloak:</span>
+            </div>
+            <span className="rounded-full bg-amber-100 dark:bg-amber-950/70 px-2.5 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">
+              Bảo vệ 3 lớp
+            </span>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+              Email hoặc Username Cần Xử Lý:
+            </label>
+            <input
+              type="text"
+              value={kcTargetEmail}
+              onChange={(e) => setKcTargetEmail(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 px-4 py-2.5 font-mono text-xs text-slate-900 dark:text-white focus:border-indigo-500 focus:bg-white focus:outline-hidden"
+            />
+          </div>
+
+          {/* 3 Action Bento Cards with iOS Toggles */}
+          <div className="space-y-3.5">
+            {/* Action 1: Password Reset */}
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-950 text-amber-600">
+                    <Key className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                      1. Đặt Lại Mật Khẩu Tạm Thời
+                    </h4>
+                    <p className="text-[11px] text-slate-400">Gán mật khẩu khởi tạo an toàn</p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setKcEnableResetPass(!kcEnableResetPass)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${kcEnableResetPass ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-700'
+                    }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${kcEnableResetPass ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                  />
+                </button>
+              </div>
+
+              {kcEnableResetPass && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200/60 dark:border-slate-800">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold uppercase text-slate-500">Mật khẩu mới:</label>
+                    <input
+                      type="text"
+                      value={kcTempPass}
+                      onChange={(e) => setKcTempPass(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-1.5 font-mono text-xs text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div className="flex items-end pb-1.5">
+                    <label className="flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={kcForceChange}
+                        onChange={(e) => setKcForceChange(e.target.checked)}
+                        className="h-4 w-4 rounded-md border-slate-300 text-amber-600 focus:ring-amber-500"
+                      />
+                      <span>Bắt buộc đổi khi đăng nhập</span>
+                    </label>
+                  </div>
+                </div>
+              )}
             </div>
 
+            {/* Action 2: Email Verification */}
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-950 text-emerald-600">
+                    <ShieldCheck className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                      2. Xác Thực Email
+                    </h4>
+                    <p className="text-[11px] text-slate-400">Gỡ lỗi tài khoản chưa xác thực email</p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setKcEnableVerify(!kcEnableVerify)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${kcEnableVerify ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-700'
+                    }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${kcEnableVerify ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                  />
+                </button>
+              </div>
+
+              {kcEnableVerify && (
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200/60 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setKcVerifyAction('verify')}
+                    className={`rounded-xl py-2 text-xs font-semibold transition-all cursor-pointer ${kcVerifyAction === 'verify'
+                        ? 'border border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                        : 'border border-slate-200 dark:border-slate-800 text-slate-500'
+                      }`}
+                  >
+                    ✓ Đã Xác Thực
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setKcVerifyAction('unverify')}
+                    className={`rounded-xl py-2 text-xs font-semibold transition-all cursor-pointer ${kcVerifyAction === 'unverify'
+                        ? 'border border-rose-500 bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                        : 'border border-slate-200 dark:border-slate-800 text-slate-500'
+                      }`}
+                  >
+                    ✗ Gỡ Xác Thực
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Action 3: Account Active Status */}
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 dark:bg-sky-950 text-sky-600">
+                    <UserCheck className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                      3. Trạng Thái Hoạt Động
+                    </h4>
+                    <p className="text-[11px] text-slate-400">Khóa hoặc kích hoạt lại người dùng</p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setKcEnableStatus(!kcEnableStatus)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${kcEnableStatus ? 'bg-sky-500' : 'bg-slate-300 dark:bg-slate-700'
+                    }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${kcEnableStatus ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                  />
+                </button>
+              </div>
+
+              {kcEnableStatus && (
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200/60 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setKcStatusAction('enable')}
+                    className={`rounded-xl py-2 text-xs font-semibold transition-all cursor-pointer ${kcStatusAction === 'enable'
+                        ? 'border border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                        : 'border border-slate-200 dark:border-slate-800 text-slate-500'
+                      }`}
+                  >
+                    ✓ Kích Hoạt
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setKcStatusAction('disable')}
+                    className={`rounded-xl py-2 text-xs font-semibold transition-all cursor-pointer ${kcStatusAction === 'disable'
+                        ? 'border border-rose-500 bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                        : 'border border-slate-200 dark:border-slate-800 text-slate-500'
+                      }`}
+                  >
+                    ✗ Vô Hiệu Hóa
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 6. Feedback Sheet Engine Workplace */}
+      {selectedBotType === 'feedback_doc_triage' && (
+        <div className="space-y-5 rounded-[2rem] border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 sm:p-7 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 dark:border-slate-800/80 pb-3">
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
+              <FileText className="h-4 w-4 text-emerald-500" />
+              <span>Đường Dẫn Google Doc Báo Cáo Sự Cố:</span>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleAIGenerateDocComment}
+              disabled={isGeneratingDocComment}
+              className="flex items-center gap-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 px-3.5 py-1.5 text-xs font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition-colors cursor-pointer"
+            >
+              <Sparkles className={`h-3.5 w-3.5 text-indigo-600 ${isGeneratingDocComment ? 'animate-spin' : ''}`} />
+              <span>{isGeneratingDocComment ? 'AI đang đọc tài liệu...' : 'AI Đọc Doc & Soạn Ghi Chú Tag'}</span>
+            </button>
+          </div>
+
+          <div className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-ink dark:text-primary-ink">
-                Email hoặc Username Cần Xử Lý:
-              </label>
               <input
                 type="text"
-                value={kcTargetEmail}
-                onChange={(e) => setKcTargetEmail(e.target.value)}
-                placeholder="VD: teacher@pythaverse.space"
-                className="w-full bg-white dark:bg-ink border border-amber-300 dark:border-amber-700/80 rounded-xl p-3 text-xs font-bold text-ink dark:text-primary-ink outline-none focus:ring-2 focus:ring-amber-500/20"
+                value={docUrl}
+                onChange={(e) => setDocUrl(e.target.value)}
+                placeholder="https://docs.google.com/document/d/..."
+                className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 px-4 py-2.5 font-mono text-xs text-slate-900 dark:text-white focus:border-indigo-500 focus:bg-white focus:outline-hidden"
               />
             </div>
 
-            <div className="space-y-3 pt-1">
-              {/* 1. Reset Pass */}
-              <div
-                className={`p-4 rounded-2xl border transition-all ${kcEnableResetPass
-                  ? 'bg-white dark:bg-ink border-amber-400 shadow-2xs'
-                  : 'bg-paper-2 dark:bg-ink/60 border-rule dark:border-rule-2 opacity-75'
-                  }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div
-                      className={`p-2 rounded-xl ${kcEnableResetPass
-                        ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300'
-                        : 'bg-rule text-ink-3 dark:bg-ink'
-                        }`}
-                    >
-                      <KeyRound className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className="text-xs font-bold text-ink dark:text-primary-ink">
-                        1. Đặt Lại Mật Khẩu Tạm Thời
-                      </div>
-                      <div className="text-[10px] text-ink-3">Gán mật khẩu khởi tạo an toàn</div>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setKcEnableResetPass(!kcEnableResetPass)}
-                    className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${kcEnableResetPass ? 'bg-amber-500 justify-end' : 'bg-rule-2 dark:bg-rule-2 justify-start'
-                      }`}
-                  >
-                    <span className="w-4 h-4 bg-white rounded-full shadow-md" />
-                  </button>
-                </div>
-
-                {kcEnableResetPass && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 mt-3 border-t border-rule dark:border-rule-2">
-                    <div>
-                      <label className="text-[10px] font-bold text-ink-2 uppercase">Mật khẩu mới:</label>
-                      <input
-                        type="text"
-                        value={kcTempPass}
-                        onChange={(e) => setKcTempPass(e.target.value)}
-                        className="w-full bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-xl p-2 text-xs font-mono font-bold outline-none"
-                      />
-                    </div>
-                    <div className="flex items-center gap-2 pt-4">
-                      <button
-                        type="button"
-                        onClick={() => setKcForceChange(!kcForceChange)}
-                        className={`w-4 h-4 rounded border flex items-center justify-center cursor-pointer transition ${kcForceChange ? 'bg-amber-500 border-amber-500 text-white' : 'border-rule-2 dark:border-rule-2'
-                          }`}
-                      >
-                        {kcForceChange && <Check className="w-3 h-3" />}
-                      </button>
-                      <label
-                        onClick={() => setKcForceChange(!kcForceChange)}
-                        className="text-xs font-medium text-ink dark:text-primary-ink cursor-pointer"
-                      >
-                        Bắt buộc đổi khi đăng nhập
-                      </label>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* 2. Email Verified */}
-              <div
-                className={`p-4 rounded-2xl border transition-all ${kcEnableVerify
-                  ? 'bg-white dark:bg-ink border-amber-400 shadow-2xs'
-                  : 'bg-paper-2 dark:bg-ink/60 border-rule dark:border-rule-2 opacity-75'
-                  }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div
-                      className={`p-2 rounded-xl ${kcEnableVerify
-                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300'
-                        : 'bg-rule text-ink-3 dark:bg-ink'
-                        }`}
-                    >
-                      <ShieldCheck className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className="text-xs font-bold text-ink dark:text-primary-ink">2. Xác Thực Email</div>
-                      <div className="text-[10px] text-ink-3">Gỡ lỗi tài khoản chưa xác thực email</div>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setKcEnableVerify(!kcEnableVerify)}
-                    className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${kcEnableVerify ? 'bg-amber-500 justify-end' : 'bg-rule-2 dark:bg-rule-2 justify-start'
-                      }`}
-                  >
-                    <span className="w-4 h-4 bg-white rounded-full shadow-md" />
-                  </button>
-                </div>
-
-                {kcEnableVerify && (
-                  <div className="flex items-center gap-3 pt-3 mt-3 border-t border-rule dark:border-rule-2 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setKcVerifyAction('verify')}
-                      className={`flex-1 py-2 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcVerifyAction === 'verify'
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
-                        : 'border-rule dark:border-rule-2 text-ink-2'
-                        }`}
-                    >
-                      ✓ Đã Xác Thực
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setKcVerifyAction('unverify')}
-                      className={`flex-1 py-2 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcVerifyAction === 'unverify'
-                        ? 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
-                        : 'border-rule dark:border-rule-2 text-ink-2'
-                        }`}
-                    >
-                      ✗ Gỡ Xác Thực
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* 3. Account Status */}
-              <div
-                className={`p-4 rounded-2xl border transition-all ${kcEnableStatus
-                  ? 'bg-white dark:bg-ink border-amber-400 shadow-2xs'
-                  : 'bg-paper-2 dark:bg-ink/60 border-rule dark:border-rule-2 opacity-75'
-                  }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div
-                      className={`p-2 rounded-xl ${kcEnableStatus
-                        ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-300'
-                        : 'bg-rule text-ink-3 dark:bg-ink'
-                        }`}
-                    >
-                      <UserX className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className="text-xs font-bold text-ink dark:text-primary-ink">
-                        3. Trạng Thái Hoạt Động
-                      </div>
-                      <div className="text-[10px] text-ink-3">Khóa hoặc kích hoạt lại người dùng</div>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setKcEnableStatus(!kcEnableStatus)}
-                    className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${kcEnableStatus ? 'bg-amber-500 justify-end' : 'bg-rule-2 dark:bg-rule-2 justify-start'
-                      }`}
-                  >
-                    <span className="w-4 h-4 bg-white rounded-full shadow-md" />
-                  </button>
-                </div>
-
-                {kcEnableStatus && (
-                  <div className="flex items-center gap-3 pt-3 mt-3 border-t border-rule dark:border-rule-2 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setKcStatusAction('enable')}
-                      className={`flex-1 py-2 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcStatusAction === 'enable'
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300'
-                        : 'border-rule dark:border-rule-2 text-ink-2'
-                        }`}
-                    >
-                      ✓ Kích Hoạt
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setKcStatusAction('disable')}
-                      className={`flex-1 py-2 px-3 rounded-xl border text-center font-bold transition cursor-pointer ${kcStatusAction === 'disable'
-                        ? 'bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300'
-                        : 'border-rule dark:border-rule-2 text-ink-2'
-                        }`}
-                    >
-                      ✗ Vô Hiệu Hóa
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Feedback Sheet */}
-        {selectedBotType === 'feedback_doc_triage' && (
-          <div className="space-y-4 p-6 rounded-2xl bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200/70 dark:border-blue-800/40">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-blue-900 dark:text-blue-300 flex items-center gap-1.5">
-                <FileText className="w-4 h-4 text-blue-600" />
-                <span>Đường Dẫn Google Doc Báo Cáo Sự Cố:</span>
-              </label>
-
-              <button
-                type="button"
-                disabled={isGeneratingDocComment}
-                onClick={handleAIGenerateDocComment}
-                className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-accent text-white rounded-xl font-bold shadow-2xs cursor-pointer transition disabled:opacity-50"
-              >
-                {isGeneratingDocComment ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                <span>AI Đọc Doc & Soạn Ghi Chú Tag</span>
-              </button>
-            </div>
-
-            <input
-              type="text"
-              value={docUrl}
-              onChange={(e) => setDocUrl(e.target.value)}
-              placeholder="https://docs.google.com/document/d/..."
-              className="w-full bg-white dark:bg-ink border border-blue-300 dark:border-blue-700 rounded-xl p-3 text-xs outline-none"
-            />
-
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-ink dark:text-primary-ink">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                 Email Nhân Sự Cần Giao Việc (@dtt.vn):
               </label>
               <input
@@ -2153,60 +2271,65 @@ export const AutomationStudioPage: React.FC = () => {
                 value={assigneeEmail}
                 onChange={(e) => setAssigneeEmail(e.target.value)}
                 placeholder="hung.nguyenmanh@dtt.vn"
-                className="w-full bg-white dark:bg-ink border border-blue-300 dark:border-blue-700 rounded-xl p-2.5 text-xs outline-none"
+                className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 px-4 py-2.5 text-xs text-slate-900 dark:text-white focus:border-indigo-500 focus:bg-white focus:outline-hidden"
               />
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-ink dark:text-primary-ink flex items-center justify-between">
-                <span>Nội Dung Cần Gắn Bình Luận / Tag Vào Doc:</span>
-                <span className="text-[11px] text-ink-3">Tự động gắn vào trang đầu</span>
-              </label>
+              <div className="flex items-center justify-between text-xs">
+                <label className="font-semibold text-slate-700 dark:text-slate-300">
+                  Nội Dung Cần Gắn Bình Luận / Tag Vào Doc:
+                </label>
+                <span className="text-slate-400 text-[11px]">Tự động gắn vào trang đầu</span>
+              </div>
               <textarea
-                rows={3}
+                rows={4}
                 value={feedbackCommentContent}
                 onChange={(e) => setFeedbackCommentContent(e.target.value)}
                 placeholder="Nhập nội dung comment..."
-                className="w-full bg-white dark:bg-ink border border-blue-300 dark:border-blue-700 rounded-xl p-3 text-xs outline-none focus:ring-2 focus:ring-blue-500/20"
+                className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 text-xs text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden leading-relaxed"
               />
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Nút Kích Hoạt Chính */}
-        <div className="pt-2">
+      {/* 7. Sticky 1-Click Execution Bar */}
+      <div className="sticky bottom-4 z-20">
+        <div className="rounded-3xl border border-indigo-400/40 dark:border-indigo-800 bg-white/90 dark:bg-slate-900/90 p-2 sm:p-2.5 shadow-xl backdrop-blur-md">
           <button
+            id="btn-trigger-worker"
             type="button"
             disabled={submitting}
             onClick={handleOpenConfirmModal}
-            className="w-full py-4 bg-accent text-white text-sm font-extrabold rounded-2xl transition flex items-center justify-center gap-2 shadow-lg cursor-pointer disabled:opacity-50 active:scale-[0.99]"
+            className="group flex w-full items-center justify-center gap-2.5 rounded-2xl bg-gradient-to-r from-sky-500 via-indigo-600 to-purple-600 px-6 py-3.5 text-sm font-bold text-white shadow-lg shadow-indigo-500/25 transition-all duration-150 hover:brightness-105 active:scale-[0.99] cursor-pointer disabled:opacity-50"
           >
-            <Zap className="w-5 h-5 text-amber-300 fill-amber-300" />
+            <Zap className="h-5 w-5 text-amber-300 group-hover:animate-bounce" />
             <span>Kiểm Tra & Kích Hoạt Worker Chạy Ngay (1-Click)</span>
           </button>
         </div>
       </div>
 
-      {/* CONFIRMATION MODAL */}
+      {/* 8. Confirmation Modal */}
       {isConfirmModalOpen && preparedPayload && (
         <div
           onClick={(e) => { if (e.target === e.currentTarget) setIsConfirmModalOpen(false); }}
-          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-white/75 dark:bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-slate-950/60 backdrop-blur-xs animate-in fade-in duration-150"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="max-w-3xl w-full bg-white dark:bg-ink rounded-3xl border border-rule dark:border-rule-2 shadow-2xl overflow-hidden p-6 sm:p-8 space-y-5 my-auto"
+            className="max-w-3xl w-full bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden p-6 sm:p-8 space-y-5 my-auto"
           >
-            <div className="flex items-start justify-between pb-3 border-b border-rule dark:border-rule-2">
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 rounded-2xl">
                   <ShieldCheck className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="text-base font-extrabold text-ink dark:text-primary-ink">
+                  <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
                     Xác Nhận Kích Hoạt Worker Tự Động
                   </h3>
-                  <p className="text-xs text-ink-2 dark:text-ink-3">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
                     Vui lòng kiểm tra lại thông số nghiệp vụ trước khi Worker can thiệp hệ thống.
                   </p>
                 </div>
@@ -2214,33 +2337,33 @@ export const AutomationStudioPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsConfirmModalOpen(false)}
-                className="p-1 rounded-xl text-ink-3 hover:text-ink-2 dark:hover:text-primary-ink hover:bg-paper-2 dark:hover:bg-ink transition cursor-pointer"
+                className="p-1 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-4 rounded-2xl bg-accent-soft/70 dark:bg-accent-soft/30 border border-accent-soft/80 dark:border-accent-soft/50 space-y-2.5">
+            <div className="p-4 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/50 space-y-2.5">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-accent dark:text-primary-ink">
+                <span className="text-xs font-bold text-indigo-700 dark:text-indigo-300">
                   {preparedPayload.summary.engineName}
                 </span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-accent-soft dark:bg-accent text-accent dark:text-primary-ink font-mono font-bold">
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 font-mono font-bold">
                   {preparedPayload.bot_type}
                 </span>
               </div>
 
               <div>
-                <div className="text-xs font-extrabold text-ink dark:text-primary-ink">
+                <div className="text-xs font-extrabold text-slate-900 dark:text-white">
                   {preparedPayload.summary.actionTitle}
                 </div>
-                <div className="text-xs text-accent dark:text-accent-2 font-bold font-mono mt-0.5">
+                <div className="text-xs text-indigo-600 dark:text-indigo-400 font-bold font-mono mt-0.5">
                   👉 {preparedPayload.summary.targetEntity}
                 </div>
               </div>
 
               {preparedPayload.summary.detailsList.length > 0 && (
-                <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 space-y-1">
+                <div className="pt-2 border-t border-indigo-100/60 dark:border-indigo-900/40 space-y-1">
                   {preparedPayload.summary.detailsList.map((dt, idx) => (
                     <div key={idx} className="text-[11px] text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
@@ -2259,7 +2382,7 @@ export const AutomationStudioPage: React.FC = () => {
                 </span>
                 <span className="text-[10px] text-slate-400 font-mono">Tự động đồng bộ</span>
               </div>
-              <pre className="p-3.5 bg-slate-950 text-indigo-300 rounded-xl text-[11px] font-mono overflow-x-auto max-h-36 border border-slate-800 scrollbar-thin">
+              <pre className="p-3.5 bg-slate-950 text-emerald-400 rounded-xl text-[11px] font-mono overflow-x-auto max-h-36 border border-slate-800 scrollbar-thin">
                 {JSON.stringify(preparedPayload.payload_data, null, 2)}
               </pre>
             </div>
@@ -2296,6 +2419,6 @@ export const AutomationStudioPage: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 };

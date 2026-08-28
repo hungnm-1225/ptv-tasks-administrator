@@ -1,35 +1,51 @@
 // frontend/src/features/tasks/TaskManagementPage.tsx
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
+  RotateCw,
+  Search,
+  Filter,
+  Layers,
   CheckCircle2,
-  Clock,
-  XCircle,
-  Loader2,
-  CheckSquare,
-  Edit3,
-  Play,
-  X,
-  Code,
-  Terminal,
   AlertTriangle,
-  RefreshCw,
-  Key,
-  Users,
-  ShieldCheck,
-  Lock,
-  Sliders,
-  FileText,
+  Clock,
   Zap,
-  Download,
+  Play,
+  FileText,
+  ChevronRight,
+  X,
+  Copy,
+  Check,
+  Cpu,
+  Server,
+  Activity,
+  ArrowUpRight,
+  ExternalLink,
+  ShieldCheck,
+  CheckCheck,
+  XCircle,
+  LayoutGrid,
+  Table as TableIcon,
+  SlidersHorizontal,
+  Info,
+  Calendar,
   Building2,
   GraduationCap,
+  Key,
   Github,
   Mail,
-  Search,
-  RotateCw,
+  Users,
+  Lock,
+  Sliders,
+  Code2,
+  Terminal,
+  Download,
+  Loader2,
+  Edit3,
+  Sparkles,
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
-import { BotAutomationTask } from '../../types';
+import { BotAutomationTask, BotType } from '../../types';
 import { toast } from 'sonner';
 
 // ⚡ TRỢ THỦ PERSISTENT STORAGE (LƯU LOCALSTORAGE - 0MS INSTANT RENDER)
@@ -48,7 +64,7 @@ const setTaskLocalCache = (key: string, data: any) => {
   } catch { }
 };
 
-// Helper bóc tách email sạch từ chuỗi phức tạp
+// Helper bóc tách email sạch từ chuỗi
 const extractCleanEmail = (raw: any): string => {
   if (!raw || typeof raw !== 'string') return '';
   const match = raw.match(/[\w\.-]+@[\w\.-]+\.\w+/);
@@ -75,21 +91,27 @@ const formatVNDateTime = (isoString?: string) => {
 };
 
 export const TaskManagementPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'all'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'pending' | 'executed' | 'failed'>('all');
+  const [viewMode, setViewMode] = useState<'table' | 'bento'>('table');
 
   // ⚡ KHỞI TẠO STATE NGAY TỪ LOCALSTORAGE (0MS)
   const initialCachedTasks = useMemo(() => {
-    return getTaskLocalCache<BotAutomationTask[]>(activeTab) || [];
-  }, [activeTab]);
+    return getTaskLocalCache<BotAutomationTask[]>('master_task_cache') || [];
+  }, []);
 
   const [tasks, setTasks] = useState<BotAutomationTask[]>(initialCachedTasks);
   const [loading, setLoading] = useState<boolean>(initialCachedTasks.length === 0);
   const [selectedBotFilter, setSelectedBotFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  const [selectedTask, setSelectedTask] = useState<BotAutomationTask | null>(null);
-  const [detailModalTask, setDetailModalTask] = useState<BotAutomationTask | null>(null);
+  // Modals & Drawer State
+  const [selectedTask, setSelectedTask] = useState<BotAutomationTask | null>(null); // Approval Modal
+  const [detailDrawerTask, setDetailDrawerTask] = useState<BotAutomationTask | null>(null); // Side Drawer Logs
   const [modalMode, setModalMode] = useState<'form' | 'json'>('form');
+
+  // Clipboard Copied states
+  const [copiedPayload, setCopiedPayload] = useState<boolean>(false);
+  const [copiedLogs, setCopiedLogs] = useState<boolean>(false);
 
   // State cho Visual Form Điều Khiển Keycloak
   const [kcIdentifiersText, setKcIdentifiersText] = useState<string>('');
@@ -104,9 +126,9 @@ export const TaskManagementPage: React.FC = () => {
   const [rejecting, setRejecting] = useState<boolean>(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
 
-  // ⚡ SWR TẢI TASKS (KHÔNG BẬT SPINNER NẾU ĐÃ CÓ CACHE)
+  // ⚡ SWR TẢI TASKS
   const loadTasks = useCallback(async (forceSpinner = false) => {
-    const cached = getTaskLocalCache<BotAutomationTask[]>(activeTab);
+    const cached = getTaskLocalCache<BotAutomationTask[]>('master_task_cache');
     if (cached && !forceSpinner) {
       setTasks(cached);
       setLoading(false);
@@ -115,13 +137,11 @@ export const TaskManagementPage: React.FC = () => {
     }
 
     try {
-      let endpoint = '/tasks';
-      if (activeTab !== 'all') {
-        endpoint += `?approval_status=${activeTab}`;
+      const data = await fetchApi<BotAutomationTask[]>('/tasks');
+      if (data) {
+        setTasks(data);
+        setTaskLocalCache('master_task_cache', data);
       }
-      const data = await fetchApi<BotAutomationTask[]>(endpoint);
-      setTasks(data || []);
-      setTaskLocalCache(activeTab, data || []);
     } catch (err) {
       if (!cached) {
         toast.error('Không thể nạp danh sách tác vụ bot: ' + (err as Error).message);
@@ -129,7 +149,7 @@ export const TaskManagementPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [activeTab]);
+  }, []);
 
   useEffect(() => {
     loadTasks();
@@ -204,8 +224,66 @@ export const TaskManagementPage: React.FC = () => {
     return { title, subtitle, target, icon, badgeColor };
   };
 
+  // Status Metrics tính toán cho 4 Bento Cards
+  const stats = useMemo(() => {
+    const total = tasks.length;
+    const pending = tasks.filter((t) => t.approval_status === 'pending').length;
+    const processing = tasks.filter(
+      (t) =>
+        t.approval_status === 'approved' &&
+        (!t.execution_status ||
+          t.execution_status === 'queued' ||
+          (t.execution_status as string) === 'running' ||
+          (t.execution_status as string) === 'processing' ||
+          (t.execution_status as string) === 'waiting_poll')
+    ).length;
+    const success = tasks.filter((t) => t.execution_status === 'success').length;
+    const failed = tasks.filter(
+      (t) => t.execution_status === 'failed' || t.approval_status === 'rejected'
+    ).length;
+    const executedTotal = success + failed;
+    const successRate = executedTotal > 0 ? Math.round((success / executedTotal) * 100) : 100;
+
+    return { total, pending, processing, success, failed, successRate };
+  }, [tasks]);
+
+  // Bộ lọc danh sách
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((t) => {
+      // Tab filter
+      if (activeTab === 'pending' && t.approval_status !== 'pending') return false;
+      if (activeTab === 'executed' && (t.approval_status !== 'approved' || t.execution_status === 'failed')) return false;
+      if (activeTab === 'failed' && t.execution_status !== 'failed' && t.approval_status !== 'rejected') return false;
+
+      // Module filter
+      if (selectedBotFilter !== 'all' && t.bot_type !== selectedBotFilter) return false;
+
+      // Search query
+      const query = searchQuery.trim().toLowerCase();
+      if (query) {
+        const tId = (t.id || '').toLowerCase();
+        const bType = (t.bot_type || '').toLowerCase();
+        const pStr = JSON.stringify(t.payload_data || {}).toLowerCase();
+        const subject = (t.inbox_tickets?.subject || '').toLowerCase();
+        const sender = (t.inbox_tickets?.sender_email || '').toLowerCase();
+
+        const match =
+          tId.includes(query) ||
+          bType.includes(query) ||
+          pStr.includes(query) ||
+          subject.includes(query) ||
+          sender.includes(query);
+
+        if (!match) return false;
+      }
+
+      return true;
+    });
+  }, [tasks, activeTab, selectedBotFilter, searchQuery]);
+
   // Khởi tạo dữ liệu khi mở Modal Review
-  const handleOpenReview = (task: BotAutomationTask) => {
+  const handleOpenReview = (task: BotAutomationTask, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     setSelectedTask(task);
     const payload = task.payload_data || {};
 
@@ -267,22 +345,13 @@ export const TaskManagementPage: React.FC = () => {
     }
   };
 
-  // ⚡ OPTIMISTIC UI: PHÊ DUYỆT TỨC THÌ
+  // Phê duyệt tác vụ
   const handleApprove = async () => {
     if (!selectedTask) return;
     setApproving(true);
     const prevTasks = [...tasks];
     const taskId = selectedTask.id;
     const finalPayload = buildFinalPayload();
-
-    if (selectedTask.bot_type === 'keycloak_api' && modalMode === 'form') {
-      const identifiers = finalPayload.identifiers || [];
-      if (identifiers.length === 0) {
-        toast.error('Vui lòng nhập ít nhất 1 email/tài khoản cần xử lý!');
-        setApproving(false);
-        return;
-      }
-    }
 
     const updatedTasks: BotAutomationTask[] = tasks.map(t => t.id === taskId ? {
       ...t,
@@ -292,7 +361,7 @@ export const TaskManagementPage: React.FC = () => {
     } : t);
 
     setTasks(updatedTasks);
-    setTaskLocalCache(activeTab, updatedTasks);
+    setTaskLocalCache('master_task_cache', updatedTasks);
     setSelectedTask(null);
     const taskIdShort = taskId ? taskId.slice(0, 8) : '';
     toast.success(`Đã phê duyệt và khởi chạy worker #${taskIdShort} thành công!`);
@@ -313,21 +382,19 @@ export const TaskManagementPage: React.FC = () => {
     }
   };
 
-  // ⚡ OPTIMISTIC UI: TỪ CHỐI TỨC THÌ
+  // Từ chối tác vụ
   const handleReject = async (taskId: string) => {
     setRejecting(true);
     const prevTasks = [...tasks];
 
-    const updatedTasks: BotAutomationTask[] = activeTab === 'pending'
-      ? tasks.filter(t => t.id !== taskId)
-      : tasks.map(t => t.id === taskId ? {
-        ...t,
-        approval_status: 'rejected' as any,
-        execution_status: 'dismissed' as any
-      } : t);
+    const updatedTasks: BotAutomationTask[] = tasks.map(t => t.id === taskId ? {
+      ...t,
+      approval_status: 'rejected' as any,
+      execution_status: 'dismissed' as any
+    } : t);
 
     setTasks(updatedTasks);
-    setTaskLocalCache(activeTab, updatedTasks);
+    setTaskLocalCache('master_task_cache', updatedTasks);
     setSelectedTask(null);
     const taskIdShort = taskId ? taskId.slice(0, 8) : '';
     toast.info(`Đã từ chối tác vụ #${taskIdShort}.`);
@@ -342,7 +409,9 @@ export const TaskManagementPage: React.FC = () => {
     }
   };
 
-  const handleRetryTask = async (taskId: string) => {
+  // Chạy lại tác vụ lỗi
+  const handleRetryTask = async (taskId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     setRetryingId(taskId);
     try {
       await fetchApi(`/bots/${taskId}/retry`, { method: 'POST' });
@@ -355,328 +424,469 @@ export const TaskManagementPage: React.FC = () => {
     }
   };
 
-  // Render Badge trạng thái chi tiết
+  // Copy helpers
+  const copyPayloadToClipboard = (data: any) => {
+    navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+    setCopiedPayload(true);
+    setTimeout(() => setCopiedPayload(false), 2000);
+  };
+
+  const copyLogsToClipboard = (logsText: string) => {
+    navigator.clipboard.writeText(logsText);
+    setCopiedLogs(true);
+    setTimeout(() => setCopiedLogs(false), 2000);
+  };
+
+  // Render Status Badge
   const renderStatusBadge = (approval: string, execution: string, payload: any) => {
     if (approval === 'pending') {
       return (
-        <span className="px-2.5 py-1 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800/50 text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-xs">
-          <Clock className="w-3 h-3" /> CHỜ PHÊ DUYỆT
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 dark:bg-amber-950/60 px-2.5 py-1 text-xs font-bold text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 shadow-2xs">
+          <Clock className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+          <span>CHỜ PHÊ DUYỆT</span>
         </span>
       );
     } else if (approval === 'approved') {
       if (execution === 'success') {
         return (
-          <span className="px-2.5 py-1 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/50 text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-xs">
-            <CheckCircle2 className="w-3 h-3" /> THÀNH CÔNG
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 px-2.5 py-1 text-xs font-bold text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 shadow-2xs">
+            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span>THÀNH CÔNG</span>
           </span>
         );
       } else if (execution === 'failed') {
         return (
-          <span className="px-2.5 py-1 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200/60 dark:border-rose-800/50 text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-xs">
-            <AlertTriangle className="w-3 h-3" /> THẤT BẠI
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 dark:bg-rose-950/60 px-2.5 py-1 text-xs font-bold text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 shadow-2xs">
+            <AlertTriangle className="h-3.5 w-3.5 text-rose-600 dark:text-rose-400" />
+            <span>THẤT BẠI</span>
           </span>
         );
       } else if (execution === 'waiting_poll') {
         return (
-          <span className="px-2.5 py-1 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800/50 text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-xs">
-            <Clock className="w-3 h-3 animate-spin" /> {payload?.request_id ? `ĐỢI BATCH #${payload.request_id}` : 'ĐANG ĐỢI POLLING'}
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 dark:bg-amber-950/60 px-2.5 py-1 text-xs font-bold text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 shadow-2xs">
+            <Clock className="h-3.5 w-3.5 animate-spin" />
+            <span>{payload?.request_id ? `ĐỢI BATCH #${payload.request_id}` : 'ĐANG ĐỢI POLLING'}</span>
           </span>
         );
       }
       return (
-        <span className="px-2.5 py-1 bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border border-sky-200/60 dark:border-sky-800/50 text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-xs">
-          <Loader2 className="w-3 h-3 animate-spin" /> ĐANG XỬ LÝ
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 dark:bg-sky-950/60 px-2.5 py-1 text-xs font-bold text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 shadow-2xs">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75"></span>
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-500"></span>
+          </span>
+          <span>ĐANG XỬ LÝ</span>
         </span>
       );
     } else {
       return (
-        <span className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 text-[10px] font-bold rounded-lg inline-flex items-center gap-1">
-          <XCircle className="w-3 h-3" /> BỊ TỪ CHỐI
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-1 text-xs font-bold text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+          <XCircle className="h-3.5 w-3.5 text-slate-500" />
+          <span>BỊ TỪ CHỐI</span>
         </span>
       );
     }
   };
 
-  const filteredTasks = useMemo(() => {
-    return tasks.filter((t) => {
-      if (activeTab === 'pending' && t.approval_status !== 'pending') return false;
-      if (activeTab === 'approved' && t.approval_status !== 'approved') return false;
-      if (selectedBotFilter !== 'all' && t.bot_type !== selectedBotFilter) return false;
-
-      const query = searchQuery.trim().toLowerCase();
-      if (query) {
-        const tId = (t.id || '').toLowerCase();
-        const bType = (t.bot_type || '').toLowerCase();
-        const pStr = JSON.stringify(t.payload_data || {}).toLowerCase();
-        const subject = (t.inbox_tickets?.subject || '').toLowerCase();
-        const sender = (t.inbox_tickets?.sender_email || '').toLowerCase();
-
-        const match =
-          tId.includes(query) ||
-          bType.includes(query) ||
-          pStr.includes(query) ||
-          subject.includes(query) ||
-          sender.includes(query);
-
-        if (!match) return false;
-      }
-
-      return true;
-    });
-  }, [tasks, activeTab, selectedBotFilter, searchQuery]);
-
   return (
-    <div className="space-y-6 w-full pb-10">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.3 }}
+      className="space-y-6 max-w-7xl mx-auto pb-16"
+    >
+      {/* 1. Header Bar */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
-            Task & Bot Automation Hub
-          </h1>
-          <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white font-sans">
+              Task & Bot Automation Hub
+            </h1>
+            <span className="hidden sm:inline-flex rounded-full bg-indigo-50 dark:bg-indigo-950/80 px-2.5 py-0.5 text-xs font-semibold text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50">
+              Live Core Hub
+            </span>
+          </div>
+          <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 max-w-2xl leading-relaxed">
             Cổng điều phối và theo dõi tiến trình thực thi của toàn bộ hệ thống Bot Workers.
           </p>
         </div>
 
-        <button
-          onClick={() => loadTasks(true)}
-          disabled={loading}
-          className="flex items-center gap-1.5 px-4 py-2 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200/80 dark:border-slate-800 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-200 shadow-xs transition cursor-pointer"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          <span>Làm Mới Danh Sách</span>
-        </button>
+        <div className="flex items-center gap-2.5">
+          <button
+            id="btn-refresh-task-list"
+            onClick={() => loadTasks(true)}
+            disabled={loading}
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3.5 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-xs hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer disabled:opacity-60"
+          >
+            <RotateCw className={`h-3.5 w-3.5 text-slate-500 ${loading ? 'animate-spin text-indigo-600' : ''}`} />
+            <span>{loading ? 'Đang Tải Dữ Liệu...' : 'Làm Mới Danh Sách'}</span>
+          </button>
+        </div>
       </div>
 
-      {/* Bộ Điều Khiển Lọc & Tìm Kiếm */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bento-card p-3.5">
-        {/* Tabs Trạng Thái */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
-          {[
-            { id: 'all', label: 'Tất Cả Tác Vụ' },
-            { id: 'pending', label: '⏳ Chờ Phê Duyệt' },
-            { id: 'approved', label: '✓ Đã Duyệt & Thực Thi' },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap cursor-pointer ${activeTab === tab.id
-                ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+      {/* 2. Bento Grid 1: Key Performance Metrics & Status Deck */}
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        {/* Card 1: Tổng Tác Vụ */}
+        <motion.div
+          whileHover={{ y: -2 }}
+          transition={{ duration: 0.2 }}
+          className="relative overflow-hidden rounded-2xl border border-indigo-100 dark:border-indigo-950/60 bg-gradient-to-br from-[#EEF2FF] to-[#F5F3FF] dark:from-indigo-950/40 dark:to-slate-900 p-4.5 shadow-xs"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-indigo-900/70 dark:text-indigo-300">Tổng Tác Vụ Ghi Nhận</span>
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/80 dark:bg-slate-800 text-indigo-600 shadow-xs">
+              <Layers className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-3 flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white font-mono">
+              {stats.total}
+            </span>
+            <span className="text-[11px] font-medium text-indigo-600 dark:text-indigo-400">tác vụ toàn hệ thống</span>
+          </div>
+          <div className="mt-2.5 flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-indigo-500"></span>
+            <span>Phân hệ RPA & Playwright</span>
+          </div>
+        </motion.div>
 
-        {/* Ô Tìm Kiếm & Dropdown Loại Bot */}
-        <div className="flex items-center gap-2">
-          <select
-            value={selectedBotFilter}
-            onChange={(e) => setSelectedBotFilter(e.target.value)}
-            className="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
-          >
-            <option value="all">Tất cả Phân Hệ</option>
-            <option value="workspace_rpa">🏢 Workspace RPA</option>
-            <option value="lms_playwright">🎓 PLearn LMS</option>
-            <option value="keycloak_api">🔑 Keycloak IDP</option>
-            <option value="github_issue_creator">🐙 GitHub Issue</option>
-            <option value="feedback_doc_triage">📝 Feedback Sheet</option>
-          </select>
+        {/* Card 2: Đang Xử Lý */}
+        <motion.div
+          whileHover={{ y: -2 }}
+          transition={{ duration: 0.2 }}
+          className="relative overflow-hidden rounded-2xl border border-sky-100 dark:border-sky-950/60 bg-gradient-to-br from-[#E0F2FE] to-[#F0F9FF] dark:from-sky-950/40 dark:to-slate-900 p-4.5 shadow-xs"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-sky-900/70 dark:text-sky-300">Đang Xử Lý (Active)</span>
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/80 dark:bg-slate-800 text-sky-600 shadow-xs">
+              <RotateCw className="h-4 w-4 animate-spin" />
+            </div>
+          </div>
+          <div className="mt-3 flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white font-mono">
+              {stats.processing}
+            </span>
+            <span className="text-[11px] font-medium text-sky-700 dark:text-sky-400">bot đang chạy</span>
+          </div>
+          <div className="mt-2.5 flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-sky-500 animate-pulse"></span>
+            <span>Khả dụng: 6 workers</span>
+          </div>
+        </motion.div>
 
-          <div className="relative flex-1 sm:w-64">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Tìm theo mã, tên trường, email..."
-              className="w-full pl-9 pr-8 py-1.5 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 outline-none focus:border-indigo-500 transition"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+        {/* Card 3: Chờ Phê Duyệt */}
+        <motion.div
+          whileHover={{ y: -2 }}
+          transition={{ duration: 0.2 }}
+          className="relative overflow-hidden rounded-2xl border border-amber-100 dark:border-amber-950/60 bg-gradient-to-br from-[#FEF3C7]/70 to-[#FFFBEB] dark:from-amber-950/40 dark:to-slate-900 p-4.5 shadow-xs"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-amber-900/80 dark:text-amber-300">Chờ Phê Duyệt</span>
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/80 dark:bg-slate-800 text-amber-600 shadow-xs">
+              <Clock className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-3 flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white font-mono">
+              {stats.pending}
+            </span>
+            <span className="text-[11px] font-medium text-amber-700 dark:text-amber-400">yêu cầu chờ</span>
+          </div>
+          <div className="mt-2.5 flex items-center gap-1.5 text-[11px] text-amber-800/80 dark:text-amber-300/80">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500"></span>
+            <span>Cần Human-in-the-Loop xác nhận</span>
+          </div>
+        </motion.div>
+
+        {/* Card 4: Hiệu Suất */}
+        <motion.div
+          whileHover={{ y: -2 }}
+          transition={{ duration: 0.2 }}
+          className="relative overflow-hidden rounded-2xl border border-emerald-100 dark:border-emerald-950/60 bg-gradient-to-br from-[#ECFDF5] to-[#F0FDF4] dark:from-emerald-950/40 dark:to-slate-900 p-4.5 shadow-xs"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-emerald-900/80 dark:text-emerald-300">Hiệu Suất Thực Thi</span>
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/80 dark:bg-slate-800 text-emerald-600 shadow-xs">
+              <CheckCircle2 className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-3 flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold tracking-tight text-emerald-700 dark:text-emerald-400 font-mono">
+              {stats.successRate}%
+            </span>
+            <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              ({stats.success} ok / {stats.failed} lỗi)
+            </span>
+          </div>
+          <div className="mt-2.5 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+            <span className="text-emerald-700 dark:text-emerald-400 font-medium">Hoàn thành tốt</span>
+            {stats.failed > 0 && (
+              <span
+                className="text-rose-600 dark:text-rose-400 font-medium cursor-pointer hover:underline"
+                onClick={() => setActiveTab('failed')}
               >
-                <X className="w-3 h-3" />
-              </button>
+                {stats.failed} cần chạy lại →
+              </span>
             )}
+          </div>
+        </motion.div>
+      </div>
+
+      {/* 3. Bento Grid 2: Interactive Filter, Search & View Controls */}
+      <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 sm:p-4 shadow-xs">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          {/* Segmented Filter Pills */}
+          <div className="flex flex-wrap items-center gap-1.5 bg-slate-100/80 dark:bg-slate-800 p-1 rounded-xl">
+            {[
+              { id: 'all', label: 'Tất Cả Tác Vụ', count: stats.total },
+              { id: 'pending', label: '⏳ Chờ Phê Duyệt', count: stats.pending },
+              { id: 'executed', label: '✓ Đã Duyệt & Thực Thi', count: stats.success + stats.processing },
+              { id: 'failed', label: '⚠️ Thất Bại', count: stats.failed },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all cursor-pointer ${activeTab === tab.id
+                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+              >
+                <span>{tab.label}</span>
+                <span
+                  className={`rounded-full px-1.5 py-0.2 text-[10px] ${activeTab === tab.id
+                    ? 'bg-white/20 dark:bg-slate-900/20 text-white dark:text-slate-900'
+                    : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400'
+                    }`}
+                >
+                  {tab.count}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {/* Right side: Module Dropdown, Search Input & Layout Switcher */}
+          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+            <div className="relative">
+              <select
+                value={selectedBotFilter}
+                onChange={(e) => setSelectedBotFilter(e.target.value)}
+                className="h-9 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 pr-8 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none cursor-pointer"
+              >
+                <option value="all">Tất cả Phân Hệ</option>
+                <option value="workspace_rpa">🏢 Workspace RPA</option>
+                <option value="lms_playwright">🎓 PLearn LMS</option>
+                <option value="keycloak_api">🔑 Keycloak IDP</option>
+                <option value="github_issue_creator">🐙 GitHub Issue</option>
+                <option value="feedback_doc_triage">📝 Feedback Sheet</option>
+              </select>
+            </div>
+
+            <div className="relative flex-1 sm:w-64 sm:flex-none">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Tìm theo mã, tên trường, email..."
+                className="h-9 w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 pl-9 pr-8 text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:border-indigo-500"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+
+            {/* Layout Toggle */}
+            <div className="flex items-center rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-0.5">
+              <button
+                onClick={() => setViewMode('table')}
+                className={`flex h-8 w-8 items-center justify-center rounded-lg transition-all cursor-pointer ${viewMode === 'table' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500'
+                  }`}
+                title="Dạng bảng chi tiết"
+              >
+                <TableIcon className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => setViewMode('bento')}
+                className={`flex h-8 w-8 items-center justify-center rounded-lg transition-all cursor-pointer ${viewMode === 'bento' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500'
+                  }`}
+                title="Dạng Bento Grid cards"
+              >
+                <LayoutGrid className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Bảng Danh Sách Tác Vụ Chi Tiết */}
+      {/* 4. Main Data Display: Table or Bento Cards */}
       {loading && tasks.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-24 text-slate-400 gap-3">
-          <Loader2 className="w-8 h-8 animate-spin text-indigo-600 dark:text-indigo-400" />
-          <span className="text-xs font-bold">Đang nạp dữ liệu tiến trình tác vụ...</span>
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 text-center space-y-3 animate-pulse">
+          <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mx-auto" />
+          <span className="text-xs font-bold text-slate-500">Đang nạp dữ liệu tiến trình tác vụ...</span>
         </div>
       ) : filteredTasks.length === 0 ? (
-        <div className="bento-card p-16 text-center space-y-3">
-          <CheckSquare className="w-12 h-12 mx-auto text-slate-300 dark:text-slate-600" />
-          <h3 className="text-sm font-bold text-slate-900 dark:text-white">Không tìm thấy tác vụ nào phù hợp</h3>
-          <p className="text-xs text-slate-500 max-w-sm mx-auto">
-            Thử thay đổi từ khóa tìm kiếm hoặc chuyển tab trạng thái khác.
+        <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-12 text-center shadow-xs">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-50 dark:bg-slate-800 text-indigo-500 mb-3">
+            <Search className="h-6 w-6" />
+          </div>
+          <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200">Không tìm thấy tác vụ phù hợp</h3>
+          <p className="mt-1 text-xs text-slate-500 max-w-sm">
+            Không có tác vụ nào khớp với bộ lọc hoặc từ khóa tìm kiếm.
           </p>
+          <button
+            onClick={() => {
+              setActiveTab('all');
+              setSelectedBotFilter('all');
+              setSearchQuery('');
+            }}
+            className="mt-4 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-4 py-2 text-xs font-semibold shadow-sm cursor-pointer"
+          >
+            Đặt lại tất cả bộ lọc
+          </button>
         </div>
-      ) : (
-        <div className="bento-card overflow-hidden">
+      ) : viewMode === 'table' ? (
+        <div className="overflow-hidden rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse min-w-[900px]">
+            <table className="w-full text-left border-collapse min-w-[900px]">
               <thead>
-                <tr className="border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/75 dark:bg-slate-850/50 text-slate-500 dark:text-slate-400 font-bold uppercase text-[10px] tracking-wider">
-                  <th className="p-4 pl-6">Mã Tác Vụ</th>
-                  <th className="p-4">Nội Dung Nghiệp Vụ Cốt Lõi</th>
-                  <th className="p-4">Nguồn Yêu Cầu</th>
-                  <th className="p-4">Trạng Thái & Tiến Trình</th>
-                  <th className="p-4">Thời Gian</th>
-                  <th className="p-4 pr-6 text-right">Thao Tác</th>
+                <tr className="border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/75 dark:bg-slate-850/50 text-[10px] font-bold tracking-wider text-slate-500 dark:text-slate-400 uppercase">
+                  <th className="py-3.5 px-4 sm:px-6">MÃ TÁC VỤ</th>
+                  <th className="py-3.5 px-4">NỘI DUNG NGHIỆP VỤ CỐT LÕI</th>
+                  <th className="py-3.5 px-4">NGUỒN YÊU CẦU</th>
+                  <th className="py-3.5 px-4">TRẠNG THÁI & TIẾN TRÌNH</th>
+                  <th className="py-3.5 px-4">THỜI GIAN</th>
+                  <th className="py-3.5 px-4 sm:px-6 text-right">THAO TÁC</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 text-slate-800 dark:text-slate-200">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
                 {filteredTasks.map((task) => {
                   const taskIdDisplay = task.id ? `#${task.id.slice(0, 8)}` : '#TASK';
                   const info = getTaskBusinessInfo(task);
                   const Icon = info.icon;
                   const payload = task.payload_data || {};
                   const resultUrl = payload.result_file_url;
-
                   const ticket = task.inbox_tickets;
                   const isFromStudio = !task.ticket_id && !ticket;
 
                   return (
-                    <tr key={task.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
-                      {/* Cột 1: Mã ID & Loại Bot */}
-                      <td className="p-4 pl-6 align-top whitespace-nowrap">
-                        <div className="space-y-1">
-                          <span className="font-mono text-xs font-bold text-indigo-600 dark:text-indigo-400">
+                    <tr
+                      key={task.id}
+                      onClick={() => setDetailDrawerTask(task)}
+                      className="group transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/40 cursor-pointer"
+                    >
+                      {/* Mã Tác Vụ */}
+                      <td className="py-4 px-4 sm:px-6 align-top whitespace-nowrap">
+                        <div className="flex flex-col gap-1.5 items-start">
+                          <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400 group-hover:underline">
                             {taskIdDisplay}
                           </span>
-                          <div>
-                            <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[10px] font-bold ${info.badgeColor}`}>
-                              <Icon className="w-3 h-3" />
-                              <span>{task.bot_type}</span>
-                            </div>
+                          <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[10px] font-bold ${info.badgeColor}`}>
+                            <Icon className="w-3 h-3" />
+                            <span>{task.bot_type}</span>
                           </div>
                         </div>
                       </td>
 
-                      {/* Cột 2: Nội Dung Nghiệp Vụ */}
-                      <td className="p-4 align-top max-w-sm">
-                        <div className="space-y-1">
-                          <div className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-1.5">
-                            <span>{info.title}</span>
-                          </div>
+                      {/* Nội Dung Nghiệp Vụ */}
+                      <td className="py-4 px-4 align-top max-w-sm">
+                        <div className="flex flex-col gap-1">
+                          <span className="font-bold text-slate-900 dark:text-white leading-snug">
+                            {info.title}
+                          </span>
                           {info.subtitle && (
-                            <div className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
                               {info.subtitle}
-                            </div>
+                            </span>
                           )}
                           {info.target && (
-                            <div className="text-[10px] font-mono text-indigo-600 dark:text-indigo-400 font-semibold">
+                            <span className="text-[10px] font-mono text-indigo-600 dark:text-indigo-400 font-semibold">
                               {info.target}
-                            </div>
+                            </span>
                           )}
                         </div>
                       </td>
 
-                      {/* Cột 3: Nguồn Yêu Cầu */}
-                      <td className="p-4 align-top whitespace-nowrap">
+                      {/* Nguồn Yêu Cầu */}
+                      <td className="py-4 px-4 align-top whitespace-nowrap">
                         {isFromStudio ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50 text-[10px] font-bold shadow-xs">
-                            <Zap className="w-3 h-3 text-indigo-600 dark:text-indigo-400" /> Tác vụ Studio
+                          <span className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-1 text-xs font-semibold text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50">
+                            <Zap className="h-3.5 w-3.5 text-indigo-600" />
+                            <span>Tác vụ Direct (Studio)</span>
                           </span>
                         ) : (
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-1.5">
-                              {ticket?.source === 'gmail' ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/40 px-2 py-0.5 rounded-md border border-sky-200/60 dark:border-sky-800/50">
-                                  <Mail className="w-3 h-3" /> Gmail
-                                </span>
-                              ) : ticket?.source === 'osticket' ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-md border border-amber-200/60 dark:border-amber-800/50">
-                                  🎫 OS Ticket
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-200/60 dark:border-emerald-800/50">
-                                  📝 Form
-                                </span>
-                              )}
-                              {ticket?.category && (
-                                <span className="text-[10px] font-mono font-bold text-slate-500 dark:text-slate-400 uppercase">
-                                  [{ticket.category}]
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-[11px] font-medium text-slate-800 dark:text-slate-200 truncate max-w-[200px]" title={ticket?.subject || ''}>
+                          <div className="flex flex-col gap-1">
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                              <Mail className="h-3 w-3 text-slate-400" />
+                              <span>{ticket?.submitter_name || ticket?.sender_email || 'Inbox Ticket'}</span>
+                            </span>
+                            <span className="text-[10px] text-slate-400 truncate max-w-[180px]">
                               {ticket?.subject || `Ticket #${task.ticket_id?.slice(0, 8)}`}
-                            </div>
+                            </span>
                           </div>
                         )}
                       </td>
 
-                      {/* Cột 4: Trạng Thái & Nút Tải Kết Quả */}
-                      <td className="p-4 align-top whitespace-nowrap space-y-1.5">
+                      {/* Trạng Thái & File Result */}
+                      <td className="py-4 px-4 align-top whitespace-nowrap space-y-1.5">
                         <div>{renderStatusBadge(task.approval_status, task.execution_status, payload)}</div>
-
                         {resultUrl && (
-                          <div>
-                            <a
-                              href={resultUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold transition shadow-xs cursor-pointer"
-                            >
-                              <Download className="w-3 h-3" />
-                              <span>Tải File (.xlsx)</span>
-                            </a>
-                          </div>
+                          <a
+                            href={resultUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-[10px] font-bold transition shadow-xs"
+                          >
+                            <Download className="w-3 h-3" />
+                            <span>Tải File (.xlsx)</span>
+                          </a>
                         )}
                       </td>
 
-                      {/* Cột 5: Thời Gian */}
-                      <td className="p-4 align-top text-slate-500 dark:text-slate-400 text-[11px] whitespace-nowrap font-mono">
+                      {/* Thời Gian */}
+                      <td className="py-4 px-4 align-top whitespace-nowrap font-mono text-[11px] text-slate-500 dark:text-slate-400">
                         {formatVNDateTime(task.executed_at || task.created_at)}
                       </td>
 
-                      {/* Cột 6: Thao Tác */}
-                      <td className="p-4 pr-6 align-top text-right space-x-2 whitespace-nowrap">
-                        {task.approval_status === 'pending' ? (
-                          <button
-                            onClick={() => handleOpenReview(task)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold transition shadow-xs cursor-pointer"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                            <span>Duyệt & Chạy</span>
-                          </button>
-                        ) : (
-                          <div className="inline-flex items-center gap-1.5">
-                            {task.execution_status === 'failed' && (
-                              <button
-                                onClick={() => handleRetryTask(task.id)}
-                                disabled={retryingId === task.id}
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800 rounded-xl text-xs font-bold transition cursor-pointer"
-                                title="Chạy lại tác vụ bị lỗi này"
-                              >
-                                {retryingId === task.id ? (
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                ) : (
-                                  <RotateCw className="w-3.5 h-3.5" />
-                                )}
-                                <span>Chạy Lại</span>
-                              </button>
-                            )}
-
+                      {/* Thao Tác */}
+                      <td className="py-4 px-4 sm:px-6 align-top text-right whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                          {task.approval_status === 'pending' ? (
                             <button
-                              onClick={() => setDetailModalTask(task)}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer"
+                              onClick={(e) => handleOpenReview(task, e)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-xs transition cursor-pointer"
                             >
-                              <Terminal className="w-3.5 h-3.5 text-indigo-500" />
-                              <span>Chi Tiết & Log</span>
+                              <Edit3 className="h-3.5 w-3.5" />
+                              <span>Duyệt & Chạy</span>
                             </button>
-                          </div>
-                        )}
+                          ) : (
+                            <>
+                              {task.execution_status === 'failed' && (
+                                <button
+                                  onClick={(e) => handleRetryTask(task.id, e)}
+                                  disabled={retryingId === task.id}
+                                  className="inline-flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950/50 px-3 py-1.5 text-xs font-bold text-amber-800 dark:text-amber-300 hover:bg-amber-100 transition shadow-xs cursor-pointer"
+                                >
+                                  {retryingId === task.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCw className="h-3.5 w-3.5" />}
+                                  <span>Chạy Lại</span>
+                                </button>
+                              )}
+
+                              <button
+                                onClick={() => setDetailDrawerTask(task)}
+                                className="inline-flex items-center gap-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 transition cursor-pointer"
+                              >
+                                <Terminal className="h-3.5 w-3.5 text-indigo-500" />
+                                <span>Chi Tiết & Log</span>
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -685,133 +895,269 @@ export const TaskManagementPage: React.FC = () => {
             </table>
           </div>
         </div>
-      )}
+      ) : (
+        /* Bento Grid Cards View */
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {filteredTasks.map((task) => {
+            const taskIdDisplay = task.id ? `#${task.id.slice(0, 8)}` : '#TASK';
+            const info = getTaskBusinessInfo(task);
+            const payload = task.payload_data || {};
 
-      {/* MODAL: CHI TIẾT & LOGS */}
-      {detailModalTask && (
-        <div
-          onClick={(e) => { if (e.target === e.currentTarget) setDetailModalTask(null); }}
-          className="fixed inset-0 z-50 bg-white/75 dark:bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-150"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-5xl overflow-hidden shadow-2xl space-y-4 p-6 sm:p-8 animate-in zoom-in-95 duration-150 my-auto"
-          >
-            <div className="flex items-start justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 rounded-2xl border border-indigo-200/60 dark:border-indigo-800/50">
-                  <Terminal className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <span>Chi Tiết Tác Vụ #{detailModalTask.id?.slice(0, 8)}</span>
-                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-mono font-bold border border-indigo-200/60 dark:border-indigo-800/50">
-                      {detailModalTask.bot_type}
+            return (
+              <div
+                key={task.id}
+                onClick={() => setDetailDrawerTask(task)}
+                className="group relative flex flex-col justify-between rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs transition-all hover:border-indigo-300 hover:shadow-md cursor-pointer space-y-4"
+              >
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-sm font-bold text-indigo-600 dark:text-indigo-400">
+                      {taskIdDisplay}
                     </span>
+                    {renderStatusBadge(task.approval_status, task.execution_status, payload)}
+                  </div>
+
+                  <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[10px] font-bold ${info.badgeColor}`}>
+                    <span>{task.bot_type}</span>
+                  </div>
+
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white leading-snug group-hover:text-indigo-600 transition-colors line-clamp-2">
+                    {info.title}
                   </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Thời gian tạo: {formatVNDateTime(detailModalTask.created_at)} | Thực thi: {formatVNDateTime(detailModalTask.executed_at)}
-                  </p>
+
+                  {info.subtitle && (
+                    <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">
+                      {info.subtitle}
+                    </p>
+                  )}
                 </div>
-              </div>
-              <button
-                onClick={() => setDetailModalTask(null)}
-                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
 
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/80 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-900 dark:text-white">
-                  Nghiệp Vụ: {getTaskBusinessInfo(detailModalTask).title}
-                </span>
-                <div>{renderStatusBadge(detailModalTask.approval_status, detailModalTask.execution_status, detailModalTask.payload_data)}</div>
-              </div>
-
-              {detailModalTask.payload_data?.result_file_url && (
-                <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between">
-                  <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4" /> Đã tạo thành công file kết quả:
+                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                  <span className="font-mono text-[11px] text-slate-400">
+                    {formatVNDateTime(task.executed_at || task.created_at)}
                   </span>
-                  <a
-                    href={detailModalTask.payload_data.result_file_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs cursor-pointer"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Tải File (.xlsx)</span>
-                  </a>
+
+                  <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                    {task.approval_status === 'pending' ? (
+                      <button
+                        onClick={(e) => handleOpenReview(task, e)}
+                        className="rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 transition cursor-pointer"
+                      >
+                        Duyệt
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setDetailDrawerTask(task)}
+                        className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-700 dark:text-slate-300"
+                      >
+                        Chi Tiết
+                      </button>
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
-
-            <div className="space-y-1.5 font-mono">
-              <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
-                <span className="flex items-center gap-1.5">
-                  <Code className="w-4 h-4 text-indigo-500" />
-                  <span>Audit Logs Thực Thi:</span>
-                </span>
               </div>
-              <div className="p-4 bg-slate-950 text-slate-300 rounded-2xl text-xs leading-relaxed max-h-56 overflow-y-auto border border-slate-800 space-y-1 scrollbar-thin">
-                {detailModalTask.execution_logs ? (
-                  detailModalTask.execution_logs.split('\n').map((line, idx) => (
-                    <div
-                      key={idx}
-                      className={
-                        line.includes('SUCCESS') || line.includes('Thành công')
-                          ? 'text-emerald-400 font-medium'
-                          : line.includes('ERROR') || line.includes('failed')
-                            ? 'text-rose-400 font-semibold'
-                            : 'text-slate-400'
-                      }
-                    >
-                      {line}
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-slate-500 italic">Chưa có nhật ký ghi nhận cho tác vụ này.</div>
-                )}
-              </div>
-            </div>
-
-            <details className="text-xs">
-              <summary className="font-bold text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white cursor-pointer">
-                ▶ Xem Tham Số Đầu Vào (Input Payload JSON)
-              </summary>
-              <pre className="mt-2 p-3 bg-slate-950 text-slate-300 rounded-xl font-mono text-[11px] overflow-x-auto max-h-36 border border-slate-800">
-                {JSON.stringify(detailModalTask.payload_data, null, 2)}
-              </pre>
-            </details>
-
-            <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
-              <button
-                onClick={() => setDetailModalTask(null)}
-                className="px-5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold rounded-xl transition cursor-pointer"
-              >
-                Đóng
-              </button>
-            </div>
-          </div>
+            );
+          })}
         </div>
       )}
 
-      {/* MODAL: PHÊ DUYỆT (HUMAN-IN-THE-LOOP) */}
+      {/* 5. SLIDE-OVER DETAIL & LIVE LOGS DRAWER (FIX LỖI XEM LOG TRIỆT ĐỂ) */}
+      <AnimatePresence>
+        {detailDrawerTask && (
+          <div
+            id="task-detail-drawer-overlay"
+            onClick={() => setDetailDrawerTask(null)}
+            className="fixed inset-0 z-[999] flex justify-end bg-slate-950/60 backdrop-blur-xs transition-opacity"
+          >
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              onClick={(e) => e.stopPropagation()}
+              className="flex h-full w-full max-w-2xl flex-col bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden"
+            >
+              {/* Drawer Header */}
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 px-6 py-4 bg-slate-50/70 dark:bg-slate-850/50">
+                <div className="flex items-center gap-3">
+                  <span className="font-mono text-lg font-bold text-indigo-600 dark:text-indigo-400">
+                    #{detailDrawerTask.id?.slice(0, 8)}
+                  </span>
+                  {renderStatusBadge(
+                    detailDrawerTask.approval_status,
+                    detailDrawerTask.execution_status,
+                    detailDrawerTask.payload_data
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {detailDrawerTask.execution_status === 'failed' && (
+                    <button
+                      onClick={(e) => {
+                        handleRetryTask(detailDrawerTask.id, e);
+                        setDetailDrawerTask(null);
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700 transition shadow-xs cursor-pointer"
+                    >
+                      <RotateCw className="h-3 w-3" />
+                      <span>Chạy Lại Tác Vụ</span>
+                    </button>
+                  )}
+                  {detailDrawerTask.approval_status === 'pending' && (
+                    <button
+                      onClick={(e) => {
+                        handleOpenReview(detailDrawerTask, e);
+                        setDetailDrawerTask(null);
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700 transition shadow-xs cursor-pointer"
+                    >
+                      <Edit3 className="h-3.5 w-3.5" />
+                      <span>Phê Duyệt</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setDetailDrawerTask(null)}
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 transition cursor-pointer"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Drawer Scrollable Content */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                {/* Core Title & Info */}
+                <div>
+                  <div className="mb-2">
+                    <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 border border-indigo-200/60">
+                      {detailDrawerTask.bot_type}
+                    </span>
+                  </div>
+                  <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                    {getTaskBusinessInfo(detailDrawerTask).title}
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    {getTaskBusinessInfo(detailDrawerTask).subtitle}
+                  </p>
+                </div>
+
+                {/* Live Console Logs */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <Terminal className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                      <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+                        Nhật Ký Thực Thi Bot (Terminal Logs)
+                      </h4>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => copyLogsToClipboard(detailDrawerTask.execution_logs || '')}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                    >
+                      {copiedLogs ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                      <span>{copiedLogs ? 'Đã sao chép' : 'Sao chép logs'}</span>
+                    </button>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 font-mono text-[11px] text-slate-200 max-h-64 overflow-y-auto space-y-1 shadow-inner scrollbar-thin">
+                    {detailDrawerTask.execution_logs ? (
+                      detailDrawerTask.execution_logs.split('\n').map((line, index) => (
+                        <div
+                          key={index}
+                          className={`flex items-start gap-2 ${line.includes('SUCCESS') || line.includes('Thành công')
+                            ? 'text-emerald-400 font-medium'
+                            : line.includes('ERROR') || line.includes('failed')
+                              ? 'text-rose-400 font-semibold'
+                              : 'text-slate-300'
+                            }`}
+                        >
+                          <span className="text-slate-600 select-none">❯</span>
+                          <span className="break-all">{line}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-slate-500 italic">Chưa có nhật ký ghi nhận cho tác vụ này.</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Input Payload Parameters */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+                      Tham Số Đầu Vào (Payload Parameters)
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => copyPayloadToClipboard(detailDrawerTask.payload_data)}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                    >
+                      {copiedPayload ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                      <span>{copiedPayload ? 'Đã sao chép' : 'Sao chép JSON'}</span>
+                    </button>
+                  </div>
+                  <pre className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-4 font-mono text-[11px] text-slate-800 dark:text-emerald-400 overflow-x-auto max-h-48 scrollbar-thin">
+                    {JSON.stringify(detailDrawerTask.payload_data, null, 2)}
+                  </pre>
+                </div>
+
+                {/* Result File Download */}
+                {detailDrawerTask.payload_data?.result_file_url && (
+                  <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                      <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                        File kết quả đã sẵn sàng
+                      </span>
+                    </div>
+                    <a
+                      href={detailDrawerTask.payload_data.result_file_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Tải Xuống File (.xlsx)</span>
+                    </a>
+                  </div>
+                )}
+
+                {/* Metadata Grid */}
+                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
+                  <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-850 p-3">
+                    <span className="text-slate-400 text-[11px]">Thời gian tạo:</span>
+                    <p className="mt-0.5 font-semibold text-slate-800 dark:text-slate-200 text-[11px] font-mono">
+                      {formatVNDateTime(detailDrawerTask.created_at)}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-850 p-3">
+                    <span className="text-slate-400 text-[11px]">Thời gian thực thi:</span>
+                    <p className="mt-0.5 font-semibold text-slate-800 dark:text-slate-200 text-[11px] font-mono">
+                      {formatVNDateTime(detailDrawerTask.executed_at)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 6. MODAL: PHÊ DUYỆT (HUMAN-IN-THE-LOOP) */}
       {selectedTask && (
         <div
           onClick={(e) => { if (e.target === e.currentTarget) setSelectedTask(null); }}
-          className="fixed inset-0 z-50 bg-white/75 dark:bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-150"
+          className="fixed inset-0 z-[1000] bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-150"
         >
           <div
             onClick={(e) => e.stopPropagation()}
             className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-4xl overflow-hidden shadow-2xl space-y-4 animate-in zoom-in-95 duration-150 my-auto"
           >
-            <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/70 dark:bg-slate-800/40">
+            <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/70 dark:bg-slate-850/40">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50 flex items-center justify-center font-bold">
-                  {selectedTask.bot_type === 'keycloak_api' ? <Key className="w-4 h-4" /> : <Code className="w-4 h-4" />}
+                  {selectedTask.bot_type === 'keycloak_api' ? <Key className="w-4 h-4" /> : <Code2 className="w-4 h-4" />}
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-900 dark:text-white">
@@ -830,7 +1176,7 @@ export const TaskManagementPage: React.FC = () => {
                     onClick={() => setModalMode('form')}
                     className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1 ${modalMode === 'form'
                       ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                      : 'text-slate-600 dark:text-slate-400'
                       }`}
                   >
                     <Sliders className="w-3 h-3" /> Form
@@ -843,16 +1189,16 @@ export const TaskManagementPage: React.FC = () => {
                     }}
                     className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1 ${modalMode === 'json'
                       ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                      : 'text-slate-600 dark:text-slate-400'
                       }`}
                   >
-                    <Code className="w-3 h-3" /> JSON
+                    <Code2 className="w-3 h-3" /> JSON
                   </button>
                 </div>
 
                 <button
                   onClick={() => setSelectedTask(null)}
-                  className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg transition cursor-pointer"
+                  className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -912,53 +1258,28 @@ export const TaskManagementPage: React.FC = () => {
                         Tùy Chọn Mật Khẩu Đặt Lại:
                       </label>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                        <label
-                          className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs cursor-pointer transition ${kcPasswordOption === 'email_lowercase'
-                            ? 'bg-white dark:bg-slate-900 border-indigo-500 text-indigo-700 dark:text-indigo-300 font-semibold shadow-xs'
-                            : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
-                            }`}
-                        >
-                          <input
-                            type="radio"
-                            name="pass_opt"
-                            checked={kcPasswordOption === 'email_lowercase'}
-                            onChange={() => setKcPasswordOption('email_lowercase')}
-                            className="text-indigo-600 cursor-pointer"
-                          />
-                          <span>Email chữ thường</span>
-                        </label>
-
-                        <label
-                          className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs cursor-pointer transition ${kcPasswordOption === 'default_secure'
-                            ? 'bg-white dark:bg-slate-900 border-indigo-500 text-indigo-700 dark:text-indigo-300 font-semibold shadow-xs'
-                            : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
-                            }`}
-                        >
-                          <input
-                            type="radio"
-                            name="pass_opt"
-                            checked={kcPasswordOption === 'default_secure'}
-                            onChange={() => setKcPasswordOption('default_secure')}
-                            className="text-indigo-600 cursor-pointer"
-                          />
-                          <span>Pythaverse@2026</span>
-                        </label>
-
-                        <label
-                          className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs cursor-pointer transition ${kcPasswordOption === 'custom'
-                            ? 'bg-white dark:bg-slate-900 border-indigo-500 text-indigo-700 dark:text-indigo-300 font-semibold shadow-xs'
-                            : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
-                            }`}
-                        >
-                          <input
-                            type="radio"
-                            name="pass_opt"
-                            checked={kcPasswordOption === 'custom'}
-                            onChange={() => setKcPasswordOption('custom')}
-                            className="text-indigo-600 cursor-pointer"
-                          />
-                          <span>Tự gõ mật khẩu</span>
-                        </label>
+                        {[
+                          { id: 'email_lowercase', label: 'Email chữ thường' },
+                          { id: 'default_secure', label: 'Pythaverse@2026' },
+                          { id: 'custom', label: 'Tự gõ mật khẩu' },
+                        ].map((pOpt) => (
+                          <label
+                            key={pOpt.id}
+                            className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs cursor-pointer transition ${kcPasswordOption === pOpt.id
+                              ? 'bg-white dark:bg-slate-900 border-indigo-500 text-indigo-700 dark:text-indigo-300 font-semibold shadow-xs'
+                              : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                              }`}
+                          >
+                            <input
+                              type="radio"
+                              name="pass_opt"
+                              checked={kcPasswordOption === pOpt.id}
+                              onChange={() => setKcPasswordOption(pOpt.id)}
+                              className="text-indigo-600 cursor-pointer"
+                            />
+                            <span>{pOpt.label}</span>
+                          </label>
+                        ))}
                       </div>
 
                       {kcPasswordOption === 'custom' && (
@@ -1032,7 +1353,7 @@ export const TaskManagementPage: React.FC = () => {
                     rows={10}
                     value={jsonPayload}
                     onChange={(e) => setJsonPayload(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-xs font-mono text-indigo-300 outline-none focus:border-indigo-500 leading-relaxed"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-xs font-mono text-emerald-400 outline-none focus:border-indigo-500 leading-relaxed"
                   />
                 </div>
               )}
@@ -1042,7 +1363,7 @@ export const TaskManagementPage: React.FC = () => {
                   type="button"
                   disabled={rejecting}
                   onClick={() => handleReject(selectedTask.id)}
-                  className="flex items-center gap-1.5 px-4 py-2.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/40 text-rose-700 dark:text-rose-300 border border-rose-200/80 dark:border-rose-800/60 rounded-xl text-xs font-semibold transition cursor-pointer"
+                  className="flex items-center gap-1.5 px-4 py-2.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200/80 dark:border-rose-800/60 rounded-xl text-xs font-semibold transition cursor-pointer"
                 >
                   <XCircle className="w-3.5 h-3.5" />
                   <span>Từ Chối</span>
@@ -1052,7 +1373,7 @@ export const TaskManagementPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setSelectedTask(null)}
-                    className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-medium rounded-xl transition cursor-pointer"
+                    className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-medium rounded-xl transition cursor-pointer"
                   >
                     Hủy Bỏ
                   </button>
@@ -1060,7 +1381,7 @@ export const TaskManagementPage: React.FC = () => {
                     type="button"
                     onClick={handleApprove}
                     disabled={approving}
-                    className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer disabled:opacity-50"
+                    className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer disabled:opacity-50"
                   >
                     {approving ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
@@ -1077,6 +1398,6 @@ export const TaskManagementPage: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 };

@@ -135,24 +135,82 @@ async def poll_workspace_long_tasks():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("🔥 Đang kích hoạt APScheduler 24/7...")
+    logger.info("🔥 Đang kích hoạt APScheduler 24/7 (Chế độ So Le & Chống Tràn RAM)...")
     
-    # 1. Quét Gmail mỗi 5 phút
-    scheduler.add_job(safe_job_wrapper, 'interval', minutes=5, args=[poll_unread_gmails, "Quét Gmail"], id='gmail_cron')
+    # Mốc thời gian xuất phát lệch pha
+    base_start = datetime.now(timezone.utc)
     
-    # 2. Quét OS Ticket mỗi 5 phút
-    scheduler.add_job(safe_job_wrapper, 'interval', minutes=5, args=[poll_open_ostickets, "Quét OS Ticket"], id='osticket_cron')
+    # 1. Quét Gmail mỗi 5 phút (Khởi chạy sau 5s)
+    scheduler.add_job(
+        safe_job_wrapper, 
+        'interval', 
+        minutes=5, 
+        args=[poll_unread_gmails, "Quét Gmail"], 
+        id='gmail_cron',
+        next_run_time=base_start + timedelta(seconds=5),
+        misfire_grace_time=120,
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True
+    )
     
-    # 3. Quét Form Feedback mỗi 5 phút
-    scheduler.add_job(safe_job_wrapper, 'interval', minutes=5, args=[poll_form_feedbacks, "Quét Form Feedback"], id='sheet_cron')
+    # 2. Quét OS Ticket mỗi 5 phút (Khởi chạy sau 65s - Lệch 1 phút)
+    scheduler.add_job(
+        safe_job_wrapper, 
+        'interval', 
+        minutes=5, 
+        args=[poll_open_ostickets, "Quét OS Ticket"], 
+        id='osticket_cron',
+        next_run_time=base_start + timedelta(seconds=65),
+        misfire_grace_time=120,
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True
+    )
+    
+    # 3. Quét Form Feedback mỗi 5 phút (Khởi chạy sau 125s - Lệch 2 phút)
+    scheduler.add_job(
+        safe_job_wrapper, 
+        'interval', 
+        minutes=5, 
+        args=[poll_form_feedbacks, "Quét Form Feedback"], 
+        id='sheet_cron',
+        next_run_time=base_start + timedelta(seconds=125),
+        misfire_grace_time=120,
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True
+    )
 
-    # 4. Quét Live Uptime & Auth Matrix định kỳ mỗi 30 phút
-    scheduler.add_job(safe_job_wrapper, 'interval', minutes=30, args=[poll_site_uptime_cron, "Quét Site Uptime & Auth Matrix"], id='site_uptime_cron', replace_existing=True)
+    # 4. Quét Task Workspace Long-Running mỗi 3 phút (Khởi chạy sau 185s - Lệch 3 phút)
+    scheduler.add_job(
+        safe_job_wrapper, 
+        'interval', 
+        minutes=3, 
+        args=[poll_workspace_long_tasks, "Quét Task Workspace Long-Running"], 
+        id='workspace_long_tasks_cron',
+        next_run_time=base_start + timedelta(seconds=185),
+        misfire_grace_time=120,
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True
+    )
 
-    # 5. Quét Task Workspace Long-Running mỗi 3 phút
-    scheduler.add_job(safe_job_wrapper, 'interval', minutes=3, args=[poll_workspace_long_tasks, "Quét Task Workspace Long-Running"], id='workspace_long_tasks_cron')
+    # 5. Quét Live Uptime & Auth Matrix định kỳ mỗi 30 phút (Khởi chạy sau 245s - Lệch 4 phút)
+    scheduler.add_job(
+        safe_job_wrapper, 
+        'interval', 
+        minutes=30, 
+        args=[poll_site_uptime_cron, "Quét Site Uptime & Auth Matrix"], 
+        id='site_uptime_cron',
+        next_run_time=base_start + timedelta(seconds=245),
+        misfire_grace_time=120,
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True
+    )
     
-    # 6. Quét Workspace Distributor để update cache mỗi 45 phút
+    # 6. Quét Workspace Distributor để update cache mỗi 45 phút (Khởi chạy sau 305s - Lệch 5 phút)
     scheduler.add_job(
         safe_job_wrapper,
         "interval",
@@ -161,7 +219,12 @@ async def lifespan(app: FastAPI):
             workspace_scanner_service.scan_and_cache_all_distributors, 
             "workspace_distributor_scanner_cron"
         ],
-        id="distributor_cache_scanner_cron"
+        id="distributor_cache_scanner_cron",
+        next_run_time=base_start + timedelta(seconds=305),
+        misfire_grace_time=120,
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True
     )
 
     scheduler.start()
