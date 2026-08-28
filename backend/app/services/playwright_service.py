@@ -169,7 +169,7 @@ class PlaywrightLMSService:
         async with async_playwright() as p:
             browser: Browser = await p.chromium.launch(
                 headless=self.headless,
-                args=LOW_MEMORY_CHROMIUM_ARGS
+                args=LOW_RAM_CHROMIUM_ARGS
             )
             context = await browser.new_context(
                 viewport={"width": 1280, "height": 800},
@@ -487,7 +487,7 @@ class PlaywrightLMSService:
         """Đổi Mono-Role (gỡ sạch role cũ và gán role mong muốn) hoặc thêm role."""
         async with acquire_playwright_slot(f"Moodle Modify User Role ({email})"):
             async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=self.headless, args=LOW_MEMORY_CHROMIUM_ARGS)
+                browser = await p.chromium.launch(headless=self.headless, args=LOW_RAM_CHROMIUM_ARGS)
                 context = await browser.new_context(viewport={"width": 1280, "height": 800})
                 await setup_low_ram_routes(context)
                 page = await context.new_page()
@@ -578,7 +578,7 @@ class PlaywrightLMSService:
             results = {"unenrolled": [], "not_found": []}
 
             async with async_playwright() as p:
-                browser: Browser = await p.chromium.launch(headless=self.headless, args=LOW_MEMORY_CHROMIUM_ARGS)
+                browser: Browser = await p.chromium.launch(headless=self.headless, args=LOW_RAM_CHROMIUM_ARGS)
                 context = await browser.new_context(viewport={"width": 1280, "height": 800})
                 await setup_low_ram_routes(context)
                 page = await context.new_page()
