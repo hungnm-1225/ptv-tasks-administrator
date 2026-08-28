@@ -697,8 +697,14 @@ export const TaskManagementPage: React.FC = () => {
 
       {/* MODAL: CHI TIẾT & LOGS */}
       {detailModalTask && (
-        <div className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-3xl overflow-hidden shadow-2xl space-y-4 p-6 sm:p-7 animate-in zoom-in-95 duration-150">
+        <div 
+          onClick={(e) => { if (e.target === e.currentTarget) setDetailModalTask(null); }}
+          className="fixed inset-0 z-50 bg-white/75 dark:bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-150"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-5xl overflow-hidden shadow-2xl space-y-4 p-6 sm:p-8 animate-in zoom-in-95 duration-150 my-auto"
+          >
             <div className="flex items-start justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 rounded-2xl border border-indigo-200/60 dark:border-indigo-800/50">
@@ -802,8 +808,14 @@ export const TaskManagementPage: React.FC = () => {
 
       {/* MODAL: PHÊ DUYỆT (HUMAN-IN-THE-LOOP) */}
       {selectedTask && (
-        <div className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl space-y-4 animate-in zoom-in-95 duration-150">
+        <div 
+          onClick={(e) => { if (e.target === e.currentTarget) setSelectedTask(null); }}
+          className="fixed inset-0 z-50 bg-white/75 dark:bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-150"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-4xl overflow-hidden shadow-2xl space-y-4 animate-in zoom-in-95 duration-150 my-auto"
+          >
             <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/70 dark:bg-slate-800/40">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50 flex items-center justify-center font-bold">

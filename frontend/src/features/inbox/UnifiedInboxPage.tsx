@@ -1364,8 +1364,14 @@ export const UnifiedInboxPage: React.FC = () => {
 
       {/* MODAL XEM TRƯỚC FILE */}
       {previewFile && (
-        <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-3xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        <div 
+          onClick={(e) => { if (e.target === e.currentTarget) setPreviewFile(null); }}
+          className="fixed inset-0 z-50 bg-white/75 dark:bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-150"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-3xl w-full max-w-6xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] my-auto"
+          >
             <div className="flex items-center justify-between p-4 border-b border-rule dark:border-rule-2">
               <div className="flex items-center gap-2 truncate">
                 <Paperclip className="w-4 h-4 text-accent" />
@@ -1398,13 +1404,13 @@ export const UnifiedInboxPage: React.FC = () => {
                 <img
                   src={previewFile.url}
                   alt={previewFile.filename}
-                  className="max-w-full max-h-[70vh] object-contain rounded-xl shadow-md"
+                  className="max-w-full max-h-[75vh] object-contain rounded-xl shadow-md"
                 />
               ) : previewFile.filename?.endsWith('.pdf') ? (
                 <iframe
                   src={previewFile.url}
                   title={previewFile.filename}
-                  className="w-full h-[70vh] rounded-xl border border-rule"
+                  className="w-full h-[75vh] rounded-xl border border-rule"
                 />
               ) : (
                 <div className="text-center p-8 space-y-3">
@@ -1431,8 +1437,14 @@ export const UnifiedInboxPage: React.FC = () => {
       {/* 🚀 SMART ACTION MODAL (BẢN CLONE HOÀN HẢO TỪ AUTOMATION STUDIO) */}
       {/* ========================================================================= */}
       {taskModalTicket && (
-        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-3xl w-full max-w-4xl shadow-2xl overflow-hidden space-y-5 p-6 sm:p-7 max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95 duration-150">
+        <div 
+          onClick={(e) => { if (e.target === e.currentTarget) setTaskModalTicket(null); }}
+          className="fixed inset-0 z-50 bg-white/75 dark:bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-150"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-3xl w-full max-w-5xl shadow-2xl overflow-hidden space-y-5 p-6 sm:p-8 max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95 duration-150 my-auto"
+          >
 
             {/* Header Modal */}
             <div className="flex items-center justify-between pb-3 border-b border-rule dark:border-rule-2 flex-wrap gap-2 shrink-0">

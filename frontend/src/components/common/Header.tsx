@@ -62,7 +62,7 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav, isMobileNavOp
   return (
     <>
       {isLoggingOut && (
-        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950/50 backdrop-blur-sm transition-opacity duration-200">
+        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-white/75 dark:bg-slate-950/70 backdrop-blur-md transition-opacity duration-200">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-2xl shadow-2xl flex flex-col items-center gap-4 animate-in zoom-in-95 duration-150">
             <Loader2 className="w-8 h-8 text-indigo-600 dark:text-indigo-400 animate-spin" />
             <p className="text-slate-600 dark:text-slate-300 font-medium text-xs">Đang đăng xuất an toàn...</p>

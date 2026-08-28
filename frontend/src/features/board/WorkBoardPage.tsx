@@ -752,11 +752,17 @@ export const WorkBoardPage: React.FC = () => {
 
             {/* MODAL: TÙY CHỈNH BOARD */}
             {isSettingsModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-overlay animate-in fade-in">
-                    <div className="bg-ink border border-rule-2 rounded-2xl max-w-xl w-full p-6 text-xs text-primary-ink shadow-2xl relative max-h-[90vh] flex flex-col">
+                <div 
+                    onClick={(e) => { if (e.target === e.currentTarget) setIsSettingsModalOpen(false); }}
+                    className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-white/75 dark:bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-150"
+                >
+                    <div 
+                        onClick={(e) => e.stopPropagation()}
+                        className="bg-ink border border-rule-2 rounded-3xl max-w-3xl w-full p-6 sm:p-8 text-xs text-primary-ink shadow-2xl relative max-h-[92vh] flex flex-col my-auto"
+                    >
                         <button
                             onClick={() => setIsSettingsModalOpen(false)}
-                            className="absolute right-4 top-4 text-ink-2 hover:text-primary-ink cursor-pointer"
+                            className="absolute right-5 top-5 p-1 text-ink-2 hover:text-primary-ink rounded-lg cursor-pointer"
                         >
                             <X className="w-5 h-5" />
                         </button>
@@ -1012,8 +1018,20 @@ export const WorkBoardPage: React.FC = () => {
 
             {/* MODAL: TẠO BOARD MỚI */}
             {isNewBoardModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-overlay backdrop-blur-xs">
-                    <div className="bg-ink border border-rule-2 rounded-2xl max-w-md w-full p-6 text-xs text-primary-ink">
+                <div 
+                    onClick={(e) => { if (e.target === e.currentTarget) setIsNewBoardModalOpen(false); }}
+                    className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-white/75 dark:bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-150"
+                >
+                    <div 
+                        onClick={(e) => e.stopPropagation()}
+                        className="bg-ink border border-rule-2 rounded-3xl max-w-xl w-full p-6 sm:p-7 text-xs text-primary-ink shadow-2xl relative my-auto"
+                    >
+                        <button
+                            onClick={() => setIsNewBoardModalOpen(false)}
+                            className="absolute right-5 top-5 p-1 text-ink-2 hover:text-primary-ink rounded-lg cursor-pointer"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
                         <h3 className="text-base font-bold text-primary-ink mb-3 flex items-center gap-2">
                             <FolderPlus className="w-5 h-5 text-accent" /> Tạo Board Mới
                         </h3>
@@ -1055,8 +1073,20 @@ export const WorkBoardPage: React.FC = () => {
 
             {/* MODAL: THÊM / SỬA CỘT */}
             {isColumnModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-overlay backdrop-blur-xs">
-                    <div className="bg-ink border border-rule-2 rounded-2xl max-w-md w-full p-6 text-xs text-primary-ink">
+                <div 
+                    onClick={(e) => { if (e.target === e.currentTarget) setIsColumnModalOpen(false); }}
+                    className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-white/75 dark:bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-150"
+                >
+                    <div 
+                        onClick={(e) => e.stopPropagation()}
+                        className="bg-ink border border-rule-2 rounded-3xl max-w-xl w-full p-6 sm:p-7 text-xs text-primary-ink shadow-2xl relative my-auto"
+                    >
+                        <button
+                            onClick={() => setIsColumnModalOpen(false)}
+                            className="absolute right-5 top-5 p-1 text-ink-2 hover:text-primary-ink rounded-lg cursor-pointer"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
                         <h3 className="text-base font-bold text-primary-ink mb-3">
                             {editingColumn ? 'Chỉnh Sửa Cột' : 'Thêm Cột Mới'}
                         </h3>
@@ -1109,9 +1139,15 @@ export const WorkBoardPage: React.FC = () => {
 
             {/* MODAL: CHI TIẾT CARD */}
             {isCardModalOpen && activeCard && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-overlay backdrop-blur-xs">
-                    <div className="bg-ink border border-rule-2 rounded-2xl max-w-xl w-full p-6 text-xs text-primary-ink relative max-h-[90vh] flex flex-col">
-                        <button onClick={() => setIsCardModalOpen(false)} className="absolute right-4 top-4 text-ink-2 hover:text-primary-ink cursor-pointer">
+                <div 
+                    onClick={(e) => { if (e.target === e.currentTarget) setIsCardModalOpen(false); }}
+                    className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-white/75 dark:bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-150"
+                >
+                    <div 
+                        onClick={(e) => e.stopPropagation()}
+                        className="bg-ink border border-rule-2 rounded-3xl max-w-3xl w-full p-6 sm:p-8 text-xs text-primary-ink shadow-2xl relative max-h-[92vh] flex flex-col my-auto"
+                    >
+                        <button onClick={() => setIsCardModalOpen(false)} className="absolute right-5 top-5 p-1 text-ink-2 hover:text-primary-ink rounded-lg cursor-pointer">
                             <X className="w-5 h-5" />
                         </button>
 

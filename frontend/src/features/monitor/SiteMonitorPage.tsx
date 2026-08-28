@@ -878,8 +878,14 @@ export const SiteMonitorPage: React.FC = () => {
 
       {/* Modal Xem Live Terminal Build/Runtime Logs */}
       {logModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-ink border border-rule-2 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in fade-in zoom-in-95 duration-150">
+        <div 
+          onClick={(e) => { if (e.target === e.currentTarget) setLogModalOpen(false); }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-white/75 dark:bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-150"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-ink border border-rule-2 rounded-2xl w-full max-w-5xl shadow-2xl overflow-hidden flex flex-col max-h-[88vh] animate-in fade-in zoom-in-95 duration-150 my-auto"
+          >
             <div className="px-5 py-3.5 bg-ink border-b border-rule-2 flex items-center justify-between">
               <div className="flex items-center gap-2 text-primary-ink">
                 <Terminal className="w-4 h-4 text-emerald-400" />

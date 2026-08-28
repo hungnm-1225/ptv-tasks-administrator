@@ -621,11 +621,17 @@ export const CoursesManagerPage: React.FC = () => {
 
             {/* MODAL 1: BULK IMPORT */}
             {isBulkModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-overlay backdrop-blur-xs animate-in fade-in">
-                    <div className="bg-white dark:bg-ink rounded-2xl max-w-2xl w-full border border-rule dark:border-rule-2 shadow-2xl p-6 relative max-h-[90vh] flex flex-col">
+                <div 
+                    onClick={(e) => { if (e.target === e.currentTarget) setIsBulkModalOpen(false); }}
+                    className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-white/75 dark:bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-150"
+                >
+                    <div 
+                        onClick={(e) => e.stopPropagation()}
+                        className="bg-white dark:bg-ink rounded-3xl max-w-4xl w-full border border-rule dark:border-rule-2 shadow-2xl p-6 sm:p-8 relative max-h-[92vh] flex flex-col my-auto"
+                    >
                         <button
                             onClick={() => setIsBulkModalOpen(false)}
-                            className="absolute right-4 top-4 text-ink-3 hover:text-ink-2 dark:hover:text-primary-ink"
+                            className="absolute right-5 top-5 p-1 text-ink-3 hover:text-ink-2 dark:hover:text-primary-ink rounded-lg cursor-pointer"
                         >
                             <X className="w-5 h-5" />
                         </button>
@@ -642,7 +648,7 @@ export const CoursesManagerPage: React.FC = () => {
                             <button
                                 type="button"
                                 onClick={() => setBulkMode('file')}
-                                className={`flex-1 py-1.5 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition-all ${bulkMode === 'file'
+                                className={`flex-1 py-1.5 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${bulkMode === 'file'
                                     ? 'bg-white dark:bg-ink text-mint dark:text-mint shadow-xs'
                                     : 'text-ink-2 hover:text-primary'
                                     }`}
@@ -653,7 +659,7 @@ export const CoursesManagerPage: React.FC = () => {
                             <button
                                 type="button"
                                 onClick={() => setBulkMode('text')}
-                                className={`flex-1 py-1.5 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition-all ${bulkMode === 'text'
+                                className={`flex-1 py-1.5 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${bulkMode === 'text'
                                     ? 'bg-white dark:bg-ink text-mint dark:text-mint shadow-xs'
                                     : 'text-ink-2 hover:text-primary'
                                     }`}
@@ -678,7 +684,7 @@ export const CoursesManagerPage: React.FC = () => {
                                         className="border-2 border-dashed border-rule-2 dark:border-rule-2 hover:border-mint dark:hover:border-mint rounded-2xl p-6 text-center cursor-pointer transition-all bg-paper-2 dark:bg-ink"
                                     >
                                         <UploadCloud className="w-8 h-8 mx-auto text-emerald-600 dark:text-emerald-400 mb-2" />
-                                        <p className="text-xs font-semibold text-primary dark:text-primary-ink">
+                                        <p className="text-xs font-semibold text-ink dark:text-primary-ink mb-1">
                                             {uploadedFileName ? `Đã chọn: ${uploadedFileName}` : 'Bấm để chọn file Excel (.xlsx, .xls) hoặc CSV'}
                                         </p>
                                         <p className="text-[11px] text-ink-3 mt-1">
@@ -759,11 +765,17 @@ export const CoursesManagerPage: React.FC = () => {
 
             {/* MODAL 2: QUẢN LÝ DANH MỤC */}
             {isCatModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-overlay backdrop-blur-xs animate-in fade-in">
-                    <div className="bg-white dark:bg-ink rounded-2xl max-w-md w-full border border-rule dark:border-rule-2 shadow-2xl p-6 relative">
+                <div 
+                    onClick={(e) => { if (e.target === e.currentTarget) setIsCatModalOpen(false); }}
+                    className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-white/75 dark:bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-150"
+                >
+                    <div 
+                        onClick={(e) => e.stopPropagation()}
+                        className="bg-white dark:bg-ink rounded-3xl max-w-2xl w-full border border-rule dark:border-rule-2 shadow-2xl p-6 sm:p-7 relative my-auto"
+                    >
                         <button
                             onClick={() => setIsCatModalOpen(false)}
-                            className="absolute right-4 top-4 text-ink-3 hover:text-ink-2 dark:hover:text-primary-ink"
+                            className="absolute right-5 top-5 p-1 text-ink-3 hover:text-ink-2 dark:hover:text-primary-ink rounded-lg cursor-pointer"
                         >
                             <X className="w-5 h-5" />
                         </button>
@@ -776,7 +788,7 @@ export const CoursesManagerPage: React.FC = () => {
                             Đổi tên danh mục sẽ tự động cập nhật tên mới cho toàn bộ các khóa học đang thuộc danh mục đó.
                         </p>
 
-                        <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+                        <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
                             {categories.map(cat => {
                                 const count = courses.filter(c => c.category === cat).length;
                                 const isEditing = editingCatOld === cat;
@@ -798,14 +810,14 @@ export const CoursesManagerPage: React.FC = () => {
                                                 <button
                                                     disabled={isCatSubmitting}
                                                     onClick={() => handleRenameCategory(cat)}
-                                                    className="p-1 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+                                                    className="p-1 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 cursor-pointer"
                                                     title="Lưu đổi tên"
                                                 >
                                                     <Check className="w-3.5 h-3.5" />
                                                 </button>
                                                 <button
                                                     onClick={() => setEditingCatOld(null)}
-                                                    className="p-1 bg-rule dark:bg-rule-2 text-ink-2 rounded-lg"
+                                                    className="p-1 bg-rule dark:bg-rule-2 text-ink-2 rounded-lg cursor-pointer"
                                                 >
                                                     <X className="w-3.5 h-3.5" />
                                                 </button>
@@ -824,14 +836,14 @@ export const CoursesManagerPage: React.FC = () => {
                                                         setEditingCatOld(cat);
                                                         setEditingCatNew(cat);
                                                     }}
-                                                    className="p-1.5 hover:bg-rule dark:hover:bg-rule-2 text-ink-2 rounded-lg transition-colors"
+                                                    className="p-1.5 hover:bg-rule dark:hover:bg-rule-2 text-ink-2 rounded-lg transition-colors cursor-pointer"
                                                     title="Đổi tên danh mục"
                                                 >
                                                     <Edit3 className="w-3.5 h-3.5" />
                                                 </button>
                                                 <button
                                                     onClick={() => handleDeleteCategory(cat)}
-                                                    className="p-1.5 hover:bg-rose-100 dark:hover:bg-rose-900/30 text-rose-500 rounded-lg transition-colors"
+                                                    className="p-1.5 hover:bg-rose-100 dark:hover:bg-rose-900/30 text-rose-500 rounded-lg transition-colors cursor-pointer"
                                                     title="Xóa hoặc gộp danh mục"
                                                 >
                                                     <ArrowRightLeft className="w-3.5 h-3.5" />
@@ -847,7 +859,7 @@ export const CoursesManagerPage: React.FC = () => {
                             <button
                                 type="button"
                                 onClick={() => setIsCatModalOpen(false)}
-                                className="px-4 py-2 bg-accent text-white rounded-xl text-xs font-semibold hover:bg-accent-2"
+                                className="px-5 py-2 bg-accent text-white rounded-xl text-xs font-semibold hover:bg-accent-2 transition cursor-pointer"
                             >
                                 Đóng
                             </button>
@@ -858,11 +870,17 @@ export const CoursesManagerPage: React.FC = () => {
 
             {/* MODAL 3: THÊM / SỬA KHÓA HỌC */}
             {isModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-overlay backdrop-blur-xs animate-in fade-in">
-                    <div className="bg-white dark:bg-ink rounded-2xl max-w-md w-full border border-rule dark:border-rule-2 shadow-2xl p-6 relative">
+                <div 
+                    onClick={(e) => { if (e.target === e.currentTarget) setIsModalOpen(false); }}
+                    className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-white/75 dark:bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-150"
+                >
+                    <div 
+                        onClick={(e) => e.stopPropagation()}
+                        className="bg-white dark:bg-ink rounded-3xl max-w-2xl w-full border border-rule dark:border-rule-2 shadow-2xl p-6 sm:p-8 relative my-auto"
+                    >
                         <button
                             onClick={() => setIsModalOpen(false)}
-                            className="absolute right-4 top-4 text-ink-3 hover:text-ink-2 dark:hover:text-primary-ink"
+                            className="absolute right-5 top-5 p-1 text-ink-3 hover:text-ink-2 dark:hover:text-primary-ink rounded-lg cursor-pointer"
                         >
                             <X className="w-5 h-5" />
                         </button>
