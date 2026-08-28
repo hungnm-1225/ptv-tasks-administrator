@@ -1366,11 +1366,11 @@ export const UnifiedInboxPage: React.FC = () => {
 
       {/* MODAL XEM TRƯỚC FILE */}
       {previewFile && (
-        <div 
+        <div
           onClick={(e) => { if (e.target === e.currentTarget) setPreviewFile(null); }}
           className="fixed inset-0 z-50 bg-white/75 dark:bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-150"
         >
-          <div 
+          <div
             onClick={(e) => e.stopPropagation()}
             className="bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-3xl w-full max-w-6xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] my-auto"
           >
@@ -1439,11 +1439,11 @@ export const UnifiedInboxPage: React.FC = () => {
       {/* 🚀 SMART ACTION MODAL (BẢN CLONE HOÀN HẢO TỪ AUTOMATION STUDIO) */}
       {/* ========================================================================= */}
       {taskModalTicket && (
-        <div 
+        <div
           onClick={(e) => { if (e.target === e.currentTarget) setTaskModalTicket(null); }}
           className="fixed inset-0 z-50 bg-white/75 dark:bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-150"
         >
-          <div 
+          <div
             onClick={(e) => e.stopPropagation()}
             className="bg-white dark:bg-ink border border-rule dark:border-rule-2 rounded-3xl w-full max-w-5xl shadow-2xl overflow-hidden space-y-5 p-6 sm:p-8 max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95 duration-150 my-auto"
           >

@@ -460,11 +460,10 @@ export const TaskManagementPage: React.FC = () => {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap cursor-pointer ${
-                activeTab === tab.id
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap cursor-pointer ${activeTab === tab.id
                   ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-xs'
                   : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
+                }`}
             >
               {tab.label}
             </button>
@@ -690,11 +689,11 @@ export const TaskManagementPage: React.FC = () => {
 
       {/* MODAL: CHI TIẾT & LOGS */}
       {detailModalTask && (
-        <div 
+        <div
           onClick={(e) => { if (e.target === e.currentTarget) setDetailModalTask(null); }}
           className="fixed inset-0 z-50 bg-white/75 dark:bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-150"
         >
-          <div 
+          <div
             onClick={(e) => e.stopPropagation()}
             className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-5xl overflow-hidden shadow-2xl space-y-4 p-6 sm:p-8 animate-in zoom-in-95 duration-150 my-auto"
           >
@@ -801,11 +800,11 @@ export const TaskManagementPage: React.FC = () => {
 
       {/* MODAL: PHÊ DUYỆT (HUMAN-IN-THE-LOOP) */}
       {selectedTask && (
-        <div 
+        <div
           onClick={(e) => { if (e.target === e.currentTarget) setSelectedTask(null); }}
           className="fixed inset-0 z-50 bg-white/75 dark:bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-150"
         >
-          <div 
+          <div
             onClick={(e) => e.stopPropagation()}
             className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-4xl overflow-hidden shadow-2xl space-y-4 animate-in zoom-in-95 duration-150 my-auto"
           >
@@ -829,11 +828,10 @@ export const TaskManagementPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setModalMode('form')}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1 ${
-                      modalMode === 'form'
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1 ${modalMode === 'form'
                         ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
                         : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                    }`}
+                      }`}
                   >
                     <Sliders className="w-3 h-3" /> Form
                   </button>
@@ -843,11 +841,10 @@ export const TaskManagementPage: React.FC = () => {
                       setJsonPayload(JSON.stringify(buildFinalPayload(), null, 2));
                       setModalMode('json');
                     }}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1 ${
-                      modalMode === 'json'
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1 ${modalMode === 'json'
                         ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
                         : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                    }`}
+                      }`}
                   >
                     <Code className="w-3 h-3" /> JSON
                   </button>
@@ -897,11 +894,10 @@ export const TaskManagementPage: React.FC = () => {
                           key={item.id}
                           type="button"
                           onClick={() => setKcActionType(item.id)}
-                          className={`p-2.5 rounded-xl border text-xs font-medium text-center transition cursor-pointer ${
-                            kcActionType === item.id
+                          className={`p-2.5 rounded-xl border text-xs font-medium text-center transition cursor-pointer ${kcActionType === item.id
                               ? 'bg-indigo-50 dark:bg-indigo-950/50 border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 font-bold'
                               : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
-                          }`}
+                            }`}
                         >
                           {item.label}
                         </button>
@@ -917,11 +913,10 @@ export const TaskManagementPage: React.FC = () => {
                       </label>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         <label
-                          className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs cursor-pointer transition ${
-                            kcPasswordOption === 'email_lowercase'
+                          className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs cursor-pointer transition ${kcPasswordOption === 'email_lowercase'
                               ? 'bg-white dark:bg-slate-900 border-indigo-500 text-indigo-700 dark:text-indigo-300 font-semibold shadow-xs'
                               : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
-                          }`}
+                            }`}
                         >
                           <input
                             type="radio"
@@ -934,11 +929,10 @@ export const TaskManagementPage: React.FC = () => {
                         </label>
 
                         <label
-                          className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs cursor-pointer transition ${
-                            kcPasswordOption === 'default_secure'
+                          className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs cursor-pointer transition ${kcPasswordOption === 'default_secure'
                               ? 'bg-white dark:bg-slate-900 border-indigo-500 text-indigo-700 dark:text-indigo-300 font-semibold shadow-xs'
                               : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
-                          }`}
+                            }`}
                         >
                           <input
                             type="radio"
@@ -951,11 +945,10 @@ export const TaskManagementPage: React.FC = () => {
                         </label>
 
                         <label
-                          className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs cursor-pointer transition ${
-                            kcPasswordOption === 'custom'
+                          className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs cursor-pointer transition ${kcPasswordOption === 'custom'
                               ? 'bg-white dark:bg-slate-900 border-indigo-500 text-indigo-700 dark:text-indigo-300 font-semibold shadow-xs'
                               : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
-                          }`}
+                            }`}
                         >
                           <input
                             type="radio"
@@ -995,11 +988,10 @@ export const TaskManagementPage: React.FC = () => {
                             key={st.id}
                             type="button"
                             onClick={() => setKcTargetStatus(st.id)}
-                            className={`flex-1 py-2 px-2 text-[11px] rounded-xl border text-center transition cursor-pointer ${
-                              kcTargetStatus === st.id
+                            className={`flex-1 py-2 px-2 text-[11px] rounded-xl border text-center transition cursor-pointer ${kcTargetStatus === st.id
                                 ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold border-transparent shadow-xs'
                                 : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
-                            }`}
+                              }`}
                           >
                             {st.label}
                           </button>
@@ -1014,17 +1006,15 @@ export const TaskManagementPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => setKcTemporary(!kcTemporary)}
-                        className={`w-full py-2 px-3 rounded-xl border text-xs font-semibold flex items-center justify-between transition cursor-pointer ${
-                          kcTemporary
+                        className={`w-full py-2 px-3 rounded-xl border text-xs font-semibold flex items-center justify-between transition cursor-pointer ${kcTemporary
                             ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300'
                             : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
-                        }`}
+                          }`}
                       >
                         <span>{kcTemporary ? 'Bật: Bắt đổi khi đăng nhập' : 'Tắt: Dùng mật khẩu này luôn'}</span>
                         <span
-                          className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] text-white ${
-                            kcTemporary ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600'
-                          }`}
+                          className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] text-white ${kcTemporary ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600'
+                            }`}
                         >
                           {kcTemporary ? '✓' : '✕'}
                         </span>

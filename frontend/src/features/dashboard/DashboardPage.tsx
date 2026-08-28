@@ -272,31 +272,17 @@ export const DashboardPage: React.FC = () => {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.3 }}
-      className="space-y-6 w-full pb-10"
+      className="space-y-6"
     >
       {/* 1. Header Bar với Live Sync Status */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white font-sans">
             Executive Dashboard
           </h1>
-          <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
+          <p className="mt-1 text-xs font-medium text-slate-500 sm:text-sm dark:text-slate-400">
             Tổng quan chỉ số KPI và trạng thái tự động hóa hệ thống real-time.
           </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          {isRefreshing && (
-            <div className="flex items-center gap-1.5 text-xs text-indigo-600 dark:text-indigo-400 animate-pulse">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              <span className="font-semibold">Đang cập nhật...</span>
-            </div>
-          )}
-
-          <span className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200/60 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-xs dark:border-emerald-800/50 dark:bg-emerald-950/40 dark:text-emerald-300">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
-            <span>Pythaverse Live Sync</span>
-          </span>
         </div>
       </div>
 

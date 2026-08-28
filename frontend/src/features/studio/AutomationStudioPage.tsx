@@ -2189,11 +2189,11 @@ export const AutomationStudioPage: React.FC = () => {
 
       {/* CONFIRMATION MODAL */}
       {isConfirmModalOpen && preparedPayload && (
-        <div 
+        <div
           onClick={(e) => { if (e.target === e.currentTarget) setIsConfirmModalOpen(false); }}
           className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-white/75 dark:bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-150"
         >
-          <div 
+          <div
             onClick={(e) => e.stopPropagation()}
             className="max-w-3xl w-full bg-white dark:bg-ink rounded-3xl border border-rule dark:border-rule-2 shadow-2xl overflow-hidden p-6 sm:p-8 space-y-5 my-auto"
           >
