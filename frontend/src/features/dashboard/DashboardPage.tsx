@@ -277,7 +277,7 @@ export const DashboardPage: React.FC = () => {
       {/* 1. Header Bar với Live Sync Status */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white font-sans">
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white font-sans">
             Executive Dashboard
           </h1>
           <p className="mt-1 text-xs font-medium text-slate-500 sm:text-sm dark:text-slate-400">
@@ -304,7 +304,7 @@ export const DashboardPage: React.FC = () => {
           </div>
 
           <div className="my-3">
-            <div className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white font-sans">
+            <div className="text-3xl sm:text-4xl font-bold text-slate-900 dark:text-white font-sans">
               {summary?.total_tickets ?? 0}
             </div>
           </div>
@@ -333,7 +333,7 @@ export const DashboardPage: React.FC = () => {
           </div>
 
           <div className="my-3">
-            <div className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white font-sans">
+            <div className="text-3xl sm:text-4xl font-bold text-slate-900 dark:text-white font-sans">
               {summary?.pending_approval ?? 0}
             </div>
           </div>
@@ -361,7 +361,7 @@ export const DashboardPage: React.FC = () => {
           </div>
 
           <div className="my-3">
-            <div className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white font-sans">
+            <div className="text-3xl sm:text-4xl font-bold text-slate-900 dark:text-white font-sans">
               {summary?.resolved_this_month ?? 0}
             </div>
           </div>
@@ -389,7 +389,7 @@ export const DashboardPage: React.FC = () => {
           </div>
 
           <div className="my-3">
-            <div className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white font-sans">
+            <div className="text-3xl sm:text-4xl font-bold text-slate-900 dark:text-white font-sans">
               {summary?.system_health ?? '100%'}
             </div>
           </div>

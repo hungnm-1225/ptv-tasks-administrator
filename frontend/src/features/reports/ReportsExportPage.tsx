@@ -211,7 +211,7 @@ export const ReportsExportPage: React.FC = () => {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
             Analytics & Custom XLSX Exporter
           </h1>
           <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">

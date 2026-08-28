@@ -492,7 +492,7 @@ export const SiteMonitorPage: React.FC = () => {
       {/* ── Page Header ── */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
             Site Uptime & Infrastructure Hub
           </h1>
           <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
@@ -872,11 +872,11 @@ export const SiteMonitorPage: React.FC = () => {
 
       {/* Modal Xem Live Terminal Build/Runtime Logs */}
       {logModalOpen && (
-        <div 
+        <div
           onClick={(e) => { if (e.target === e.currentTarget) setLogModalOpen(false); }}
           className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-white/75 dark:bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-150"
         >
-          <div 
+          <div
             onClick={(e) => e.stopPropagation()}
             className="bg-ink border border-rule-2 rounded-2xl w-full max-w-5xl shadow-2xl overflow-hidden flex flex-col max-h-[88vh] animate-in fade-in zoom-in-95 duration-150 my-auto"
           >

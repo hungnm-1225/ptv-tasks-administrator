@@ -427,7 +427,7 @@ export const CoursesManagerPage: React.FC = () => {
             {/* Header & Pane Switcher */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+                    <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
                         Quản Lý Danh Mục Khóa Học
                     </h1>
                     <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
@@ -620,11 +620,11 @@ export const CoursesManagerPage: React.FC = () => {
 
             {/* MODAL 1: BULK IMPORT */}
             {isBulkModalOpen && (
-                <div 
+                <div
                     onClick={(e) => { if (e.target === e.currentTarget) setIsBulkModalOpen(false); }}
                     className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-white/75 dark:bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-150"
                 >
-                    <div 
+                    <div
                         onClick={(e) => e.stopPropagation()}
                         className="bg-white dark:bg-ink rounded-3xl max-w-4xl w-full border border-rule dark:border-rule-2 shadow-2xl p-6 sm:p-8 relative max-h-[92vh] flex flex-col my-auto"
                     >
@@ -764,11 +764,11 @@ export const CoursesManagerPage: React.FC = () => {
 
             {/* MODAL 2: QUẢN LÝ DANH MỤC */}
             {isCatModalOpen && (
-                <div 
+                <div
                     onClick={(e) => { if (e.target === e.currentTarget) setIsCatModalOpen(false); }}
                     className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-white/75 dark:bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-150"
                 >
-                    <div 
+                    <div
                         onClick={(e) => e.stopPropagation()}
                         className="bg-white dark:bg-ink rounded-3xl max-w-2xl w-full border border-rule dark:border-rule-2 shadow-2xl p-6 sm:p-7 relative my-auto"
                     >
@@ -869,11 +869,11 @@ export const CoursesManagerPage: React.FC = () => {
 
             {/* MODAL 3: THÊM / SỬA KHÓA HỌC */}
             {isModalOpen && (
-                <div 
+                <div
                     onClick={(e) => { if (e.target === e.currentTarget) setIsModalOpen(false); }}
                     className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-white/75 dark:bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-150"
                 >
-                    <div 
+                    <div
                         onClick={(e) => e.stopPropagation()}
                         className="bg-white dark:bg-ink rounded-3xl max-w-2xl w-full border border-rule dark:border-rule-2 shadow-2xl p-6 sm:p-8 relative my-auto"
                     >

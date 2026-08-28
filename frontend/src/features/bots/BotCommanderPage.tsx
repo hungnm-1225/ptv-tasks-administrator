@@ -296,7 +296,7 @@ export const BotCommanderPage: React.FC = () => {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
             Bot Command & Execution Center
           </h1>
           <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
@@ -510,9 +510,8 @@ export const BotCommanderPage: React.FC = () => {
             <button
               type="button"
               onClick={() => setAutoScroll(!autoScroll)}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition cursor-pointer ${
-                autoScroll ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-800 text-slate-300 hover:text-white'
-              }`}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition cursor-pointer ${autoScroll ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-800 text-slate-300 hover:text-white'
+                }`}
               title="Tự động cuộn theo log mới"
             >
               <ArrowDownCircle className="w-3.5 h-3.5" />
