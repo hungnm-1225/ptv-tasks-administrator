@@ -491,20 +491,21 @@ export const GithubReporterPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="space-y-6 w-full pb-10">
       {/* Header */}
-      <div>
-        <h2 className="text-xl font-bold text-primary dark:text-ink flex items-center gap-2.5 tracking-tight">
-          <Github className="w-5 h-5 text-primary dark:text-ink" />
-          <span>GitHub Issue Dispatcher</span>
-        </h2>
-        <p className="text-xs text-ink-2 dark:text-ink-2 mt-1">
-          Soạn thảo và điều phối Bug Report chuẩn QA DTT vào Private Repository{' '}
-          <code className="text-accent dark:text-accent font-mono font-semibold">
-            PTV-TechHub/Pythaverse2026
-          </code>
-          .
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+            GitHub Issue Dispatcher
+          </h1>
+          <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
+            Soạn thảo và điều phối Bug Report chuẩn QA DTT vào Private Repository{' '}
+            <code className="text-accent dark:text-accent-2 font-mono font-semibold">
+              PTV-TechHub/Pythaverse2026
+            </code>
+            .
+          </p>
+        </div>
       </div>
 
       {/* Banner thông báo nếu nhận từ Ticket */}

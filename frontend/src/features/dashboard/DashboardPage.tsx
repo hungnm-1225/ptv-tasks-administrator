@@ -46,10 +46,9 @@ const setDashboardCache = (data: ReportsSummary) => {
 };
 
 export const DashboardPage: React.FC = () => {
-  // 1. State Quản trị dữ liệu & Time Range đồng bộ toàn trang
-  const initialCache = useMemo(() => getDashboardCache(), []);
-  const [summary, setSummary] = useState<ReportsSummary | null>(initialCache);
-  const [isInitialLoading, setIsInitialLoading] = useState<boolean>(!initialCache);
+  // 1. State Quản trị dữ liệu & Time Range đồng bộ toàn trang (Khởi tạo Lazy 0ms từ Cache)
+  const [summary, setSummary] = useState<ReportsSummary | null>(() => getDashboardCache());
+  const [isInitialLoading, setIsInitialLoading] = useState<boolean>(() => !getDashboardCache());
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
   // Time Range thống nhất cho toàn bộ Dashboard
@@ -62,9 +61,8 @@ export const DashboardPage: React.FC = () => {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
 
-  // 2. ⚡ SWR FETCH: Đồng bộ toàn bộ KPI & Charts theo Time Range
+  // 2. ⚡ SWR FETCH: Đồng bộ toàn bộ KPI & Charts theo Time Range (Tách rời state khỏi dependency để triệt tiêu vòng lặp)
   const fetchDashboardData = useCallback(async (range: TimeRangeOption) => {
-    if (!summary) setIsInitialLoading(true);
     setIsRefreshing(true);
 
     try {
@@ -80,7 +78,7 @@ export const DashboardPage: React.FC = () => {
       setIsInitialLoading(false);
       setIsRefreshing(false);
     }
-  }, [summary]);
+  }, []);
 
   useEffect(() => {
     fetchDashboardData(timeRange);
@@ -274,15 +272,15 @@ export const DashboardPage: React.FC = () => {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.3 }}
-      className="space-y-6"
+      className="space-y-6 w-full pb-10"
     >
       {/* 1. Header Bar với Live Sync Status */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white font-sans">
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
             Executive Dashboard
           </h1>
-          <p className="mt-1 text-xs font-medium text-slate-500 sm:text-sm dark:text-slate-400">
+          <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
             Tổng quan chỉ số KPI và trạng thái tự động hóa hệ thống real-time.
           </p>
         </div>

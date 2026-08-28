@@ -488,20 +488,14 @@ export const SiteMonitorPage: React.FC = () => {
   });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full pb-10">
       {/* ── Page Header ── */}
-      <div className="flex items-start justify-between flex-wrap gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2.5 mb-1">
-            <Activity className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-            <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">
-              Site Uptime & Infrastructure Hub
-            </h2>
-            <span className="text-[10px] font-bold px-2.5 py-1 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200/80 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30">
-              ● Centralized Monitor
-            </span>
-          </div>
-          <p className="text-xs text-ink-2 dark:text-ink-3">
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+            Site Uptime & Infrastructure Hub
+          </h1>
+          <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
             Giám sát đa tầng: Uptime công khai · Xác thực phân quyền 7 Roles · CI/CD Deploy Pipelines
           </p>
         </div>

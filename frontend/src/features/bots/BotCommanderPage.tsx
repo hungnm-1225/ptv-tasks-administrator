@@ -292,15 +292,14 @@ export const BotCommanderPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 max-w-[1600px] mx-auto pb-10">
+    <div className="space-y-6 w-full pb-10">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2.5 tracking-tight">
-            <Cpu className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
-            <span>Bot Command & Execution Center</span>
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+            Bot Command & Execution Center
+          </h1>
+          <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
             Trung tâm chỉ huy toàn diện các luồng Thu thập dữ liệu (Ingestion) và Cỗ máy thực thi tự động (Execution Engines).
           </p>
         </div>

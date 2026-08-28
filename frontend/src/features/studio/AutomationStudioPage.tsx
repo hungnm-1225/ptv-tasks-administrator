@@ -846,26 +846,16 @@ export const AutomationStudioPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto pb-12">
+    <div className="space-y-6 w-full pb-10">
       {/* Header Trang */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div className="flex items-center gap-3">
-          <div className="p-3 bg-accent text-white rounded-2xl shadow-md">
-            <Zap className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-xl sm:text-2xl font-extrabold text-ink dark:text-primary-ink tracking-tight">
-                Automation Studio
-              </h2>
-              <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-accent-soft text-accent dark:bg-accent/60 dark:text-accent-2 uppercase tracking-wider">
-                Direct Engine
-              </span>
-            </div>
-            <p className="text-xs sm:text-sm text-ink-2 dark:text-ink-3 mt-0.5">
-              Khởi tạo và điều phối các chuỗi tác vụ tự động hóa độc lập.
-            </p>
-          </div>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+            Automation Studio
+          </h1>
+          <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
+            Khởi tạo và điều phối các chuỗi tác vụ tự động hóa độc lập.
+          </p>
         </div>
 
         <button

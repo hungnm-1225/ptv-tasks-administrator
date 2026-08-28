@@ -423,15 +423,14 @@ export const CoursesManagerPage: React.FC = () => {
     };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 w-full pb-10">
             {/* Header & Pane Switcher */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <h2 className="text-xl font-bold text-ink dark:text-primary-ink tracking-tight flex items-center gap-2.5">
-                        <BookOpen className="w-5 h-5 text-accent dark:text-accent-2" />
+                    <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
                         Quản Lý Danh Mục Khóa Học
-                    </h2>
-                    <p className="text-xs text-ink-2 dark:text-ink-3 mt-1">
+                    </h1>
+                    <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
                         Tra cứu, đồng bộ và quản trị cấu hình khóa học hệ sinh thái Pythaverse.
                     </p>
                 </div>

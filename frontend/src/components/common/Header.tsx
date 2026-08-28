@@ -80,13 +80,6 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav, isMobileNavOp
           >
             {isMobileNavOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
-
-          <div className="hidden sm:flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50 text-[11px] font-medium">
-              <Sparkles className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
-              <span>Enterprise Admin Hub</span>
-            </span>
-          </div>
         </div>
 
         {/* Right Controls */}
@@ -108,11 +101,10 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav, isMobileNavOp
           <div className="relative" ref={dropdownRef}>
             <button
               onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-              className={`flex items-center gap-2 sm:gap-3 pl-2 pr-1.5 py-1 rounded-xl transition-all duration-200 border cursor-pointer ${
-                isDropdownOpen
-                  ? 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-700'
-                  : 'hover:bg-slate-100/80 dark:hover:bg-slate-800/60 border-transparent'
-              }`}
+              className={`flex items-center gap-2 sm:gap-3 pl-2 pr-1.5 py-1 rounded-xl transition-all duration-200 border cursor-pointer ${isDropdownOpen
+                ? 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-700'
+                : 'hover:bg-slate-100/80 dark:hover:bg-slate-800/60 border-transparent'
+                }`}
             >
               {userAvatar ? (
                 <img
@@ -136,9 +128,8 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav, isMobileNavOp
               </div>
 
               <ChevronDown
-                className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
-                  isDropdownOpen ? 'rotate-180' : ''
-                }`}
+                className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''
+                  }`}
               />
             </button>
 

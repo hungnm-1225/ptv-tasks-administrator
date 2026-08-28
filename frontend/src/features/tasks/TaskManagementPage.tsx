@@ -426,23 +426,16 @@ export const TaskManagementPage: React.FC = () => {
   }, [tasks, activeTab, selectedBotFilter, searchQuery]);
 
   return (
-    <div className="space-y-6 max-w-[1600px] mx-auto pb-12">
+    <div className="space-y-6 w-full pb-10">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2.5">
-            <div className="p-2.5 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 rounded-2xl shadow-xs">
-              <CheckSquare className="w-6 h-6" />
-            </div>
-            <div>
-              <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
-                Task & Bot Automation Hub
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Cổng điều phối và theo dõi tiến trình thực thi của toàn bộ hệ thống Bot Workers.
-              </p>
-            </div>
-          </div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+            Task & Bot Automation Hub
+          </h1>
+          <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
+            Cổng điều phối và theo dõi tiến trình thực thi của toàn bộ hệ thống Bot Workers.
+          </p>
         </div>
 
         <button

@@ -235,18 +235,15 @@ export const ProfileSettingsPage: React.FC = () => {
     }
 
     return (
-        <div className="mx-auto p-6 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-400">
+        <div className="space-y-6 w-full pb-10 animate-in fade-in duration-200">
 
             {/* Header Bar */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white/70 dark:bg-ink/70 p-6 rounded-3xl border border-rule/80 dark:border-rule-2/80 backdrop-blur-md shadow-xs">
+            <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
-                    <div className="flex items-center gap-2.5 mb-1">
-                        <h1 className="text-xl font-bold text-ink dark:text-primary-ink">Thiết Lập Chủ Quyền Tác Giả</h1>
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-accent-soft text-accent dark:bg-accent-soft dark:text-accent-2 border border-accent-soft dark:border-accent">
-                            Admin Exclusive
-                        </span>
-                    </div>
-                    <p className="text-xs text-ink-2 dark:text-ink-3">
+                    <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+                        Thiết Lập Chủ Quyền Tác Giả
+                    </h1>
+                    <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
                         Cập nhật họ tên, avatar lưu trên Supabase Storage và hệ sinh thái MXH hiển thị ở Trang Chủ.
                     </p>
                 </div>

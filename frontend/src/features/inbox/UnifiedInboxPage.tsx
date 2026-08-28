@@ -1039,12 +1039,14 @@ export const UnifiedInboxPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6 w-full pb-10">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-ink dark:text-primary-ink tracking-tight">Unified Inbox Feed</h2>
-          <p className="text-xs text-slate-500 dark:text-ink-3 mt-1">
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+            Unified Inbox Feed
+          </h1>
+          <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
             Hợp nhất yêu cầu từ Gmail Workspace, Google Form và OS Ticket với sự hỗ trợ từ Gemini AI Triage.
           </p>
         </div>

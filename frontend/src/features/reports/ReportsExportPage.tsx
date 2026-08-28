@@ -207,16 +207,17 @@ export const ReportsExportPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="space-y-6 w-full pb-10">
       {/* Header */}
-      <div>
-        <h2 className="text-xl font-bold text-primary flex items-center gap-2.5 tracking-tight">
-          <FileSpreadsheet className="w-5 h-5 text-mint" />
-          <span>Analytics & Custom XLSX Exporter</span>
-        </h2>
-        <p className="text-xs text-ink-2 mt-1">
-          Tự động tổng hợp dữ liệu tickets, AI triage summary và trích xuất báo cáo đánh giá KPI chuẩn định dạng DTT.
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+            Analytics & Custom XLSX Exporter
+          </h1>
+          <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
+            Tự động tổng hợp dữ liệu tickets, AI triage summary và trích xuất báo cáo đánh giá KPI chuẩn định dạng DTT.
+          </p>
+        </div>
       </div>
 
       {/* Exporter Controls Card */}
