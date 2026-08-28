@@ -46,22 +46,31 @@ async def download_file_to_temp(url: str) -> Optional[str]:
         return None
 
 
-async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Điều phối thực thi chính xác Service dựa trên loại Bot và Action (Safe-by-Default)."""
+async def execute_approved_bot_task(
+    bot_type: str, 
+    payload_data: Optional[Dict[str, Any]] = None,
+    task_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """Điều phối thực thi Service dựa trên loại Bot & Action (Truy vết [Task #ID] chuẩn xác)."""
     if payload_data is None or not isinstance(payload_data, dict):
         payload_data = {}
 
+    # Gắn task_id vào payload_data để các service con tái sử dụng
+    if task_id:
+        payload_data["task_id"] = task_id
+
+    task_tag = f"[Task #{str(task_id).replace('-', '')[:8]}]" if task_id else "[Task #N/A]"
     action = payload_data.get("action", "")
-    logger.info(f"🚀 Bắt đầu thực thi Task Bot: [{bot_type}] | Action: {action}")
+    
+    logger.info(f"🚀 {task_tag} Bắt đầu thực thi Bot: [{bot_type}] | Action: {action}")
     
     try:
         # =====================================================================
         # 1. NHÓM TASK WORKSPACE RPA (HỆ THỐNG PHẢ HỆ & PHÂN PHỐI LICENSE)
         # =====================================================================
         if bot_type == "workspace_rpa":
-            # Bẫy trường hợp task sinh từ Tab 4 nhưng bot_type vẫn là workspace_rpa
             if action == "direct_moodle_lms_enroll":
-                logger.info("🎓 Điều hướng sang Playwright LMS Direct Enroller...")
+                logger.info(f"🎓 {task_tag} Điều hướng sang Playwright LMS Direct Enroller...")
                 return await playwright_lms_service.enroll_users_pipeline(payload_data)
 
             # Bóc tách và làm sạch thông tin phả hệ
@@ -86,15 +95,13 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
                 "password": getattr(settings, "TEST_ADMIN_PASS", "Pythaverse@2026")
             }
 
-            # 🟢 CƠ CHẾ AUTO-RESOLVER ĐÚNG THỨ TỰ ƯU TIÊN:
-            # 1. ƯU TIÊN CAO NHẤT: Tra cứu từ distributor_code (VD: '36') hoặc distributor_name thật
+            # 🟢 AUTO-RESOLVER PHẢ HỆ:
             if (distributor_name or payload_data.get("distributor_code")) and not distributor_creds:
                 target_dist_id = payload_data.get("distributor_code") or distributor_name
                 d_lin = workspace_lineage_service.resolve_by_distributor(str(target_dist_id))
                 if d_lin:
                     distributor_creds = d_lin.get("distributor")
 
-            # 2. ƯU TIÊN 2: Tra cứu từ Partner thật (tự động suy ra Distributor cấp cha)
             if (partner_name or payload_data.get("partner_code")) and (not partner_creds or not distributor_creds):
                 target_part_id = payload_data.get("partner_code") or partner_name
                 p_lin = workspace_lineage_service.resolve_by_partner(str(target_part_id))
@@ -102,7 +109,6 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
                     partner_creds = partner_creds or p_lin.get("partner")
                     distributor_creds = distributor_creds or p_lin.get("distributor")
 
-            # 3. ƯU TIÊN 3: Tra cứu từ School thật
             if school_name and (not school_creds or not partner_creds or not distributor_creds):
                 s_lin = workspace_lineage_service.resolve_by_school(school_name)
                 if s_lin:
@@ -110,14 +116,12 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
                     partner_creds = partner_creds or s_lin.get("partner")
                     distributor_creds = distributor_creds or s_lin.get("distributor")
 
-            # 4. ƯU TIÊN 4: Tra cứu ngược từ mã Contract Code (PRT-...)
             if contract_code and (not distributor_creds or not partner_creds):
                 c_lin = workspace_lineage_service.resolve_by_contract(contract_code)
                 if c_lin:
                     distributor_creds = distributor_creds or c_lin.get("distributor")
                     partner_creds = partner_creds or c_lin.get("partner")
 
-            # Tầng 5: Fallback an toàn tuyệt đối cho Distributor
             if not distributor_creds and ("distributor" in action or "partner_contract" in action or "admin_approve" in action):
                 c_lin = workspace_lineage_service.resolve_by_contract(contract_code or "PRT")
                 if c_lin and c_lin.get("distributor"):
@@ -263,7 +267,7 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
 
                 file_path = payload_data.get("upload_file_path")
                 if not file_path and payload_data.get("attachment_url"):
-                    logger.info("📥 Đang tải file tài khoản về từ Supabase Storage...")
+                    logger.info(f"📥 {task_tag} Đang tải file tài khoản về từ Supabase Storage...")
                     file_path = await download_file_to_temp(payload_data["attachment_url"])
 
                 if not file_path:
@@ -272,14 +276,12 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
                 if not school_creds:
                     return {"status": "failed", "error": f"Không tìm thấy tài khoản trường '{school_name}' trong Két Sắt."}
 
-                # 1. Tự động nhận diện & bóc tách file
                 temp_dir = "/tmp/ptv_accounts"
                 os.makedirs(temp_dir, exist_ok=True)
                 ready_file, student_c, teacher_c, total_c, is_cof, parsed_data = COFExcelService.detect_and_process_excel(file_path, temp_dir)
 
-                logger.info(f"📊 Thống kê đầu vào: {student_c} học sinh, {teacher_c} giáo viên (Tổng: {total_c}) | Là COF: {is_cof}")
+                logger.info(f"📊 {task_tag} Thống kê: {student_c} học sinh, {teacher_c} giáo viên (Tổng: {total_c}) | Là COF: {is_cof}")
 
-                # 2. Nộp batch lên School Workspace
                 submit_res = await workspace_playwright_service.submit_account_creation_batch(
                     credentials=school_creds,
                     upload_file_path=ready_file,
@@ -290,8 +292,6 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
                     return submit_res
 
                 req_id = submit_res.get("request_id")
-                
-                # 🟢 TÍNH TOÁN THỜI GIAN NGHỈ NGẮT QUÃNG: 15s cho 1 tài khoản
                 wait_seconds = max(total_c * 15, 30)
                 next_check_time = datetime.now(timezone.utc) + timedelta(seconds=wait_seconds)
                 next_check_iso = next_check_time.isoformat()
@@ -337,7 +337,7 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
         # 2. NHÓM TASK LMS PLAYWRIGHT DIRECT (TIỂU NGẠCH / MOODLE DIRECT ENROLLER)
         # =====================================================================
         elif bot_type in ["lms_playwright", "lms_git_provisioning", "lms_enroll"]:
-            logger.info("🎓 Kích hoạt Playwright LMS Direct Enroller...")
+            logger.info(f"🎓 {task_tag} Kích hoạt Playwright LMS Direct Enroller...")
             return await playwright_lms_service.enroll_users_pipeline(payload_data)
 
         # =====================================================================
@@ -356,5 +356,5 @@ async def execute_approved_bot_task(bot_type: str, payload_data: Optional[Dict[s
             return {"status": "failed", "error": f"Loại bot '{bot_type}' chưa được hỗ trợ."}
 
     except Exception as e:
-        logger.error(f"❌ Lỗi thực thi Task Bot ({bot_type}): {e}", exc_info=True)
+        logger.error(f"❌ {task_tag} Lỗi thực thi Task Bot ({bot_type}): {e}", exc_info=True)
         return {"status": "failed", "error": str(e)}

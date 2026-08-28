@@ -4,7 +4,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   RotateCw,
   Search,
-  Filter,
   Layers,
   CheckCircle2,
   AlertTriangle,
@@ -12,23 +11,9 @@ import {
   Zap,
   Play,
   FileText,
-  ChevronRight,
   X,
   Copy,
   Check,
-  Cpu,
-  Server,
-  Activity,
-  ArrowUpRight,
-  ExternalLink,
-  ShieldCheck,
-  CheckCheck,
-  XCircle,
-  LayoutGrid,
-  Table as TableIcon,
-  SlidersHorizontal,
-  Info,
-  Calendar,
   Building2,
   GraduationCap,
   Key,
@@ -42,10 +27,12 @@ import {
   Download,
   Loader2,
   Edit3,
-  Sparkles,
+  XCircle,
+  LayoutGrid,
+  Table as TableIcon,
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
-import { BotAutomationTask, BotType } from '../../types';
+import { BotAutomationTask } from '../../types';
 import { toast } from 'sonner';
 
 // ⚡ TRỢ THỦ PERSISTENT STORAGE (LƯU LOCALSTORAGE - 0MS INSTANT RENDER)
@@ -64,14 +51,12 @@ const setTaskLocalCache = (key: string, data: any) => {
   } catch { }
 };
 
-// Helper bóc tách email sạch từ chuỗi
 const extractCleanEmail = (raw: any): string => {
   if (!raw || typeof raw !== 'string') return '';
   const match = raw.match(/[\w\.-]+@[\w\.-]+\.\w+/);
   return match ? match[0].trim().toLowerCase() : raw.replace(/["'<>]/g, '').trim().toLowerCase();
 };
 
-// Helper định dạng giờ Việt Nam chuẩn
 const formatVNDateTime = (isoString?: string) => {
   if (!isoString) return '---';
   try {
@@ -94,7 +79,6 @@ export const TaskManagementPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'all' | 'pending' | 'executed' | 'failed'>('all');
   const [viewMode, setViewMode] = useState<'table' | 'bento'>('table');
 
-  // ⚡ KHỞI TẠO STATE NGAY TỪ LOCALSTORAGE (0MS)
   const initialCachedTasks = useMemo(() => {
     return getTaskLocalCache<BotAutomationTask[]>('master_task_cache') || [];
   }, []);
@@ -105,13 +89,14 @@ export const TaskManagementPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Modals & Drawer State
-  const [selectedTask, setSelectedTask] = useState<BotAutomationTask | null>(null); // Approval Modal
-  const [detailDrawerTask, setDetailDrawerTask] = useState<BotAutomationTask | null>(null); // Side Drawer Logs
+  const [selectedTask, setSelectedTask] = useState<BotAutomationTask | null>(null);
+  const [detailDrawerTask, setDetailDrawerTask] = useState<BotAutomationTask | null>(null);
   const [modalMode, setModalMode] = useState<'form' | 'json'>('form');
 
   // Clipboard Copied states
   const [copiedPayload, setCopiedPayload] = useState<boolean>(false);
   const [copiedLogs, setCopiedLogs] = useState<boolean>(false);
+  const [copiedTaskId, setCopiedTaskId] = useState<boolean>(false);
 
   // State cho Visual Form Điều Khiển Keycloak
   const [kcIdentifiersText, setKcIdentifiersText] = useState<string>('');
@@ -141,6 +126,12 @@ export const TaskManagementPage: React.FC = () => {
       if (data) {
         setTasks(data);
         setTaskLocalCache('master_task_cache', data);
+
+        // Cập nhật lại detailDrawerTask nếu đang mở
+        if (detailDrawerTask) {
+          const fresh = data.find(t => t.id === detailDrawerTask.id);
+          if (fresh) setDetailDrawerTask(fresh);
+        }
       }
     } catch (err) {
       if (!cached) {
@@ -149,7 +140,7 @@ export const TaskManagementPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [detailDrawerTask]);
 
   useEffect(() => {
     loadTasks();
@@ -159,7 +150,6 @@ export const TaskManagementPage: React.FC = () => {
     return () => clearInterval(interval);
   }, [loadTasks]);
 
-  // Bóc tách thông tin nghiệp vụ chi tiết cho từng Task
   const getTaskBusinessInfo = (task: BotAutomationTask) => {
     const payload = task.payload_data || {};
     const botType = task.bot_type;
@@ -224,7 +214,6 @@ export const TaskManagementPage: React.FC = () => {
     return { title, subtitle, target, icon, badgeColor };
   };
 
-  // Status Metrics tính toán cho 4 Bento Cards
   const stats = useMemo(() => {
     const total = tasks.length;
     const pending = tasks.filter((t) => t.approval_status === 'pending').length;
@@ -247,21 +236,17 @@ export const TaskManagementPage: React.FC = () => {
     return { total, pending, processing, success, failed, successRate };
   }, [tasks]);
 
-  // Bộ lọc danh sách
   const filteredTasks = useMemo(() => {
     return tasks.filter((t) => {
-      // Tab filter
       if (activeTab === 'pending' && t.approval_status !== 'pending') return false;
       if (activeTab === 'executed' && (t.approval_status !== 'approved' || t.execution_status === 'failed')) return false;
       if (activeTab === 'failed' && t.execution_status !== 'failed' && t.approval_status !== 'rejected') return false;
 
-      // Module filter
       if (selectedBotFilter !== 'all' && t.bot_type !== selectedBotFilter) return false;
 
-      // Search query
-      const query = searchQuery.trim().toLowerCase();
+      const query = searchQuery.trim().toLowerCase().replace(/^#/, '');
       if (query) {
-        const tId = (t.id || '').toLowerCase();
+        const tId = (t.id || '').toLowerCase().replace(/-/g, '');
         const bType = (t.bot_type || '').toLowerCase();
         const pStr = JSON.stringify(t.payload_data || {}).toLowerCase();
         const subject = (t.inbox_tickets?.subject || '').toLowerCase();
@@ -281,7 +266,6 @@ export const TaskManagementPage: React.FC = () => {
     });
   }, [tasks, activeTab, selectedBotFilter, searchQuery]);
 
-  // Khởi tạo dữ liệu khi mở Modal Review
   const handleOpenReview = (task: BotAutomationTask, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     setSelectedTask(task);
@@ -345,7 +329,6 @@ export const TaskManagementPage: React.FC = () => {
     }
   };
 
-  // Phê duyệt tác vụ
   const handleApprove = async () => {
     if (!selectedTask) return;
     setApproving(true);
@@ -364,7 +347,7 @@ export const TaskManagementPage: React.FC = () => {
     setTaskLocalCache('master_task_cache', updatedTasks);
     setSelectedTask(null);
     const taskIdShort = taskId ? taskId.slice(0, 8) : '';
-    toast.success(`Đã phê duyệt và khởi chạy worker #${taskIdShort} thành công!`);
+    toast.success(`Đã phê duyệt và khởi chạy worker #${taskIdShort}!`);
 
     try {
       await fetchApi(`/tasks/${taskId}/approve`, {
@@ -374,6 +357,7 @@ export const TaskManagementPage: React.FC = () => {
           edited_payload: finalPayload,
         }),
       });
+      await loadTasks(false);
     } catch (err) {
       setTasks(prevTasks);
       toast.error('Lỗi phê duyệt tác vụ: ' + (err as Error).message);
@@ -382,7 +366,6 @@ export const TaskManagementPage: React.FC = () => {
     }
   };
 
-  // Từ chối tác vụ
   const handleReject = async (taskId: string) => {
     setRejecting(true);
     const prevTasks = [...tasks];
@@ -401,6 +384,7 @@ export const TaskManagementPage: React.FC = () => {
 
     try {
       await fetchApi(`/tasks/${taskId}/reject`, { method: 'PUT' });
+      await loadTasks(false);
     } catch (err) {
       setTasks(prevTasks);
       toast.error('Lỗi từ chối tác vụ: ' + (err as Error).message);
@@ -409,12 +393,12 @@ export const TaskManagementPage: React.FC = () => {
     }
   };
 
-  // Chạy lại tác vụ lỗi
+  // 🔄 Kích hoạt Retry qua đúng endpoint /tasks/{id}/retry
   const handleRetryTask = async (taskId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     setRetryingId(taskId);
     try {
-      await fetchApi(`/bots/${taskId}/retry`, { method: 'POST' });
+      await fetchApi(`/tasks/${taskId}/retry`, { method: 'PUT' });
       toast.success(`Đã đưa tác vụ #${taskId.slice(0, 8)} vào hàng đợi chạy lại!`);
       await loadTasks(true);
     } catch (err) {
@@ -424,7 +408,6 @@ export const TaskManagementPage: React.FC = () => {
     }
   };
 
-  // Copy helpers
   const copyPayloadToClipboard = (data: any) => {
     navigator.clipboard.writeText(JSON.stringify(data, null, 2));
     setCopiedPayload(true);
@@ -437,7 +420,12 @@ export const TaskManagementPage: React.FC = () => {
     setTimeout(() => setCopiedLogs(false), 2000);
   };
 
-  // Render Status Badge
+  const copyTaskIdToClipboard = (id: string) => {
+    navigator.clipboard.writeText(id);
+    setCopiedTaskId(true);
+    setTimeout(() => setCopiedTaskId(false), 2000);
+  };
+
   const renderStatusBadge = (approval: string, execution: string, payload: any) => {
     if (approval === 'pending') {
       return (
@@ -524,7 +512,7 @@ export const TaskManagementPage: React.FC = () => {
         </div>
       </div>
 
-      {/* 2. Bento Grid 1: Key Performance Metrics & Status Deck */}
+      {/* 2. Key Metrics & Status Deck */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         {/* Card 1: Tổng Tác Vụ */}
         <motion.div
@@ -632,10 +620,9 @@ export const TaskManagementPage: React.FC = () => {
         </motion.div>
       </div>
 
-      {/* 3. Bento Grid 2: Interactive Filter, Search & View Controls */}
+      {/* 3. Filter, Search & View Controls */}
       <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 sm:p-4 shadow-xs">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          {/* Segmented Filter Pills */}
           <div className="flex flex-wrap items-center gap-1.5 bg-slate-100/80 dark:bg-slate-800 p-1 rounded-xl">
             {[
               { id: 'all', label: 'Tất Cả Tác Vụ', count: stats.total },
@@ -664,7 +651,6 @@ export const TaskManagementPage: React.FC = () => {
             ))}
           </div>
 
-          {/* Right side: Module Dropdown, Search Input & Layout Switcher */}
           <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
             <div className="relative">
               <select
@@ -687,8 +673,8 @@ export const TaskManagementPage: React.FC = () => {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Tìm theo mã, tên trường, email..."
-                className="h-9 w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 pl-9 pr-8 text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:border-indigo-500"
+                placeholder="Tìm mã task (VD: 7a057e0b), tên trường, email..."
+                className="h-9 w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 pl-9 pr-8 text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:border-indigo-500 font-mono"
               />
               {searchQuery && (
                 <button
@@ -700,7 +686,6 @@ export const TaskManagementPage: React.FC = () => {
               )}
             </div>
 
-            {/* Layout Toggle */}
             <div className="flex items-center rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-0.5">
               <button
                 onClick={() => setViewMode('table')}
@@ -765,7 +750,9 @@ export const TaskManagementPage: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
                 {filteredTasks.map((task) => {
-                  const taskIdDisplay = task.id ? `#${task.id.slice(0, 8)}` : '#TASK';
+                  const rawId = task.id || '';
+                  const taskIdClean = rawId.replace(/-/g, '');
+                  const taskIdDisplay = taskIdClean ? `#${taskIdClean.slice(0, 8)}` : '#TASK';
                   const info = getTaskBusinessInfo(task);
                   const Icon = info.icon;
                   const payload = task.payload_data || {};
@@ -870,7 +857,7 @@ export const TaskManagementPage: React.FC = () => {
                                 <button
                                   onClick={(e) => handleRetryTask(task.id, e)}
                                   disabled={retryingId === task.id}
-                                  className="inline-flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950/50 px-3 py-1.5 text-xs font-bold text-amber-800 dark:text-amber-300 hover:bg-amber-100 transition shadow-xs cursor-pointer"
+                                  className="inline-flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950/50 px-3 py-1.5 text-xs font-bold text-amber-800 dark:text-amber-300 hover:bg-amber-100 transition shadow-xs cursor-pointer disabled:opacity-60"
                                 >
                                   {retryingId === task.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCw className="h-3.5 w-3.5" />}
                                   <span>Chạy Lại</span>
@@ -899,7 +886,9 @@ export const TaskManagementPage: React.FC = () => {
         /* Bento Grid Cards View */
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filteredTasks.map((task) => {
-            const taskIdDisplay = task.id ? `#${task.id.slice(0, 8)}` : '#TASK';
+            const rawId = task.id || '';
+            const taskIdClean = rawId.replace(/-/g, '');
+            const taskIdDisplay = taskIdClean ? `#${taskIdClean.slice(0, 8)}` : '#TASK';
             const info = getTaskBusinessInfo(task);
             const payload = task.payload_data || {};
 
@@ -961,7 +950,7 @@ export const TaskManagementPage: React.FC = () => {
         </div>
       )}
 
-      {/* 5. SLIDE-OVER DETAIL & LIVE LOGS DRAWER (FIX LỖI XEM LOG TRIỆT ĐỂ) */}
+      {/* 5. SLIDE-OVER DETAIL & LIVE LOGS DRAWER (FORMAT LOGS CHUẨN TASK ID) */}
       <AnimatePresence>
         {detailDrawerTask && (
           <div
@@ -980,9 +969,14 @@ export const TaskManagementPage: React.FC = () => {
               {/* Drawer Header */}
               <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 px-6 py-4 bg-slate-50/70 dark:bg-slate-850/50">
                 <div className="flex items-center gap-3">
-                  <span className="font-mono text-lg font-bold text-indigo-600 dark:text-indigo-400">
-                    #{detailDrawerTask.id?.slice(0, 8)}
-                  </span>
+                  <button
+                    onClick={() => copyTaskIdToClipboard(detailDrawerTask.id)}
+                    className="font-mono text-lg font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1.5"
+                    title="Bấm để sao chép Full Task UUID"
+                  >
+                    <span>#{detailDrawerTask.id?.replace(/-/g, '').slice(0, 8)}</span>
+                    {copiedTaskId ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
+                  </button>
                   {renderStatusBadge(
                     detailDrawerTask.approval_status,
                     detailDrawerTask.execution_status,
@@ -995,11 +989,11 @@ export const TaskManagementPage: React.FC = () => {
                     <button
                       onClick={(e) => {
                         handleRetryTask(detailDrawerTask.id, e);
-                        setDetailDrawerTask(null);
                       }}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700 transition shadow-xs cursor-pointer"
+                      disabled={retryingId === detailDrawerTask.id}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700 transition shadow-xs cursor-pointer disabled:opacity-60"
                     >
-                      <RotateCw className="h-3 w-3" />
+                      {retryingId === detailDrawerTask.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCw className="h-3.5 w-3.5" />}
                       <span>Chạy Lại Tác Vụ</span>
                     </button>
                   )}
@@ -1026,7 +1020,6 @@ export const TaskManagementPage: React.FC = () => {
 
               {/* Drawer Scrollable Content */}
               <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                {/* Core Title & Info */}
                 <div>
                   <div className="mb-2">
                     <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 border border-indigo-200/60">
@@ -1047,7 +1040,7 @@ export const TaskManagementPage: React.FC = () => {
                     <div className="flex items-center gap-2">
                       <Terminal className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
                       <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
-                        Nhật Ký Thực Thi Bot (Terminal Logs)
+                        Nhật Ký Thực Thi (Terminal Logs)
                       </h4>
                     </div>
                     <button
@@ -1060,22 +1053,30 @@ export const TaskManagementPage: React.FC = () => {
                     </button>
                   </div>
 
-                  <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 font-mono text-[11px] text-slate-200 max-h-64 overflow-y-auto space-y-1 shadow-inner scrollbar-thin">
+                  <div className="rounded-2xl border border-slate-800 bg-[#0B1120] p-4 font-mono text-[11px] text-slate-200 max-h-72 overflow-y-auto space-y-1.5 shadow-inner scrollbar-thin">
                     {detailDrawerTask.execution_logs ? (
-                      detailDrawerTask.execution_logs.split('\n').map((line, index) => (
-                        <div
-                          key={index}
-                          className={`flex items-start gap-2 ${line.includes('SUCCESS') || line.includes('Thành công')
-                            ? 'text-emerald-400 font-medium'
-                            : line.includes('ERROR') || line.includes('failed')
-                              ? 'text-rose-400 font-semibold'
-                              : 'text-slate-300'
-                            }`}
-                        >
-                          <span className="text-slate-600 select-none">❯</span>
-                          <span className="break-all">{line}</span>
-                        </div>
-                      ))
+                      detailDrawerTask.execution_logs.split('\n').filter(Boolean).map((line, index) => {
+                        const isError = line.includes('ERROR') || line.includes('failed') || line.includes('CRITICAL');
+                        const isSuccess = line.includes('SUCCESS') || line.includes('Hoàn thành') || line.includes('thành công');
+                        const isApproval = line.includes('APPROVAL');
+
+                        return (
+                          <div
+                            key={index}
+                            className={`flex items-start gap-2 py-0.5 px-1.5 rounded transition-colors ${isError
+                              ? 'bg-rose-950/30 text-rose-300'
+                              : isSuccess
+                                ? 'bg-emerald-950/20 text-emerald-300 font-medium'
+                                : isApproval
+                                  ? 'bg-indigo-950/30 text-indigo-300'
+                                  : 'hover:bg-slate-800/40 text-slate-300'
+                              }`}
+                          >
+                            <span className="text-slate-600 select-none">❯</span>
+                            <span className="break-all">{line}</span>
+                          </div>
+                        );
+                      })
                     ) : (
                       <div className="text-slate-500 italic">Chưa có nhật ký ghi nhận cho tác vụ này.</div>
                     )}
@@ -1097,7 +1098,7 @@ export const TaskManagementPage: React.FC = () => {
                       <span>{copiedPayload ? 'Đã sao chép' : 'Sao chép JSON'}</span>
                     </button>
                   </div>
-                  <pre className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-4 font-mono text-[11px] text-slate-800 dark:text-emerald-400 overflow-x-auto max-h-48 scrollbar-thin">
+                  <pre className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B1120] p-4 font-mono text-[11px] text-slate-800 dark:text-emerald-400 overflow-x-auto max-h-48 scrollbar-thin">
                     {JSON.stringify(detailDrawerTask.payload_data, null, 2)}
                   </pre>
                 </div>
@@ -1144,7 +1145,7 @@ export const TaskManagementPage: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* 6. MODAL: PHÊ DUYỆT (HUMAN-IN-THE-LOOP) */}
+      {/* 6. MODAL: PHÊ DUYỆT */}
       {selectedTask && (
         <div
           onClick={(e) => { if (e.target === e.currentTarget) setSelectedTask(null); }}
@@ -1161,7 +1162,7 @@ export const TaskManagementPage: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                    Phê Duyệt Tác Vụ #{selectedTask.id ? selectedTask.id.slice(0, 8) : ''} ({selectedTask.bot_type})
+                    Phê Duyệt Tác Vụ #{selectedTask.id ? selectedTask.id.replace(/-/g, '').slice(0, 8) : ''} ({selectedTask.bot_type})
                   </h3>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
                     Tùy chỉnh tham số thực thi trước khi bàn giao cho Bot Worker.

@@ -1,7 +1,7 @@
 // frontend/src/features/bots/BotCommanderPage.tsx
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
-  Terminal,
+  Terminal as TerminalIcon,
   RefreshCw,
   CheckCircle2,
   AlertTriangle,
@@ -10,9 +10,7 @@ import {
   Copy,
   Trash2,
   Search,
-  ArrowDownCircle,
   ShieldCheck,
-  Cpu,
   Zap,
   Mail,
   LifeBuoy,
@@ -22,7 +20,13 @@ import {
   GraduationCap,
   GitPullRequest,
   Boxes,
-  Sparkles
+  Sparkles,
+  Play,
+  Pause,
+  Clock,
+  Check,
+  Tag,
+  Filter,
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { BotTerminalLog } from '../../types';
@@ -49,7 +53,6 @@ interface ExecutionWorkerConfig {
   iconClass: string;
 }
 
-// ⚡ TRỢ THỦ PERSISTENT STORAGE (LƯU LOCALSTORAGE - 0MS INSTANT RENDER)
 const getBotLocalCache = <T,>(key: string): T | null => {
   try {
     const raw = localStorage.getItem(`ptv_bot_${key}`);
@@ -70,7 +73,7 @@ const INGESTION_PIPELINES: IngestionWorkerConfig[] = [
     key: 'gmail_sync_worker',
     name: 'Gmail Workspace Ingestion',
     description: 'Quét thư chưa đọc @dtt.vn, trích xuất tệp COF & đính kèm',
-    cronInterval: 'Chu kỳ 5 phút',
+    cronInterval: 'Chu kỳ 5 phút (So Le)',
     syncType: 'gmail',
     icon: Mail,
     badgeClass: 'bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-200/60 dark:border-sky-800/50',
@@ -80,7 +83,7 @@ const INGESTION_PIPELINES: IngestionWorkerConfig[] = [
     key: 'osticket_sync_worker',
     name: 'OS Ticket Support Scraper',
     description: 'Cào vé mở từ helpdesk support.pythaverse.space qua Playwright',
-    cronInterval: 'Chu kỳ 5 phút',
+    cronInterval: 'Chu kỳ 5 phút (So Le)',
     syncType: 'osticket',
     icon: LifeBuoy,
     badgeClass: 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200/60 dark:border-amber-800/50',
@@ -90,7 +93,7 @@ const INGESTION_PIPELINES: IngestionWorkerConfig[] = [
     key: 'feedback_sheet_worker',
     name: 'Google Form Feedback Sync',
     description: 'Quét phản hồi từ Google Sheets & đồng bộ trạng thái Assigned',
-    cronInterval: 'Chu kỳ 5 phút',
+    cronInterval: 'Chu kỳ 5 phút (So Le)',
     syncType: 'sheet',
     icon: FileSpreadsheet,
     badgeClass: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200/60 dark:border-emerald-800/50',
@@ -148,7 +151,6 @@ const EXECUTION_ENGINES: ExecutionWorkerConfig[] = [
 ];
 
 export const BotCommanderPage: React.FC = () => {
-  // ⚡ KHỞI TẠO STATE NGAY TỪ LOCALSTORAGE (0MS)
   const initialStatus = useMemo(() => getBotLocalCache<Record<string, { status: string; failed_count: number }>>('workers_status'), []);
   const initialLogs = useMemo(() => getBotLocalCache<BotTerminalLog[]>('terminal_logs') || [], []);
 
@@ -159,12 +161,15 @@ export const BotCommanderPage: React.FC = () => {
   const [syncingType, setSyncingType] = useState<string | null>(null);
   const [retryingKey, setRetryingKey] = useState<string | null>(null);
   const [purgingRam, setPurgingRam] = useState<boolean>(false);
+
+  // Terminal Controls
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
+  const [isStreaming, setIsStreaming] = useState<boolean>(true);
+  const [copiedLogs, setCopiedLogs] = useState<boolean>(false);
 
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
 
-  // ⚡ SWR TẢI DỮ LIỆU BOT & LOGS (KHÔNG BẬT SPINNER NẾU ĐÃ CÓ CACHE)
   const loadBotData = useCallback(async (showToast = false, forceSpinner = false) => {
     const cachedStatus = getBotLocalCache<Record<string, { status: string; failed_count: number }>>('workers_status');
     if (!cachedStatus || forceSpinner) {
@@ -191,11 +196,13 @@ export const BotCommanderPage: React.FC = () => {
 
   useEffect(() => {
     loadBotData();
+    if (!isStreaming) return;
+
     const interval = setInterval(() => {
       loadBotData();
     }, 15000);
     return () => clearInterval(interval);
-  }, [loadBotData]);
+  }, [loadBotData, isStreaming]);
 
   useEffect(() => {
     if (autoScroll && terminalEndRef.current) {
@@ -203,7 +210,6 @@ export const BotCommanderPage: React.FC = () => {
     }
   }, [logs, autoScroll]);
 
-  // ⚡ Ép quét ngay lập tức
   const handleForceSync = async (syncType: string, pipelineName: string) => {
     setSyncingType(syncType);
     try {
@@ -217,7 +223,6 @@ export const BotCommanderPage: React.FC = () => {
     }
   };
 
-  // 🔄 Chạy lại các task lỗi của Worker
   const handleRetryWorker = async (workerKey: string, workerName: string) => {
     setRetryingKey(workerKey);
     try {
@@ -231,7 +236,6 @@ export const BotCommanderPage: React.FC = () => {
     }
   };
 
-  // 🧹 Dọn dẹp bộ nhớ RAM (Garbage Collection)
   const handlePurgeMemory = async () => {
     setPurgingRam(true);
     try {
@@ -248,7 +252,9 @@ export const BotCommanderPage: React.FC = () => {
   const handleCopyLogs = () => {
     const textToCopy = logs.map(l => l.raw_line).join('\n');
     navigator.clipboard.writeText(textToCopy);
+    setCopiedLogs(true);
     toast.success('Đã sao chép toàn bộ nhật ký log vào clipboard!');
+    setTimeout(() => setCopiedLogs(false), 2000);
   };
 
   const handleClearLogs = () => {
@@ -262,34 +268,36 @@ export const BotCommanderPage: React.FC = () => {
     }];
     setLogs(cleared);
     setBotLocalCache('terminal_logs', cleared);
-    toast.info('Đã xóa màn hình console');
+    toast.info('Đã xóa sạch nhật ký terminal');
+  };
+
+  // 🔍 BÓC TÁCH TASK ID TỪ LOG LINE
+  const parseLogLineDetails = (log: BotTerminalLog) => {
+    const text = `${log.raw_line || ''} ${log.message || ''}`;
+
+    const taskMatch = text.match(/\[Task\s*#?([a-fA-F0-9]{8})\]/i) ||
+      text.match(/Task\s*#?([a-fA-F0-9]{8})/i) ||
+      text.match(/#([a-fA-F0-9]{8})/i);
+
+    const taskId = taskMatch ? taskMatch[1].toLowerCase() : null;
+
+    let cleanMsg = log.message || '';
+    if (taskId && cleanMsg.includes(`[Task #${taskId}]`)) {
+      cleanMsg = cleanMsg.replace(`[Task #${taskId}]:`, '').replace(`[Task #${taskId}]`, '').trim();
+    }
+
+    return { taskId, cleanMsg };
   };
 
   const filteredLogs = useMemo(() => {
+    if (!searchQuery.trim()) return logs;
+    const q = searchQuery.toLowerCase().replace(/^#/, '');
     return logs.filter(l =>
-      (l.raw_line || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (l.worker || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (l.message || '').toLowerCase().includes(searchQuery.toLowerCase())
+      (l.raw_line || '').toLowerCase().includes(q) ||
+      (l.worker || '').toLowerCase().includes(q) ||
+      (l.message || '').toLowerCase().includes(q)
     );
   }, [logs, searchQuery]);
-
-  // 🟢 Hàm lấy màu sắc log
-  const getLogColorClass = (level: string) => {
-    switch (level) {
-      case 'SUCCESS':
-        return 'text-emerald-400 font-medium';
-      case 'ERROR':
-        return 'text-rose-400 font-semibold';
-      case 'SSO_SEEDING':
-        return 'text-indigo-400 font-medium';
-      case 'RETRY':
-        return 'text-amber-400 font-medium';
-      case 'CRON':
-        return 'text-sky-400';
-      default:
-        return 'text-slate-300';
-    }
-  };
 
   return (
     <div className="space-y-6 w-full pb-10">
@@ -305,13 +313,11 @@ export const BotCommanderPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Badge Human in the loop */}
           <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/50 text-xs font-semibold shadow-xs">
             <ShieldCheck className="w-4 h-4" />
             <span>Human-in-the-Loop Active</span>
           </span>
 
-          {/* Dọn dẹp RAM */}
           <button
             type="button"
             onClick={handlePurgeMemory}
@@ -323,7 +329,6 @@ export const BotCommanderPage: React.FC = () => {
             <span>{purgingRam ? 'Đang dọn RAM...' : 'Dọn RAM (512MB)'}</span>
           </button>
 
-          {/* Làm mới dữ liệu */}
           <button
             type="button"
             onClick={() => loadBotData(true, true)}
@@ -336,7 +341,7 @@ export const BotCommanderPage: React.FC = () => {
         </div>
       </div>
 
-      {/* SECTION 1: INGESTION PIPELINES (BỘ THU THẬP DỮ LIỆU) */}
+      {/* SECTION 1: INGESTION PIPELINES */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -345,7 +350,7 @@ export const BotCommanderPage: React.FC = () => {
               1. Bộ Thu Thập Dữ Liệu Đa Kênh (Ingestion Crons)
             </h3>
           </div>
-          <span className="text-[11px] text-slate-500 dark:text-slate-400">Hệ thống quét tự động ngầm — Bấm nút để ép quét ngay lập tức</span>
+          <span className="text-[11px] text-slate-500 dark:text-slate-400">Chế độ Lệch Pha (So Le) — Tránh tràn RAM 512MB</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -375,8 +380,9 @@ export const BotCommanderPage: React.FC = () => {
                 </div>
 
                 <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
-                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
-                    {p.cronInterval}
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-slate-400" />
+                    <span>{p.cronInterval}</span>
                   </span>
 
                   <button
@@ -404,7 +410,7 @@ export const BotCommanderPage: React.FC = () => {
         </div>
       </div>
 
-      {/* SECTION 2: AUTOMATION EXECUTION ENGINES (CỖ MÁY THỰC THI TỰ ĐỘNG) */}
+      {/* SECTION 2: AUTOMATION EXECUTION ENGINES */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -413,7 +419,7 @@ export const BotCommanderPage: React.FC = () => {
               2. Cỗ Máy Thực Thi Tự Động (Automation Execution Engines)
             </h3>
           </div>
-          <span className="text-[11px] text-slate-500 dark:text-slate-400">Tiếp nhận và thực thi các tác vụ sau khi được Quản trị viên duyệt</span>
+          <span className="text-[11px] text-slate-500 dark:text-slate-400">Bảo vệ Crash Guard & Truy vết [Task #ID]</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -452,7 +458,7 @@ export const BotCommanderPage: React.FC = () => {
                 </div>
 
                 <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
-                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md truncate max-w-[130px]" title={w.engineType}>
                     {w.engineType}
                   </span>
 
@@ -462,7 +468,7 @@ export const BotCommanderPage: React.FC = () => {
                     disabled={isRetrying}
                     className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer shadow-xs ${isDegraded
                       ? 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/60 animate-pulse'
-                      : 'bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50'
+                      : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
                       }`}
                   >
                     {isRetrying ? (
@@ -481,82 +487,190 @@ export const BotCommanderPage: React.FC = () => {
         </div>
       </div>
 
-      {/* SECTION 3: LIVE TERMINAL CONSOLE */}
-      <div className="bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden shadow-2xl">
-        {/* Terminal Header */}
-        <div className="bg-slate-900/90 px-4 py-3 border-b border-slate-800 flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-2 text-xs font-mono text-slate-200">
-            <Terminal className="w-4 h-4 text-indigo-400" />
-            <span className="font-bold text-white">Live Worker Execution Terminal</span>
-            <span className="text-[10px] text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/60 flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              Real-time Stream
-            </span>
-          </div>
+      {/* SECTION 3: LIVE WORKER EXECUTION TERMINAL */}
+      <section id="section-live-terminal" className="space-y-2.5">
+        <div className="bg-[#0B1120] rounded-2xl border border-slate-800 shadow-xl overflow-hidden transition-all">
+          {/* Terminal Header Bar */}
+          <div className="px-4 py-3 bg-[#131E32] border-b border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 text-slate-200 font-mono text-sm font-semibold">
+                <TerminalIcon className="w-4 h-4 text-emerald-400" />
+                <span>Live Execution Terminal</span>
+              </div>
 
-          {/* Controls */}
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="Lọc logs theo từ khóa..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-8 pr-3 py-1 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 w-36 sm:w-56 transition"
-              />
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Real-time Stream</span>
+              </div>
+
+              {searchQuery && (
+                <div className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-950/80 text-indigo-300 border border-indigo-700/80 rounded-md text-[11px] font-mono">
+                  <Filter className="w-3 h-3" />
+                  <span>Đang lọc: #{searchQuery}</span>
+                  <button onClick={() => setSearchQuery('')} className="hover:text-white ml-1">×</button>
+                </div>
+              )}
             </div>
 
-            <button
-              type="button"
-              onClick={() => setAutoScroll(!autoScroll)}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition cursor-pointer ${autoScroll ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-800 text-slate-300 hover:text-white'
-                }`}
-              title="Tự động cuộn theo log mới"
-            >
-              <ArrowDownCircle className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Auto-scroll</span>
-            </button>
+            {/* Terminal Controls */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Lọc mã Task (VD: 7a057e0b)..."
+                  className="w-48 sm:w-60 pl-8 pr-3 py-1 bg-slate-900/90 border border-slate-700/80 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors font-mono"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
 
-            <button
-              type="button"
-              onClick={handleCopyLogs}
-              className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-medium transition cursor-pointer"
-              title="Sao chép toàn bộ logs"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Copy</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => setIsStreaming(!isStreaming)}
+                className={`p-1.5 rounded-xl border text-xs font-mono transition-colors cursor-pointer ${isStreaming
+                  ? 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                  : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                  }`}
+                title={isStreaming ? 'Tạm dừng luồng log' : 'Tiếp tục luồng log'}
+              >
+                {isStreaming ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+              </button>
 
-            <button
-              type="button"
-              onClick={handleClearLogs}
-              className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-medium transition cursor-pointer"
-              title="Xóa màn hình"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Clear</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => setAutoScroll(!autoScroll)}
+                className={`px-2.5 py-1 rounded-xl border text-xs font-mono transition-colors inline-flex items-center gap-1.5 cursor-pointer ${autoScroll
+                  ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/40'
+                  : 'bg-slate-800 text-slate-400 border-slate-700'
+                  }`}
+                title="Tự động cuộn khi có log mới"
+              >
+                <span>Auto-scroll</span>
+                <span className="text-[10px] font-bold">{autoScroll ? 'ON' : 'OFF'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCopyLogs}
+                className="p-1.5 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-mono inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Sao chép toàn bộ logs"
+              >
+                {copiedLogs ? (
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5" />
+                )}
+                <span>Copy</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleClearLogs}
+                className="p-1.5 px-2.5 rounded-xl bg-slate-800 hover:bg-rose-950/40 text-slate-400 hover:text-rose-300 border border-slate-700 text-xs font-mono inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Xóa sạch nhật ký"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Clear</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Terminal Logs Output Viewport */}
+          <div
+            id="terminal-logs-viewport"
+            className="p-4 sm:p-5 font-mono text-xs sm:text-[12px] leading-relaxed max-h-[400px] overflow-y-auto space-y-1 select-text scrollbar-thin scrollbar-thumb-slate-800"
+          >
+            {filteredLogs.length === 0 ? (
+              <div className="text-slate-500 py-8 text-center italic">
+                Không tìm thấy dòng nhật ký nào khớp với bộ lọc &quot;{searchQuery}&quot;
+              </div>
+            ) : (
+              filteredLogs.map((log, index) => {
+                const { taskId, cleanMsg } = parseLogLineDetails(log);
+
+                // 🟢 Ép kiểu String để TypeScript không báo lỗi No Overlap ts(2367)
+                const lvl = String(log.level || '').toUpperCase();
+                const isError = lvl === 'ERROR' || lvl.includes('CRITICAL') || lvl.includes('ERR');
+                const isSuccess = lvl === 'SUCCESS' || cleanMsg.toLowerCase().includes('success') || cleanMsg.includes('hoàn thành');
+                const isApproval = lvl.includes('APPROVAL');
+                const isRetry = lvl === 'RETRY' || lvl.includes('WARN');
+
+                return (
+                  <div
+                    key={index}
+                    className="flex flex-wrap items-start gap-x-2 gap-y-1 hover:bg-slate-800/40 px-2 py-1 rounded transition-colors"
+                  >
+                    {/* Timestamp */}
+                    <span className="text-slate-500 shrink-0 font-medium">
+                      [{log.timestamp}]
+                    </span>
+
+                    {/* Level Tag */}
+                    <span
+                      className={`font-semibold shrink-0 px-1.5 py-0.2 rounded text-[11px] ${isError
+                        ? 'text-rose-400 bg-rose-500/10 border border-rose-500/20'
+                        : isSuccess
+                          ? 'text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 font-bold'
+                          : isApproval
+                            ? 'text-indigo-300 bg-indigo-500/10 border border-indigo-500/20'
+                            : isRetry
+                              ? 'text-amber-400 bg-amber-500/10 border border-amber-500/20'
+                              : 'text-sky-300 bg-sky-500/10'
+                        }`}
+                    >
+                      [{log.level}]
+                    </span>
+
+                    {/* Worker Tag */}
+                    <span className="text-violet-300 shrink-0 font-medium">
+                      [{log.worker}]
+                    </span>
+
+                    {/* Task ID Tag (1-Click Filterable) */}
+                    {taskId && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchQuery(taskId)}
+                        className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[11px] font-mono font-bold bg-indigo-950/70 hover:bg-indigo-900 text-indigo-300 border border-indigo-700/60 transition cursor-pointer"
+                        title={`Bấm để lọc toàn bộ log của Task #${taskId}`}
+                      >
+                        <Tag className="w-2.5 h-2.5" />
+                        <span>#{taskId}</span>
+                      </button>
+                    )}
+
+                    {/* Message Content */}
+                    <span
+                      className={`flex-1 break-all ${isError
+                        ? 'text-rose-300 font-medium'
+                        : isSuccess
+                          ? 'text-emerald-300'
+                          : isApproval
+                            ? 'text-indigo-200'
+                            : cleanMsg.includes('queued with status') || cleanMsg.includes('approved')
+                              ? 'text-indigo-300'
+                              : 'text-slate-200'
+                        }`}
+                    >
+                      {cleanMsg}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+            <div ref={terminalEndRef} />
           </div>
         </div>
-
-        {/* Terminal Body */}
-        <div className="p-4 bg-slate-950 font-mono text-xs space-y-1.5 h-80 overflow-y-auto leading-relaxed scrollbar-thin scrollbar-thumb-slate-800">
-          {filteredLogs.length === 0 ? (
-            <div className="text-slate-500 italic py-10 text-center">Không tìm thấy dòng nhật ký nào phù hợp.</div>
-          ) : (
-            filteredLogs.map((log, index) => (
-              <div key={index} className={`flex items-start gap-2 hover:bg-slate-900/60 px-1.5 py-0.5 rounded transition ${getLogColorClass(log.level)}`}>
-                <span className="text-slate-500 shrink-0 select-none">[{log.timestamp}]</span>
-                <span className="shrink-0 font-bold">[{log.level}]</span>
-                <span className="text-indigo-400 shrink-0">[{log.worker}]:</span>
-                <span className="break-all">{log.message}</span>
-              </div>
-            ))
-          )}
-          <div ref={terminalEndRef} />
-        </div>
-      </div>
+      </section>
     </div>
   );
 };
