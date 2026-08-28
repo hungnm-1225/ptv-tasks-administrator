@@ -70,8 +70,9 @@ class KeycloakService:
     async def execute_via_rest_api(
         self,
         identifiers: List[str],
-        action_type: str,
-        target_status: Optional[str],
+        desired_enabled: Optional[bool],
+        desired_email_verified: Optional[bool],
+        should_reset_pass: bool,
         password_option: str,
         custom_password: Optional[str],
         temporary: bool
@@ -94,18 +95,12 @@ class KeycloakService:
             success_count = 0
             failed_count = 0
 
-            desired_enabled = None
-            if target_status == "enabled":
-                desired_enabled = True
-            elif target_status == "disabled":
-                desired_enabled = False
-
             for raw_id in identifiers:
                 clean_id = clean_email_identifier(raw_id)
                 if not clean_id:
                     continue
 
-                # 1. Tìm User
+                # 1. Tìm User theo email hoặc username
                 search_res = await client.get(f"{base_api}/users?email={clean_id}&exact=true", headers=auth_headers)
                 users = search_res.json() if search_res.status_code == 200 and isinstance(search_res.json(), list) else []
                 
@@ -123,34 +118,44 @@ class KeycloakService:
                 logs = []
 
                 try:
-                    # 2. Cập nhật Status
+                    # 2. Cập nhật Status & Email Verified
                     user_payload = {}
                     if desired_enabled is not None:
                         user_payload["enabled"] = desired_enabled
                         logs.append(f"Set enabled={desired_enabled}")
 
-                    if action_type in ["bulk_verify", "bulk_both"]:
-                        user_payload["emailVerified"] = True
-                        logs.append("Set emailVerified=True")
+                    if desired_email_verified is not None:
+                        user_payload["emailVerified"] = desired_email_verified
+                        logs.append(f"Set emailVerified={desired_email_verified}")
 
                     if user_payload:
-                        await client.put(f"{base_api}/users/{user_id}", json=user_payload, headers=auth_headers)
+                        put_res = await client.put(f"{base_api}/users/{user_id}", json=user_payload, headers=auth_headers)
+                        if put_res.status_code not in [200, 204]:
+                            raise Exception(f"Lỗi cập nhật user ({put_res.status_code}): {put_res.text}")
 
-                    # 3. Đổi Mật Khẩu
-                    if action_type in ["bulk_reset_pass", "bulk_both", "reset_password"]:
-                        if password_option == "email_lowercase":
+                    # 3. Đổi Mật Khẩu (Chỉ khi được yêu cầu)
+                    if should_reset_pass:
+                        if custom_password:
+                            pass_val = custom_password
+                        elif password_option == "email_lowercase":
                             pass_val = user_email
                         elif password_option == "default_secure":
                             pass_val = "Pythaverse@2026"
                         else:
-                            pass_val = custom_password or user_email
+                            pass_val = user_email
 
-                        await client.put(
+                        pass_res = await client.put(
                             f"{base_api}/users/{user_id}/reset-password",
                             json={"type": "password", "value": pass_val, "temporary": temporary},
                             headers=auth_headers
                         )
-                        logs.append(f"Reset pass ({password_option}) [Temporary={temporary}]")
+                        if pass_res.status_code not in [200, 204]:
+                            raise Exception(f"Lỗi reset password ({pass_res.status_code}): {pass_res.text}")
+                        
+                        logs.append(f"Reset pass ({pass_val}) [Temporary={temporary}]")
+
+                    if not logs:
+                        logs.append("Không có thay đổi nào được thực hiện")
 
                     success_count += 1
                     results.append({"identifier": clean_id, "status": "success", "logs": " | ".join(logs)})
@@ -171,8 +176,9 @@ class KeycloakService:
     async def execute_via_playwright_rpa(
         self,
         identifiers: List[str],
-        action_type: str,
-        target_status: Optional[str],
+        desired_enabled: Optional[bool],
+        desired_email_verified: Optional[bool],
+        should_reset_pass: bool,
         password_option: str,
         custom_password: Optional[str],
         temporary: bool
@@ -182,12 +188,6 @@ class KeycloakService:
         results = []
         success_count = 0
         failed_count = 0
-
-        desired_enabled = None
-        if target_status == "enabled":
-            desired_enabled = True
-        elif target_status == "disabled":
-            desired_enabled = False
 
         async with acquire_playwright_slot("Keycloak Playwright RPA Fallback"):
             async with async_playwright() as p:
@@ -247,21 +247,34 @@ class KeycloakService:
                             await target_row.locator("td.kc-action-cell:has-text('Edit')").click()
                             await page.wait_for_selector('ul.nav-tabs', timeout=10000)
 
+                            need_save_details = False
                             if desired_enabled is not None:
                                 enabled_chk = page.locator("input#userEnabled")
                                 if await enabled_chk.is_checked() != desired_enabled:
                                     await page.locator("label[for='userEnabled']").click()
-                                    await page.click("button[kc-save]")
-                                    await page.wait_for_timeout(1000)
+                                    need_save_details = True
                                 logs.append(f"Set enabled={desired_enabled}")
 
-                            if action_type in ["bulk_reset_pass", "bulk_both", "reset_password"]:
-                                if password_option == "email_lowercase":
+                            if desired_email_verified is not None:
+                                verify_chk = page.locator("input#emailVerified")
+                                if await verify_chk.count() > 0 and await verify_chk.is_checked() != desired_email_verified:
+                                    await page.locator("label[for='emailVerified']").click()
+                                    need_save_details = True
+                                logs.append(f"Set emailVerified={desired_email_verified}")
+
+                            if need_save_details:
+                                await page.click("button[kc-save]")
+                                await page.wait_for_timeout(1000)
+
+                            if should_reset_pass:
+                                if custom_password:
+                                    pass_val = custom_password
+                                elif password_option == "email_lowercase":
                                     pass_val = clean_id
                                 elif password_option == "default_secure":
                                     pass_val = "Pythaverse@2026"
                                 else:
-                                    pass_val = custom_password or clean_id
+                                    pass_val = clean_id
 
                                 await page.click('ul.nav-tabs a:has-text("Credentials")')
                                 await page.wait_for_selector("input#newPas", timeout=10000)
@@ -275,7 +288,10 @@ class KeycloakService:
 
                                 await page.click('button[data-ng-click="resetPassword(true)"]')
                                 await page.wait_for_timeout(1500)
-                                logs.append(f"Reset pass ({password_option}) [Temporary={temporary}]")
+                                logs.append(f"Reset pass ({pass_val}) [Temporary={temporary}]")
+
+                            if not logs:
+                                logs.append("Không có thay đổi nào được thực hiện")
 
                             success_count += 1
                             results.append({"identifier": clean_id, "status": "success", "logs": " | ".join(logs)})
@@ -296,10 +312,11 @@ class KeycloakService:
         }
 
     # =========================================================================
-    # 🎯 ROUTER ĐIỀU PHỐI CHÍNH (NATIVE ASYNC 100%)
+    # 🎯 ROUTER ĐIỀU PHỐI CHÍNH (PARSER THÔNG MINH ĐA PHÂN HỆ)
     # =========================================================================
     async def execute_account_action(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Hàm Async chính thức - Định dạng Log Success cực đẹp"""
+        """Hàm Async chính thức - Bóc tách chính xác mọi flag hành động"""
+        # 1. Trích xuất danh sách User / Email
         raw_list = payload.get("identifiers") or payload.get("emails") or payload.get("users") or []
         if isinstance(raw_list, str):
             raw_list = [raw_list]
@@ -312,40 +329,72 @@ class KeycloakService:
         if not raw_list:
             return {"status": "failed", "message": "Không tìm thấy email/username trong payload"}
 
-        action = payload.get("action") or payload.get("action_type") or "bulk_both"
-        target_status = payload.get("target_status")
-        if not target_status:
-            if action == "enable_user":
-                target_status = "enabled"
-            elif action == "disable_user":
-                target_status = "disabled"
+        # 2. Bóc tách danh sách Actions (Hỗ trợ cả mảng 'actions' và chuỗi 'action')
+        actions_list: List[str] = []
+        raw_actions = payload.get("actions")
+        if isinstance(raw_actions, list):
+            actions_list.extend(raw_actions)
+        
+        single_action = payload.get("action") or payload.get("action_type")
+        if single_action:
+            actions_list.append(single_action)
 
-        password_option = payload.get("password_option") or "email_lowercase"
-        custom_pass = payload.get("new_password") or payload.get("temp_pass")
-        temporary = payload.get("temporary", False)
+        # 3. Phân giải trạng thái Hoạt động (Enabled / Disabled)
+        desired_enabled: Optional[bool] = None
+        if "disable_account" in actions_list or "disable_user" in actions_list:
+            desired_enabled = False
+        elif "enable_account" in actions_list or "enable_user" in actions_list:
+            desired_enabled = True
+        elif payload.get("target_status") == "disabled":
+            desired_enabled = False
+        elif payload.get("target_status") == "enabled":
+            desired_enabled = True
 
-        # 1. Chạy REST API trước
+        # 4. Phân giải Xác thực Email (Email Verified)
+        desired_email_verified: Optional[bool] = None
+        if "mark_email_verified" in actions_list or "bulk_verify" in actions_list or "bulk_both" in actions_list:
+            desired_email_verified = True
+        elif "mark_email_unverified" in actions_list:
+            desired_email_verified = False
+
+        # 5. Phân giải Đổi Mật Khẩu (Reset Password)
+        should_reset_pass = False
+        if any(a in ["reset_password", "bulk_reset_pass", "bulk_both"] for a in actions_list):
+            should_reset_pass = True
+
+        password_option = payload.get("password_option") or "custom"
+        custom_pass = (
+            payload.get("temporary_password") 
+            or payload.get("new_password") 
+            or payload.get("temp_pass") 
+            or payload.get("custom_password")
+        )
+        temporary = payload.get("force_change_on_first_login", payload.get("temporary", False))
+
+        # 6. Chạy Tầng 1: REST API trước
         res = await self.execute_via_rest_api(
             identifiers=raw_list,
-            action_type=action,
-            target_status=target_status,
+            desired_enabled=desired_enabled,
+            desired_email_verified=desired_email_verified,
+            should_reset_pass=should_reset_pass,
             password_option=password_option,
             custom_password=custom_pass,
             temporary=temporary
         )
 
-        # 2. Fallback sang Playwright nếu cần
+        # 7. Fallback sang Tầng 2: Playwright nếu cần
         if res is None:
             res = await self.execute_via_playwright_rpa(
                 identifiers=raw_list,
-                action_type=action,
-                target_status=target_status,
+                desired_enabled=desired_enabled,
+                desired_email_verified=desired_email_verified,
+                should_reset_pass=should_reset_pass,
                 password_option=password_option,
                 custom_password=custom_pass,
                 temporary=temporary
             )
 
-        # 3. Format Log Thành Công rõ ràng và chi tiết
+        # 8. Format Logs đẹp mắt
         success_count = res.get("success_count", 0)
         total = res.get("total", len(raw_list))
         details = res.get("details", [])

@@ -1,5 +1,6 @@
 // frontend/src/features/tasks/TaskManagementPage.tsx
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   RotateCw,
@@ -477,29 +478,24 @@ export const TaskManagementPage: React.FC = () => {
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.3 }}
-      className="space-y-6 max-w-7xl mx-auto pb-16"
-    >
+    <div className="space-y-6 max-w-7xl mx-auto pb-16">
       {/* 1. Header Bar */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div className="flex items-center gap-2.5">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2.5 flex-wrap">
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white font-sans">
               Task & Bot Automation Hub
             </h1>
-            <span className="hidden sm:inline-flex rounded-full bg-indigo-50 dark:bg-indigo-950/80 px-2.5 py-0.5 text-xs font-semibold text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50">
+            <span className="inline-flex rounded-full bg-indigo-50 dark:bg-indigo-950/80 px-2.5 py-0.5 text-xs font-semibold text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50 shadow-2xs">
               Live Core Hub
             </span>
           </div>
-          <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 max-w-2xl leading-relaxed">
+          <p className="mt-1.5 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 max-w-3xl leading-relaxed">
             Cổng điều phối và theo dõi tiến trình thực thi của toàn bộ hệ thống Bot Workers.
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 shrink-0">
           <button
             id="btn-refresh-task-list"
             onClick={() => loadTasks(true)}
@@ -515,10 +511,8 @@ export const TaskManagementPage: React.FC = () => {
       {/* 2. Key Metrics & Status Deck */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         {/* Card 1: Tổng Tác Vụ */}
-        <motion.div
-          whileHover={{ y: -2 }}
-          transition={{ duration: 0.2 }}
-          className="relative overflow-hidden rounded-2xl border border-indigo-100 dark:border-indigo-950/60 bg-gradient-to-br from-[#EEF2FF] to-[#F5F3FF] dark:from-indigo-950/40 dark:to-slate-900 p-4.5 shadow-xs"
+        <div
+          className="relative overflow-hidden rounded-2xl border border-indigo-100 dark:border-indigo-950/60 bg-gradient-to-br from-[#EEF2FF] to-[#F5F3FF] dark:from-indigo-950/40 dark:to-slate-900 p-4.5 shadow-xs hover:-translate-y-0.5 transition-transform duration-200"
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-indigo-900/70 dark:text-indigo-300">Tổng Tác Vụ Ghi Nhận</span>
@@ -536,13 +530,11 @@ export const TaskManagementPage: React.FC = () => {
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-indigo-500"></span>
             <span>Phân hệ RPA & Playwright</span>
           </div>
-        </motion.div>
+        </div>
 
         {/* Card 2: Đang Xử Lý */}
-        <motion.div
-          whileHover={{ y: -2 }}
-          transition={{ duration: 0.2 }}
-          className="relative overflow-hidden rounded-2xl border border-sky-100 dark:border-sky-950/60 bg-gradient-to-br from-[#E0F2FE] to-[#F0F9FF] dark:from-sky-950/40 dark:to-slate-900 p-4.5 shadow-xs"
+        <div
+          className="relative overflow-hidden rounded-2xl border border-sky-100 dark:border-sky-950/60 bg-gradient-to-br from-[#E0F2FE] to-[#F0F9FF] dark:from-sky-950/40 dark:to-slate-900 p-4.5 shadow-xs hover:-translate-y-0.5 transition-transform duration-200"
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-sky-900/70 dark:text-sky-300">Đang Xử Lý (Active)</span>
@@ -560,13 +552,11 @@ export const TaskManagementPage: React.FC = () => {
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-sky-500 animate-pulse"></span>
             <span>Khả dụng: 6 workers</span>
           </div>
-        </motion.div>
+        </div>
 
         {/* Card 3: Chờ Phê Duyệt */}
-        <motion.div
-          whileHover={{ y: -2 }}
-          transition={{ duration: 0.2 }}
-          className="relative overflow-hidden rounded-2xl border border-amber-100 dark:border-amber-950/60 bg-gradient-to-br from-[#FEF3C7]/70 to-[#FFFBEB] dark:from-amber-950/40 dark:to-slate-900 p-4.5 shadow-xs"
+        <div
+          className="relative overflow-hidden rounded-2xl border border-amber-100 dark:border-amber-950/60 bg-gradient-to-br from-[#FEF3C7]/70 to-[#FFFBEB] dark:from-amber-950/40 dark:to-slate-900 p-4.5 shadow-xs hover:-translate-y-0.5 transition-transform duration-200"
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-amber-900/80 dark:text-amber-300">Chờ Phê Duyệt</span>
@@ -584,13 +574,11 @@ export const TaskManagementPage: React.FC = () => {
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500"></span>
             <span>Cần Human-in-the-Loop xác nhận</span>
           </div>
-        </motion.div>
+        </div>
 
         {/* Card 4: Hiệu Suất */}
-        <motion.div
-          whileHover={{ y: -2 }}
-          transition={{ duration: 0.2 }}
-          className="relative overflow-hidden rounded-2xl border border-emerald-100 dark:border-emerald-950/60 bg-gradient-to-br from-[#ECFDF5] to-[#F0FDF4] dark:from-emerald-950/40 dark:to-slate-900 p-4.5 shadow-xs"
+        <div
+          className="relative overflow-hidden rounded-2xl border border-emerald-100 dark:border-emerald-950/60 bg-gradient-to-br from-[#ECFDF5] to-[#F0FDF4] dark:from-emerald-950/40 dark:to-slate-900 p-4.5 shadow-xs hover:-translate-y-0.5 transition-transform duration-200"
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-emerald-900/80 dark:text-emerald-300">Hiệu Suất Thực Thi</span>
@@ -617,7 +605,7 @@ export const TaskManagementPage: React.FC = () => {
               </span>
             )}
           </div>
-        </motion.div>
+        </div>
       </div>
 
       {/* 3. Filter, Search & View Controls */}
@@ -950,210 +938,217 @@ export const TaskManagementPage: React.FC = () => {
         </div>
       )}
 
-      {/* 5. SLIDE-OVER DETAIL & LIVE LOGS DRAWER (FORMAT LOGS CHUẨN TASK ID) */}
-      <AnimatePresence>
-        {detailDrawerTask && (
-          <div
-            id="task-detail-drawer-overlay"
-            onClick={() => setDetailDrawerTask(null)}
-            className="fixed inset-0 z-[999] flex justify-end bg-slate-950/60 backdrop-blur-xs transition-opacity"
+      {/* ========================================================================= */}
+      {/* 5. SLIDE-OVER DETAIL & LIVE LOGS DRAWER (DÙNG REACT PORTAL) */}
+      {/* ========================================================================= */}
+      {detailDrawerTask && createPortal(
+        <div
+          id="task-detail-drawer-overlay"
+          onClick={() => setDetailDrawerTask(null)}
+          className="fixed inset-0 z-[9999] flex justify-end bg-slate-950/70 backdrop-blur-sm transition-opacity"
+        >
+          <motion.div
+            initial={{ x: '100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '100%' }}
+            transition={{ type: 'spring', damping: 28, stiffness: 220 }}
+            onClick={(e) => e.stopPropagation()}
+            className="flex h-full w-full max-w-2xl flex-col bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden"
           >
-            <motion.div
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              onClick={(e) => e.stopPropagation()}
-              className="flex h-full w-full max-w-2xl flex-col bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden"
-            >
-              {/* Drawer Header */}
-              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 px-6 py-4 bg-slate-50/70 dark:bg-slate-850/50">
-                <div className="flex items-center gap-3">
+            {/* Drawer Header */}
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 px-6 py-4 bg-slate-50/70 dark:bg-slate-850/50 shrink-0">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => copyTaskIdToClipboard(detailDrawerTask.id)}
+                  className="font-mono text-base sm:text-lg font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1.5"
+                  title="Bấm để sao chép Full Task UUID"
+                >
+                  <span>#{detailDrawerTask.id?.replace(/-/g, '').slice(0, 8)}</span>
+                  {copiedTaskId ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
+                </button>
+                {renderStatusBadge(
+                  detailDrawerTask.approval_status,
+                  detailDrawerTask.execution_status,
+                  detailDrawerTask.payload_data
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                {detailDrawerTask.execution_status === 'failed' && (
                   <button
-                    onClick={() => copyTaskIdToClipboard(detailDrawerTask.id)}
-                    className="font-mono text-lg font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1.5"
-                    title="Bấm để sao chép Full Task UUID"
+                    onClick={(e) => {
+                      handleRetryTask(detailDrawerTask.id, e);
+                    }}
+                    disabled={retryingId === detailDrawerTask.id}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700 transition shadow-xs cursor-pointer disabled:opacity-60"
                   >
-                    <span>#{detailDrawerTask.id?.replace(/-/g, '').slice(0, 8)}</span>
-                    {copiedTaskId ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
+                    {retryingId === detailDrawerTask.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCw className="h-3.5 w-3.5" />}
+                    <span>Chạy Lại Tác Vụ</span>
                   </button>
-                  {renderStatusBadge(
-                    detailDrawerTask.approval_status,
-                    detailDrawerTask.execution_status,
-                    detailDrawerTask.payload_data
-                  )}
+                )}
+                {detailDrawerTask.approval_status === 'pending' && (
+                  <button
+                    onClick={(e) => {
+                      handleOpenReview(detailDrawerTask, e);
+                      setDetailDrawerTask(null);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700 transition shadow-xs cursor-pointer"
+                  >
+                    <Edit3 className="h-3.5 w-3.5" />
+                    <span>Phê Duyệt</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => setDetailDrawerTask(null)}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 transition cursor-pointer"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Drawer Scrollable Content */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              <div>
+                <div className="mb-2">
+                  <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 border border-indigo-200/60">
+                    {detailDrawerTask.bot_type}
+                  </span>
+                </div>
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                  {getTaskBusinessInfo(detailDrawerTask).title}
+                </h2>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  {getTaskBusinessInfo(detailDrawerTask).subtitle}
+                </p>
+              </div>
+
+              {/* Live Console Logs */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Terminal className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+                      Nhật Ký Thực Thi (Terminal Logs)
+                    </h4>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => copyLogsToClipboard(detailDrawerTask.execution_logs || '')}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                  >
+                    {copiedLogs ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                    <span>{copiedLogs ? 'Đã sao chép' : 'Sao chép logs'}</span>
+                  </button>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  {detailDrawerTask.execution_status === 'failed' && (
-                    <button
-                      onClick={(e) => {
-                        handleRetryTask(detailDrawerTask.id, e);
-                      }}
-                      disabled={retryingId === detailDrawerTask.id}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700 transition shadow-xs cursor-pointer disabled:opacity-60"
-                    >
-                      {retryingId === detailDrawerTask.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCw className="h-3.5 w-3.5" />}
-                      <span>Chạy Lại Tác Vụ</span>
-                    </button>
+                <div className="rounded-2xl border border-slate-800 bg-[#0B1120] p-4 font-mono text-[11px] text-slate-200 max-h-72 overflow-y-auto space-y-1.5 shadow-inner scrollbar-thin">
+                  {detailDrawerTask.execution_logs ? (
+                    detailDrawerTask.execution_logs.split('\n').filter(Boolean).map((line, index) => {
+                      const isError = line.includes('ERROR') || line.includes('failed') || line.includes('CRITICAL');
+                      const isSuccess = line.includes('SUCCESS') || line.includes('Hoàn thành') || line.includes('thành công');
+                      const isApproval = line.includes('APPROVAL');
+
+                      return (
+                        <div
+                          key={index}
+                          className={`flex items-start gap-2 py-0.5 px-1.5 rounded transition-colors ${isError
+                            ? 'bg-rose-950/30 text-rose-300'
+                            : isSuccess
+                              ? 'bg-emerald-950/20 text-emerald-300 font-medium'
+                              : isApproval
+                                ? 'bg-indigo-950/30 text-indigo-300'
+                                : 'hover:bg-slate-800/40 text-slate-300'
+                            }`}
+                        >
+                          <span className="text-slate-600 select-none">❯</span>
+                          <span className="break-all">{line}</span>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="text-slate-500 italic">Chưa có nhật ký ghi nhận cho tác vụ này.</div>
                   )}
-                  {detailDrawerTask.approval_status === 'pending' && (
-                    <button
-                      onClick={(e) => {
-                        handleOpenReview(detailDrawerTask, e);
-                        setDetailDrawerTask(null);
-                      }}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700 transition shadow-xs cursor-pointer"
-                    >
-                      <Edit3 className="h-3.5 w-3.5" />
-                      <span>Phê Duyệt</span>
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setDetailDrawerTask(null)}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 transition cursor-pointer"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
                 </div>
               </div>
 
-              {/* Drawer Scrollable Content */}
-              <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                <div>
-                  <div className="mb-2">
-                    <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 border border-indigo-200/60">
-                      {detailDrawerTask.bot_type}
+              {/* Input Payload Parameters */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+                    Tham Số Đầu Vào (Payload Parameters)
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => copyPayloadToClipboard(detailDrawerTask.payload_data)}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                  >
+                    {copiedPayload ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                    <span>{copiedPayload ? 'Đã sao chép' : 'Sao chép JSON'}</span>
+                  </button>
+                </div>
+                <pre className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B1120] p-4 font-mono text-[11px] text-slate-800 dark:text-emerald-400 overflow-x-auto max-h-48 scrollbar-thin">
+                  {JSON.stringify(detailDrawerTask.payload_data, null, 2)}
+                </pre>
+              </div>
+
+              {/* Result File Download */}
+              {detailDrawerTask.payload_data?.result_file_url && (
+                <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                    <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                      File kết quả đã sẵn sàng
                     </span>
                   </div>
-                  <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                    {getTaskBusinessInfo(detailDrawerTask).title}
-                  </h2>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    {getTaskBusinessInfo(detailDrawerTask).subtitle}
+                  <a
+                    href={detailDrawerTask.payload_data.result_file_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Tải Xuống File (.xlsx)</span>
+                  </a>
+                </div>
+              )}
+
+              {/* Metadata Grid */}
+              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
+                <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-850 p-3">
+                  <span className="text-slate-400 text-[11px]">Thời gian tạo:</span>
+                  <p className="mt-0.5 font-semibold text-slate-800 dark:text-slate-200 text-[11px] font-mono">
+                    {formatVNDateTime(detailDrawerTask.created_at)}
                   </p>
                 </div>
-
-                {/* Live Console Logs */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <Terminal className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
-                      <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
-                        Nhật Ký Thực Thi (Terminal Logs)
-                      </h4>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => copyLogsToClipboard(detailDrawerTask.execution_logs || '')}
-                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
-                    >
-                      {copiedLogs ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
-                      <span>{copiedLogs ? 'Đã sao chép' : 'Sao chép logs'}</span>
-                    </button>
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-800 bg-[#0B1120] p-4 font-mono text-[11px] text-slate-200 max-h-72 overflow-y-auto space-y-1.5 shadow-inner scrollbar-thin">
-                    {detailDrawerTask.execution_logs ? (
-                      detailDrawerTask.execution_logs.split('\n').filter(Boolean).map((line, index) => {
-                        const isError = line.includes('ERROR') || line.includes('failed') || line.includes('CRITICAL');
-                        const isSuccess = line.includes('SUCCESS') || line.includes('Hoàn thành') || line.includes('thành công');
-                        const isApproval = line.includes('APPROVAL');
-
-                        return (
-                          <div
-                            key={index}
-                            className={`flex items-start gap-2 py-0.5 px-1.5 rounded transition-colors ${isError
-                              ? 'bg-rose-950/30 text-rose-300'
-                              : isSuccess
-                                ? 'bg-emerald-950/20 text-emerald-300 font-medium'
-                                : isApproval
-                                  ? 'bg-indigo-950/30 text-indigo-300'
-                                  : 'hover:bg-slate-800/40 text-slate-300'
-                              }`}
-                          >
-                            <span className="text-slate-600 select-none">❯</span>
-                            <span className="break-all">{line}</span>
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <div className="text-slate-500 italic">Chưa có nhật ký ghi nhận cho tác vụ này.</div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Input Payload Parameters */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
-                      Tham Số Đầu Vào (Payload Parameters)
-                    </h4>
-                    <button
-                      type="button"
-                      onClick={() => copyPayloadToClipboard(detailDrawerTask.payload_data)}
-                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
-                    >
-                      {copiedPayload ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
-                      <span>{copiedPayload ? 'Đã sao chép' : 'Sao chép JSON'}</span>
-                    </button>
-                  </div>
-                  <pre className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B1120] p-4 font-mono text-[11px] text-slate-800 dark:text-emerald-400 overflow-x-auto max-h-48 scrollbar-thin">
-                    {JSON.stringify(detailDrawerTask.payload_data, null, 2)}
-                  </pre>
-                </div>
-
-                {/* Result File Download */}
-                {detailDrawerTask.payload_data?.result_file_url && (
-                  <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                      <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
-                        File kết quả đã sẵn sàng
-                      </span>
-                    </div>
-                    <a
-                      href={detailDrawerTask.payload_data.result_file_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Download className="w-4 h-4" />
-                      <span>Tải Xuống File (.xlsx)</span>
-                    </a>
-                  </div>
-                )}
-
-                {/* Metadata Grid */}
-                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
-                  <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-850 p-3">
-                    <span className="text-slate-400 text-[11px]">Thời gian tạo:</span>
-                    <p className="mt-0.5 font-semibold text-slate-800 dark:text-slate-200 text-[11px] font-mono">
-                      {formatVNDateTime(detailDrawerTask.created_at)}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-850 p-3">
-                    <span className="text-slate-400 text-[11px]">Thời gian thực thi:</span>
-                    <p className="mt-0.5 font-semibold text-slate-800 dark:text-slate-200 text-[11px] font-mono">
-                      {formatVNDateTime(detailDrawerTask.executed_at)}
-                    </p>
-                  </div>
+                <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-850 p-3">
+                  <span className="text-slate-400 text-[11px]">Thời gian thực thi:</span>
+                  <p className="mt-0.5 font-semibold text-slate-800 dark:text-slate-200 text-[11px] font-mono">
+                    {formatVNDateTime(detailDrawerTask.executed_at)}
+                  </p>
                 </div>
               </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+            </div>
+          </motion.div>
+        </div>,
+        document.body
+      )}
 
-      {/* 6. MODAL: PHÊ DUYỆT */}
-      {selectedTask && (
+      {/* ========================================================================= */}
+      {/* 6. MODAL: PHÊ DUYỆT (DÙNG REACT PORTAL) */}
+      {/* ========================================================================= */}
+      {selectedTask && createPortal(
         <div
           onClick={(e) => { if (e.target === e.currentTarget) setSelectedTask(null); }}
-          className="fixed inset-0 z-[1000] bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-150"
+          className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
         >
-          <div
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 15 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 15 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
             onClick={(e) => e.stopPropagation()}
-            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-4xl overflow-hidden shadow-2xl space-y-4 animate-in zoom-in-95 duration-150 my-auto"
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-4xl overflow-hidden shadow-2xl space-y-4 my-auto"
           >
             <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/70 dark:bg-slate-850/40">
               <div className="flex items-center gap-2.5">
@@ -1396,9 +1391,10 @@ export const TaskManagementPage: React.FC = () => {
                 </div>
               </div>
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </div>,
+        document.body
       )}
-    </motion.div>
+    </div>
   );
 };

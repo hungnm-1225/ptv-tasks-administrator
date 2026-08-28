@@ -1,5 +1,6 @@
 // frontend/src/features/courses/CoursesManagerPage.tsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
     GraduationCap,
@@ -503,28 +504,23 @@ export const CoursesManagerPage: React.FC = () => {
     };
 
     return (
-        <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.3 }}
-            className="space-y-6 max-w-7xl mx-auto pb-16"
-        >
+        <div className="space-y-6 max-w-7xl mx-auto pb-16">
             {/* 1. Top Header Deck & Source Switcher */}
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 pb-6 border-b border-slate-200/80 dark:border-slate-800">
-                <div>
+                <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2.5">
                         <BookOpen className="w-6 h-6 text-indigo-600 dark:text-indigo-400 shrink-0" />
                         <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white font-sans">
                             Quản Lý Danh Mục Khóa Học
                         </h1>
                     </div>
-                    <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 font-medium">
+                    <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 font-medium max-w-3xl leading-relaxed">
                         Tra cứu, đồng bộ và quản trị cấu hình khóa học hệ sinh thái Pythaverse.
                     </p>
                 </div>
 
                 {/* Source Switcher Pill Container */}
-                <div className="inline-flex p-1 rounded-xl bg-slate-100 dark:bg-slate-850 border border-slate-200 dark:border-slate-700/60 self-start lg:self-auto shadow-2xs">
+                <div className="inline-flex p-1 rounded-xl bg-slate-100 dark:bg-slate-850 border border-slate-200 dark:border-slate-700/60 self-start lg:self-auto shadow-2xs shrink-0">
                     <button
                         onClick={() => handleTabChange('workspace')}
                         className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all cursor-pointer ${activePane === 'workspace'
@@ -550,9 +546,9 @@ export const CoursesManagerPage: React.FC = () => {
             </div>
 
             {/* 2. Action & Search Control Bar */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                {/* Search Input & Refresh Button */}
-                <div className="flex items-center gap-2 flex-1 max-w-2xl">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                {/* Search Input & Refresh Button (Rộng rãi, sang trọng) */}
+                <div className="flex items-center gap-2 w-full lg:max-w-xl">
                     <div className="relative flex-1">
                         <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                         <input
@@ -560,12 +556,12 @@ export const CoursesManagerPage: React.FC = () => {
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             placeholder="Tìm theo tên môn học, Course ID, SKU, danh mục..."
-                            className="w-full pl-10 pr-9 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-2xs"
+                            className="w-full pl-10 pr-9 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-2xs"
                         />
                         {searchQuery && (
                             <button
                                 onClick={() => setSearchQuery('')}
-                                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 cursor-pointer"
                             >
                                 <X className="w-3.5 h-3.5" />
                             </button>
@@ -669,26 +665,26 @@ export const CoursesManagerPage: React.FC = () => {
                         ))}
                     </div>
                 ) : filteredCourses.length === 0 ? (
-                    <div className="text-center py-16 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-8 shadow-xs">
+                    <div className="text-center py-16 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-8 shadow-xs w-full">
                         <FolderOpen className="w-12 h-12 mx-auto text-slate-300 dark:text-slate-600 mb-3" />
                         <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">
                             Không tìm thấy khóa học nào phù hợp
                         </h3>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-md mx-auto">
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 max-w-lg mx-auto leading-relaxed">
                             Hãy thử thay đổi từ khóa tìm kiếm hoặc bấm nút bên dưới để tạo mới khóa học.
                         </p>
                         <div className="mt-4 flex items-center justify-center gap-3">
                             {searchQuery && (
                                 <button
                                     onClick={() => setSearchQuery('')}
-                                    className="px-3.5 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold transition"
+                                    className="px-3.5 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold transition cursor-pointer"
                                 >
                                     Xóa tìm kiếm
                                 </button>
                             )}
                             <button
                                 onClick={() => handleOpenModal()}
-                                className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-xs"
+                                className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
                             >
                                 + Thêm Khóa Học Mới
                             </button>
@@ -701,11 +697,9 @@ export const CoursesManagerPage: React.FC = () => {
                                 course.lms_url || `https://learn.pythaverse.space/course/view.php?id=${course.course_id}`;
 
                             return (
-                                <motion.div
+                                <div
                                     key={`${activePane}-${course.id || course.course_id}`}
                                     id={`course-card-${course.course_id}`}
-                                    whileHover={{ y: -2 }}
-                                    transition={{ duration: 0.2 }}
                                     className="group bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 rounded-2xl p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between"
                                 >
                                     <div>
@@ -776,7 +770,7 @@ export const CoursesManagerPage: React.FC = () => {
                                             </button>
                                         </div>
                                     </div>
-                                </motion.div>
+                                </div>
                             );
                         })}
                     </div>
@@ -784,18 +778,22 @@ export const CoursesManagerPage: React.FC = () => {
             </div>
 
             {/* ========================================================================= */}
-            {/* MODAL 1: Quản Lý Danh Mục (Category Manager) */}
+            {/* MODAL 1: Quản Lý Danh Mục (Category Manager - REACT PORTAL) */}
             {/* ========================================================================= */}
-            {isCatModalOpen && (
+            {isCatModalOpen && createPortal(
                 <div
                     onClick={(e) => {
                         if (e.target === e.currentTarget) setIsCatModalOpen(false);
                     }}
-                    className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200"
+                    className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
                 >
-                    <div
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.95, y: 15 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95, y: 15 }}
+                        transition={{ duration: 0.2 }}
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-lg shadow-2xl p-6 sm:p-7 relative animate-in zoom-in-95 duration-200"
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-lg shadow-2xl p-6 sm:p-7 relative my-auto"
                     >
                         <button
                             onClick={() => {
@@ -903,23 +901,28 @@ export const CoursesManagerPage: React.FC = () => {
                                 Đóng
                             </button>
                         </div>
-                    </div>
-                </div>
+                    </motion.div>
+                </div>,
+                document.body
             )}
 
             {/* ========================================================================= */}
-            {/* MODAL 2: Nhập Nhanh Danh Sách Khóa Học (Bulk Import) */}
+            {/* MODAL 2: Nhập Nhanh Danh Sách Khóa Học (Bulk Import - REACT PORTAL) */}
             {/* ========================================================================= */}
-            {isBulkModalOpen && (
+            {isBulkModalOpen && createPortal(
                 <div
                     onClick={(e) => {
                         if (e.target === e.currentTarget) setIsBulkModalOpen(false);
                     }}
-                    className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200"
+                    className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
                 >
-                    <div
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.95, y: 15 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95, y: 15 }}
+                        transition={{ duration: 0.2 }}
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-2xl shadow-2xl p-6 sm:p-7 relative animate-in zoom-in-95 duration-200"
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-2xl shadow-2xl p-6 sm:p-7 relative my-auto"
                     >
                         <button
                             onClick={() => setIsBulkModalOpen(false)}
@@ -1038,7 +1041,7 @@ export const CoursesManagerPage: React.FC = () => {
                                     value={bulkRawText}
                                     onChange={(e) => handleParseBulkText(e.target.value)}
                                     placeholder={`Ví dụ:\n654\tSWRP\tSWRP 9: LEANBOT Programming\tPTV-SWRP-09\n780\tASP\tASP Elementary Intermediate (EN)\tPTV-ASP-EL-01`}
-                                    className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-mono text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                                    className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-mono text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 leading-relaxed"
                                 />
                                 <div className="mt-1.5 flex items-center justify-between text-xs">
                                     <button
@@ -1143,23 +1146,28 @@ export const CoursesManagerPage: React.FC = () => {
                                 <span>Đồng Bộ {bulkPreview.filter((p) => p.isValid).length} Khóa Học Ngay</span>
                             </button>
                         </div>
-                    </div>
-                </div>
+                    </motion.div>
+                </div>,
+                document.body
             )}
 
             {/* ========================================================================= */}
-            {/* MODAL 3: Thêm / Chỉnh Sửa Khóa Học Đơn Lẻ */}
+            {/* MODAL 3: Thêm / Chỉnh Sửa Khóa Học Đơn Lẻ (REACT PORTAL) */}
             {/* ========================================================================= */}
-            {isModalOpen && (
+            {isModalOpen && createPortal(
                 <div
                     onClick={(e) => {
                         if (e.target === e.currentTarget) setIsModalOpen(false);
                     }}
-                    className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200"
+                    className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
                 >
-                    <div
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.95, y: 15 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95, y: 15 }}
+                        transition={{ duration: 0.2 }}
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-lg shadow-2xl p-6 sm:p-7 relative animate-in zoom-in-95 duration-200"
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-lg shadow-2xl p-6 sm:p-7 relative my-auto"
                     >
                         <button
                             onClick={() => setIsModalOpen(false)}
@@ -1273,23 +1281,28 @@ export const CoursesManagerPage: React.FC = () => {
                                 </button>
                             </div>
                         </form>
-                    </div>
-                </div>
+                    </motion.div>
+                </div>,
+                document.body
             )}
 
             {/* ========================================================================= */}
-            {/* MODAL 4: Xác Nhận Xóa Khóa Học */}
+            {/* MODAL 4: Xác Nhận Xóa Khóa Học (REACT PORTAL) */}
             {/* ========================================================================= */}
-            {deleteModalCourse && (
+            {deleteModalCourse && createPortal(
                 <div
                     onClick={(e) => {
                         if (e.target === e.currentTarget) setDeleteModalCourse(null);
                     }}
-                    className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200"
+                    className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
                 >
-                    <div
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.95, y: 15 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95, y: 15 }}
+                        transition={{ duration: 0.2 }}
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-md shadow-2xl p-6 relative animate-in zoom-in-95 duration-200"
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-md shadow-2xl p-6 relative my-auto"
                     >
                         <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 flex items-center justify-center mb-4 mx-auto">
                             <AlertTriangle className="w-6 h-6" />
@@ -1324,9 +1337,10 @@ export const CoursesManagerPage: React.FC = () => {
                                 Xác Nhận Xóa
                             </button>
                         </div>
-                    </div>
-                </div>
+                    </motion.div>
+                </div>,
+                document.body
             )}
-        </motion.div>
+        </div>
     );
 };
