@@ -1,6 +1,7 @@
 # backend/app/services/osticket_service.py
 import re
 import os
+import gc
 import mimetypes
 import logging
 from typing import Dict, Any, List, Optional
@@ -10,6 +11,7 @@ from playwright.async_api import async_playwright
 from app.core.config import settings
 from app.core.supabase import get_supabase_client
 from app.core.gemini import process_ticket_with_ai
+from app.core.playwright_manager import acquire_playwright_slot, LOW_RAM_CHROMIUM_ARGS, setup_low_ram_routes
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +20,7 @@ OSTICKET_BASE_URL = str(raw_osticket_url).replace("/scp/login.php", "").replace(
 
 OSTICKET_USER = getattr(settings, "OSTICKET_ADMIN_USER", os.getenv("OSTICKET_ADMIN_USER", ""))
 OSTICKET_PASS = getattr(settings, "OSTICKET_ADMIN_PASS", os.getenv("OSTICKET_ADMIN_PASS", ""))
+
 
 class OSTicketService:
     """Service Playwright chuyên cào vé OS Ticket, bóc tách đầy đủ lịch sử hội thoại Thread và tải Attachment lên Supabase."""
@@ -28,19 +31,15 @@ class OSTicketService:
     async def _create_context(self, p) -> tuple:
         browser = await p.chromium.launch(
             headless=self.headless,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--single-process"
-            ]
+            args=LOW_RAM_CHROMIUM_ARGS
         )
         context = await browser.new_context(
             viewport={"width": 1440, "height": 900},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
         )
+        await setup_low_ram_routes(context)
         page = await context.new_page()
+        page.set_default_timeout(30000)
         return browser, context, page
 
     async def login(self, page) -> bool:
@@ -58,7 +57,7 @@ class OSTicketService:
                 await page.fill("input[name='userid'], #name", OSTICKET_USER)
                 await page.fill("input[name='passwd'], #pass", OSTICKET_PASS)
                 await page.click("input[type='submit'], button[type='submit']")
-                await page.wait_for_timeout(3000)
+                await page.wait_for_timeout(2500)
 
             if "login.php" in page.url:
                 logger.error("❌ Đăng nhập OS Ticket thất bại! Vui lòng kiểm tra lại tài khoản/mật khẩu.")
@@ -252,7 +251,6 @@ class OSTicketService:
                 ])
                 if created_at_str:
                     try:
-                        # Parse định dạng: 27/08/2026 8:59 AM
                         dt = datetime.strptime(created_at_str, "%d/%m/%Y %I:%M %p")
                         created_at_iso = dt.strftime("%Y-%m-%dT%H:%M:%S+07:00")
                     except Exception as dt_err:
@@ -285,19 +283,19 @@ class OSTicketService:
 
             return {
                 "source": "osticket",
-                "source_id": ticket_number,                     # 🎯 Mã 6 chữ số hiển thị (#248707)
-                "doc_url": detail_url,                           # 🎯 Link mở chính xác với ID 4 số (tickets.php?id=3370)
+                "source_id": ticket_number,
+                "doc_url": detail_url,
                 "sender_email": sender_email,
                 "submitter_name": submitter_name,
                 "subject": subject,
                 "raw_content": raw_content,
-                "created_at": created_at_iso,                   # 🎯 Thời gian tạo vé thực tế
+                "created_at": created_at_iso,
                 "ticket_timestamp": created_at_str or created_at_iso,
                 "country": country,
                 "school_name": school_name,
                 "attachments": attachments_list,
                 "metadata": {
-                    "internal_id": internal_id,                 # 🎯 Lưu ID 4 chữ số nội bộ
+                    "internal_id": internal_id,
                     "ticket_number": ticket_number,
                     "help_topic": help_topic,
                     "school_name": school_name,
@@ -315,122 +313,125 @@ class OSTicketService:
             await detail_page.close()
 
     async def poll_open_ostickets(self):
-        """Quét danh sách Open Queue và cào các vé mới nhất."""
+        """Quét danh sách Open Queue và cào các vé mới nhất (Được bọc Semaphore Concurrency Slot)."""
         supabase = get_supabase_client()
-        async with async_playwright() as p:
-            browser, context, page = await self._create_context(p)
-            try:
-                if not await self.login(page):
-                    return
+        async with acquire_playwright_slot("OSTicket Queue Polling"):
+            async with async_playwright() as p:
+                browser, context, page = await self._create_context(p)
+                try:
+                    if not await self.login(page):
+                        return
 
-                queue_url = f"{OSTICKET_BASE_URL}/scp/tickets.php?dir=1&sort=10"
-                logger.info(f"📂 Đang mở danh sách vé Open: {queue_url}")
-                await page.goto(queue_url, wait_until="domcontentloaded", timeout=30000)
-                await page.wait_for_selector("table.list", timeout=15000)
+                    queue_url = f"{OSTICKET_BASE_URL}/scp/tickets.php?dir=1&sort=10"
+                    logger.info(f"📂 Đang mở danh sách vé Open: {queue_url}")
+                    await page.goto(queue_url, wait_until="domcontentloaded", timeout=30000)
+                    await page.wait_for_selector("table.list", timeout=15000)
 
-                ticket_rows = page.locator("table.list tbody tr")
-                total_rows = await ticket_rows.count()
-                logger.info(f"📋 Tìm thấy {total_rows} dòng vé trong Open Queue của OS Ticket.")
+                    ticket_rows = page.locator("table.list tbody tr")
+                    total_rows = await ticket_rows.count()
+                    logger.info(f"📋 Tìm thấy {total_rows} dòng vé trong Open Queue của OS Ticket.")
 
-                for r_idx in range(total_rows):
-                    try:
-                        row = ticket_rows.nth(r_idx)
-                        
-                        ticket_num_el = row.locator("a.preview, a[href*='tickets.php?id='], td:nth-child(2) a").first
-                        if await ticket_num_el.count() == 0:
-                            continue
-
-                        ticket_num_text = (await ticket_num_el.inner_text()).strip()
-                        num_match = re.search(r'(\d+)', ticket_num_text)
-                        if not num_match:
-                            continue
-                        ticket_number = num_match.group(1)
-
-                        last_updated_el = row.locator("td:nth-child(3)").first
-                        last_updated_str = (await last_updated_el.inner_text()).strip() if await last_updated_el.count() > 0 else ""
-
-                        href = await ticket_num_el.get_attribute("href")
-                        id_match = re.search(r'id=(\d+)', href or '')
-                        internal_id = id_match.group(1) if id_match else ticket_number
-
-                        # Kiểm tra vé trong Database Supabase
-                        check_db = supabase.table("inbox_tickets")\
-                            .select("id, status, metadata, attachments")\
-                            .eq("source", "osticket")\
-                            .or_(f"source_id.eq.{ticket_number},source_id.eq.{internal_id}")\
-                            .execute()
-
-                        existing_ticket = check_db.data[0] if check_db.data else None
-
-                        if existing_ticket:
-                            db_last_updated = existing_ticket.get("metadata", {}).get("last_updated_raw", "")
-                            if db_last_updated == last_updated_str and last_updated_str != "":
+                    for r_idx in range(total_rows):
+                        try:
+                            row = ticket_rows.nth(r_idx)
+                            
+                            ticket_num_el = row.locator("a.preview, a[href*='tickets.php?id='], td:nth-child(2) a").first
+                            if await ticket_num_el.count() == 0:
                                 continue
 
-                        logger.info(f"✨ Phát hiện biến động tại vé #{ticket_number} (Cập nhật lúc: {last_updated_str}), đang đồng bộ...")
-                        ticket_data = await self.scrape_ticket_detail(context, internal_id, ticket_number)
-                        
-                        if ticket_data:
-                            meta = ticket_data.get("metadata", {})
-                            meta["last_updated_raw"] = last_updated_str
+                            ticket_num_text = (await ticket_num_el.inner_text()).strip()
+                            num_match = re.search(r'(\d+)', ticket_num_text)
+                            if not num_match:
+                                continue
+                            ticket_number = num_match.group(1)
 
-                            if not existing_ticket:
-                                insert_payload = {
-                                    "source": ticket_data["source"],
-                                    "source_id": ticket_data["source_id"],
-                                    "doc_url": ticket_data.get("doc_url"),
-                                    "sender_email": ticket_data["sender_email"],
-                                    "submitter_name": ticket_data["submitter_name"],
-                                    "subject": ticket_data["subject"],
-                                    "raw_content": ticket_data["raw_content"],
-                                    "country": ticket_data.get("country"),
-                                    "ticket_timestamp": ticket_data.get("ticket_timestamp"),
-                                    "attachments": ticket_data.get("attachments", []),
-                                    "metadata": meta,
-                                    "status": "pending"
-                                }
-                                if ticket_data.get("created_at"):
-                                    insert_payload["created_at"] = ticket_data["created_at"]
+                            last_updated_el = row.locator("td:nth-child(3)").first
+                            last_updated_str = (await last_updated_el.inner_text()).strip() if await last_updated_el.count() > 0 else ""
 
-                                insert_res = supabase.table("inbox_tickets").insert(insert_payload).execute()
-                                if insert_res.data:
-                                    new_id = insert_res.data[0]["id"]
-                                    logger.info(f"💾 Đã lưu vé mới #{ticket_number}! Kích hoạt Gemini Triage...")
-                                    await process_ticket_with_ai(new_id)
-                            else:
-                                ticket_db_id = existing_ticket["id"]
-                                old_attachments = existing_ticket.get("attachments") or []
-                                new_attachments = ticket_data.get("attachments") or []
-                                seen_urls = {att.get("url") for att in old_attachments if isinstance(att, dict)}
-                                merged_attachments = list(old_attachments)
-                                for att in new_attachments:
-                                    if att.get("url") not in seen_urls:
-                                        merged_attachments.append(att)
-                                        seen_urls.add(att.get("url"))
+                            href = await ticket_num_el.get_attribute("href")
+                            id_match = re.search(r'id=(\d+)', href or '')
+                            internal_id = id_match.group(1) if id_match else ticket_number
 
-                                update_payload = {
-                                    "subject": ticket_data["subject"],
-                                    "raw_content": ticket_data["raw_content"],
-                                    "doc_url": ticket_data.get("doc_url"),
-                                    "attachments": merged_attachments,
-                                    "metadata": meta,
-                                    "status": "pending" if existing_ticket.get("status") in ["completed", "dismissed"] else existing_ticket.get("status")
-                                }
-                                if ticket_data.get("created_at"):
-                                    update_payload["created_at"] = ticket_data["created_at"]
+                            # Kiểm tra vé trong Database Supabase
+                            check_db = supabase.table("inbox_tickets")\
+                                .select("id, status, metadata, attachments")\
+                                .eq("source", "osticket")\
+                                .or_(f"source_id.eq.{ticket_number},source_id.eq.{internal_id}")\
+                                .execute()
 
-                                supabase.table("inbox_tickets").update(update_payload).eq("id", ticket_db_id).execute()
-                                logger.info(f"🔄 Đã cập nhật diễn biến mới cho vé #{ticket_number}! Kích hoạt Gemini Triage phân tích lại...")
-                                await process_ticket_with_ai(ticket_db_id)
+                            existing_ticket = check_db.data[0] if check_db.data else None
 
-                    except Exception as row_err:
-                        logger.error(f"❌ Lỗi khi quét dòng {r_idx}: {row_err}")
-                        continue
+                            if existing_ticket:
+                                db_last_updated = existing_ticket.get("metadata", {}).get("last_updated_raw", "")
+                                if db_last_updated == last_updated_str and last_updated_str != "":
+                                    continue
 
-            except Exception as e:
-                logger.error(f"❌ Lỗi polling OS Ticket tổng thể: {e}")
-            finally:
-                await browser.close()
+                            logger.info(f"✨ Phát hiện biến động tại vé #{ticket_number} (Cập nhật lúc: {last_updated_str}), đang đồng bộ...")
+                            ticket_data = await self.scrape_ticket_detail(context, internal_id, ticket_number)
+                            
+                            if ticket_data:
+                                meta = ticket_data.get("metadata", {})
+                                meta["last_updated_raw"] = last_updated_str
+
+                                if not existing_ticket:
+                                    insert_payload = {
+                                        "source": ticket_data["source"],
+                                        "source_id": ticket_data["source_id"],
+                                        "doc_url": ticket_data.get("doc_url"),
+                                        "sender_email": ticket_data["sender_email"],
+                                        "submitter_name": ticket_data["submitter_name"],
+                                        "subject": ticket_data["subject"],
+                                        "raw_content": ticket_data["raw_content"],
+                                        "country": ticket_data.get("country"),
+                                        "ticket_timestamp": ticket_data.get("ticket_timestamp"),
+                                        "attachments": ticket_data.get("attachments", []),
+                                        "metadata": meta,
+                                        "status": "pending"
+                                    }
+                                    if ticket_data.get("created_at"):
+                                        insert_payload["created_at"] = ticket_data["created_at"]
+
+                                    insert_res = supabase.table("inbox_tickets").insert(insert_payload).execute()
+                                    if insert_res.data:
+                                        new_id = insert_res.data[0]["id"]
+                                        logger.info(f"💾 Đã lưu vé mới #{ticket_number}! Kích hoạt Gemini Triage...")
+                                        await process_ticket_with_ai(new_id)
+                                else:
+                                    ticket_db_id = existing_ticket["id"]
+                                    old_attachments = existing_ticket.get("attachments") or []
+                                    new_attachments = ticket_data.get("attachments") or []
+                                    seen_urls = {att.get("url") for att in old_attachments if isinstance(att, dict)}
+                                    merged_attachments = list(old_attachments)
+                                    for att in new_attachments:
+                                        if att.get("url") not in seen_urls:
+                                            merged_attachments.append(att)
+                                            seen_urls.add(att.get("url"))
+
+                                    update_payload = {
+                                        "subject": ticket_data["subject"],
+                                        "raw_content": ticket_data["raw_content"],
+                                        "doc_url": ticket_data.get("doc_url"),
+                                        "attachments": merged_attachments,
+                                        "metadata": meta,
+                                        "status": "pending" if existing_ticket.get("status") in ["completed", "dismissed"] else existing_ticket.get("status")
+                                    }
+                                    if ticket_data.get("created_at"):
+                                        update_payload["created_at"] = ticket_data["created_at"]
+
+                                    supabase.table("inbox_tickets").update(update_payload).eq("id", ticket_db_id).execute()
+                                    logger.info(f"🔄 Đã cập nhật diễn biến mới cho vé #{ticket_number}! Kích hoạt Gemini Triage phân tích lại...")
+                                    await process_ticket_with_ai(ticket_db_id)
+
+                        except Exception as row_err:
+                            logger.error(f"❌ Lỗi khi quét dòng {r_idx}: {row_err}")
+                            continue
+
+                except Exception as e:
+                    logger.error(f"❌ Lỗi polling OS Ticket tổng thể: {e}")
+                finally:
+                    await browser.close()
+                    gc.collect()
+
 
 osticket_service = OSTicketService()
 

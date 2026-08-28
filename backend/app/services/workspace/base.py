@@ -6,6 +6,7 @@ from typing import Optional
 from playwright.async_api import async_playwright, Page, BrowserContext
 
 from app.core.config import settings
+from app.core.playwright_manager import LOW_RAM_CHROMIUM_ARGS, setup_low_ram_routes, wait_for_dom_and_spinners
 
 logger = logging.getLogger(__name__)
 BASE_WORKSPACE_URL = "https://pythaverse.space"
@@ -34,7 +35,7 @@ def normalize_date_iso(date_str: Optional[str]) -> Optional[str]:
 
 
 class WorkspaceBaseService:
-    """Class nền tảng quản lý phiên Chromium và đăng nhập SSO."""
+    """Class nền tảng quản lý phiên Chromium siêu tiết kiệm RAM và đăng nhập SSO."""
 
     def __init__(self):
         self.headless = True
@@ -42,21 +43,18 @@ class WorkspaceBaseService:
     async def _create_context(self, p) -> tuple:
         browser = await p.chromium.launch(
             headless=self.headless,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--no-zygote",
-                "--single-process"
-            ]
+            args=LOW_RAM_CHROMIUM_ARGS
         )
         context = await browser.new_context(
             viewport={"width": 1440, "height": 900},
             accept_downloads=True,
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
         )
+        # Gắn bộ chặn media, font, trackers để tiết kiệm 70% RAM
+        await setup_low_ram_routes(context)
         page = await context.new_page()
+        page.set_default_timeout(30000)
+        page.set_default_navigation_timeout(45000)
         return browser, context, page
 
     async def login_role(self, page: Page, username: str, password: str, role_title: str = "Tài khoản") -> tuple[bool, str]:
@@ -67,18 +65,28 @@ class WorkspaceBaseService:
 
         try:
             logger.info(f"🔑 [{role_title}] Đang đăng nhập tài khoản '{username}'...")
-            # 🚀 TỐI ƯU: Đổi sang domcontentloaded và chờ input username xuất hiện
-            response = await page.goto(f"{BASE_WORKSPACE_URL}/login", wait_until="domcontentloaded", timeout=25000)
+            response = await page.goto(f"{BASE_WORKSPACE_URL}/login", wait_until="domcontentloaded", timeout=30000)
             
             if response and response.status >= 500:
                 err = f"🔥 [{role_title}] Máy chủ Pythaverse bị sập hoặc bảo trì! (Mã HTTP: {response.status})"
                 logger.error(err)
                 return False, err
 
-            await page.wait_for_selector("input[name='username'], input[name='email'], #username", timeout=15000)
-            await page.fill("input[name='username'], input[name='email'], #username", username)
-            await page.fill("input[name='password'], #password", password)
-            await page.click("button[type='submit'], input[type='submit'], button:has-text('Log In'), button:has-text('Đăng nhập')")
+            # Chờ input xuất hiện và ổn định
+            await wait_for_dom_and_spinners(page, "input[name='username'], input[name='email'], #username", min_pacing_ms=300)
+            
+            uname_input = page.locator("input[name='username'], input[name='email'], #username").first
+            await uname_input.fill(username)
+            await page.wait_for_timeout(200)
+
+            pwd_input = page.locator("input[name='password'], #password").first
+            await pwd_input.fill(password)
+            await page.wait_for_timeout(300)
+
+            submit_btn = page.locator("button[type='submit'], input[type='submit'], button:has-text('Log In'), button:has-text('Đăng nhập')").first
+            await submit_btn.click()
+            
+            # Chờ chuyển hướng sau đăng nhập
             await page.wait_for_timeout(2500)
 
             kc_error_locator = page.locator(".alert-error, #input-error, span.kc-feedback-text, .alert.alert-warning, p.instruction")

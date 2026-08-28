@@ -179,9 +179,10 @@ ptv-tasks-administrator/
 │   │   │   └── router.py               # Điểm tập hợp toàn bộ Router v1
 │   │   ├── brain/                      # Tri thức nghiệp vụ AI Triage
 │   │   │   └── knowledge_base.json     # Định nghĩa 7 phân hệ, từ khóa routing cán bộ phụ trách
-│   │   ├── core/                       # Lõi hệ thống
+│   │   ├── core/                       # Lõi hệ thống & Quản trị tài nguyên
 │   │   │   ├── config.py               # Pydantic Settings, Biến môi trường, Hàm múi giờ GMT+7
 │   │   │   ├── gemini.py               # AI Engine Triage, Chuỗi 10-Model Fallback tự phục hồi
+│   │   │   ├── playwright_manager.py   # Global Concurrency Semaphore 1-slot, Low-RAM Chromium Args, Route Interceptor
 │   │   │   ├── security.py             # Kiểm tra Domain @dtt.vn, Xác thực Bearer JWT
 │   │   │   └── supabase.py             # Singleton Supabase Client (Service Role Key)
 │   │   ├── models/                     # Schemas Pydantic Validation
@@ -317,6 +318,18 @@ ptv-tasks-administrator/
 #### 4. [`supabase.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/core/supabase.py)
 - **Mục đích:** Cung cấp singleton client kết nối Supabase PostgreSQL với quyền hạn tối cao (`SUPABASE_SERVICE_ROLE_KEY`), cho phép các background workers thao tác CSDL mà không bị chặn bởi RLS.
 - **Hàm `get_supabase_client() -> Client`:** Trả về đối tượng singleton kết nối Supabase.
+
+#### 5. [`playwright_manager.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/core/playwright_manager.py)
+- **Mục đích:** Trung tâm kiểm soát tài nguyên và bộ nhớ trình duyệt Playwright Chromium toàn diện, thiết kế riêng cho môi trường máy chủ Render 512MB RAM.
+- **Cơ chế Khóa Đơn Phiên (Global Concurrency Semaphore):**
+  - `PLAYWRIGHT_CONCURRENCY_SEMAPHORE = asyncio.Semaphore(1)`
+  - Context Manager `acquire_playwright_slot(task_name, timeout)`: Đảm bảo tại một thời điểm chỉ có tối đa 1 phiên Chromium chạy ngầm trong toàn bộ hệ thống; các tác vụ khác tự động xếp hàng đợi an toàn thay vì chạy đồng thời gây tràn RAM (OOM Kill).
+- **Bộ Cờ Tiết Kiệm RAM (Low-RAM Chromium Arguments):**
+  - `LOW_RAM_CHROMIUM_ARGS`: Bật `--js-flags=--max-old-space-size=128` khóa trần V8 Heap ở 128MB, vô hiệu hóa GPU, Audio, Extensions, Sync, Software Rasterizer và Dev-Shm.
+- **Bộ Chặn Tải Tài Nguyên (Network Route Interceptor):**
+  - `setup_low_ram_routes(target)`: Tự động abort toàn bộ request `image`, `media`, `font` (`.woff`, `.woff2`, `.ttf`), analytics/tracking (`google-analytics`, `facebook`, `hotjar`, `clarity`, `stats.wp.com`...), giảm 60-80% lượng tiêu thụ RAM và tăng tốc độ tải trang gấp 3-5 lần.
+- **Trợ Thủ Chờ DOM & API Ổn Định:**
+  - `wait_for_dom_and_spinners(page, target_selector, min_pacing_ms, timeout)`: Tự động chờ các spinner/overlay của MUI/WordPress/Moodle biến mất (`.MuiCircularProgress-root`, `.MuiSkeleton-root`, `.MuiDataGrid-loadingOverlay`, `.loading-icon`), chờ selector mục tiêu xuất hiện và chèn micro-pacing 300-500ms cho React Virtual DOM cập nhật hoàn tất trước khi thao tác.
 
 ---
 

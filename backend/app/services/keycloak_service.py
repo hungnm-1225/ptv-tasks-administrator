@@ -1,10 +1,12 @@
 import logging
 import re
+import gc
 import httpx
 from email.utils import parseaddr
 from typing import List, Dict, Any, Optional
 from playwright.async_api import async_playwright
 from app.core.config import settings
+from app.core.playwright_manager import acquire_playwright_slot, LOW_RAM_CHROMIUM_ARGS, setup_low_ram_routes
 
 logger = logging.getLogger(__name__)
 
@@ -187,101 +189,104 @@ class KeycloakService:
         elif target_status == "disabled":
             desired_enabled = False
 
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"]
-            )
-            context = await browser.new_context(
-                viewport={"width": 1440, "height": 900},
-                user_agent=BROWSER_HEADERS["User-Agent"]
-            )
-            page = await context.new_page()
+        async with acquire_playwright_slot("Keycloak Playwright RPA Fallback"):
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=LOW_RAM_CHROMIUM_ARGS
+                )
+                context = await browser.new_context(
+                    viewport={"width": 1440, "height": 900},
+                    user_agent=BROWSER_HEADERS["User-Agent"]
+                )
+                await setup_low_ram_routes(context)
+                page = await context.new_page()
 
-            try:
-                console_url = f"{self.raw_server_url}/auth/admin/master/console/#/realms/{self.target_realm}/users"
-                await page.goto(console_url, wait_until="networkidle", timeout=30000)
+                try:
+                    console_url = f"{self.raw_server_url}/auth/admin/master/console/#/realms/{self.target_realm}/users"
+                    await page.goto(console_url, wait_until="domcontentloaded", timeout=30000)
 
-                if await page.locator("input#username").count() > 0:
-                    await page.fill("input#username", self.admin_user)
-                    await page.fill("input#password", self.admin_pass)
-                    await page.click("input#kc-login")
-                    await page.wait_for_load_state("networkidle")
+                    if await page.locator("input#username").count() > 0:
+                        await page.fill("input#username", self.admin_user)
+                        await page.fill("input#password", self.admin_pass)
+                        await page.click("input#kc-login")
+                        await page.wait_for_load_state("domcontentloaded")
 
-                for raw_id in identifiers:
-                    clean_id = clean_email_identifier(raw_id)
-                    if not clean_id:
-                        continue
-
-                    logs = []
-                    try:
-                        await page.goto(console_url, wait_until="networkidle")
-                        await page.wait_for_selector('input[data-ng-model="query.search"]', timeout=15000)
-
-                        search_box = page.locator('input[data-ng-model="query.search"]')
-                        await search_box.fill(clean_id)
-                        await page.keyboard.press("Enter")
-                        await page.wait_for_timeout(1500)
-
-                        rows = page.locator('table#user-table tbody tr[ng-repeat="user in users"]')
-                        count = await rows.count()
-                        target_row = None
-
-                        for i in range(count):
-                            row = rows.nth(i)
-                            email_txt = await row.locator("td.clip").nth(1).inner_text()
-                            uname_txt = await row.locator("td.clip").nth(0).inner_text()
-                            if email_txt.strip().lower() == clean_id or uname_txt.strip().lower() == clean_id:
-                                target_row = row
-                                break
-
-                        if not target_row:
-                            failed_count += 1
-                            results.append({"identifier": clean_id, "status": "failed", "message": "Không tìm thấy User trên bảng UI"})
+                    for raw_id in identifiers:
+                        clean_id = clean_email_identifier(raw_id)
+                        if not clean_id:
                             continue
 
-                        await target_row.locator("td.kc-action-cell:has-text('Edit')").click()
-                        await page.wait_for_selector('ul.nav-tabs', timeout=10000)
+                        logs = []
+                        try:
+                            await page.goto(console_url, wait_until="domcontentloaded")
+                            await page.wait_for_selector('input[data-ng-model="query.search"]', timeout=15000)
 
-                        if desired_enabled is not None:
-                            enabled_chk = page.locator("input#userEnabled")
-                            if await enabled_chk.is_checked() != desired_enabled:
-                                await page.locator("label[for='userEnabled']").click()
-                                await page.click("button[kc-save]")
-                                await page.wait_for_timeout(1000)
-                            logs.append(f"Set enabled={desired_enabled}")
-
-                        if action_type in ["bulk_reset_pass", "bulk_both", "reset_password"]:
-                            if password_option == "email_lowercase":
-                                pass_val = clean_id
-                            elif password_option == "default_secure":
-                                pass_val = "Pythaverse@2026"
-                            else:
-                                pass_val = custom_password or clean_id
-
-                            await page.click('ul.nav-tabs a:has-text("Credentials")')
-                            await page.wait_for_selector("input#newPas", timeout=10000)
-
-                            await page.fill("input#newPas", pass_val)
-                            await page.fill("input#confirmPas", pass_val)
-
-                            temp_chk = page.locator("input#temporaryPassword")
-                            if await temp_chk.is_checked() != temporary:
-                                await page.locator("label[for='temporaryPassword']").click()
-
-                            await page.click('button[data-ng-click="resetPassword(true)"]')
+                            search_box = page.locator('input[data-ng-model="query.search"]')
+                            await search_box.fill(clean_id)
+                            await page.keyboard.press("Enter")
                             await page.wait_for_timeout(1500)
-                            logs.append(f"Reset pass ({password_option}) [Temporary={temporary}]")
 
-                        success_count += 1
-                        results.append({"identifier": clean_id, "status": "success", "logs": " | ".join(logs)})
-                    except Exception as err:
-                        failed_count += 1
-                        results.append({"identifier": clean_id, "status": "failed", "message": str(err)})
+                            rows = page.locator('table#user-table tbody tr[ng-repeat="user in users"]')
+                            count = await rows.count()
+                            target_row = None
 
-            finally:
-                await context.close()
-                await browser.close()
+                            for i in range(count):
+                                row = rows.nth(i)
+                                email_txt = await row.locator("td.clip").nth(1).inner_text()
+                                uname_txt = await row.locator("td.clip").nth(0).inner_text()
+                                if email_txt.strip().lower() == clean_id or uname_txt.strip().lower() == clean_id:
+                                    target_row = row
+                                    break
+
+                            if not target_row:
+                                failed_count += 1
+                                results.append({"identifier": clean_id, "status": "failed", "message": "Không tìm thấy User trên bảng UI"})
+                                continue
+
+                            await target_row.locator("td.kc-action-cell:has-text('Edit')").click()
+                            await page.wait_for_selector('ul.nav-tabs', timeout=10000)
+
+                            if desired_enabled is not None:
+                                enabled_chk = page.locator("input#userEnabled")
+                                if await enabled_chk.is_checked() != desired_enabled:
+                                    await page.locator("label[for='userEnabled']").click()
+                                    await page.click("button[kc-save]")
+                                    await page.wait_for_timeout(1000)
+                                logs.append(f"Set enabled={desired_enabled}")
+
+                            if action_type in ["bulk_reset_pass", "bulk_both", "reset_password"]:
+                                if password_option == "email_lowercase":
+                                    pass_val = clean_id
+                                elif password_option == "default_secure":
+                                    pass_val = "Pythaverse@2026"
+                                else:
+                                    pass_val = custom_password or clean_id
+
+                                await page.click('ul.nav-tabs a:has-text("Credentials")')
+                                await page.wait_for_selector("input#newPas", timeout=10000)
+
+                                await page.fill("input#newPas", pass_val)
+                                await page.fill("input#confirmPas", pass_val)
+
+                                temp_chk = page.locator("input#temporaryPassword")
+                                if await temp_chk.is_checked() != temporary:
+                                    await page.locator("label[for='temporaryPassword']").click()
+
+                                await page.click('button[data-ng-click="resetPassword(true)"]')
+                                await page.wait_for_timeout(1500)
+                                logs.append(f"Reset pass ({password_option}) [Temporary={temporary}]")
+
+                            success_count += 1
+                            results.append({"identifier": clean_id, "status": "success", "logs": " | ".join(logs)})
+                        except Exception as err:
+                            failed_count += 1
+                            results.append({"identifier": clean_id, "status": "failed", "message": str(err)})
+
+                finally:
+                    await context.close()
+                    await browser.close()
+                    gc.collect()
 
         return {
             "total": len(identifiers),
