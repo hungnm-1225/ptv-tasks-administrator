@@ -120,6 +120,10 @@ export const CoursesManagerPage: React.FC = () => {
     const [editingCatNew, setEditingCatNew] = useState<string>('');
     const [isCatSubmitting, setIsCatSubmitting] = useState<boolean>(false);
 
+    // Modal Merge & Delete Category (Thay thế window.prompt)
+    const [mergeModalCat, setMergeModalCat] = useState<{ cat: string; count: number } | null>(null);
+    const [targetMergeCat, setTargetMergeCat] = useState<string>('');
+
     // ⚡ SWR SILENT FETCH
     const loadData = useCallback(async (forceSpinner = false) => {
         const cached = getCoursesCache(activePane);
@@ -476,25 +480,29 @@ export const CoursesManagerPage: React.FC = () => {
         }
     };
 
-    const handleDeleteCategory = async (cat: string) => {
+    const handleDeleteCategory = (cat: string) => {
+        const count = courses.filter((c) => c.category === cat).length;
         const remainingCats = categories.filter((c) => c !== cat);
-        let promptMsg = `Anh muốn làm gì với các khóa học thuộc danh mục "${cat}"?\n\n- Nhập tên danh mục đích để GỘP (${remainingCats.join(', ')})\n- Bấm Cancel để hủy bỏ.`;
+        setTargetMergeCat(remainingCats[0] || 'SWRP');
+        setMergeModalCat({ cat, count });
+    };
 
-        const targetCat = window.prompt(promptMsg, remainingCats[0] || 'SWRP');
-        if (!targetCat) return;
+    const handleConfirmMergeCategory = async () => {
+        if (!mergeModalCat || !targetMergeCat.trim()) return;
 
         setIsCatSubmitting(true);
         try {
             await fetchApi(
-                `/courses/${activePane}/categories/${cat}?target_category=${encodeURIComponent(
-                    targetCat.trim().toUpperCase()
+                `/courses/${activePane}/categories/${mergeModalCat.cat}?target_category=${encodeURIComponent(
+                    targetMergeCat.trim().toUpperCase()
                 )}`,
                 {
                     method: 'DELETE',
                 }
             );
-            toast.success(`Đã gộp danh mục "${cat}" vào "${targetCat.toUpperCase()}"!`);
+            toast.success(`Đã gộp danh mục "${mergeModalCat.cat}" vào "${targetMergeCat.trim().toUpperCase()}" thành công!`);
             clearCoursesCache(activePane);
+            setMergeModalCat(null);
             loadData(true);
         } catch (err: any) {
             toast.error('Lỗi khi gộp danh mục: ' + (err.message || err));
@@ -899,6 +907,122 @@ export const CoursesManagerPage: React.FC = () => {
                                 className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer"
                             >
                                 Đóng
+                            </button>
+                        </div>
+                    </motion.div>
+                </div>,
+                document.body
+            )}
+
+            {/* ========================================================================= */}
+            {/* MODAL GỘP & XÓA DANH MỤC (CATEGORY MERGE & DELETE - REACT PORTAL) */}
+            {/* ========================================================================= */}
+            {mergeModalCat && createPortal(
+                <div
+                    onClick={(e) => {
+                        if (e.target === e.currentTarget && !isCatSubmitting) setMergeModalCat(null);
+                    }}
+                    className="fixed inset-0 z-[10000] bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+                >
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.95, y: 15 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95, y: 15 }}
+                        transition={{ duration: 0.2 }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-[min(94vw,520px)] shadow-2xl p-6 sm:p-7 relative my-auto space-y-4"
+                    >
+                        <button
+                            disabled={isCatSubmitting}
+                            onClick={() => setMergeModalCat(null)}
+                            className="absolute right-5 top-5 p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white rounded-lg transition-colors cursor-pointer"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+
+                        <div className="flex items-start gap-3.5">
+                            <div className="w-11 h-11 rounded-2xl bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60 flex items-center justify-center shrink-0">
+                                <ArrowRightLeft className="w-5 h-5" />
+                            </div>
+                            <div>
+                                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                                    Gộp & Xóa Danh Mục
+                                </h3>
+                                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                                    Chuyển toàn bộ các khóa học sang danh mục mới trước khi xóa.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="p-4 bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-800/40 rounded-2xl space-y-2 text-xs">
+                            <div className="flex items-center justify-between text-slate-700 dark:text-slate-300">
+                                <span>Danh mục nguồn cần xóa:</span>
+                                <span className="font-bold text-slate-900 dark:text-white uppercase font-mono px-2 py-0.5 bg-white dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700">
+                                    {mergeModalCat.cat}
+                                </span>
+                            </div>
+                            <div className="flex items-center justify-between text-slate-700 dark:text-slate-300">
+                                <span>Số lượng khóa học bị ảnh hưởng:</span>
+                                <span className="font-bold text-amber-600 dark:text-amber-400">
+                                    {mergeModalCat.count} khóa học
+                                </span>
+                            </div>
+                        </div>
+
+                        <div className="space-y-1.5 text-xs">
+                            <label className="block font-semibold text-slate-700 dark:text-slate-300">
+                                Chọn hoặc Nhập Danh Mục Đích Để Chuyển Tới: <span className="text-rose-500">*</span>
+                            </label>
+                            <div className="space-y-2">
+                                <select
+                                    value={targetMergeCat}
+                                    onChange={(e) => setTargetMergeCat(e.target.value)}
+                                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white outline-none cursor-pointer focus:ring-2 focus:ring-indigo-500 uppercase"
+                                >
+                                    {categories
+                                        .filter((c) => c !== mergeModalCat.cat)
+                                        .map((c) => (
+                                            <option key={c} value={c} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
+                                                Gộp vào danh mục: {c}
+                                            </option>
+                                        ))}
+                                </select>
+
+                                <div className="flex items-center gap-2">
+                                    <span className="text-[11px] text-slate-400">Hoặc tự nhập tên:</span>
+                                    <input
+                                        type="text"
+                                        value={targetMergeCat}
+                                        onChange={(e) => setTargetMergeCat(e.target.value.toUpperCase())}
+                                        placeholder="VD: SWRP, IR, ROBOTICS..."
+                                        className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white uppercase outline-none focus:border-indigo-500"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
+                            <button
+                                type="button"
+                                disabled={isCatSubmitting}
+                                onClick={() => setMergeModalCat(null)}
+                                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-xl transition cursor-pointer border border-slate-200 dark:border-slate-700"
+                            >
+                                Hủy Bỏ
+                            </button>
+
+                            <button
+                                type="button"
+                                disabled={isCatSubmitting || !targetMergeCat.trim()}
+                                onClick={handleConfirmMergeCategory}
+                                className="inline-flex items-center gap-1.5 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer disabled:opacity-50"
+                            >
+                                {isCatSubmitting ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                    <ArrowRightLeft className="w-4 h-4" />
+                                )}
+                                <span>Xác Nhận Gộp & Xóa</span>
                             </button>
                         </div>
                     </motion.div>

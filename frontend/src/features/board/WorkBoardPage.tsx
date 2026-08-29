@@ -30,6 +30,7 @@ import {
 import { toast } from 'sonner';
 import { fetchApi } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
+import { ConfirmDialog } from '../../components/common/ConfirmDialog';
 import { BoardItem, BoardColumnItem, BoardCardItem, BoardSubtask, BoardPriorityItem } from '../../types';
 
 const PRESET_OVERLAYS = [
@@ -124,6 +125,16 @@ export const WorkBoardPage: React.FC = () => {
     const [boardCardOpacity, setBoardCardOpacity] = useState<number>(0.85);
     const [newCategoryInput, setNewCategoryInput] = useState<string>('');
     const [isUploadingBg, setIsUploadingBg] = useState<boolean>(false);
+
+    // Custom Confirm Dialog State (Thay thế window.confirm)
+    const [confirmDialog, setConfirmDialog] = useState<{
+        isOpen: boolean;
+        title: string;
+        description: string;
+        confirmText?: string;
+        variant?: 'danger' | 'warning' | 'primary';
+        onConfirm: () => void;
+    } | null>(null);
 
     const bgFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -389,18 +400,26 @@ export const WorkBoardPage: React.FC = () => {
     };
 
     // 8. Xóa Board (Soft Delete)
-    const handleSoftDeleteBoard = async () => {
+    const handleSoftDeleteBoard = () => {
         if (!activeBoardId) return;
-        if (!window.confirm(`Chuyển bảng "${activeBoard?.title}" vào Thùng rác? (Bảng sẽ tự động xóa vĩnh viễn sau 30 ngày).`)) return;
-
-        try {
-            await fetchApi(`/board/boards/${activeBoardId}`, { method: 'DELETE' });
-            toast.success('Đã chuyển bảng vào Thùng rác.');
-            setIsSettingsModalOpen(false);
-            loadBoards();
-        } catch (err: any) {
-            toast.error('Lỗi xóa bảng: ' + (err.message || err));
-        }
+        setConfirmDialog({
+            isOpen: true,
+            title: 'Chuyển Bảng Vào Thùng Rác?',
+            description: `Bảng "${activeBoard?.title}" sẽ được chuyển vào Thùng rác và lưu trữ an toàn trong 30 ngày trước khi tự động hủy.`,
+            confirmText: 'Chuyển Vào Thùng Rác',
+            variant: 'warning',
+            onConfirm: async () => {
+                try {
+                    await fetchApi(`/board/boards/${activeBoardId}`, { method: 'DELETE' });
+                    toast.success('Đã chuyển bảng vào Thùng rác.');
+                    setConfirmDialog(null);
+                    setIsSettingsModalOpen(false);
+                    loadBoards();
+                } catch (err: any) {
+                    toast.error('Lỗi xóa bảng: ' + (err.message || err));
+                }
+            }
+        });
     };
 
     // 9. Khôi phục Board
@@ -415,27 +434,45 @@ export const WorkBoardPage: React.FC = () => {
     };
 
     // 10. Xóa Vĩnh Viễn Board
-    const handlePermanentDeleteBoard = async (bId: string) => {
-        if (!window.confirm('Hành động này sẽ XÓA VĨNH VIỄN toàn bộ Cột và Thẻ của bảng này và không thể phục hồi. Anh có chắc không?')) return;
-        try {
-            await fetchApi(`/board/boards/${bId}/permanent`, { method: 'DELETE' });
-            toast.success('Đã xóa vĩnh viễn bảng.');
-            loadBoards();
-        } catch (err: any) {
-            toast.error('Lỗi xóa vĩnh viễn: ' + (err.message || err));
-        }
+    const handlePermanentDeleteBoard = (bId: string) => {
+        setConfirmDialog({
+            isOpen: true,
+            title: 'Xóa Vĩnh Viễn Bảng Này?',
+            description: 'Hành động này sẽ XÓA VĨNH VIỄN toàn bộ Cột và Thẻ công việc của bảng này và KHÔNG THỂ PHỤC HỒI. Bạn có chắc chắn không?',
+            confirmText: 'Xóa Vĩnh Viễn',
+            variant: 'danger',
+            onConfirm: async () => {
+                try {
+                    await fetchApi(`/board/boards/${bId}/permanent`, { method: 'DELETE' });
+                    toast.success('Đã xóa vĩnh viễn bảng.');
+                    setConfirmDialog(null);
+                    loadBoards();
+                } catch (err: any) {
+                    toast.error('Lỗi xóa vĩnh viễn: ' + (err.message || err));
+                }
+            }
+        });
     };
 
     // 11. Xóa Cột
-    const handleDeleteColumn = async (colId: string) => {
-        if (!window.confirm('Xác nhận xóa cột này cùng toàn bộ thẻ bên trong?')) return;
-        try {
-            await fetchApi(`/board/columns/${colId}`, { method: 'DELETE' });
-            toast.success('Đã xóa cột!');
-            loadBoardData(activeBoardId, true);
-        } catch (err: any) {
-            toast.error('Lỗi xóa cột: ' + (err.message || err));
-        }
+    const handleDeleteColumn = (colId: string) => {
+        setConfirmDialog({
+            isOpen: true,
+            title: 'Xác Nhận Xóa Cột Này?',
+            description: 'Toàn bộ thẻ nhiệm vụ thuộc cột này cũng sẽ bị xóa. Bạn có chắc chắn muốn tiếp tục?',
+            confirmText: 'Xóa Cột',
+            variant: 'danger',
+            onConfirm: async () => {
+                try {
+                    await fetchApi(`/board/columns/${colId}`, { method: 'DELETE' });
+                    toast.success('Đã xóa cột!');
+                    setConfirmDialog(null);
+                    loadBoardData(activeBoardId, true);
+                } catch (err: any) {
+                    toast.error('Lỗi xóa cột: ' + (err.message || err));
+                }
+            }
+        });
     };
 
     // 12. Lưu Card Chi Tiết
@@ -872,22 +909,24 @@ export const WorkBoardPage: React.FC = () => {
                     >
                         <button
                             onClick={() => setIsSettingsModalOpen(false)}
-                            className="absolute right-5 top-5 p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+                            className="absolute right-5 top-5 p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white rounded-lg cursor-pointer transition-colors"
                         >
                             <X className="w-5 h-5" />
                         </button>
 
-                        <h3 className="text-base font-bold text-white mb-2 flex items-center gap-2">
-                            <Sliders className="w-5 h-5 text-emerald-400" />
+                        <h3 className="text-base font-bold text-slate-900 dark:text-white mb-3 flex items-center gap-2">
+                            <Sliders className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
                             Tùy Chỉnh Toàn Diện – [{activeBoard?.title}]
                         </h3>
 
                         {/* 3 Tabs Điều Khiển */}
-                        <div className="flex bg-slate-950 p-1 rounded-xl mb-4 text-xs">
+                        <div className="flex bg-slate-100 dark:bg-slate-950 p-1.5 rounded-2xl mb-4 text-xs border border-slate-200 dark:border-slate-800 gap-1">
                             <button
                                 type="button"
                                 onClick={() => setSettingsTab('visuals')}
-                                className={`flex-1 py-1.5 rounded-lg font-semibold transition-colors cursor-pointer ${settingsTab === 'visuals' ? 'bg-slate-800 text-white' : 'text-slate-400'
+                                className={`flex-1 py-2 rounded-xl font-bold transition-all cursor-pointer ${settingsTab === 'visuals'
+                                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
+                                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                                     }`}
                             >
                                 🎨 Hình Nền & Độ Mờ
@@ -895,7 +934,9 @@ export const WorkBoardPage: React.FC = () => {
                             <button
                                 type="button"
                                 onClick={() => setSettingsTab('taxonomy')}
-                                className={`flex-1 py-1.5 rounded-lg font-semibold transition-colors cursor-pointer ${settingsTab === 'taxonomy' ? 'bg-slate-800 text-white' : 'text-slate-400'
+                                className={`flex-1 py-2 rounded-xl font-bold transition-all cursor-pointer ${settingsTab === 'taxonomy'
+                                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
+                                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                                     }`}
                             >
                                 🏷️ Phân Loại & Priority
@@ -903,10 +944,12 @@ export const WorkBoardPage: React.FC = () => {
                             <button
                                 type="button"
                                 onClick={() => setSettingsTab('trash')}
-                                className={`flex-1 py-1.5 rounded-lg font-semibold transition-colors cursor-pointer ${settingsTab === 'trash' ? 'bg-slate-800 text-white' : 'text-slate-400'
+                                className={`flex-1 py-2 rounded-xl font-bold transition-all cursor-pointer ${settingsTab === 'trash'
+                                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
+                                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                                     }`}
                             >
-                                🗑️ Thùng Rác Board ({trashBoards.length})
+                                🗑️ Thùng Rác ({trashBoards.length})
                             </button>
                         </div>
 
@@ -914,7 +957,7 @@ export const WorkBoardPage: React.FC = () => {
                             {settingsTab === 'visuals' && (
                                 <div className="space-y-4">
                                     <div>
-                                        <label className="block font-semibold mb-1 text-slate-300">Ảnh Nền Board:</label>
+                                        <label className="block font-semibold mb-1.5 text-slate-700 dark:text-slate-300">Ảnh Nền Board:</label>
                                         <input
                                             type="file"
                                             ref={bgFileInputRef}
@@ -924,31 +967,31 @@ export const WorkBoardPage: React.FC = () => {
                                         />
                                         <div
                                             onClick={() => !isUploadingBg && bgFileInputRef.current?.click()}
-                                            className="border border-dashed border-slate-700 hover:border-emerald-400 p-4 rounded-xl text-center cursor-pointer bg-slate-950/50"
+                                            className="border border-dashed border-slate-300 dark:border-slate-700 hover:border-emerald-500 dark:hover:border-emerald-400 p-4 rounded-2xl text-center cursor-pointer bg-slate-50 dark:bg-slate-950/50 transition-colors"
                                         >
                                             {isUploadingBg ? (
-                                                <span className="text-indigo-400 flex items-center justify-center gap-2">
+                                                <span className="text-indigo-600 dark:text-indigo-400 flex items-center justify-center gap-2 font-medium">
                                                     <Loader2 className="w-4 h-4 animate-spin" /> Đang tải lên Supabase...
                                                 </span>
                                             ) : (
-                                                <span className="text-slate-400 flex items-center justify-center gap-2">
-                                                    <UploadCloud className="w-4 h-4 text-emerald-400" /> Bấm để chọn ảnh nền mới từ máy tính
+                                                <span className="text-slate-600 dark:text-slate-400 flex items-center justify-center gap-2 font-medium">
+                                                    <UploadCloud className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /> Bấm để chọn ảnh nền mới từ máy tính
                                                 </span>
                                             )}
                                         </div>
                                     </div>
 
                                     <div>
-                                        <label className="block font-semibold mb-1 text-slate-300">Màu Lớp Phủ (Overlay Color):</label>
+                                        <label className="block font-semibold mb-1.5 text-slate-700 dark:text-slate-300">Màu Lớp Phủ (Overlay Color):</label>
                                         <div className="flex gap-2 flex-wrap">
                                             {PRESET_OVERLAYS.map((ov) => (
                                                 <button
                                                     key={ov.name}
                                                     type="button"
                                                     onClick={() => setBoardOverlayColor(ov.color)}
-                                                    className={`px-3 py-1 rounded-lg border text-[11px] font-medium transition-all cursor-pointer ${boardOverlayColor === ov.color
-                                                        ? 'border-emerald-500 bg-emerald-950/40 text-emerald-300'
-                                                        : 'border-slate-800 bg-slate-950 text-slate-400'
+                                                    className={`px-3 py-1.5 rounded-xl border text-[11px] font-medium transition-all cursor-pointer ${boardOverlayColor === ov.color
+                                                        ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-bold ring-2 ring-emerald-500/20'
+                                                        : 'border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800'
                                                         }`}
                                                 >
                                                     {ov.name}
@@ -957,11 +1000,11 @@ export const WorkBoardPage: React.FC = () => {
                                         </div>
                                     </div>
 
-                                    <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-800 space-y-3.5">
+                                    <div className="bg-slate-50 dark:bg-slate-950/80 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-xs">
                                         <div>
-                                            <div className="flex justify-between mb-1">
+                                            <div className="flex justify-between mb-1 text-slate-700 dark:text-slate-300">
                                                 <span className="font-semibold">Độ mờ tối của Lớp Phủ Board:</span>
-                                                <span className="font-mono text-emerald-400">{Math.round(boardOverlayOpacity * 100)}%</span>
+                                                <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">{Math.round(boardOverlayOpacity * 100)}%</span>
                                             </div>
                                             <input
                                                 type="range"
@@ -975,9 +1018,9 @@ export const WorkBoardPage: React.FC = () => {
                                         </div>
 
                                         <div>
-                                            <div className="flex justify-between mb-1">
+                                            <div className="flex justify-between mb-1 text-slate-700 dark:text-slate-300">
                                                 <span className="font-semibold">Độ trong suốt nền Cột (Columns):</span>
-                                                <span className="font-mono text-indigo-400">{Math.round(boardColumnOpacity * 100)}%</span>
+                                                <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">{Math.round(boardColumnOpacity * 100)}%</span>
                                             </div>
                                             <input
                                                 type="range"
@@ -991,9 +1034,9 @@ export const WorkBoardPage: React.FC = () => {
                                         </div>
 
                                         <div>
-                                            <div className="flex justify-between mb-1">
+                                            <div className="flex justify-between mb-1 text-slate-700 dark:text-slate-300">
                                                 <span className="font-semibold">Độ trong suốt nền Thẻ (Cards):</span>
-                                                <span className="font-mono text-sky-400">{Math.round(boardCardOpacity * 100)}%</span>
+                                                <span className="font-mono font-bold text-sky-600 dark:text-sky-400">{Math.round(boardCardOpacity * 100)}%</span>
                                             </div>
                                             <input
                                                 type="range"
@@ -1012,14 +1055,14 @@ export const WorkBoardPage: React.FC = () => {
                             {settingsTab === 'taxonomy' && (
                                 <div className="space-y-4">
                                     <div>
-                                        <label className="block font-semibold mb-1.5">
+                                        <label className="block font-semibold mb-2 text-slate-700 dark:text-slate-300">
                                             Danh sách Phân Loại (Categories) áp dụng cho Board:
                                         </label>
-                                        <div className="flex flex-wrap gap-1.5 mb-2">
+                                        <div className="flex flex-wrap gap-2 mb-3">
                                             {boardCategories.map((cat, idx) => (
                                                 <span
                                                     key={idx}
-                                                    className="flex items-center gap-1 px-2.5 py-1 bg-slate-950 border border-slate-800 rounded-lg text-white"
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-800 dark:text-slate-200 font-semibold shadow-xs"
                                                 >
                                                     {cat}
                                                     {boardCategories.length > 1 && (
@@ -1030,9 +1073,9 @@ export const WorkBoardPage: React.FC = () => {
                                                                     prev.map((b) => (b.id === activeBoardId ? { ...b, categories: updated } : b))
                                                                 );
                                                             }}
-                                                            className="text-slate-400 hover:text-rose-400 cursor-pointer"
+                                                            className="text-slate-400 hover:text-rose-500 cursor-pointer"
                                                         >
-                                                            <X className="w-3 h-3" />
+                                                            <X className="w-3.5 h-3.5" />
                                                         </button>
                                                     )}
                                                 </span>
@@ -1045,7 +1088,7 @@ export const WorkBoardPage: React.FC = () => {
                                                 value={newCategoryInput}
                                                 onChange={(e) => setNewCategoryInput(e.target.value)}
                                                 placeholder="Thêm phân loại mới..."
-                                                className="flex-1 p-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none"
+                                                className="flex-1 p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white outline-none focus:border-indigo-500"
                                             />
                                             <button
                                                 type="button"
@@ -1057,7 +1100,7 @@ export const WorkBoardPage: React.FC = () => {
                                                     );
                                                     setNewCategoryInput('');
                                                 }}
-                                                className="px-4 py-2 bg-indigo-600 text-white rounded-xl font-semibold cursor-pointer"
+                                                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold cursor-pointer transition shadow-xs"
                                             >
                                                 Thêm
                                             </button>
@@ -1068,28 +1111,28 @@ export const WorkBoardPage: React.FC = () => {
 
                             {settingsTab === 'trash' && (
                                 <div className="space-y-4">
-                                    <div className="p-4 bg-rose-950/30 border border-rose-900 rounded-2xl flex items-center justify-between">
+                                    <div className="p-4 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60 rounded-2xl flex items-center justify-between">
                                         <div>
-                                            <h4 className="font-bold text-rose-400">Xóa Bảng Hiện Tại</h4>
-                                            <p className="text-[11px] text-slate-400">
+                                            <h4 className="font-bold text-rose-700 dark:text-rose-400">Xóa Bảng Hiện Tại</h4>
+                                            <p className="text-[11px] text-slate-600 dark:text-slate-400">
                                                 Bảng sẽ chuyển vào Thùng rác và lưu trữ an toàn trong 30 ngày.
                                             </p>
                                         </div>
                                         <button
                                             type="button"
                                             onClick={handleSoftDeleteBoard}
-                                            className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl cursor-pointer shadow-xs"
+                                            className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl cursor-pointer shadow-xs transition"
                                         >
                                             Xóa Bảng Này
                                         </button>
                                     </div>
 
                                     <div>
-                                        <h4 className="font-bold mb-2 text-slate-300">
+                                        <h4 className="font-bold mb-2 text-slate-700 dark:text-slate-300">
                                             Danh sách Bảng trong Thùng rác (Tự hủy sau 30 ngày):
                                         </h4>
                                         {trashBoards.length === 0 ? (
-                                            <div className="p-6 text-center text-slate-500 bg-slate-950 rounded-xl border border-slate-800">
+                                            <div className="p-6 text-center text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800">
                                                 Thùng rác trống.
                                             </div>
                                         ) : (
@@ -1097,11 +1140,11 @@ export const WorkBoardPage: React.FC = () => {
                                                 {trashBoards.map((tb) => (
                                                     <div
                                                         key={tb.id}
-                                                        className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between"
+                                                        className="p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between"
                                                     >
                                                         <div>
-                                                            <div className="font-bold text-white">{tb.title}</div>
-                                                            <div className="text-[10px] text-slate-400">
+                                                            <div className="font-bold text-slate-900 dark:text-white">{tb.title}</div>
+                                                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
                                                                 Đã xóa:{' '}
                                                                 {tb.deleted_at
                                                                     ? new Date(tb.deleted_at).toLocaleDateString('vi-VN')
@@ -1112,13 +1155,13 @@ export const WorkBoardPage: React.FC = () => {
                                                         <div className="flex items-center gap-2">
                                                             <button
                                                                 onClick={() => handleRestoreBoard(tb.id)}
-                                                                className="flex items-center gap-1 px-3 py-1.5 bg-emerald-950 text-emerald-300 hover:bg-emerald-900 border border-emerald-800 rounded-lg text-xs font-semibold cursor-pointer"
+                                                                className="flex items-center gap-1 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950 dark:hover:bg-emerald-900 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-lg text-xs font-semibold cursor-pointer transition"
                                                             >
                                                                 <RotateCcw className="w-3.5 h-3.5" /> Khôi phục
                                                             </button>
                                                             <button
                                                                 onClick={() => handlePermanentDeleteBoard(tb.id)}
-                                                                className="p-1.5 text-rose-400 hover:text-rose-300 cursor-pointer"
+                                                                className="p-1.5 text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300 cursor-pointer"
                                                                 title="Xóa vĩnh viễn"
                                                             >
                                                                 <Trash2 className="w-4 h-4" />
@@ -1133,11 +1176,11 @@ export const WorkBoardPage: React.FC = () => {
                             )}
                         </div>
 
-                        <div className="flex justify-end gap-2.5 pt-4 mt-3 border-t border-slate-800">
+                        <div className="flex justify-end gap-2.5 pt-4 mt-3 border-t border-slate-200 dark:border-slate-800">
                             <button
                                 type="button"
                                 onClick={() => setIsSettingsModalOpen(false)}
-                                className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl cursor-pointer"
+                                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl cursor-pointer border border-slate-200 dark:border-slate-700 font-medium transition"
                             >
                                 Đóng
                             </button>
@@ -1145,7 +1188,7 @@ export const WorkBoardPage: React.FC = () => {
                                 <button
                                     type="button"
                                     onClick={handleSaveBoardSettings}
-                                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl cursor-pointer shadow-xs"
+                                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl cursor-pointer shadow-xs transition"
                                 >
                                     Lưu Thiết Lập
                                 </button>
@@ -1484,29 +1527,44 @@ export const WorkBoardPage: React.FC = () => {
                         <div className="flex justify-between pt-4 mt-3 border-t border-slate-200 dark:border-slate-800">
                             <button
                                 type="button"
-                                onClick={async () => {
-                                    if (!window.confirm('Xóa thẻ này?')) return;
-                                    await fetchApi(`/board/cards/${activeCard.id}`, { method: 'DELETE' });
-                                    const updated = cards.filter((c) => c.id !== activeCard.id);
-                                    setCards(updated);
-                                    setBoardLocalCache(`cards_${activeBoardId}`, updated);
-                                    setIsCardModalOpen(false);
+                                onClick={() => {
+                                    if (!activeCard) return;
+                                    setConfirmDialog({
+                                        isOpen: true,
+                                        title: 'Xóa Thẻ Nhiệm Vụ?',
+                                        description: `Bạn có chắc chắn muốn xóa thẻ "${activeCard.title}"? Thẻ sau khi xóa sẽ không thể phục hồi.`,
+                                        confirmText: 'Xóa Thẻ',
+                                        variant: 'danger',
+                                        onConfirm: async () => {
+                                            try {
+                                                await fetchApi(`/board/cards/${activeCard.id}`, { method: 'DELETE' });
+                                                const updated = cards.filter((c) => c.id !== activeCard.id);
+                                                setCards(updated);
+                                                setBoardLocalCache(`cards_${activeBoardId}`, updated);
+                                                setConfirmDialog(null);
+                                                setIsCardModalOpen(false);
+                                                toast.success('Đã xóa thẻ nhiệm vụ!');
+                                            } catch (err: any) {
+                                                toast.error('Lỗi khi xóa thẻ: ' + (err.message || err));
+                                            }
+                                        }
+                                    });
                                 }}
-                                className="text-rose-400 font-bold hover:underline cursor-pointer"
+                                className="text-rose-500 hover:text-rose-700 dark:text-rose-400 font-bold hover:underline cursor-pointer"
                             >
                                 Xóa Thẻ
                             </button>
                             <div className="flex gap-2">
                                 <button
                                     onClick={() => setIsCardModalOpen(false)}
-                                    className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl cursor-pointer"
+                                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-medium rounded-xl cursor-pointer border border-slate-200 dark:border-slate-700 transition"
                                 >
                                     Hủy
                                 </button>
                                 <button
                                     disabled={isSavingCard}
                                     onClick={handleSaveCardDetail}
-                                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-xs cursor-pointer disabled:opacity-50"
+                                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-xs cursor-pointer disabled:opacity-50 transition"
                                 >
                                     Lưu Thay Đổi
                                 </button>
@@ -1514,6 +1572,19 @@ export const WorkBoardPage: React.FC = () => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* Custom Confirm Dialog Modal */}
+            {confirmDialog && (
+                <ConfirmDialog
+                    isOpen={confirmDialog.isOpen}
+                    title={confirmDialog.title}
+                    description={confirmDialog.description}
+                    confirmText={confirmDialog.confirmText}
+                    variant={confirmDialog.variant}
+                    onConfirm={confirmDialog.onConfirm}
+                    onCancel={() => setConfirmDialog(null)}
+                />
             )}
         </div>
     );
