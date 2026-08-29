@@ -187,3 +187,97 @@
   outline-offset: 2px;
   border-radius: 4px;
 }
+
+/* Custom Sun/Moon Theme Switcher (AG Modern Aesthetics) */
+.pty-theme-switch {
+  font-size: 17px;
+  position: relative;
+  display: inline-block;
+  width: 64px;
+  height: 34px;
+  cursor: pointer;
+}
+
+.pty-theme-input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.pty-theme-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #73C0FC;
+  transition: 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  border-radius: 30px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.pty-theme-slider:before {
+  position: absolute;
+  content: "";
+  height: 28px;
+  width: 28px;
+  border-radius: 50%;
+  left: 3px;
+  bottom: 3px;
+  z-index: 2;
+  background-color: #ffffff;
+  transition: 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
+}
+
+.pty-sun-icon svg {
+  position: absolute;
+  top: 6px;
+  left: 35px;
+  z-index: 1;
+  width: 22px;
+  height: 22px;
+  transition: opacity 0.3s ease;
+  animation: pty-rotate 15s linear infinite;
+}
+
+.pty-moon-icon svg {
+  fill: #73C0FC;
+  position: absolute;
+  top: 6px;
+  left: 7px;
+  z-index: 1;
+  width: 20px;
+  height: 20px;
+  transition: opacity 0.3s ease;
+  animation: pty-tilt 5s linear infinite;
+}
+
+@keyframes pty-rotate {
+  0% { transform: rotate(0); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes pty-tilt {
+  0% { transform: rotate(0deg); }
+  25% { transform: rotate(-10deg); }
+  75% { transform: rotate(10deg); }
+  100% { transform: rotate(0deg); }
+}
+
+.pty-theme-input:checked + .pty-theme-slider {
+  background-color: #183153;
+}
+
+.pty-theme-input:focus + .pty-theme-slider {
+  box-shadow: 0 0 0 2px #4f46e5;
+}
+
+.pty-theme-input:checked + .pty-theme-slider:before {
+  transform: translateX(30px);
+  background-color: #f1f5f9;
+}
+

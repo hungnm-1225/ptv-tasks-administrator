@@ -28,12 +28,11 @@ import {
 } from 'lucide-react';
 import { authorConfig as defaultAuthorConfig } from '../../config/authorConfig';
 import { useAuth } from '../../context/AuthContext';
-import { useTheme } from '../../context/ThemeContext';
+import { ThemeToggle } from '../../components/common/ThemeToggle';
 import { supabase } from '../../lib/supabase';
 
 export const LandingPage: React.FC = () => {
   const { user } = useAuth();
-  const { theme, toggleTheme } = useTheme();
 
   // State lưu thông tin tác giả, khởi tạo mặc định bằng authorConfig
   const [author, setAuthor] = useState(defaultAuthorConfig);
@@ -101,18 +100,8 @@ export const LandingPage: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Theme Toggle Button */}
-            <button
-              onClick={toggleTheme}
-              title={theme === 'light' ? 'Chuyển sang Giao diện Tối' : 'Chuyển sang Giao diện Sáng'}
-              className="p-2 rounded-xl bg-slate-100/80 hover:bg-slate-200/80 dark:bg-slate-800/80 dark:hover:bg-slate-700/80 border border-slate-200/80 dark:border-slate-700/80 text-slate-600 dark:text-slate-300 transition cursor-pointer"
-            >
-              {theme === 'light' ? (
-                <Moon className="w-4 h-4 text-slate-700" />
-              ) : (
-                <Sun className="w-4 h-4 text-amber-400" />
-              )}
-            </button>
+            {/* Theme Toggle */}
+            <ThemeToggle scale={0.82} />
 
             {user ? (
               <Link

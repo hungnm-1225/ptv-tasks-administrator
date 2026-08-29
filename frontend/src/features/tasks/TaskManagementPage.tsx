@@ -1,5 +1,5 @@
 // frontend/src/features/tasks/TaskManagementPage.tsx
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -92,7 +92,18 @@ export const TaskManagementPage: React.FC = () => {
   // Modals & Drawer State
   const [selectedTask, setSelectedTask] = useState<BotAutomationTask | null>(null);
   const [detailDrawerTask, setDetailDrawerTask] = useState<BotAutomationTask | null>(null);
+  const detailDrawerTaskIdRef = useRef<string | null>(null);
   const [modalMode, setModalMode] = useState<'form' | 'json'>('form');
+
+  const openDetailDrawer = (task: BotAutomationTask) => {
+    detailDrawerTaskIdRef.current = task.id;
+    setDetailDrawerTask(task);
+  };
+
+  const closeDetailDrawer = () => {
+    detailDrawerTaskIdRef.current = null;
+    setDetailDrawerTask(null);
+  };
 
   // Clipboard Copied states
   const [copiedPayload, setCopiedPayload] = useState<boolean>(false);
@@ -129,8 +140,8 @@ export const TaskManagementPage: React.FC = () => {
         setTaskLocalCache('master_task_cache', data);
 
         // Cập nhật lại detailDrawerTask nếu đang mở
-        if (detailDrawerTask) {
-          const fresh = data.find(t => t.id === detailDrawerTask.id);
+        if (detailDrawerTaskIdRef.current) {
+          const fresh = data.find(t => t.id === detailDrawerTaskIdRef.current);
           if (fresh) setDetailDrawerTask(fresh);
         }
       }
@@ -141,7 +152,7 @@ export const TaskManagementPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [detailDrawerTask]);
+  }, []);
 
   useEffect(() => {
     loadTasks();
@@ -751,7 +762,7 @@ export const TaskManagementPage: React.FC = () => {
                   return (
                     <tr
                       key={task.id}
-                      onClick={() => setDetailDrawerTask(task)}
+                      onClick={() => openDetailDrawer(task)}
                       className="group transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/40 cursor-pointer"
                     >
                       {/* Mã Tác Vụ */}
@@ -853,7 +864,7 @@ export const TaskManagementPage: React.FC = () => {
                               )}
 
                               <button
-                                onClick={() => setDetailDrawerTask(task)}
+                                onClick={() => openDetailDrawer(task)}
                                 className="inline-flex items-center gap-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 transition cursor-pointer"
                               >
                                 <Terminal className="h-3.5 w-3.5 text-indigo-500" />
@@ -883,7 +894,7 @@ export const TaskManagementPage: React.FC = () => {
             return (
               <div
                 key={task.id}
-                onClick={() => setDetailDrawerTask(task)}
+                onClick={() => openDetailDrawer(task)}
                 className="group relative flex flex-col justify-between rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs transition-all hover:border-indigo-300 hover:shadow-md cursor-pointer space-y-4"
               >
                 <div className="space-y-2.5">
@@ -924,7 +935,7 @@ export const TaskManagementPage: React.FC = () => {
                       </button>
                     ) : (
                       <button
-                        onClick={() => setDetailDrawerTask(task)}
+                        onClick={() => openDetailDrawer(task)}
                         className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-700 dark:text-slate-300"
                       >
                         Chi Tiết
@@ -944,7 +955,9 @@ export const TaskManagementPage: React.FC = () => {
       {detailDrawerTask && createPortal(
         <div
           id="task-detail-drawer-overlay"
-          onClick={() => setDetailDrawerTask(null)}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeDetailDrawer();
+          }}
           className="fixed inset-0 z-[9999] flex justify-end bg-slate-950/70 backdrop-blur-sm transition-opacity"
         >
           <motion.div
@@ -953,7 +966,7 @@ export const TaskManagementPage: React.FC = () => {
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 28, stiffness: 220 }}
             onClick={(e) => e.stopPropagation()}
-            className="flex h-full w-full max-w-full sm:max-w-2xl lg:max-w-3xl flex-col bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden"
+            className="flex h-full w-[min(100vw,680px)] sm:w-[620px] lg:w-[680px] flex-col bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden"
           >
             {/* Drawer Header */}
             <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 px-6 py-4 bg-slate-50/70 dark:bg-slate-850/50 shrink-0">
@@ -990,7 +1003,7 @@ export const TaskManagementPage: React.FC = () => {
                   <button
                     onClick={(e) => {
                       handleOpenReview(detailDrawerTask, e);
-                      setDetailDrawerTask(null);
+                      closeDetailDrawer();
                     }}
                     className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700 transition shadow-xs cursor-pointer"
                   >
@@ -999,8 +1012,12 @@ export const TaskManagementPage: React.FC = () => {
                   </button>
                 )}
                 <button
-                  onClick={() => setDetailDrawerTask(null)}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 transition cursor-pointer"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeDetailDrawer();
+                  }}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200 transition cursor-pointer"
                 >
                   <X className="h-5 w-5" />
                 </button>
@@ -1148,7 +1165,7 @@ export const TaskManagementPage: React.FC = () => {
             exit={{ opacity: 0, scale: 0.95, y: 15 }}
             transition={{ duration: 0.2, ease: 'easeOut' }}
             onClick={(e) => e.stopPropagation()}
-            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-full sm:max-w-3xl lg:max-w-4xl overflow-hidden shadow-2xl space-y-4 my-auto"
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-[min(94vw,840px)] overflow-hidden shadow-2xl space-y-4 my-auto"
           >
             <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/70 dark:bg-slate-850/40">
               <div className="flex items-center gap-2.5">

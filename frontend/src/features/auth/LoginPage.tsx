@@ -1,14 +1,13 @@
 // frontend/src/features/auth/LoginPage.tsx
 import React, { useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Zap, ShieldCheck, Sun, Moon } from 'lucide-react';
+import { Zap, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { useTheme } from '../../context/ThemeContext';
+import { ThemeToggle } from '../../components/common/ThemeToggle';
 import { toast } from 'sonner';
 
 export const LoginPage: React.FC = () => {
   const { user, signInWithGoogle } = useAuth();
-  const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -29,17 +28,7 @@ export const LoginPage: React.FC = () => {
     <div className="min-h-screen bg-[#F8FAFC] dark:bg-[#0B0F17] text-slate-900 dark:text-slate-100 flex flex-col justify-center items-center p-6 relative transition-colors duration-200">
       {/* Top controls */}
       <div className="absolute top-6 right-6 flex items-center gap-3">
-        <button
-          onClick={toggleTheme}
-          title={theme === 'light' ? 'Chuyển sang Giao diện Tối' : 'Chuyển sang Giao diện Sáng'}
-          className="p-2 rounded-xl bg-white/80 hover:bg-slate-100 dark:bg-slate-900/80 dark:hover:bg-slate-800 border border-slate-200/80 dark:border-slate-800/80 text-slate-600 dark:text-slate-300 transition cursor-pointer shadow-xs"
-        >
-          {theme === 'light' ? (
-            <Moon className="w-4 h-4 text-slate-700" />
-          ) : (
-            <Sun className="w-4 h-4 text-amber-400" />
-          )}
-        </button>
+        <ThemeToggle scale={0.82} />
 
         <Link
           to="/"

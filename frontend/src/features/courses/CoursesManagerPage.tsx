@@ -793,7 +793,7 @@ export const CoursesManagerPage: React.FC = () => {
                         exit={{ opacity: 0, scale: 0.95, y: 15 }}
                         transition={{ duration: 0.2 }}
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-xl shadow-2xl p-6 sm:p-7 relative my-auto"
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-[min(94vw,580px)] shadow-2xl p-6 sm:p-7 relative my-auto"
                     >
                         <button
                             onClick={() => {
@@ -922,7 +922,7 @@ export const CoursesManagerPage: React.FC = () => {
                         exit={{ opacity: 0, scale: 0.95, y: 15 }}
                         transition={{ duration: 0.2 }}
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-4xl shadow-2xl p-6 sm:p-7 relative my-auto"
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-[min(94vw,860px)] shadow-2xl p-6 sm:p-7 relative my-auto"
                     >
                         <button
                             onClick={() => setIsBulkModalOpen(false)}
@@ -1167,7 +1167,7 @@ export const CoursesManagerPage: React.FC = () => {
                         exit={{ opacity: 0, scale: 0.95, y: 15 }}
                         transition={{ duration: 0.2 }}
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-xl shadow-2xl p-6 sm:p-7 relative my-auto"
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-[min(94vw,560px)] shadow-2xl p-6 sm:p-7 relative my-auto"
                     >
                         <button
                             onClick={() => setIsModalOpen(false)}
@@ -1302,7 +1302,7 @@ export const CoursesManagerPage: React.FC = () => {
                         exit={{ opacity: 0, scale: 0.95, y: 15 }}
                         transition={{ duration: 0.2 }}
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-md shadow-2xl p-6 relative my-auto"
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-[min(94vw,480px)] shadow-2xl p-6 relative my-auto"
                     >
                         <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 flex items-center justify-center mb-4 mx-auto">
                             <AlertTriangle className="w-6 h-6" />

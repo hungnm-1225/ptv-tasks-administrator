@@ -487,18 +487,18 @@ export const WorkBoardPage: React.FC = () => {
             {/* Content Container */}
             <div className="relative z-10 w-full h-full flex flex-col p-4 space-y-3">
                 {/* Top Control Bar */}
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-900/80 backdrop-blur-md p-3 rounded-2xl border border-slate-800 shadow-xl text-xs">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md p-3 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl text-xs">
                     <div className="flex items-center gap-2.5 flex-wrap">
                         {/* Board Selector */}
                         <div className="flex items-center gap-2">
-                            <Layers className="w-4 h-4 text-indigo-400" />
+                            <Layers className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                             <select
                                 value={activeBoardId}
                                 onChange={(e) => setActiveBoardId(e.target.value)}
-                                className="px-3 py-1.5 bg-slate-850 border border-slate-700 rounded-xl text-xs font-bold text-white outline-none cursor-pointer focus:ring-2 focus:ring-indigo-500"
+                                className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white outline-none cursor-pointer focus:ring-2 focus:ring-indigo-500 shadow-xs"
                             >
                                 {boards.map((b) => (
-                                    <option key={b.id} value={b.id}>
+                                    <option key={b.id} value={b.id} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-medium">
                                         📋 {b.title}
                                     </option>
                                 ))}
@@ -508,18 +508,18 @@ export const WorkBoardPage: React.FC = () => {
                         {/* Nút Tạo Board */}
                         <button
                             onClick={() => setIsNewBoardModalOpen(true)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl border border-slate-700 transition cursor-pointer shadow-xs font-semibold"
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl border border-slate-200 dark:border-slate-700 transition cursor-pointer shadow-xs font-semibold"
                         >
-                            <FolderPlus className="w-3.5 h-3.5 text-indigo-400" />
+                            <FolderPlus className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
                             <span>Tạo Board</span>
                         </button>
 
                         {/* Nút Cài Đặt Chuyên Sâu */}
                         <button
                             onClick={() => setIsSettingsModalOpen(true)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl border border-slate-700 transition cursor-pointer shadow-xs font-semibold"
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl border border-slate-200 dark:border-slate-700 transition cursor-pointer shadow-xs font-semibold"
                         >
-                            <Sliders className="w-3.5 h-3.5 text-emerald-400" />
+                            <Sliders className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                             <span>Tùy Chỉnh Board</span>
                         </button>
 
@@ -548,12 +548,12 @@ export const WorkBoardPage: React.FC = () => {
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 placeholder="Tìm thẻ nhiệm vụ..."
-                                className="pl-8 pr-3 py-1.5 bg-slate-950/80 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-400 outline-none w-36 focus:w-48 transition-all"
+                                className="pl-8 pr-3 py-1.5 bg-slate-100 dark:bg-slate-800/90 border border-slate-300 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none w-36 focus:w-48 transition-all shadow-xs"
                             />
                             {searchQuery && (
                                 <button
                                     onClick={() => setSearchQuery('')}
-                                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-white"
                                 >
                                     <X className="w-3 h-3" />
                                 </button>
@@ -564,11 +564,11 @@ export const WorkBoardPage: React.FC = () => {
                         <select
                             value={filterPriority}
                             onChange={(e) => setFilterPriority(e.target.value)}
-                            className="px-2.5 py-1.5 bg-slate-850 border border-slate-700 rounded-xl text-xs text-slate-200 outline-none cursor-pointer"
+                            className="px-2.5 py-1.5 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none cursor-pointer shadow-xs"
                         >
-                            <option value="all">⚡ Tất cả Priority</option>
+                            <option value="all" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">⚡ Tất cả Priority</option>
                             {boardPriorities.map((p) => (
-                                <option key={p.key} value={p.key}>
+                                <option key={p.key} value={p.key} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
                                     {p.label}
                                 </option>
                             ))}
@@ -578,11 +578,11 @@ export const WorkBoardPage: React.FC = () => {
                         <select
                             value={filterCategory}
                             onChange={(e) => setFilterCategory(e.target.value)}
-                            className="px-2.5 py-1.5 bg-slate-850 border border-slate-700 rounded-xl text-xs text-slate-200 outline-none cursor-pointer"
+                            className="px-2.5 py-1.5 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none cursor-pointer shadow-xs"
                         >
-                            <option value="all">🏷️ Tất cả Phân loại</option>
+                            <option value="all" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">🏷️ Tất cả Phân loại</option>
                             {boardCategories.map((cat) => (
-                                <option key={cat} value={cat}>
+                                <option key={cat} value={cat} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
                                     {cat}
                                 </option>
                             ))}
@@ -868,7 +868,7 @@ export const WorkBoardPage: React.FC = () => {
                 >
                     <div
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-full sm:max-w-2xl lg:max-w-3xl p-6 sm:p-8 text-xs text-slate-200 shadow-2xl relative max-h-[92vh] flex flex-col my-auto"
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-[min(94vw,760px)] p-6 sm:p-8 text-xs text-slate-800 dark:text-slate-200 shadow-2xl relative max-h-[92vh] flex flex-col my-auto"
                     >
                         <button
                             onClick={() => setIsSettingsModalOpen(false)}
@@ -1165,16 +1165,16 @@ export const WorkBoardPage: React.FC = () => {
                 >
                     <div
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-full sm:max-w-lg lg:max-w-xl p-6 sm:p-7 text-xs text-slate-200 shadow-2xl relative my-auto"
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-[min(94vw,520px)] p-6 sm:p-7 text-xs text-slate-800 dark:text-slate-200 shadow-2xl relative my-auto"
                     >
                         <button
                             onClick={() => setIsNewBoardModalOpen(false)}
-                            className="absolute right-5 top-5 p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+                            className="absolute right-5 top-5 p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white rounded-lg cursor-pointer"
                         >
                             <X className="w-5 h-5" />
                         </button>
-                        <h3 className="text-base font-bold text-white mb-3 flex items-center gap-2">
-                            <FolderPlus className="w-5 h-5 text-indigo-400" /> Tạo Board Mới
+                        <h3 className="text-base font-bold text-slate-900 dark:text-white mb-3 flex items-center gap-2">
+                            <FolderPlus className="w-5 h-5 text-indigo-600 dark:text-indigo-400" /> Tạo Board Mới
                         </h3>
                         <form
                             onSubmit={async (e) => {
@@ -1196,7 +1196,7 @@ export const WorkBoardPage: React.FC = () => {
                             className="space-y-4"
                         >
                             <div>
-                                <label className="block font-semibold mb-1 text-slate-300">
+                                <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">
                                     Tên Board <span className="text-rose-500">*</span>
                                 </label>
                                 <input
@@ -1205,20 +1205,20 @@ export const WorkBoardPage: React.FC = () => {
                                     value={newBoardTitle}
                                     onChange={(e) => setNewBoardTitle(e.target.value)}
                                     placeholder="VD: Quản Lý Khách Hàng / RPA..."
-                                    className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-indigo-500"
+                                    className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white outline-none focus:border-indigo-500"
                                 />
                             </div>
                             <div className="flex justify-end gap-2 pt-2">
                                 <button
                                     type="button"
                                     onClick={() => setIsNewBoardModalOpen(false)}
-                                    className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl cursor-pointer"
+                                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl cursor-pointer font-medium transition"
                                 >
                                     Hủy
                                 </button>
                                 <button
                                     type="submit"
-                                    className="px-5 py-2 bg-indigo-600 text-white font-bold rounded-xl shadow-xs cursor-pointer"
+                                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-xs cursor-pointer transition"
                                 >
                                     Tạo Board
                                 </button>
@@ -1238,15 +1238,15 @@ export const WorkBoardPage: React.FC = () => {
                 >
                     <div
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-full sm:max-w-lg lg:max-w-xl p-6 sm:p-7 text-xs text-slate-200 shadow-2xl relative my-auto"
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-[min(94vw,520px)] p-6 sm:p-7 text-xs text-slate-800 dark:text-slate-200 shadow-2xl relative my-auto"
                     >
                         <button
                             onClick={() => setIsColumnModalOpen(false)}
-                            className="absolute right-5 top-5 p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+                            className="absolute right-5 top-5 p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white rounded-lg cursor-pointer"
                         >
                             <X className="w-5 h-5" />
                         </button>
-                        <h3 className="text-base font-bold text-white mb-3">
+                        <h3 className="text-base font-bold text-slate-900 dark:text-white mb-3">
                             {editingColumn ? 'Chỉnh Sửa Cột' : 'Thêm Cột Mới'}
                         </h3>
                         <form
@@ -1278,38 +1278,38 @@ export const WorkBoardPage: React.FC = () => {
                             className="space-y-3"
                         >
                             <div>
-                                <label className="block font-semibold mb-1 text-slate-300">Tên Cột</label>
+                                <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Tên Cột</label>
                                 <input
                                     type="text"
                                     required
                                     value={columnFormTitle}
                                     onChange={(e) => setColumnFormTitle(e.target.value)}
-                                    className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none"
+                                    className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white outline-none"
                                 />
                             </div>
                             <div>
-                                <label className="block font-semibold mb-1 text-slate-300">Loại Cột</label>
+                                <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Loại Cột</label>
                                 <select
                                     value={columnFormType}
                                     onChange={(e) => setColumnFormType(e.target.value)}
-                                    className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none cursor-pointer"
+                                    className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white outline-none cursor-pointer"
                                 >
-                                    <option value="custom">📌 Thông thường</option>
-                                    <option value="done">✓ Hoàn thành (Tích xanh & Mờ dịu)</option>
-                                    <option value="abort">🚫 Hủy bỏ (Gạch ngang chữ)</option>
+                                    <option value="custom" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">📌 Thông thường</option>
+                                    <option value="done" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">✓ Hoàn thành (Tích xanh & Mờ dịu)</option>
+                                    <option value="abort" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">🚫 Hủy bỏ (Gạch ngang chữ)</option>
                                 </select>
                             </div>
                             <div className="flex justify-end gap-2 pt-3">
                                 <button
                                     type="button"
                                     onClick={() => setIsColumnModalOpen(false)}
-                                    className="px-4 py-2 bg-slate-800 rounded-xl text-slate-300 cursor-pointer"
+                                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-xl text-slate-700 dark:text-slate-300 cursor-pointer font-medium transition"
                                 >
                                     Hủy
                                 </button>
                                 <button
                                     type="submit"
-                                    className="px-5 py-2 bg-indigo-600 text-white font-bold rounded-xl shadow-xs cursor-pointer"
+                                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-xs cursor-pointer transition"
                                 >
                                     Lưu Cột
                                 </button>
@@ -1329,11 +1329,11 @@ export const WorkBoardPage: React.FC = () => {
                 >
                     <div
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-full sm:max-w-2xl lg:max-w-3xl p-6 sm:p-8 text-xs text-slate-200 shadow-2xl relative max-h-[92vh] flex flex-col my-auto"
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-[min(94vw,760px)] p-6 sm:p-8 text-xs text-slate-800 dark:text-slate-200 shadow-2xl relative max-h-[92vh] flex flex-col my-auto"
                     >
                         <button
                             onClick={() => setIsCardModalOpen(false)}
-                            className="absolute right-5 top-5 p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+                            className="absolute right-5 top-5 p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white rounded-lg cursor-pointer"
                         >
                             <X className="w-5 h-5" />
                         </button>
@@ -1342,20 +1342,20 @@ export const WorkBoardPage: React.FC = () => {
                             type="text"
                             value={activeCard.title}
                             onChange={(e) => setActiveCard({ ...activeCard, title: e.target.value })}
-                            className="text-base font-bold text-white bg-transparent border-b border-slate-800 focus:border-indigo-500 outline-none pb-1 mb-4"
+                            className="text-base font-bold text-slate-900 dark:text-white bg-transparent border-b border-slate-200 dark:border-slate-800 focus:border-indigo-500 outline-none pb-1 mb-4"
                         />
 
                         <div className="space-y-4 flex-1 overflow-y-auto pr-1 scrollbar-thin">
-                            <div className="grid grid-cols-2 gap-3 bg-slate-950/70 p-3.5 rounded-2xl border border-slate-800">
+                            <div className="grid grid-cols-2 gap-3 bg-slate-50 dark:bg-slate-950/70 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800">
                                 <div>
-                                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Mức độ ưu tiên</label>
+                                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Mức độ ưu tiên</label>
                                     <select
                                         value={activeCard.priority}
                                         onChange={(e) => setActiveCard({ ...activeCard, priority: e.target.value })}
-                                        className="w-full p-2 bg-slate-900 border border-slate-700 rounded-xl text-white font-bold cursor-pointer"
+                                        className="w-full p-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-bold cursor-pointer shadow-xs"
                                     >
                                         {boardPriorities.map((p) => (
-                                            <option key={p.key} value={p.key}>
+                                            <option key={p.key} value={p.key} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
                                                 {p.label}
                                             </option>
                                         ))}
@@ -1363,14 +1363,14 @@ export const WorkBoardPage: React.FC = () => {
                                 </div>
 
                                 <div>
-                                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Phân loại (Category)</label>
+                                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Phân loại (Category)</label>
                                     <select
                                         value={activeCard.category || 'Khác'}
                                         onChange={(e) => setActiveCard({ ...activeCard, category: e.target.value })}
-                                        className="w-full p-2 bg-slate-900 border border-slate-700 rounded-xl text-white cursor-pointer"
+                                        className="w-full p-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white cursor-pointer shadow-xs"
                                     >
                                         {boardCategories.map((cat) => (
-                                            <option key={cat} value={cat}>
+                                            <option key={cat} value={cat} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
                                                 {cat}
                                             </option>
                                         ))}
@@ -1378,17 +1378,17 @@ export const WorkBoardPage: React.FC = () => {
                                 </div>
 
                                 <div>
-                                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Người phụ trách</label>
+                                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Người phụ trách</label>
                                     <input
                                         type="text"
                                         value={activeCard.assigned_name || ''}
                                         onChange={(e) => setActiveCard({ ...activeCard, assigned_name: e.target.value })}
-                                        className="w-full p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"
+                                        className="w-full p-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white shadow-xs"
                                     />
                                 </div>
 
                                 <div>
-                                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Hạn chót (Ngày & Giờ)</label>
+                                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Hạn chót (Ngày & Giờ)</label>
                                     <input
                                         type="datetime-local"
                                         value={activeCard.due_date ? activeCard.due_date.slice(0, 16) : ''}
@@ -1398,33 +1398,33 @@ export const WorkBoardPage: React.FC = () => {
                                                 due_date: e.target.value ? new Date(e.target.value).toISOString() : null
                                             })
                                         }
-                                        className="w-full p-2 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono text-[11px]"
+                                        className="w-full p-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-mono text-[11px] shadow-xs"
                                     />
                                 </div>
                             </div>
 
                             <div>
-                                <label className="block font-semibold mb-1 text-slate-300">Mô tả công việc</label>
+                                <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Mô tả công việc</label>
                                 <textarea
                                     rows={3}
                                     value={activeCard.description || ''}
                                     onChange={(e) => setActiveCard({ ...activeCard, description: e.target.value })}
                                     placeholder="Chi tiết công việc..."
-                                    className="w-full p-3 bg-slate-950 border border-slate-800 rounded-2xl text-white outline-none"
+                                    className="w-full p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl text-slate-900 dark:text-white outline-none"
                                 />
                             </div>
 
                             <div>
-                                <label className="block font-semibold mb-1 flex justify-between text-slate-300">
+                                <label className="block font-semibold mb-1 flex justify-between text-slate-700 dark:text-slate-300">
                                     <span>Checklist công việc:</span>
-                                    <span className="text-slate-400">
+                                    <span className="text-slate-500 dark:text-slate-400">
                                         {(activeCard.subtasks || []).filter((s) => s.completed).length}/
                                         {(activeCard.subtasks || []).length}
                                     </span>
                                 </label>
                                 <div className="space-y-1.5 mb-2">
                                     {(activeCard.subtasks || []).map((sub) => (
-                                        <div key={sub.id} className="flex items-center gap-2 p-2.5 bg-slate-950 rounded-xl border border-slate-800">
+                                        <div key={sub.id} className="flex items-center gap-2 p-2.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800">
                                             <input
                                                 type="checkbox"
                                                 checked={sub.completed}
@@ -1436,7 +1436,7 @@ export const WorkBoardPage: React.FC = () => {
                                                 }}
                                                 className="w-4 h-4 rounded text-indigo-600 cursor-pointer"
                                             />
-                                            <span className={`flex-1 ${sub.completed ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+                                            <span className={`flex-1 ${sub.completed ? 'line-through text-slate-400 dark:text-slate-500' : 'text-slate-800 dark:text-slate-200'}`}>
                                                 {sub.title}
                                             </span>
                                             <button
@@ -1444,7 +1444,7 @@ export const WorkBoardPage: React.FC = () => {
                                                     const updated = (activeCard.subtasks || []).filter((s) => s.id !== sub.id);
                                                     setActiveCard({ ...activeCard, subtasks: updated });
                                                 }}
-                                                className="text-slate-400 hover:text-rose-400 cursor-pointer"
+                                                className="text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 cursor-pointer"
                                             >
                                                 <X className="w-3.5 h-3.5" />
                                             </button>
@@ -1458,7 +1458,7 @@ export const WorkBoardPage: React.FC = () => {
                                         value={newSubtaskTitle}
                                         onChange={(e) => setNewSubtaskTitle(e.target.value)}
                                         placeholder="Thêm đầu việc..."
-                                        className="flex-1 p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none"
+                                        className="flex-1 p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white outline-none"
                                     />
                                     <button
                                         type="button"
@@ -1473,7 +1473,7 @@ export const WorkBoardPage: React.FC = () => {
                                             });
                                             setNewSubtaskTitle('');
                                         }}
-                                        className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl cursor-pointer shadow-xs"
+                                        className="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-white font-bold rounded-xl cursor-pointer shadow-xs"
                                     >
                                         Thêm
                                     </button>
@@ -1481,7 +1481,7 @@ export const WorkBoardPage: React.FC = () => {
                             </div>
                         </div>
 
-                        <div className="flex justify-between pt-4 mt-3 border-t border-slate-800">
+                        <div className="flex justify-between pt-4 mt-3 border-t border-slate-200 dark:border-slate-800">
                             <button
                                 type="button"
                                 onClick={async () => {
