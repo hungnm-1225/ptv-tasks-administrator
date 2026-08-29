@@ -793,7 +793,7 @@ export const CoursesManagerPage: React.FC = () => {
                         exit={{ opacity: 0, scale: 0.95, y: 15 }}
                         transition={{ duration: 0.2 }}
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-lg shadow-2xl p-6 sm:p-7 relative my-auto"
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-xl shadow-2xl p-6 sm:p-7 relative my-auto"
                     >
                         <button
                             onClick={() => {
@@ -922,7 +922,7 @@ export const CoursesManagerPage: React.FC = () => {
                         exit={{ opacity: 0, scale: 0.95, y: 15 }}
                         transition={{ duration: 0.2 }}
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full shadow-2xl p-6 sm:p-7 relative my-auto"
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-4xl shadow-2xl p-6 sm:p-7 relative my-auto"
                     >
                         <button
                             onClick={() => setIsBulkModalOpen(false)}
@@ -1167,7 +1167,7 @@ export const CoursesManagerPage: React.FC = () => {
                         exit={{ opacity: 0, scale: 0.95, y: 15 }}
                         transition={{ duration: 0.2 }}
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-lg shadow-2xl p-6 sm:p-7 relative my-auto"
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-xl shadow-2xl p-6 sm:p-7 relative my-auto"
                     >
                         <button
                             onClick={() => setIsModalOpen(false)}

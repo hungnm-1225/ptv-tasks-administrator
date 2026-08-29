@@ -868,7 +868,7 @@ export const WorkBoardPage: React.FC = () => {
                 >
                     <div
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-slate-900 border border-slate-800 rounded-3xl max-w-3xl w-full p-6 sm:p-8 text-xs text-slate-200 shadow-2xl relative max-h-[92vh] flex flex-col my-auto"
+                        className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-full sm:max-w-2xl lg:max-w-3xl p-6 sm:p-8 text-xs text-slate-200 shadow-2xl relative max-h-[92vh] flex flex-col my-auto"
                     >
                         <button
                             onClick={() => setIsSettingsModalOpen(false)}
@@ -1165,7 +1165,7 @@ export const WorkBoardPage: React.FC = () => {
                 >
                     <div
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full p-6 sm:p-7 text-xs text-slate-200 shadow-2xl relative my-auto"
+                        className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-full sm:max-w-lg lg:max-w-xl p-6 sm:p-7 text-xs text-slate-200 shadow-2xl relative my-auto"
                     >
                         <button
                             onClick={() => setIsNewBoardModalOpen(false)}
@@ -1238,7 +1238,7 @@ export const WorkBoardPage: React.FC = () => {
                 >
                     <div
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full p-6 sm:p-7 text-xs text-slate-200 shadow-2xl relative my-auto"
+                        className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-full sm:max-w-lg lg:max-w-xl p-6 sm:p-7 text-xs text-slate-200 shadow-2xl relative my-auto"
                     >
                         <button
                             onClick={() => setIsColumnModalOpen(false)}
@@ -1329,7 +1329,7 @@ export const WorkBoardPage: React.FC = () => {
                 >
                     <div
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-slate-900 border border-slate-800 rounded-3xl max-w-3xl w-full p-6 sm:p-8 text-xs text-slate-200 shadow-2xl relative max-h-[92vh] flex flex-col my-auto"
+                        className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-full sm:max-w-2xl lg:max-w-3xl p-6 sm:p-8 text-xs text-slate-200 shadow-2xl relative max-h-[92vh] flex flex-col my-auto"
                     >
                         <button
                             onClick={() => setIsCardModalOpen(false)}

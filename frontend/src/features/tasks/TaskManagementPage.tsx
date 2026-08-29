@@ -953,7 +953,7 @@ export const TaskManagementPage: React.FC = () => {
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 28, stiffness: 220 }}
             onClick={(e) => e.stopPropagation()}
-            className="flex h-full w-full flex-col bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden"
+            className="flex h-full w-full max-w-full sm:max-w-2xl lg:max-w-3xl flex-col bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden"
           >
             {/* Drawer Header */}
             <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 px-6 py-4 bg-slate-50/70 dark:bg-slate-850/50 shrink-0">
@@ -1148,7 +1148,7 @@ export const TaskManagementPage: React.FC = () => {
             exit={{ opacity: 0, scale: 0.95, y: 15 }}
             transition={{ duration: 0.2, ease: 'easeOut' }}
             onClick={(e) => e.stopPropagation()}
-            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-4xl overflow-hidden shadow-2xl space-y-4 my-auto"
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-full sm:max-w-3xl lg:max-w-4xl overflow-hidden shadow-2xl space-y-4 my-auto"
           >
             <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/70 dark:bg-slate-850/40">
               <div className="flex items-center gap-2.5">

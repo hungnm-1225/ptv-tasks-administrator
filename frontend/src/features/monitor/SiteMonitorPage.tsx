@@ -878,7 +878,7 @@ export const SiteMonitorPage: React.FC = () => {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-ink border border-rule-2 rounded-2xl w-full max-w-5xl shadow-2xl overflow-hidden flex flex-col max-h-[88vh] animate-in fade-in zoom-in-95 duration-150 my-auto"
+            className="bg-ink border border-rule-2 rounded-2xl w-full max-w-full sm:max-w-4xl lg:max-w-5xl shadow-2xl overflow-hidden flex flex-col max-h-[88vh] animate-in fade-in zoom-in-95 duration-150 my-auto"
           >
             <div className="px-5 py-3.5 bg-ink border-b border-rule-2 flex items-center justify-between">
               <div className="flex items-center gap-2 text-primary-ink">
