@@ -673,28 +673,31 @@ export const CoursesManagerPage: React.FC = () => {
                         ))}
                     </div>
                 ) : filteredCourses.length === 0 ? (
-                    <div className="text-center py-16 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-8 shadow-xs w-full">
-                        <FolderOpen className="w-12 h-12 mx-auto text-slate-300 dark:text-slate-600 mb-3" />
-                        <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">
+                    <div className="w-full flex flex-col items-center justify-center text-center py-16 px-6 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl shadow-xs my-2">
+                        <div className="w-14 h-14 rounded-2xl bg-indigo-50 dark:bg-slate-800/80 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-slate-700/60 flex items-center justify-center mb-4">
+                            <FolderOpen className="w-7 h-7" />
+                        </div>
+                        <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
                             Không tìm thấy khóa học nào phù hợp
                         </h3>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 max-w-lg mx-auto leading-relaxed">
+                        <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-2 max-w-md mx-auto leading-relaxed">
                             Hãy thử thay đổi từ khóa tìm kiếm hoặc bấm nút bên dưới để tạo mới khóa học.
                         </p>
-                        <div className="mt-4 flex items-center justify-center gap-3">
+                        <div className="mt-5 flex items-center justify-center gap-3 flex-wrap">
                             {searchQuery && (
                                 <button
                                     onClick={() => setSearchQuery('')}
-                                    className="px-3.5 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold transition cursor-pointer"
+                                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold transition cursor-pointer border border-slate-200 dark:border-slate-700"
                                 >
                                     Xóa tìm kiếm
                                 </button>
                             )}
                             <button
                                 onClick={() => handleOpenModal()}
-                                className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+                                className="inline-flex items-center gap-1.5 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
                             >
-                                + Thêm Khóa Học Mới
+                                <Plus className="w-4 h-4" />
+                                <span>Thêm Khóa Học Mới</span>
                             </button>
                         </div>
                     </div>

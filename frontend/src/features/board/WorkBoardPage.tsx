@@ -504,7 +504,7 @@ export const WorkBoardPage: React.FC = () => {
     };
 
     return (
-        <div className="relative w-full h-[calc(100vh-64px)] flex flex-col overflow-hidden bg-slate-950 text-slate-100">
+        <div className="relative w-full h-full flex-1 flex flex-col overflow-hidden bg-slate-950 text-slate-100">
             {/* 🖼️ Lớp Hình Nền + Lớp Phủ Màu Mờ Tùy Chỉnh (0-100%) */}
             {activeBoard?.background_url && (
                 <div
@@ -522,9 +522,9 @@ export const WorkBoardPage: React.FC = () => {
             />
 
             {/* Content Container */}
-            <div className="relative z-10 w-full h-full flex flex-col p-4 space-y-3">
+            <div className="relative z-10 w-full h-full flex-1 flex flex-col p-3 sm:p-4 space-y-3 overflow-hidden min-h-0">
                 {/* Top Control Bar */}
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md p-3 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl text-xs">
+                <div className="shrink-0 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md p-3 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl text-xs">
                     <div className="flex items-center gap-2.5 flex-wrap">
                         {/* Board Selector */}
                         <div className="flex items-center gap-2">
@@ -627,8 +627,8 @@ export const WorkBoardPage: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Kanban Board Columns Area */}
-                <div className="flex-1 flex gap-3.5 items-start overflow-x-auto pb-2 scrollbar-thin">
+                {/* Kanban Board Columns Area (Tự động fit 100% chiều cao và cuộn ngang mượt mà) */}
+                <div className="flex-1 flex gap-3.5 items-stretch overflow-x-auto overflow-y-hidden pb-1 min-h-0 scrollbar-thin">
                     {columns.map((col) => {
                         const colCards = filteredCards.filter((c) => c.column_id === col.id);
                         const isDoneCol = col.column_type === 'done';
@@ -640,7 +640,7 @@ export const WorkBoardPage: React.FC = () => {
                                 key={col.id}
                                 onDragOver={(e) => handleDragOver(e, col.id)}
                                 onDrop={() => handleDrop(col.id)}
-                                className={`w-72 shrink-0 p-3 rounded-2xl border transition-all flex flex-col max-h-[calc(100vh-160px)] shadow-xl ${isDragOver ? 'ring-2 ring-indigo-500 border-indigo-500 scale-[1.01]' : 'border-slate-800'
+                                className={`w-72 sm:w-80 shrink-0 p-3 rounded-2xl border transition-all flex flex-col h-full shadow-xl overflow-hidden ${isDragOver ? 'ring-2 ring-indigo-500 border-indigo-500 scale-[1.01]' : 'border-slate-800'
                                     }`}
                                 style={{
                                     backgroundColor: hexToRgba('#0f172a', activeBoard?.column_opacity ?? 0.75),
@@ -648,7 +648,7 @@ export const WorkBoardPage: React.FC = () => {
                                 }}
                             >
                                 {/* Header Cột */}
-                                <div className="flex items-center justify-between mb-2.5 px-1">
+                                <div className="shrink-0 flex items-center justify-between mb-2.5 px-1">
                                     <div className="flex items-center gap-2">
                                         <span className="w-2.5 h-2.5 rounded-full shadow-xs" style={{ backgroundColor: col.color }} />
                                         <h3 className="text-xs font-bold text-white truncate max-w-[130px]">{col.title}</h3>
