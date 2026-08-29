@@ -627,8 +627,8 @@ export const WorkBoardPage: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Kanban Board Columns Area (Tự động fit 100% chiều cao và cuộn ngang mượt mà) */}
-                <div className="flex-1 flex gap-3.5 items-stretch overflow-x-auto overflow-y-hidden pb-1 min-h-0 scrollbar-thin">
+                {/* Kanban Board Columns Area (Tự động co theo thẻ, cuộn ngang mượt mà) */}
+                <div className="flex-1 flex gap-3.5 items-start overflow-x-auto overflow-y-hidden pb-2 min-h-0 scrollbar-thin">
                     {columns.map((col) => {
                         const colCards = filteredCards.filter((c) => c.column_id === col.id);
                         const isDoneCol = col.column_type === 'done';
@@ -640,7 +640,7 @@ export const WorkBoardPage: React.FC = () => {
                                 key={col.id}
                                 onDragOver={(e) => handleDragOver(e, col.id)}
                                 onDrop={() => handleDrop(col.id)}
-                                className={`w-72 sm:w-80 shrink-0 p-3 rounded-2xl border transition-all flex flex-col h-full shadow-xl overflow-hidden ${isDragOver ? 'ring-2 ring-indigo-500 border-indigo-500 scale-[1.01]' : 'border-slate-800'
+                                className={`w-72 sm:w-80 shrink-0 p-3 rounded-2xl border transition-all flex flex-col max-h-full shadow-xl overflow-hidden ${isDragOver ? 'ring-2 ring-indigo-500 border-indigo-500 scale-[1.01]' : 'border-slate-800'
                                     }`}
                                 style={{
                                     backgroundColor: hexToRgba('#0f172a', activeBoard?.column_opacity ?? 0.75),
@@ -695,7 +695,7 @@ export const WorkBoardPage: React.FC = () => {
                                                         className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-left hover:bg-slate-800 font-semibold text-slate-200"
                                                     >
                                                         <Settings2 className="w-3.5 h-3.5 text-indigo-400" />
-                                                        <span>Sửa Cột Này</span>
+                                                        <span>Sửa Cột</span>
                                                     </button>
                                                     <div className="h-px bg-slate-800 my-1" />
                                                     <button
@@ -706,7 +706,7 @@ export const WorkBoardPage: React.FC = () => {
                                                         className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-left text-rose-400 hover:bg-rose-950/40 font-semibold"
                                                     >
                                                         <Trash2 className="w-3.5 h-3.5" />
-                                                        <span>Xóa Cột Này</span>
+                                                        <span>Xóa Cột</span>
                                                     </button>
                                                 </div>
                                             </>
@@ -779,13 +779,7 @@ export const WorkBoardPage: React.FC = () => {
                                 )}
 
                                 {/* Danh Sách Thẻ */}
-                                <div className="flex-1 overflow-y-auto space-y-2.5 pr-0.5 scrollbar-thin">
-                                    {colCards.length === 0 && inlineAddingColId !== col.id && (
-                                        <div className="py-12 text-center text-slate-500 text-[11px] border border-dashed border-slate-800 rounded-xl">
-                                            Kéo thả thẻ vào đây
-                                        </div>
-                                    )}
-
+                                <div className="flex-1 overflow-y-auto space-y-2.5 pr-0.5 min-h-0 scrollbar-thin">
                                     {colCards.map((card) => {
                                         const subtasks = card.subtasks || [];
                                         const completedSubtasks = subtasks.filter((s) => s.completed).length;
@@ -884,6 +878,23 @@ export const WorkBoardPage: React.FC = () => {
                                             </div>
                                         );
                                     })}
+
+                                    {/* Nút Thêm Thẻ Mới Trực Tiếp ở Chân Cột */}
+                                    {inlineAddingColId !== col.id && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setInlineAddingColId(col.id);
+                                                setInlineTaskTitle('');
+                                                setQuickAddPriority('low');
+                                                setQuickAddCategory('Khác');
+                                            }}
+                                            className="w-full mt-2 py-2 px-3 flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-slate-700/80 hover:border-indigo-500/80 bg-slate-900/30 hover:bg-indigo-950/30 text-slate-400 hover:text-indigo-300 text-xs font-semibold transition-all cursor-pointer group shadow-2xs"
+                                        >
+                                            <Plus className="w-4 h-4 text-slate-500 group-hover:text-indigo-400 transition-colors" />
+                                            <span>Thêm thẻ nhiệm vụ</span>
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         );

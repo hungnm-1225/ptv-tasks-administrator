@@ -159,7 +159,15 @@
   border-color: rgba(51, 65, 85, 0.9);
 }
 
-/* Subtle Scrollbars — light + dark */
+/* ── Modern Sleek Custom Scrollbars — Cross-browser support ── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.4) transparent;
+}
+.dark * {
+  scrollbar-color: rgba(100, 116, 139, 0.4) transparent;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -168,17 +176,30 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: oklch(75% 0.010 250);
-  border-radius: 4px;
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 9999px;
+  transition: background-color 0.2s ease;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: oklch(65% 0.012 250);
+  background: rgba(100, 116, 139, 0.65);
 }
 .dark ::-webkit-scrollbar-thumb {
-  background: oklch(38% 0.015 250);
+  background: rgba(100, 116, 139, 0.35);
 }
 .dark ::-webkit-scrollbar-thumb:hover {
-  background: oklch(50% 0.015 250);
+  background: rgba(148, 163, 184, 0.6);
+}
+
+/* Custom Scrollbar Utility Classes */
+.scrollbar-thin {
+  scrollbar-width: thin;
+}
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
 }
 
 /* Focus ring — appears instantly, never animates */
