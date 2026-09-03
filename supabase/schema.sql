@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS workspace_credentials_vault (
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS workspace_contracts_cache (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    contract_id VARCHAR(100) NOT NULL,
+    contract_code VARCHAR(100) NOT NULL,
     distributor_name VARCHAR(255),
     distributor_code VARCHAR(50),
     partner_name VARCHAR(255),
@@ -262,7 +262,7 @@ CREATE INDEX IF NOT EXISTS idx_ws_vault_org         ON workspace_credentials_vau
 
 CREATE INDEX IF NOT EXISTS idx_ws_contracts_type    ON workspace_contracts_cache(contract_type);
 CREATE INDEX IF NOT EXISTS idx_ws_contracts_dist    ON workspace_contracts_cache(distributor_code);
-CREATE INDEX IF NOT EXISTS idx_ws_contracts_id      ON workspace_contracts_cache(contract_id);
+CREATE INDEX IF NOT EXISTS idx_ws_contracts_code    ON workspace_contracts_cache(contract_code);
 CREATE INDEX IF NOT EXISTS idx_ws_orders_dist       ON workspace_orders_cache(distributor_code);
 CREATE INDEX IF NOT EXISTS idx_ws_orders_id         ON workspace_orders_cache(order_id);
 
