@@ -1,7 +1,7 @@
 # backend/app/services/workspace/account_service.py
 import os
 import logging
-from typing import Dict, Any
+from typing import Optional, Dict, Any
 from playwright.async_api import async_playwright
 
 from app.services.workspace.base import WorkspaceBaseService, BASE_WORKSPACE_URL
