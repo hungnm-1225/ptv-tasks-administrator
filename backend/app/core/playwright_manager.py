@@ -11,35 +11,55 @@ from playwright.async_api import Route, Page, BrowserContext
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# 🔒 GLOBAL CONCURRENCY SEMAPHORE (KHÓA 1 PHIÊN DUY NHẤT TRÊN RENDER 512MB RAM)
+# 🔒 DUAL-LANE CONCURRENCY ARCHITECTURE (PHÂN LÀN KÉP ĐỘC LẬP - TỐI ĐA 2 CHROMIUM)
 # =============================================================================
-# Đảm bảo tại một thời điểm chỉ có DUY NHẤT 1 phiên Chromium chạy trong toàn bộ hệ thống
-PLAYWRIGHT_CONCURRENCY_SEMAPHORE = asyncio.Semaphore(1)
+# Làn 1: Dành riêng cho Quản trị viên duyệt tác vụ & Automation Studio (Không bao giờ bị nghẽn)
+PLAYWRIGHT_ADMIN_SEMAPHORE = asyncio.Semaphore(1)
+
+# Làn 2: Dành riêng cho các Cronjob quét ngầm (osTicket, Scanner, Smart Poller)
+PLAYWRIGHT_CRON_SEMAPHORE = asyncio.Semaphore(1)
 
 
 @asynccontextmanager
-async def acquire_playwright_slot(task_name: str = "Playwright Task", timeout: float = 300.0):
+async def acquire_playwright_slot(
+    task_name: str = "Playwright Task", 
+    timeout: float = 300.0,
+    lane: str = "admin"  # Mặc định là 'admin' (Làn VIP) hoặc 'cron' (Làn nền)
+):
     """
-    Async Context Manager quản lý việc cấp phát slot thực thi Playwright:
-    - Nếu có tác vụ khác đang chạy, tác vụ mới sẽ xếp hàng đợi an toàn thay vì
-      khởi chạy đồng thời làm tràn trần 512MB RAM trên Render.
-    - Tự động gọi gc.collect() khi nhả slot.
+    Async Context Manager quản lý việc cấp phát slot thực thi Playwright theo 2 làn:
+    - lane='admin' (Mặc định): Tác vụ do Admin duyệt hoặc chạy trực tiếp từ Studio.
+      Được cấp slot riêng, độc lập hoàn toàn với các cronjob ngầm.
+    - lane='cron': Tác vụ cào dữ liệu định kỳ (osTicket scraper, distributor scanner...).
+      Chỉ cạnh tranh slot trong làn nền, tuyệt đối không được chiếm làn của Admin.
+    - Tổng Chromium tối đa toàn hệ thống: 1 Admin + 1 Cron = 2 instances (~300MB RAM an toàn trên 512MB).
     """
-    logger.info(f"⏳ [Playwright Concurrency] Đang xin slot thực thi cho: '{task_name}'...")
+    is_admin = (lane.lower() == "admin")
+    semaphore = PLAYWRIGHT_ADMIN_SEMAPHORE if is_admin else PLAYWRIGHT_CRON_SEMAPHORE
+    lane_tag = "👑 [VIP ADMIN LANE]" if is_admin else "⚙️ [BACKGROUND CRON LANE]"
+    
+    # Với cronjob nền, nếu phải chờ quá lâu (ví dụ >45s), tự động hủy để nhường tài nguyên cho chu kỳ sau
+    actual_timeout = timeout if is_admin else min(timeout, 45.0)
+
+    logger.info(f"⏳ {lane_tag} Đang xin slot thực thi cho: '{task_name}'...")
+    acquired = False
     try:
-        acquired = False
         try:
-            await asyncio.wait_for(PLAYWRIGHT_CONCURRENCY_SEMAPHORE.acquire(), timeout=timeout)
+            await asyncio.wait_for(semaphore.acquire(), timeout=actual_timeout)
             acquired = True
-            logger.info(f"🟢 [Playwright Concurrency] Đã nhận slot thực thi cho: '{task_name}'")
+            logger.info(f"🟢 {lane_tag} Đã nhận slot! Bắt đầu thực thi: '{task_name}'")
             yield
         except asyncio.TimeoutError:
-            logger.error(f"❌ [Playwright Concurrency] Quá thời gian chờ slot ({timeout}s) cho: '{task_name}'")
-            raise TimeoutError(f"Hệ thống đang bận xử lý tác vụ khác. Hết thời gian chờ slot ({timeout}s).")
+            if is_admin:
+                logger.error(f"❌ {lane_tag} Quá thời gian chờ slot ({actual_timeout}s) cho: '{task_name}'")
+                raise TimeoutError(f"Hệ thống đang bận xử lý tác vụ Admin khác. Hết thời gian chờ ({actual_timeout}s).")
+            else:
+                logger.warning(f"⚠️ {lane_tag} Làn nền đang bận, tự động bỏ qua chu kỳ này cho: '{task_name}' để bảo toàn tài nguyên.")
+                raise TimeoutError(f"Cronjob '{task_name}' nhường slot cho chu kỳ quét kế tiếp.")
     finally:
         if acquired:
-            PLAYWRIGHT_CONCURRENCY_SEMAPHORE.release()
-            logger.info(f"⚪ [Playwright Concurrency] Đã giải phóng slot thực thi của: '{task_name}'")
+            semaphore.release()
+            logger.info(f"⚪ {lane_tag} Đã giải phóng slot thực thi của: '{task_name}'")
         gc.collect()
 
 

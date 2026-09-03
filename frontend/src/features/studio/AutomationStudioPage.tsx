@@ -1,5 +1,6 @@
 // frontend/src/features/studio/AutomationStudioPage.tsx
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
@@ -247,7 +248,6 @@ export const AutomationStudioPage: React.FC = () => {
         if (lmsCats && lmsCats.length > 0) setLmsCategoriesList(lmsCats);
         if (lmsCourses && lmsCourses.length > 0) {
           setLmsCoursesList(lmsCourses);
-          // Khởi tạo dòng khóa học đầu tiên nếu chưa có
           const defaultCat = lmsCats && lmsCats.length > 0 ? lmsCats[0] : lmsCourses[0].category;
           const matchFirst = lmsCourses.filter((c) => c.category === defaultCat);
           const activeFirst = matchFirst.length > 0 ? matchFirst[0] : lmsCourses[0];
@@ -450,6 +450,7 @@ export const AutomationStudioPage: React.FC = () => {
   };
 
   const handleOpenConfirmModal = () => {
+    console.log("👉 Đã nhấn nút Kiểm tra & Kích hoạt Worker!");
     let payload: Record<string, any> = {
       is_manual_dispatch: true,
       creator: 'Admin Studio',
@@ -679,7 +680,7 @@ export const AutomationStudioPage: React.FC = () => {
           return;
         }
 
-        // 🌟 Payload gửi mảng `courses` để bot duyệt trong 1 phiên login duy nhất
+        // 🌟 Payload gửi mảng `courses` an toàn tuyệt đối
         payload = {
           action: 'direct_moodle_lms_enroll',
           platform: 'learn.pythaverse.space',
@@ -689,7 +690,7 @@ export const AutomationStudioPage: React.FC = () => {
             course_name: c.course_name,
             start_date: c.start_date,
             end_date: c.end_date,
-            group_name: c.group_name.trim() || undefined,
+            group_name: (c.group_name || '').trim() || undefined,
           })),
           role_mode: lmsRoleMode,
           student_emails: studentsList,
@@ -779,6 +780,7 @@ export const AutomationStudioPage: React.FC = () => {
       summary,
     });
     setIsConfirmModalOpen(true);
+    toast.info("Đã mở bảng xác nhận thông số thực thi!");
   };
 
   const handleConfirmExecute = async () => {
@@ -1168,7 +1170,6 @@ export const AutomationStudioPage: React.FC = () => {
                 ))}
               </div>
 
-              {/* Search Bar */}
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
@@ -1224,7 +1225,6 @@ export const AutomationStudioPage: React.FC = () => {
                 </div>
               )}
 
-              {/* Status Filter */}
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-1 border-t border-slate-100 dark:border-slate-800/80">
                 <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
                   Danh Sách Đơn Hàng ({filteredCacheList.length}/{scrapedPendingList.length}):
@@ -1250,7 +1250,6 @@ export const AutomationStudioPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* List & Detail */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
                 <div className="lg:col-span-7 space-y-2.5 max-h-[360px] overflow-y-auto pr-1">
                   {isScrapingLive && scrapedPendingList.length === 0 ? (
@@ -2275,11 +2274,11 @@ export const AutomationStudioPage: React.FC = () => {
         </div>
       </div>
 
-      {/* 8. Confirmation Modal */}
-      {isConfirmModalOpen && preparedPayload && (
+      {/* 🌟 8. Confirmation Modal SỬ DỤNG CREATEPORTAL ĐỂ GẮN THẲNG VÀO DOCUMENT.BODY (CHỐNG BẪY SCROLL) */}
+      {isConfirmModalOpen && preparedPayload && typeof document !== 'undefined' && createPortal(
         <div
           onClick={(e) => { if (e.target === e.currentTarget) setIsConfirmModalOpen(false); }}
-          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-slate-950/60 backdrop-blur-xs animate-in fade-in duration-150"
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-150"
         >
           <div
             onClick={(e) => e.stopPropagation()}
@@ -2382,7 +2381,8 @@ export const AutomationStudioPage: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </motion.div>
   );
