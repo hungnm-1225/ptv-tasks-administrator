@@ -291,7 +291,13 @@ class WorkspaceLineageService:
                 dist_creds = None
                 partner_creds = None
                 
-                if dist_name:
+                # "Sales Admin" là tài khoản system tối cao — không tồn tại trong
+                # workspace_organizations nên không cần resolve, tránh warning giả
+                is_sales_admin_receiver = dist_name and dist_name.strip().lower() in (
+                    "sales admin", "salesadmin", "admin"
+                )
+                
+                if dist_name and not is_sales_admin_receiver:
                     d_res = WorkspaceLineageService.resolve_by_distributor(dist_name)
                     if d_res:
                         dist_creds = d_res.get("distributor")
@@ -301,9 +307,10 @@ class WorkspaceLineageService:
                     if p_res:
                         partner_creds = p_res.get("partner")
                         if not dist_creds:
+                            # DST Contract gửi Sales Admin: lấy Distributor qua Partner cha
                             dist_creds = p_res.get("distributor")
                             
-                if dist_creds:
+                if dist_creds or partner_creds:
                     return {"distributor": dist_creds, "partner": partner_creds}
         except Exception as e:
             logger.warning(f"Lỗi truy vết contract từ cache: {e}")
