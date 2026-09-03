@@ -4,7 +4,7 @@ import asyncio
 import gc
 from typing import Dict, Any, List, Optional
 from datetime import datetime
-from playwright.async_api import async_playwright, Page, Browser, Locator
+from playwright.async_api import async_playwright, Page, Browser, Locator, Error as PlaywrightError
 
 from app.core.config import settings
 from app.core.playwright_manager import (
@@ -22,10 +22,10 @@ MOODLE_BASE_URL = "https://learn.pythaverse.space"
 class PlaywrightLMSService:
     """
     Playwright Worker tự động hóa 100% trên Moodle PLearn Edwiser RemUI (learn.pythaverse.space):
-    - Đăng nhập Keycloak OpenID Connect SSO an toàn.
+    - Đăng nhập Keycloak OpenID Connect SSO an toàn, kháng lỗi Navigation Destroyed.
     - Bảo vệ bộ nhớ Render 512MB RAM bằng Global Concurrency Lock & Route Interceptor chặn Media/Font.
-    - Ghi danh MỚI kèm bung 'Show more...', bật Enable và cài đặt Enrolment ends.
-    - Smart Fallback: Lọc chuẩn 2 nhịp (Tag Pill + Apply Filters) & so khớp chính xác 100% cột td.c2 để Gia hạn (Update date).
+    - Ghi danh MỚI kèm bung 'Show more...', bật Enable và cài đặt Enrolment ends (hỗ trợ Select ẩn RemUI).
+    - Smart Fallback: Lọc chuẩn 2 nhịp (Tag Pill + Apply Filters) & so khớp chính xác 100% cột td.c2 để Gia hạn.
     - Đổi Mono-Role (gỡ sạch role cũ và gán role mong muốn).
     - Xóa người dùng khỏi khóa học (Unenrol 🗑️).
     - Tạo Group & Phân nhóm lớp tự động.
@@ -75,7 +75,10 @@ class PlaywrightLMSService:
         }
 
     async def _login_moodle_sso(self, page: Page) -> bool:
-        """Đăng nhập Moodle qua Keycloak SSO với cơ chế State Confirmation chống trễ mạng Render."""
+        """
+        Đăng nhập Moodle qua Keycloak SSO.
+        Khắc phục triệt để lỗi 'Execution context was destroyed' khi redirect giữa Keycloak và Moodle.
+        """
         try:
             admin_user = getattr(settings, "TEST_ADMIN_USER", None) or "adminworkspace"
             admin_pass = getattr(settings, "TEST_ADMIN_PASS", None) or getattr(settings, "KEYCLOAK_ADMIN_PASS", None) or ""
@@ -91,27 +94,45 @@ class PlaywrightLMSService:
                 logger.error(f"🔥 Máy chủ Moodle phản hồi mã lỗi HTTP {response.status}")
                 return False
 
-            # Đợi input hoặc chuyển trang
+            # Đợi trang ổn định 1 nhịp ngắn
+            await page.wait_for_load_state("domcontentloaded")
+            await asyncio.sleep(0.5)
+
+            # Kiểm tra xem có đang ở trang login của Keycloak không
             username_input = page.locator("input#username, input[name='username'], #username").first
             try:
-                await username_input.wait_for(state="visible", timeout=8000)
-                logger.info(f"🔐 Điền thông tin Keycloak: {admin_user}")
-                await username_input.fill(admin_user)
-                await page.fill("input#password, input[name='password'], #password", admin_pass)
-                
-                # Bấm submit và đợi phản hồi
-                login_btn = page.locator("input#kc-login, button[type='submit'], button:has-text('Log In'), button:has-text('Đăng nhập')").first
-                await login_btn.click()
+                if await username_input.count() > 0 and await username_input.is_visible():
+                    logger.info(f"🔐 Điền thông tin Keycloak: {admin_user}")
+                    await username_input.fill(admin_user)
+                    await page.fill("input#password, input[name='password'], #password", admin_pass)
+                    
+                    login_btn = page.locator("input#kc-login, button[type='submit'], button:has-text('Log In'), button:has-text('Đăng nhập')").first
+                    
+                    # Click và chờ navigation chuyển hướng an toàn, tránh lỗi execution context destroyed
+                    try:
+                        async with page.expect_navigation(wait_until="domcontentloaded", timeout=25000):
+                            await login_btn.click()
+                    except Exception:
+                        # Fallback nếu expect_navigation bị miss do redirect quá nhanh
+                        await asyncio.sleep(2)
+            except PlaywrightError as pe:
+                logger.debug(f"ℹ️ Bỏ qua form đăng nhập (có thể đã có session): {pe}")
+
+            # Đợi DOM trang đích sau redirect tải xong
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=15000)
             except Exception:
-                # Có thể session trước vẫn còn sống
                 pass
 
-            # Kiểm tra lỗi đăng nhập
-            kc_error = page.locator(".alert-error, #input-error, span.kc-feedback-text").first
-            if await kc_error.count() > 0 and await kc_error.is_visible():
-                err_text = (await kc_error.inner_text()).strip()
-                logger.error(f"❌ Đăng nhập Keycloak thất bại: '{err_text}'")
-                return False
+            # Kiểm tra an toàn xem có thông báo lỗi Keycloak không (có try-catch phòng navigation còn chạy)
+            try:
+                kc_error = page.locator(".alert-error, #input-error, span.kc-feedback-text").first
+                if await kc_error.count() > 0 and await kc_error.is_visible():
+                    err_text = (await kc_error.inner_text()).strip()
+                    logger.error(f"❌ Đăng nhập Keycloak thất bại: '{err_text}'")
+                    return False
+            except Exception:
+                pass
 
             # Chờ xác nhận đã vào trong Moodle (State Confirmation)
             user_menu = page.locator(".usermenu, a[title='User menu'], .userinitials, .site-name, a[href*='/login/logout.php']").first
@@ -121,7 +142,7 @@ class PlaywrightLMSService:
                 return True
             except Exception:
                 if "login" not in page.url:
-                    logger.info("✅ Đăng nhập Moodle LMS PLearn thành công (URL bypass verified)!")
+                    logger.info(f"✅ Đăng nhập Moodle LMS PLearn thành công (URL bypass verified: {page.url})!")
                     return True
 
             logger.error(f"❌ Không thể xác nhận phiên đăng nhập Moodle. URL hiện tại: {page.url}")
@@ -164,10 +185,19 @@ class PlaywrightLMSService:
             except Exception:
                 pass
 
-        # 2. Chọn trường lọc Keywords
-        select_loc = page.locator("div[data-filterregion='filters'] select[data-filterfield='type'], select[data-filterfield='type']").first
-        if await select_loc.count() > 0 and await select_loc.is_enabled():
-            await select_loc.select_option(value="keywords")
+        # 2. Chọn trường lọc Keywords (Dùng JS để bypass nếu thẻ select bị custom ẩn)
+        try:
+            await page.evaluate("""() => {
+                const sel = document.querySelector("div[data-filterregion='filters'] select[data-filterfield='type'], select[data-filterfield='type']");
+                if (sel) {
+                    sel.value = 'keywords';
+                    sel.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }""")
+        except Exception:
+            select_loc = page.locator("div[data-filterregion='filters'] select[data-filterfield='type'], select[data-filterfield='type']").first
+            if await select_loc.count() > 0:
+                await select_loc.select_option(value="keywords", force=True)
 
         # 3. Nhịp 1: Điền email vào ô Type... và bấm Enter để sinh Tag Pill
         kw_input = page.locator("div[data-filterregion='value'] input[placeholder='Type...'], div[data-filter-type='keywords'] input, input[placeholder='Type...']").first
@@ -242,7 +272,7 @@ class PlaywrightLMSService:
             # Chặn toàn bộ media, font, trackers để tiết kiệm 75% RAM trên Moodle RemUI
             await setup_low_ram_routes(context)
             page = await context.new_page()
-            page.set_default_timeout(30000)
+            page.set_default_timeout(35000)
 
             try:
                 if not await self._login_moodle_sso(page):
@@ -271,7 +301,7 @@ class PlaywrightLMSService:
                     # ----------------------------------------------------------
                     # BƯỚC 1: ENROL MỚI TRONG MODAL
                     # ----------------------------------------------------------
-                    enrol_btn = page.locator("form[id^='enrolusersbutton'] input[type='submit'], input[value='Enrol users']").first
+                    enrol_btn = page.locator("form[id^='enrolusersbutton'] input[type='submit'], input[value='Enrol users'], button:has-text('Enrol users')").first
                     if await enrol_btn.count() > 0:
                         await enrol_btn.wait_for(state="visible", timeout=15000)
                         await enrol_btn.scroll_into_view_if_needed()
@@ -280,33 +310,44 @@ class PlaywrightLMSService:
                         modal = page.locator("div.modal.show[data-region='modal-container'], div.modal.show:has-text('Enrol users')").first
                         await modal.wait_for(state="visible", timeout=15000)
 
-                        # Chọn Role
-                        role_select = modal.locator("select#id_roletoassign").first
-                        if await role_select.count() > 0:
-                            await role_select.select_option(value=role_value)
+                        # 🎯 FIX LỖI: Chọn Role bằng cả Playwright lẫn JS Fallback (chống lỗi element is not visible)
+                        try:
+                            await page.evaluate(f"""() => {{
+                                const sel = document.querySelector(".modal.show select#id_roletoassign, select#id_roletoassign");
+                                if (sel) {{
+                                    sel.value = '{role_value}';
+                                    sel.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                }}
+                            }}""")
+                        except Exception:
+                            role_select = modal.locator("select#id_roletoassign").first
+                            if await role_select.count() > 0:
+                                await role_select.select_option(value=role_value, force=True)
 
                         # Bung Show more & Cài ngày
                         if date_info:
                             show_more_link = modal.locator("a.moreless-toggler, a:has-text('Show more')").first
                             if await show_more_link.count() > 0:
                                 await show_more_link.scroll_into_view_if_needed()
-                                await show_more_link.click()
+                                await show_more_link.click(force=True)
 
-                            enable_chk = modal.locator("input#id_timeend_enabled, label[data-fieldtype='checkbox']:has(#id_timeend_enabled)").first
-                            if await enable_chk.count() > 0:
-                                await enable_chk.scroll_into_view_if_needed()
-                                if not await modal.locator("input#id_timeend_enabled").is_checked():
-                                    await enable_chk.click()
+                            # Kích hoạt checkbox và điền ngày bằng Javascript an toàn 100%
+                            await page.evaluate(f"""() => {{
+                                const chk = document.querySelector(".modal.show input#id_timeend_enabled, .modal.show input[name='timeend[enabled]']");
+                                if (chk && !chk.checked) {{
+                                    chk.checked = true;
+                                    chk.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                }}
+                                const day = document.querySelector(".modal.show select#id_timeend_day");
+                                const month = document.querySelector(".modal.show select#id_timeend_month");
+                                const year = document.querySelector(".modal.show select#id_timeend_year");
 
-                            day_sel = modal.locator("select#id_timeend_day").first
-                            if await day_sel.count() > 0:
-                                try:
-                                    await page.wait_for_function("!document.getElementById('id_timeend_day').disabled", timeout=4000)
-                                except Exception:
-                                    pass
-                                await modal.locator("select#id_timeend_day").first.select_option(date_info["day"])
-                                await modal.locator("select#id_timeend_month").first.select_option(date_info["month"])
-                                await modal.locator("select#id_timeend_year").first.select_option(date_info["year"])
+                                [day, month, year].forEach(el => {{ if (el) el.removeAttribute('disabled'); }});
+
+                                if (day) {{ day.value = '{date_info["day"]}'; day.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
+                                if (month) {{ month.value = '{date_info["month"]}'; month.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
+                                if (year) {{ year.value = '{date_info["year"]}'; year.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
+                            }}""")
 
                         new_selected_count = 0
                         search_container = modal.locator("#fitem_id_userlist, div[data-fieldtype='autocomplete']").first
@@ -319,14 +360,14 @@ class PlaywrightLMSService:
                             
                             if await search_user_input.count() > 0:
                                 await search_user_input.scroll_into_view_if_needed()
-                                await search_user_input.click()
+                                await search_user_input.click(force=True)
                                 await search_user_input.fill(clean_email)
 
                                 target_option = suggestions_list.locator("li[role='option']").filter(has_text=clean_email).first
 
                                 try:
                                     await target_option.wait_for(state="visible", timeout=4000)
-                                    await target_option.click()
+                                    await target_option.click(force=True)
 
                                     spinner = search_container.locator(".loading-icon, i.fa-spin, i.fa-circle-notch")
                                     if await spinner.count() > 0:
@@ -346,7 +387,7 @@ class PlaywrightLMSService:
 
                         if new_selected_count > 0:
                             save_btn = modal.locator(".modal-footer button[data-action='save'], button:has-text('Enrol selected users and cohorts')").first
-                            await save_btn.click()
+                            await save_btn.click(force=True)
                             
                             # Chờ modal đóng hoàn tất
                             try:
@@ -384,12 +425,21 @@ class PlaywrightLMSService:
                                     edit_modal = page.locator("div.modal.show[data-region='modal-container'], div.modal.show:has-text('Edit')").first
                                     await edit_modal.wait_for(state="visible", timeout=10000)
 
-                                    status_select = edit_modal.locator("select#id_status").first
-                                    if await status_select.count() > 0:
-                                        await status_select.select_option(value="0")
+                                    # Kích hoạt trạng thái Active (0)
+                                    try:
+                                        await page.evaluate("""() => {
+                                            const st = document.querySelector(".modal.show select#id_status");
+                                            if (st) {
+                                                st.value = "0";
+                                                st.dispatchEvent(new Event('change', { bubbles: true }));
+                                            }
+                                        }""")
+                                    except Exception:
+                                        status_select = edit_modal.locator("select#id_status").first
+                                        if await status_select.count() > 0:
+                                            await status_select.select_option(value="0", force=True)
 
                                     if date_info:
-                                        # 🎯 ĐÃ SỬA BUG: month.value được gán chính xác vào element month
                                         await page.evaluate(f"""() => {{
                                             const chk = document.querySelector(".modal.show input#id_timeend_enabled, .modal.show input[name='timeend[enabled]']");
                                             if (chk && !chk.checked) {{
@@ -493,7 +543,6 @@ class PlaywrightLMSService:
 
                                 results["group_created"] = group_name
 
-                # 🎯 ĐÃ NÂNG CẤP: Phân định rõ ràng success, partial_success và failed
                 success_count = len(results["enrolled_new"]) + len(results["extended_access"])
                 failed_count = len(results["not_found"])
 
