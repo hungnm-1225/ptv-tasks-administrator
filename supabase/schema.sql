@@ -262,7 +262,9 @@ CREATE INDEX IF NOT EXISTS idx_ws_vault_org         ON workspace_credentials_vau
 
 CREATE INDEX IF NOT EXISTS idx_ws_contracts_type    ON workspace_contracts_cache(contract_type);
 CREATE INDEX IF NOT EXISTS idx_ws_contracts_dist    ON workspace_contracts_cache(distributor_code);
+CREATE INDEX IF NOT EXISTS idx_ws_contracts_id      ON workspace_contracts_cache(contract_id);
 CREATE INDEX IF NOT EXISTS idx_ws_orders_dist       ON workspace_orders_cache(distributor_code);
+CREATE INDEX IF NOT EXISTS idx_ws_orders_id         ON workspace_orders_cache(order_id);
 
 -- =============================================================================
 -- SECTION 4: ROW LEVEL SECURITY (RLS) – Whitelist Admin @dtt.vn Only
