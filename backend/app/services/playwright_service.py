@@ -24,7 +24,7 @@ class PlaywrightLMSService:
     Playwright Worker tự động hóa 100% trên Moodle PLearn Edwiser RemUI (learn.pythaverse.space):
     - Đăng nhập Keycloak OpenID Connect SSO an toàn, kháng lỗi Navigation Destroyed.
     - Bảo vệ bộ nhớ Render 512MB RAM bằng Global Concurrency Lock & Route Interceptor chặn Media/Font.
-    - Ghi danh MỚI kèm bung 'Show more...', bật Enable và cài đặt Enrolment ends (hỗ trợ Select ẩn RemUI).
+    - Ghi danh MỚI: Khớp chuẩn xác ô autocomplete nạp chậm qua RequireJS (form_autocomplete_input).
     - Smart Fallback: Lọc chuẩn 2 nhịp (Tag Pill + Apply Filters) & so khớp chính xác 100% cột td.c2 để Gia hạn.
     - Đổi Mono-Role (gỡ sạch role cũ và gán role mong muốn).
     - Xóa người dùng khỏi khóa học (Unenrol 🗑️).
@@ -94,7 +94,6 @@ class PlaywrightLMSService:
                 logger.error(f"🔥 Máy chủ Moodle phản hồi mã lỗi HTTP {response.status}")
                 return False
 
-            # Đợi trang ổn định 1 nhịp ngắn
             await page.wait_for_load_state("domcontentloaded")
             await asyncio.sleep(0.5)
 
@@ -108,23 +107,19 @@ class PlaywrightLMSService:
                     
                     login_btn = page.locator("input#kc-login, button[type='submit'], button:has-text('Log In'), button:has-text('Đăng nhập')").first
                     
-                    # Click và chờ navigation chuyển hướng an toàn, tránh lỗi execution context destroyed
                     try:
                         async with page.expect_navigation(wait_until="domcontentloaded", timeout=25000):
                             await login_btn.click()
                     except Exception:
-                        # Fallback nếu expect_navigation bị miss do redirect quá nhanh
                         await asyncio.sleep(2)
             except PlaywrightError as pe:
                 logger.debug(f"ℹ️ Bỏ qua form đăng nhập (có thể đã có session): {pe}")
 
-            # Đợi DOM trang đích sau redirect tải xong
             try:
                 await page.wait_for_load_state("domcontentloaded", timeout=15000)
             except Exception:
                 pass
 
-            # Kiểm tra an toàn xem có thông báo lỗi Keycloak không (có try-catch phòng navigation còn chạy)
             try:
                 kc_error = page.locator(".alert-error, #input-error, span.kc-feedback-text").first
                 if await kc_error.count() > 0 and await kc_error.is_visible():
@@ -160,7 +155,6 @@ class PlaywrightLMSService:
             else:
                 await page.keyboard.press("Escape")
             
-            # Đợi modal biến mất
             try:
                 await modal.wait_for(state="hidden", timeout=3000)
             except Exception:
@@ -191,7 +185,7 @@ class PlaywrightLMSService:
                 const sel = document.querySelector("div[data-filterregion='filters'] select[data-filterfield='type'], select[data-filterfield='type']");
                 if (sel) {
                     sel.value = 'keywords';
-                    sel.dispatchEvent(new Event('change', { bubbles: true }));
+                    sel.dispatchEvent(new Event('change', {{ bubbles: true }}));
                 }
             }""")
         except Exception:
@@ -206,7 +200,6 @@ class PlaywrightLMSService:
         await kw_input.fill(email)
         await kw_input.press("Enter")
 
-        # Đợi pill xuất hiện
         try:
             pill = page.locator(f"div[data-filterregion='value'] span.badge:has-text('{email}')").first
             await pill.wait_for(state="visible", timeout=3000)
@@ -217,7 +210,6 @@ class PlaywrightLMSService:
         apply_btn = page.locator("button[data-filteraction='apply']:has-text('Apply filters')").first
         await apply_btn.click(force=True)
 
-        # Chờ các loading spinner của Edwiser RemUI / Moodle biến mất hoàn toàn
         try:
             await page.locator("div.loading-icon, .MuiCircularProgress-root, .overlay-icon").wait_for(state="hidden", timeout=8000)
         except Exception:
@@ -269,7 +261,6 @@ class PlaywrightLMSService:
                 viewport={"width": 1280, "height": 800},
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
             )
-            # Chặn toàn bộ media, font, trackers để tiết kiệm 75% RAM trên Moodle RemUI
             await setup_low_ram_routes(context)
             page = await context.new_page()
             page.set_default_timeout(35000)
@@ -296,7 +287,7 @@ class PlaywrightLMSService:
                     await page.goto(participants_url, wait_until="domcontentloaded", timeout=45000)
                     await wait_for_dom_and_spinners(page, "#page-content, #region-main, table#participants", min_pacing_ms=400)
 
-                    emails_need_fallback = []
+                    new_enrolled_emails_in_group = []
 
                     # ----------------------------------------------------------
                     # BƯỚC 1: ENROL MỚI TRONG MODAL
@@ -310,7 +301,7 @@ class PlaywrightLMSService:
                         modal = page.locator("div.modal.show[data-region='modal-container'], div.modal.show:has-text('Enrol users')").first
                         await modal.wait_for(state="visible", timeout=15000)
 
-                        # 🎯 FIX LỖI: Chọn Role bằng cả Playwright lẫn JS Fallback (chống lỗi element is not visible)
+                        # 1. Chọn Role (Dùng cả JS lẫn Playwright)
                         try:
                             await page.evaluate(f"""() => {{
                                 const sel = document.querySelector(".modal.show select#id_roletoassign, select#id_roletoassign");
@@ -324,14 +315,15 @@ class PlaywrightLMSService:
                             if await role_select.count() > 0:
                                 await role_select.select_option(value=role_value, force=True)
 
-                        # Bung Show more & Cài ngày
+                        # 2. Bung Show more & Cài ngày
                         if date_info:
-                            show_more_link = modal.locator("a.moreless-toggler, a:has-text('Show more')").first
+                            show_more_link = modal.locator("a.moreless-toggler").first
                             if await show_more_link.count() > 0:
-                                await show_more_link.scroll_into_view_if_needed()
-                                await show_more_link.click(force=True)
+                                is_expanded = await show_more_link.get_attribute("aria-expanded")
+                                if is_expanded != "true":
+                                    await show_more_link.scroll_into_view_if_needed()
+                                    await show_more_link.click(force=True)
 
-                            # Kích hoạt checkbox và điền ngày bằng Javascript an toàn 100%
                             await page.evaluate(f"""() => {{
                                 const chk = document.querySelector(".modal.show input#id_timeend_enabled, .modal.show input[name='timeend[enabled]']");
                                 if (chk && !chk.checked) {{
@@ -349,47 +341,50 @@ class PlaywrightLMSService:
                                 if (year) {{ year.value = '{date_info["year"]}'; year.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
                             }}""")
 
+                        # 3. Chờ ô input tìm kiếm User nạp xong qua RequireJS (Khớp chính xác DOM RemUI)
+                        search_user_input = modal.locator(
+                            "#fitem_id_userlist input[placeholder='Search'], #fitem_id_userlist input[role='combobox'], #fitem_id_userlist input.form-control"
+                        ).first
+                        
+                        try:
+                            await search_user_input.wait_for(state="visible", timeout=12000)
+                            logger.info("🎯 Đã bắt được ô tìm kiếm học viên trong modal!")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Ô tìm kiếm modal chưa sẵn sàng: {e}")
+
                         new_selected_count = 0
-                        search_container = modal.locator("#fitem_id_userlist, div[data-fieldtype='autocomplete']").first
-                        search_user_input = modal.locator("#fitem_id_userlist input.form-autocomplete-input, #fitem_id_userlist input[placeholder='Search'], div.form-autocomplete-selection + input").first
                         suggestions_list = modal.locator("ul.form-autocomplete-suggestions")
 
                         for email in emails:
                             clean_email = email.strip().lower()
                             logger.info(f"🔍 Tìm kiếm tài khoản trong modal: {clean_email}")
                             
-                            if await search_user_input.count() > 0:
-                                await search_user_input.scroll_into_view_if_needed()
-                                await search_user_input.click(force=True)
-                                await search_user_input.fill(clean_email)
+                            try:
+                                if await search_user_input.count() > 0 and await search_user_input.is_visible():
+                                    await search_user_input.scroll_into_view_if_needed()
+                                    await search_user_input.click(force=True)
+                                    await search_user_input.fill("")
+                                    # Gõ từng ký tự để Moodle debounce lắng nghe AJAX
+                                    await search_user_input.press_sequentially(clean_email, delay=35)
 
-                                target_option = suggestions_list.locator("li[role='option']").filter(has_text=clean_email).first
-
-                                try:
+                                    target_option = suggestions_list.locator("li[role='option']").filter(has_text=clean_email).first
                                     await target_option.wait_for(state="visible", timeout=4000)
                                     await target_option.click(force=True)
 
-                                    spinner = search_container.locator(".loading-icon, i.fa-spin, i.fa-circle-notch")
-                                    if await spinner.count() > 0:
-                                        try:
-                                            await spinner.first.wait_for(state="hidden", timeout=3000)
-                                        except Exception:
-                                            pass
-
                                     new_selected_count += 1
+                                    new_enrolled_emails_in_group.append(clean_email)
                                     all_valid_emails.append(clean_email)
                                     results["enrolled_new"].append({"email": clean_email, "role": role_label, "valid_until": end_date_str})
                                     logger.info(f"➕ Đã chọn để ghi danh MỚI: {clean_email} ({role_label})")
-
-                                except Exception:
-                                    logger.info(f"ℹ️ Không có trong gợi ý Mới -> Sẽ kiểm tra Fallback ngoài bảng: {clean_email}")
-                                    emails_need_fallback.append(clean_email)
+                                else:
+                                    logger.info(f"ℹ️ Không thấy ô tìm kiếm -> Chuyển Fallback: {clean_email}")
+                            except Exception:
+                                logger.info(f"ℹ️ Không có trong gợi ý Mới -> Sẽ kiểm tra Fallback ngoài bảng: {clean_email}")
 
                         if new_selected_count > 0:
                             save_btn = modal.locator(".modal-footer button[data-action='save'], button:has-text('Enrol selected users and cohorts')").first
                             await save_btn.click(force=True)
                             
-                            # Chờ modal đóng hoàn tất
                             try:
                                 await modal.wait_for(state="hidden", timeout=15000)
                             except Exception:
@@ -398,12 +393,13 @@ class PlaywrightLMSService:
                             logger.info(f"✅ Đã submit ghi danh {new_selected_count} tài khoản mới thành công!")
                         else:
                             await self._close_modal_safely(page, modal)
-                    else:
-                        emails_need_fallback = emails
 
                     # ----------------------------------------------------------
-                    # BƯỚC 2: SMART FALLBACK (LỌC CHUẨN 2 NHỊP & BẮT CHUẨN TD.C2)
+                    # BƯỚC 2: SMART FALLBACK CHO CÁC EMAIL CHƯA GHI DANH ĐƯỢC Ở BƯỚC 1
+                    # (Bảo toàn 100% dữ liệu, không bao giờ bị bỏ sót email!)
                     # ----------------------------------------------------------
+                    emails_need_fallback = [e for e in emails if e not in new_enrolled_emails_in_group]
+
                     if emails_need_fallback:
                         logger.info(f"🔄 BẮT ĐẦU SMART FALLBACK CHO {len(emails_need_fallback)} TÀI KHOẢN TRONG BẢNG...")
 
@@ -453,14 +449,13 @@ class PlaywrightLMSService:
                                             [day, month, year].forEach(el => {{ if (el) el.removeAttribute('disabled'); }});
 
                                             if (day) {{ day.value = '{date_info["day"]}'; day.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
-                                            if (month) {{ month.value = '{date_info["month"]}'; month.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
-                                            if (year) {{ year.value = '{date_info["year"]}'; year.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
+                                            if (month) {{ day.value = '{date_info["month"]}'; month.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
+                                            if (year) {{ day.value = '{date_info["year"]}'; year.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
                                         }}""")
 
                                     save_edit_btn = edit_modal.locator(".modal-footer button[data-action='save'], button:has-text('Save changes')").first
                                     await save_edit_btn.click(force=True)
                                     
-                                    # Đợi modal sửa đóng hoàn tất
                                     try:
                                         await edit_modal.wait_for(state="hidden", timeout=10000)
                                     except Exception:
@@ -480,7 +475,7 @@ class PlaywrightLMSService:
                                 results["not_found"].append({
                                     "email": email,
                                     "role_intended": role_label,
-                                    "reason": "Tài khoản không có trong danh sách gợi ý Mới và không tồn tại trong bảng học viên của khóa."
+                                    "reason": "Tài khoản không có trong danh sách gợi ý Mới và không tồn tại trong bảng học viên của khóa học."
                                 })
 
                     # ----------------------------------------------------------
@@ -520,7 +515,6 @@ class PlaywrightLMSService:
                                     await search_potential.click(force=True)
                                     await search_potential.fill(u_email)
                                     
-                                    # Chờ danh sách options cập nhật
                                     try:
                                         await page.locator("select#addselect").wait_for(state="visible", timeout=3000)
                                     except Exception:
@@ -543,6 +537,7 @@ class PlaywrightLMSService:
 
                                 results["group_created"] = group_name
 
+                # Tổng kết trạng thái chuẩn xác 100%
                 success_count = len(results["enrolled_new"]) + len(results["extended_access"])
                 failed_count = len(results["not_found"])
 
@@ -636,7 +631,6 @@ class PlaywrightLMSService:
                     else:
                         await page.keyboard.press("Enter")
 
-                    # Chờ icon đĩa mềm biến mất xác nhận lưu thành công
                     try:
                         await save_disk_btn.wait_for(state="hidden", timeout=5000)
                     except Exception:
@@ -688,7 +682,6 @@ class PlaywrightLMSService:
                                 confirm_btn = modal.locator(".modal-footer button[data-action='save'], button:has-text('Unenrol')").first
                                 await confirm_btn.click(force=True)
                                 
-                                # Chờ modal đóng
                                 try:
                                     await modal.wait_for(state="hidden", timeout=10000)
                                 except Exception:
