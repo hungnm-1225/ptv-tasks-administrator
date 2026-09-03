@@ -95,9 +95,11 @@ async def execute_approved_bot_task(
             partner_creds = payload_data.get("partner_credentials")
             distributor_creds = payload_data.get("distributor_credentials")
             
-            admin_pass = getattr(settings, "KEYCLOAK_ADMIN_PASS", None) or getattr(settings, "TEST_ADMIN_PASS", None)
+            # TEST_ADMIN_USER / TEST_ADMIN_PASS → Tài khoản Sales Admin trên pythaverse.space/admin-workspace
+            # KEYCLOAK_ADMIN_PASS              → Tài khoản quản trị Keycloak IDP (khác hệ thống, không dùng ở đây)
+            admin_pass = getattr(settings, "TEST_ADMIN_PASS", None)
             if not admin_pass:
-                logger.warning(f"⚠️ {task_tag} KEYCLOAK_ADMIN_PASS chưa được cấu hình trong biến môi trường!")
+                logger.warning(f"⚠️ {task_tag} TEST_ADMIN_PASS chưa được cấu hình trong Render Environment Variables!")
                 
             admin_creds = payload_data.get("admin_credentials") or {
                 "username": getattr(settings, "TEST_ADMIN_USER", "salesadmin@dtt.vn"),
