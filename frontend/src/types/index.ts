@@ -132,6 +132,11 @@ export interface GithubIssuePayload {
   body: string;
 }
 
+export interface GitRepoConfig {
+  repo_url: string;
+  target: 'teacher_only' | 'all' | 'student_only';
+}
+
 export interface GithubIssueResponse {
   status: string;
   issue_url?: string;
@@ -146,8 +151,7 @@ export interface CourseItem {
   course_name: string;
   sku?: string | null;
   lms_url: string;
-  git_repo_url?: string | null;
-  git_repo_target?: 'none' | 'teacher_only' | 'all' | string | null;
+  git_repos?: GitRepoConfig[] | null;
   created_at?: string;
 }
 
