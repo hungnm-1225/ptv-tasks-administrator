@@ -22,13 +22,13 @@ MOODLE_BASE_URL = "https://learn.pythaverse.space"
 class PlaywrightLMSService:
     """
     Playwright Worker tự động hóa 100% trên Moodle PLearn Edwiser RemUI (learn.pythaverse.space):
-    - Đăng nhập Keycloak OpenID Connect SSO an toàn, kháng lỗi Navigation Destroyed.
-    - Bảo vệ bộ nhớ Render 512MB RAM bằng Global Concurrency Lock & Route Interceptor chặn Media/Font.
-    - Ghi danh MỚI: Khớp chuẩn xác ô autocomplete nạp chậm qua RequireJS (form_autocomplete_input).
-    - Smart Fallback: Lọc chuẩn 2 nhịp (Tag Pill + Apply Filters) & so khớp chính xác 100% cột td.c2 để Gia hạn.
-    - Đổi Mono-Role (gỡ sạch role cũ và gán role mong muốn).
+    - Đăng nhập Keycloak OpenID Connect SSO an toàn 1 lần duy nhất cho toàn bộ chuỗi khóa học.
+    - Hỗ trợ Ghi danh Hàng Loạt Nhiều Khóa Học (Batch Multi-Course) trong cùng 1 phiên làm việc.
+    - Tự động bung 'Show more...', cài đặt cả Starting from (Start date) và Enrolment ends (End date).
+    - Khớp chuẩn xác ô autocomplete nạp chậm qua RequireJS (form_autocomplete_input).
+    - Smart Fallback: Lọc 2 nhịp & so khớp chính xác cột td.c2 để Gia hạn ngày VÀ Đổi Role (Mono-Role ✏️).
     - Xóa người dùng khỏi khóa học (Unenrol 🗑️).
-    - Tạo Group & Phân nhóm lớp tự động.
+    - Tạo Group & Phân nhóm lớp tự động từng khóa.
     """
 
     def __init__(self):
@@ -75,10 +75,7 @@ class PlaywrightLMSService:
         }
 
     async def _login_moodle_sso(self, page: Page) -> bool:
-        """
-        Đăng nhập Moodle qua Keycloak SSO.
-        Khắc phục triệt để lỗi 'Execution context was destroyed' khi redirect giữa Keycloak và Moodle.
-        """
+        """Đăng nhập Moodle qua Keycloak SSO kháng lỗi Navigation Destroyed."""
         try:
             admin_user = getattr(settings, "TEST_ADMIN_USER", None) or "adminworkspace"
             admin_pass = getattr(settings, "TEST_ADMIN_PASS", None) or getattr(settings, "KEYCLOAK_ADMIN_PASS", None) or ""
@@ -97,7 +94,6 @@ class PlaywrightLMSService:
             await page.wait_for_load_state("domcontentloaded")
             await asyncio.sleep(0.5)
 
-            # Kiểm tra xem có đang ở trang login của Keycloak không
             username_input = page.locator("input#username, input[name='username'], #username").first
             try:
                 if await username_input.count() > 0 and await username_input.is_visible():
@@ -106,7 +102,6 @@ class PlaywrightLMSService:
                     await page.fill("input#password, input[name='password'], #password", admin_pass)
                     
                     login_btn = page.locator("input#kc-login, button[type='submit'], button:has-text('Log In'), button:has-text('Đăng nhập')").first
-                    
                     try:
                         async with page.expect_navigation(wait_until="domcontentloaded", timeout=25000):
                             await login_btn.click()
@@ -129,7 +124,6 @@ class PlaywrightLMSService:
             except Exception:
                 pass
 
-            # Chờ xác nhận đã vào trong Moodle (State Confirmation)
             user_menu = page.locator(".usermenu, a[title='User menu'], .userinitials, .site-name, a[href*='/login/logout.php']").first
             try:
                 await user_menu.wait_for(state="visible", timeout=20000)
@@ -170,7 +164,6 @@ class PlaywrightLMSService:
 
     async def _apply_keyword_filter(self, page: Page, email: str) -> None:
         """Thao tác chuẩn hóa bộ lọc Keyword 2 nhịp chống lag mạng."""
-        # 1. Reset filter cũ nếu có
         reset_btn = page.locator("button[data-filteraction='reset']:has-text('Clear filters')").first
         if await reset_btn.count() > 0 and await reset_btn.is_visible():
             await reset_btn.click(force=True)
@@ -179,13 +172,12 @@ class PlaywrightLMSService:
             except Exception:
                 pass
 
-        # 2. Chọn trường lọc Keywords (Dùng JS để bypass nếu thẻ select bị custom ẩn)
         try:
             await page.evaluate("""() => {
                 const sel = document.querySelector("div[data-filterregion='filters'] select[data-filterfield='type'], select[data-filterfield='type']");
                 if (sel) {
                     sel.value = 'keywords';
-                    sel.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    sel.dispatchEvent(new Event('change', { bubbles: true }));
                 }
             }""")
         except Exception:
@@ -193,7 +185,6 @@ class PlaywrightLMSService:
             if await select_loc.count() > 0:
                 await select_loc.select_option(value="keywords", force=True)
 
-        # 3. Nhịp 1: Điền email vào ô Type... và bấm Enter để sinh Tag Pill
         kw_input = page.locator("div[data-filterregion='value'] input[placeholder='Type...'], div[data-filter-type='keywords'] input, input[placeholder='Type...']").first
         await kw_input.wait_for(state="visible", timeout=10000)
         await kw_input.click(force=True)
@@ -206,7 +197,6 @@ class PlaywrightLMSService:
         except Exception:
             pass
 
-        # 4. Nhịp 2: Bấm Apply filters và chờ Moodle tải dữ liệu xong
         apply_btn = page.locator("button[data-filteraction='apply']:has-text('Apply filters')").first
         await apply_btn.click(force=True)
 
@@ -215,14 +205,77 @@ class PlaywrightLMSService:
         except Exception:
             pass
 
-    async def _internal_enroll_pipeline(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Thực thi nghiệp vụ ghi danh cốt lõi."""
-        course_id = str(payload.get("course_id", "")).strip()
-        course_name = payload.get("course_name", f"Course #{course_id}")
-        end_date_str = payload.get("end_date", "")
-        group_name = payload.get("group_name", "").strip()
+    async def _update_user_role_in_table(self, page: Page, user_row: Locator, target_role_label: str) -> bool:
+        """Cập nhật vai trò (Mono-Role) trực tiếp ở cột Roles (td.cell.c3) bằng icon bút chì."""
+        try:
+            role_cell = user_row.locator("td.cell.c3, td.c3").first
+            current_role_text = (await role_cell.inner_text()).strip()
+            
+            # Nếu role đã khớp thì không cần chỉnh sửa
+            if target_role_label.lower() in current_role_text.lower():
+                return True
 
-        date_info = self._parse_date_components(end_date_str) if end_date_str else None
+            logger.info(f"✏️ Phát hiện Role khác biệt (Hiện tại: '{current_role_text}' ➔ Muốn đổi sang: '{target_role_label}'). Đang cập nhật...")
+            
+            pencil_btn = role_cell.locator("a.quickeditlink, a[data-inplaceeditablelink='1']").first
+            if await pencil_btn.count() == 0:
+                return False
+
+            await pencil_btn.scroll_into_view_if_needed()
+            await pencil_btn.click(force=True)
+            await asyncio.sleep(0.4)
+
+            # Xóa các role cũ (Mono-role replacement)
+            while True:
+                old_cancel = role_cell.locator(".form-autocomplete-selection span.badge span.edw-icon-Cancel, .badge .edw-icon-Cancel, .badge a[tabindex]")
+                if await old_cancel.count() > 0:
+                    await old_cancel.first.click(force=True)
+                    await asyncio.sleep(0.2)
+                else:
+                    break
+
+            # Mở dropdown gợi ý role
+            down_arrow = role_cell.locator("span.form-autocomplete-downarrow, .edw-icon-Down-Arrow").first
+            if await down_arrow.count() > 0:
+                await down_arrow.click(force=True)
+            else:
+                input_elem = role_cell.locator("input").first
+                if await input_elem.count() > 0:
+                    await input_elem.click(force=True)
+
+            await asyncio.sleep(0.3)
+            new_opt = role_cell.locator(f"ul.form-autocomplete-suggestions li").filter(has_text=target_role_label).first
+            await new_opt.wait_for(state="visible", timeout=4000)
+            await new_opt.click(force=True)
+
+            # Bấm nút lưu (icon đĩa mềm) hoặc Enter
+            save_disk = role_cell.locator("i.fa-floppy-o, a:has(i.fa-floppy-o)").first
+            if await save_disk.count() > 0 and await save_disk.is_visible():
+                await save_disk.click(force=True)
+            else:
+                await page.keyboard.press("Enter")
+
+            await asyncio.sleep(0.5)
+            logger.info(f"✅ Đã đổi Role thành công sang [{target_role_label}]!")
+            return True
+        except Exception as e:
+            logger.warning(f"⚠️ Không thể cập nhật Role qua quickedit: {e}")
+            return False
+
+    async def _internal_enroll_pipeline(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Thực thi nghiệp vụ ghi danh hỗ trợ 1 hoặc NHIỀU KHÓA HỌC trong 1 phiên duy nhất."""
+        raw_courses = payload.get("courses", [])
+        if not raw_courses and payload.get("course_id"):
+            raw_courses = [{
+                "course_id": payload.get("course_id"),
+                "course_name": payload.get("course_name", f"Course #{payload.get('course_id')}"),
+                "start_date": payload.get("start_date", ""),
+                "end_date": payload.get("end_date", ""),
+                "group_name": payload.get("group_name", "")
+            }]
+
+        if not raw_courses:
+            return {"status": "failed", "error": "Không có thông tin khóa học nào để ghi danh."}
 
         students = self._sanitize_emails(payload.get("student_emails", payload.get("students", [])))
         teachers = self._sanitize_emails(payload.get("teacher_emails", payload.get("non_editing_teachers", [])))
@@ -239,18 +292,12 @@ class PlaywrightLMSService:
                 managers = bulk_list
 
         total_requested = len(students) + len(teachers) + len(managers)
-        logger.info(f"📋 Tổng số emails cần xử lý: {total_requested} (Học viên: {len(students)}, Trợ giảng: {len(teachers)}, Quản lý: {len(managers)})")
+        logger.info(f"📋 BẮT ĐẦU CHUỖI GHI DANH {len(raw_courses)} KHÓA HỌC | Tổng emails: {total_requested} (Học viên: {len(students)}, Trợ giảng: {len(teachers)}, Quản lý: {len(managers)})")
 
         if total_requested == 0:
             return {"status": "failed", "error": "Không có email nào được cung cấp để thực hiện ghi danh."}
 
-        results = {
-            "enrolled_new": [],
-            "extended_access": [],
-            "not_found": [],
-            "group_created": None,
-            "group_members_added": []
-        }
+        batch_course_results = []
 
         async with async_playwright() as p:
             browser: Browser = await p.chromium.launch(
@@ -266,321 +313,355 @@ class PlaywrightLMSService:
             page.set_default_timeout(35000)
 
             try:
+                # 🔑 ĐĂNG NHẬP 1 LẦN DUY NHẤT CHO CẢ BATCH
                 if not await self._login_moodle_sso(page):
                     return {"status": "failed", "error": "Không thể đăng nhập vào hệ thống Moodle PLearn."}
 
-                participants_url = f"{MOODLE_BASE_URL}/user/index.php?id={course_id}"
-                role_configs = [
-                    ("Non-editing teacher", "7", teachers),
-                    ("Manager", "1", managers),
-                    ("Student", "9", students),
-                ]
+                # VÒNG LẶP DUYỆT TỪNG KHÓA HỌC
+                for c_idx, c_info in enumerate(raw_courses):
+                    course_id = str(c_info.get("course_id", "")).strip()
+                    course_name = c_info.get("course_name", f"Course #{course_id}")
+                    end_date_str = c_info.get("end_date", payload.get("end_date", ""))
+                    start_date_option = str(c_info.get("start_date_type", c_info.get("start_date", payload.get("start_date", "4")))).strip()
+                    group_name = c_info.get("group_name", "").strip()
 
-                all_valid_emails = []
+                    date_info = self._parse_date_components(end_date_str) if end_date_str else None
 
-                for role_label, role_value, emails in role_configs:
-                    if not emails:
-                        continue
+                    logger.info(f"\n=======================================================")
+                    logger.info(f"📚 [{c_idx + 1}/{len(raw_courses)}] ĐANG XỬ LÝ KHÓA: {course_name} (ID: {course_id})")
+                    logger.info(f"=======================================================")
 
-                    logger.info(f"👥 Đang xử lý nhóm [{role_label}] ({len(emails)} emails)...")
+                    course_results = {
+                        "course_id": course_id,
+                        "course_name": course_name,
+                        "enrolled_new": [],
+                        "extended_access": [],
+                        "not_found": [],
+                        "group_created": None,
+                        "group_members_added": []
+                    }
 
-                    await page.goto(participants_url, wait_until="domcontentloaded", timeout=45000)
-                    await wait_for_dom_and_spinners(page, "#page-content, #region-main, table#participants", min_pacing_ms=400)
+                    participants_url = f"{MOODLE_BASE_URL}/user/index.php?id={course_id}"
+                    role_configs = [
+                        ("Non-editing teacher", "7", teachers),
+                        ("Manager", "1", managers),
+                        ("Student", "9", students),
+                    ]
 
-                    new_enrolled_emails_in_group = []
+                    all_valid_emails_for_group = []
 
-                    # ----------------------------------------------------------
-                    # BƯỚC 1: ENROL MỚI TRONG MODAL
-                    # ----------------------------------------------------------
-                    enrol_btn = page.locator("form[id^='enrolusersbutton'] input[type='submit'], input[value='Enrol users'], button:has-text('Enrol users')").first
-                    if await enrol_btn.count() > 0:
-                        await enrol_btn.wait_for(state="visible", timeout=15000)
-                        await enrol_btn.scroll_into_view_if_needed()
-                        await enrol_btn.click()
+                    for role_label, role_value, emails in role_configs:
+                        if not emails:
+                            continue
 
-                        modal = page.locator("div.modal.show[data-region='modal-container'], div.modal.show:has-text('Enrol users')").first
-                        await modal.wait_for(state="visible", timeout=15000)
+                        logger.info(f"👥 Đang xử lý nhóm [{role_label}] ({len(emails)} emails)...")
 
-                        # 1. Chọn Role (Dùng cả JS lẫn Playwright)
-                        try:
-                            await page.evaluate(f"""() => {{
-                                const sel = document.querySelector(".modal.show select#id_roletoassign, select#id_roletoassign");
-                                if (sel) {{
-                                    sel.value = '{role_value}';
-                                    sel.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                                }}
-                            }}""")
-                        except Exception:
-                            role_select = modal.locator("select#id_roletoassign").first
-                            if await role_select.count() > 0:
-                                await role_select.select_option(value=role_value, force=True)
+                        await page.goto(participants_url, wait_until="domcontentloaded", timeout=45000)
+                        await wait_for_dom_and_spinners(page, "#page-content, #region-main, table#participants", min_pacing_ms=400)
 
-                        # 2. Bung Show more & Cài ngày
-                        if date_info:
-                            show_more_link = modal.locator("a.moreless-toggler").first
-                            if await show_more_link.count() > 0:
-                                is_expanded = await show_more_link.get_attribute("aria-expanded")
-                                if is_expanded != "true":
-                                    await show_more_link.scroll_into_view_if_needed()
-                                    await show_more_link.click(force=True)
+                        new_enrolled_emails_in_group = []
 
-                            await page.evaluate(f"""() => {{
-                                const chk = document.querySelector(".modal.show input#id_timeend_enabled, .modal.show input[name='timeend[enabled]']");
-                                if (chk && !chk.checked) {{
-                                    chk.checked = true;
-                                    chk.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                                }}
-                                const day = document.querySelector(".modal.show select#id_timeend_day");
-                                const month = document.querySelector(".modal.show select#id_timeend_month");
-                                const year = document.querySelector(".modal.show select#id_timeend_year");
+                        # ------------------------------------------------------
+                        # BƯỚC 1: ENROL MỚI TRONG MODAL
+                        # ------------------------------------------------------
+                        enrol_btn = page.locator("form[id^='enrolusersbutton'] input[type='submit'], input[value='Enrol users'], button:has-text('Enrol users')").first
+                        if await enrol_btn.count() > 0:
+                            await enrol_btn.wait_for(state="visible", timeout=15000)
+                            await enrol_btn.scroll_into_view_if_needed()
+                            await enrol_btn.click()
 
-                                [day, month, year].forEach(el => {{ if (el) el.removeAttribute('disabled'); }});
+                            modal = page.locator("div.modal.show[data-region='modal-container'], div.modal.show:has-text('Enrol users')").first
+                            await modal.wait_for(state="visible", timeout=15000)
 
-                                if (day) {{ day.value = '{date_info["day"]}'; day.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
-                                if (month) {{ month.value = '{date_info["month"]}'; month.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
-                                if (year) {{ year.value = '{date_info["year"]}'; year.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
-                            }}""")
-
-                        # 3. Chờ ô input tìm kiếm User nạp xong qua RequireJS (Khớp chính xác DOM RemUI)
-                        search_user_input = modal.locator(
-                            "#fitem_id_userlist input[placeholder='Search'], #fitem_id_userlist input[role='combobox'], #fitem_id_userlist input.form-control"
-                        ).first
-                        
-                        try:
-                            await search_user_input.wait_for(state="visible", timeout=12000)
-                            logger.info("🎯 Đã bắt được ô tìm kiếm học viên trong modal!")
-                        except Exception as e:
-                            logger.warning(f"⚠️ Ô tìm kiếm modal chưa sẵn sàng: {e}")
-
-                        new_selected_count = 0
-                        suggestions_list = modal.locator("ul.form-autocomplete-suggestions")
-
-                        for email in emails:
-                            clean_email = email.strip().lower()
-                            logger.info(f"🔍 Tìm kiếm tài khoản trong modal: {clean_email}")
-                            
+                            # 1. Chọn Role
                             try:
-                                if await search_user_input.count() > 0 and await search_user_input.is_visible():
-                                    await search_user_input.scroll_into_view_if_needed()
-                                    await search_user_input.click(force=True)
-                                    await search_user_input.fill("")
-                                    # Gõ từng ký tự để Moodle debounce lắng nghe AJAX
-                                    await search_user_input.press_sequentially(clean_email, delay=35)
-
-                                    target_option = suggestions_list.locator("li[role='option']").filter(has_text=clean_email).first
-                                    await target_option.wait_for(state="visible", timeout=4000)
-                                    await target_option.click(force=True)
-
-                                    new_selected_count += 1
-                                    new_enrolled_emails_in_group.append(clean_email)
-                                    all_valid_emails.append(clean_email)
-                                    results["enrolled_new"].append({"email": clean_email, "role": role_label, "valid_until": end_date_str})
-                                    logger.info(f"➕ Đã chọn để ghi danh MỚI: {clean_email} ({role_label})")
-                                else:
-                                    logger.info(f"ℹ️ Không thấy ô tìm kiếm -> Chuyển Fallback: {clean_email}")
+                                await page.evaluate(f"""() => {{
+                                    const sel = document.querySelector(".modal.show select#id_roletoassign, select#id_roletoassign");
+                                    if (sel) {{
+                                        sel.value = '{role_value}';
+                                        sel.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                    }}
+                                }}""")
                             except Exception:
-                                logger.info(f"ℹ️ Không có trong gợi ý Mới -> Sẽ kiểm tra Fallback ngoài bảng: {clean_email}")
+                                role_select = modal.locator("select#id_roletoassign").first
+                                if await role_select.count() > 0:
+                                    await role_select.select_option(value=role_value, force=True)
 
-                        if new_selected_count > 0:
-                            save_btn = modal.locator(".modal-footer button[data-action='save'], button:has-text('Enrol selected users and cohorts')").first
-                            await save_btn.click(force=True)
-                            
-                            try:
-                                await modal.wait_for(state="hidden", timeout=15000)
-                            except Exception:
-                                await self._close_modal_safely(page, modal)
-                                
-                            logger.info(f"✅ Đã submit ghi danh {new_selected_count} tài khoản mới thành công!")
-                        else:
-                            await self._close_modal_safely(page, modal)
+                            # 2. Bung Show more & Cài ngày
+                            if start_date_option not in ["2", "3", "4"]:
+                                start_date_option = "4"
 
-                    # ----------------------------------------------------------
-                    # BƯỚC 2: SMART FALLBACK CHO CÁC EMAIL CHƯA GHI DANH ĐƯỢC Ở BƯỚC 1
-                    # (Bảo toàn 100% dữ liệu, không bao giờ bị bỏ sót email!)
-                    # ----------------------------------------------------------
-                    emails_need_fallback = [e for e in emails if e not in new_enrolled_emails_in_group]
+                            if date_info or start_date_option != "4":
+                                show_more_link = modal.locator("a.moreless-toggler").first
+                                if await show_more_link.count() > 0:
+                                    is_expanded = await show_more_link.get_attribute("aria-expanded")
+                                    if is_expanded != "true":
+                                        await show_more_link.scroll_into_view_if_needed()
+                                        await show_more_link.click(force=True)
+                                        await asyncio.sleep(0.3)
 
-                    if emails_need_fallback:
-                        logger.info(f"🔄 BẮT ĐẦU SMART FALLBACK CHO {len(emails_need_fallback)} TÀI KHOẢN TRONG BẢNG...")
+                                try:
+                                    await page.evaluate(f"""() => {{
+                                        const startSel = document.querySelector(".modal.show select#id_startdate, select#id_startdate");
+                                        if (startSel) {{
+                                            startSel.value = '{start_date_option}';
+                                            startSel.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                        }}
+                                    }}""")
+                                    logger.info(f"⏱️ Đã chọn Starting from (Option: {start_date_option})")
+                                except Exception as e:
+                                    logger.debug(f"Không set được startdate: {e}")
 
-                        for email in emails_need_fallback:
-                            user_extended = False
-                            await self._apply_keyword_filter(page, email)
+                            if date_info:
+                                logger.info(f"📅 Cài đặt Enrolment ends: {end_date_str}")
+                                await page.evaluate(f"""() => {{
+                                    const chk = document.querySelector(".modal.show input#id_timeend_enabled, .modal.show input[name='timeend[enabled]']");
+                                    if (chk && !chk.checked) {{
+                                        chk.checked = true;
+                                        chk.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                    }}
+                                    const day = document.querySelector(".modal.show select#id_timeend_day");
+                                    const month = document.querySelector(".modal.show select#id_timeend_month");
+                                    const year = document.querySelector(".modal.show select#id_timeend_year");
 
-                            # So khớp chính xác cột td.cell.c2
-                            user_row = page.locator("table#participants tbody tr").filter(
-                                has=page.locator("td.cell.c2, td.c2", has_text=email)
+                                    [day, month, year].forEach(el => {{ if (el) el.removeAttribute('disabled'); }});
+
+                                    if (day) {{ day.value = '{date_info["day"]}'; day.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
+                                    if (month) {{ day.value = '{date_info["month"]}'; day.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
+                                    if (year) {{ year.value = '{date_info["year"]}'; year.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
+                                }}""")
+
+                            # 3. Đợi ô Search của RequireJS
+                            search_user_input = modal.locator(
+                                "#fitem_id_userlist input[placeholder='Search'], #fitem_id_userlist input[role='combobox'], #fitem_id_userlist input.form-control"
                             ).first
+                            try:
+                                await search_user_input.wait_for(state="visible", timeout=12000)
+                            except Exception as e:
+                                logger.warning(f"⚠️ Ô tìm kiếm modal chưa sẵn sàng: {e}")
 
-                            if await user_row.count() > 0:
-                                edit_gear = user_row.locator("a.editenrollink, a[data-action='editenrolment']").first
-                                if await edit_gear.count() > 0:
-                                    await edit_gear.scroll_into_view_if_needed()
-                                    await edit_gear.click(force=True)
-                                    
-                                    edit_modal = page.locator("div.modal.show[data-region='modal-container'], div.modal.show:has-text('Edit')").first
-                                    await edit_modal.wait_for(state="visible", timeout=10000)
+                            new_selected_count = 0
+                            suggestions_list = modal.locator("ul.form-autocomplete-suggestions")
 
-                                    # Kích hoạt trạng thái Active (0)
-                                    try:
-                                        await page.evaluate("""() => {
-                                            const st = document.querySelector(".modal.show select#id_status");
-                                            if (st) {
-                                                st.value = "0";
-                                                st.dispatchEvent(new Event('change', { bubbles: true }));
-                                            }
-                                        }""")
-                                    except Exception:
-                                        status_select = edit_modal.locator("select#id_status").first
-                                        if await status_select.count() > 0:
-                                            await status_select.select_option(value="0", force=True)
+                            for email in emails:
+                                clean_email = email.strip().lower()
+                                logger.info(f"🔍 Tìm kiếm tài khoản trong modal: {clean_email}")
+                                
+                                try:
+                                    if await search_user_input.count() > 0 and await search_user_input.is_visible():
+                                        await search_user_input.scroll_into_view_if_needed()
+                                        await search_user_input.click(force=True)
+                                        await search_user_input.fill("")
+                                        await search_user_input.press_sequentially(clean_email, delay=35)
 
-                                    if date_info:
-                                        await page.evaluate(f"""() => {{
-                                            const chk = document.querySelector(".modal.show input#id_timeend_enabled, .modal.show input[name='timeend[enabled]']");
-                                            if (chk && !chk.checked) {{
-                                                chk.checked = true;
-                                                chk.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                                            }}
-                                            const day = document.querySelector(".modal.show select#id_timeend_day");
-                                            const month = document.querySelector(".modal.show select#id_timeend_month");
-                                            const year = document.querySelector(".modal.show select#id_timeend_year");
+                                        target_option = suggestions_list.locator("li[role='option']").filter(has_text=clean_email).first
+                                        await target_option.wait_for(state="visible", timeout=4000)
+                                        await target_option.click(force=True)
 
-                                            [day, month, year].forEach(el => {{ if (el) el.removeAttribute('disabled'); }});
+                                        new_selected_count += 1
+                                        new_enrolled_emails_in_group.append(clean_email)
+                                        all_valid_emails_for_group.append(clean_email)
+                                        course_results["enrolled_new"].append({"email": clean_email, "role": role_label, "valid_until": end_date_str})
+                                        logger.info(f"➕ Đã chọn để ghi danh MỚI: {clean_email} ({role_label})")
+                                    else:
+                                        logger.info(f"ℹ️ Không thấy ô tìm kiếm -> Chuyển Fallback: {clean_email}")
+                                except Exception:
+                                    logger.info(f"ℹ️ Không có trong gợi ý Mới -> Sẽ kiểm tra Fallback ngoài bảng: {clean_email}")
 
-                                            if (day) {{ day.value = '{date_info["day"]}'; day.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
-                                            if (month) {{ day.value = '{date_info["month"]}'; month.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
-                                            if (year) {{ day.value = '{date_info["year"]}'; year.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
-                                        }}""")
+                            if new_selected_count > 0:
+                                save_btn = modal.locator(".modal-footer button[data-action='save'], button:has-text('Enrol selected users and cohorts')").first
+                                await save_btn.click(force=True)
+                                try:
+                                    await modal.wait_for(state="hidden", timeout=15000)
+                                except Exception:
+                                    await self._close_modal_safely(page, modal)
+                                logger.info(f"✅ Đã submit ghi danh {new_selected_count} tài khoản mới thành công!")
+                            else:
+                                await self._close_modal_safely(page, modal)
 
-                                    save_edit_btn = edit_modal.locator(".modal-footer button[data-action='save'], button:has-text('Save changes')").first
-                                    await save_edit_btn.click(force=True)
-                                    
-                                    try:
-                                        await edit_modal.wait_for(state="hidden", timeout=10000)
-                                    except Exception:
-                                        await self._close_modal_safely(page, edit_modal)
+                        # ------------------------------------------------------
+                        # BƯỚC 2: SMART FALLBACK (GIA HẠN + ĐỔI ROLE NẾU KHÁC BIỆT ✏️)
+                        # ------------------------------------------------------
+                        emails_need_fallback = [e for e in emails if e not in new_enrolled_emails_in_group]
 
-                                    logger.info(f"🔄 SMART FALLBACK THÀNH CÔNG: Đã gia hạn cho {email} ({role_label}) đến ngày {end_date_str}")
-                                    all_valid_emails.append(email)
-                                    results["extended_access"].append({
+                        if emails_need_fallback:
+                            logger.info(f"🔄 BẮT ĐẦU SMART FALLBACK CHO {len(emails_need_fallback)} TÀI KHOẢN TRONG BẢNG...")
+
+                            for email in emails_need_fallback:
+                                user_extended = False
+                                await self._apply_keyword_filter(page, email)
+
+                                user_row = page.locator("table#participants tbody tr").filter(
+                                    has=page.locator("td.cell.c2, td.c2", has_text=email)
+                                ).first
+
+                                if await user_row.count() > 0:
+                                    # 1. Kiểm tra và đổi Role bằng icon bút chì nếu Role hiện tại khác với Role mong muốn
+                                    await self._update_user_role_in_table(page, user_row, role_label)
+
+                                    # 2. Bấm icon bánh răng để gia hạn ngày
+                                    edit_gear = user_row.locator("a.editenrollink, a[data-action='editenrolment']").first
+                                    if await edit_gear.count() > 0:
+                                        await edit_gear.scroll_into_view_if_needed()
+                                        await edit_gear.click(force=True)
+                                        
+                                        edit_modal = page.locator("div.modal.show[data-region='modal-container'], div.modal.show:has-text('Edit')").first
+                                        await edit_modal.wait_for(state="visible", timeout=10000)
+
+                                        try:
+                                            await page.evaluate("""() => {
+                                                const st = document.querySelector(".modal.show select#id_status");
+                                                if (st) {
+                                                    st.value = "0";
+                                                    st.dispatchEvent(new Event('change', { bubbles: true }));
+                                                }
+                                            }""")
+                                        except Exception:
+                                            status_select = edit_modal.locator("select#id_status").first
+                                            if await status_select.count() > 0:
+                                                await status_select.select_option(value="0", force=True)
+
+                                        if date_info:
+                                            await page.evaluate(f"""() => {{
+                                                const chk = document.querySelector(".modal.show input#id_timeend_enabled, .modal.show input[name='timeend[enabled]']");
+                                                if (chk && !chk.checked) {{
+                                                    chk.checked = true;
+                                                    chk.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                                }}
+                                                const day = document.querySelector(".modal.show select#id_timeend_day");
+                                                const month = document.querySelector(".modal.show select#id_timeend_month");
+                                                const year = document.querySelector(".modal.show select#id_timeend_year");
+
+                                                [day, month, year].forEach(el => {{ if (el) el.removeAttribute('disabled'); }});
+
+                                                if (day) {{ day.value = '{date_info["day"]}'; day.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
+                                                if (month) {{ day.value = '{date_info["month"]}'; day.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
+                                                if (year) {{ year.value = '{date_info["year"]}'; year.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
+                                            }}""")
+
+                                        save_edit_btn = edit_modal.locator(".modal-footer button[data-action='save'], button:has-text('Save changes')").first
+                                        await save_edit_btn.click(force=True)
+                                        
+                                        try:
+                                            await edit_modal.wait_for(state="hidden", timeout=10000)
+                                        except Exception:
+                                            await self._close_modal_safely(page, edit_modal)
+
+                                        logger.info(f"🔄 SMART FALLBACK THÀNH CÔNG: Đã gia hạn & đồng bộ Role cho {email} ({role_label}) đến ngày {end_date_str}")
+                                        all_valid_emails_for_group.append(email)
+                                        course_results["extended_access"].append({
+                                            "email": email,
+                                            "role": role_label,
+                                            "valid_until": end_date_str
+                                        })
+                                        user_extended = True
+
+                                if not user_extended:
+                                    logger.warning(f"❌ SMART FALLBACK THẤT BẠI: Không tìm thấy tài khoản trong bảng: {email}")
+                                    course_results["not_found"].append({
                                         "email": email,
-                                        "role": role_label,
-                                        "valid_until": end_date_str
+                                        "role_intended": role_label,
+                                        "reason": "Tài khoản không có trong gợi ý Mới và không tồn tại trong bảng học viên của khóa học."
                                     })
-                                    user_extended = True
 
-                            if not user_extended:
-                                logger.warning(f"❌ SMART FALLBACK THẤT BẠI: Không tìm thấy tài khoản trong bảng: {email}")
-                                results["not_found"].append({
-                                    "email": email,
-                                    "role_intended": role_label,
-                                    "reason": "Tài khoản không có trong danh sách gợi ý Mới và không tồn tại trong bảng học viên của khóa học."
-                                })
+                        # ------------------------------------------------------
+                        # BƯỚC 3: TẠO GROUP & PHÂN NHÓM (CHO KHÓA HỌC HIỆN TẠI)
+                        # ------------------------------------------------------
+                        if group_name and all_valid_emails_for_group:
+                            logger.info(f"🏷️ Bắt đầu tiến trình tạo Group & phân nhóm: [{group_name}] cho khóa {course_id}...")
+                            groups_url = f"{MOODLE_BASE_URL}/group/index.php?id={course_id}"
+                            await page.goto(groups_url, wait_until="domcontentloaded", timeout=45000)
+                            await wait_for_dom_and_spinners(page, "select#groups, #page-content", min_pacing_ms=400)
 
-                    # ----------------------------------------------------------
-                    # BƯỚC 3: TẠO GROUP & PHÂN NHÓM
-                    # ----------------------------------------------------------
-                    if group_name and all_valid_emails:
-                        logger.info(f"🏷️ Bắt đầu tiến trình tạo Group & phân nhóm: [{group_name}]...")
-                        groups_url = f"{MOODLE_BASE_URL}/group/index.php?id={course_id}"
-                        await page.goto(groups_url, wait_until="domcontentloaded", timeout=45000)
-                        await wait_for_dom_and_spinners(page, "select#groups, #page-content", min_pacing_ms=400)
+                            group_option = page.locator(f"select#groups option:has-text('{group_name}')").first
+                            if await group_option.count() == 0:
+                                logger.info(f"➕ Tạo Group mới: [{group_name}]...")
+                                create_group_btn = page.locator("input#showcreateorphangroupform, input[value='Create group']").first
+                                if await create_group_btn.count() > 0:
+                                    await create_group_btn.click(force=True)
+                                    name_input = page.locator("input#id_name").first
+                                    await name_input.wait_for(state="visible", timeout=10000)
+                                    await name_input.fill(group_name)
+                                    await page.click("input#id_submitbutton, input[value='Save changes']", force=True)
+                                    await wait_for_dom_and_spinners(page, "select#groups", min_pacing_ms=400)
 
-                        group_option = page.locator(f"select#groups option:has-text('{group_name}')").first
-                        if await group_option.count() == 0:
-                            logger.info(f"➕ Tạo Group mới: [{group_name}]...")
-                            create_group_btn = page.locator("input#showcreateorphangroupform, input[value='Create group']").first
-                            if await create_group_btn.count() > 0:
-                                await create_group_btn.click(force=True)
-                                
-                                name_input = page.locator("input#id_name").first
-                                await name_input.wait_for(state="visible", timeout=10000)
-                                await name_input.fill(group_name)
-                                await page.click("input#id_submitbutton, input[value='Save changes']", force=True)
-                                await wait_for_dom_and_spinners(page, "select#groups", min_pacing_ms=400)
+                            group_option = page.locator(f"select#groups option:has-text('{group_name}')").first
+                            if await group_option.count() > 0:
+                                await group_option.click(force=True)
 
-                        group_option = page.locator(f"select#groups option:has-text('{group_name}')").first
-                        if await group_option.count() > 0:
-                            await group_option.click(force=True)
+                                add_members_btn = page.locator("input#showaddmembersform, input[value='Add/remove users']").first
+                                if await add_members_btn.count() > 0 and await add_members_btn.is_enabled():
+                                    await add_members_btn.click(force=True)
+                                    search_potential = page.locator("input#addselect_searchtext").first
+                                    await search_potential.wait_for(state="visible", timeout=15000)
 
-                            add_members_btn = page.locator("input#showaddmembersform, input[value='Add/remove users']").first
-                            if await add_members_btn.count() > 0 and await add_members_btn.is_enabled():
-                                await add_members_btn.click(force=True)
-                                
-                                search_potential = page.locator("input#addselect_searchtext").first
-                                await search_potential.wait_for(state="visible", timeout=15000)
+                                    for u_email in all_valid_emails_for_group:
+                                        await search_potential.click(force=True)
+                                        await search_potential.fill(u_email)
+                                        try:
+                                            await page.locator("select#addselect").wait_for(state="visible", timeout=3000)
+                                        except Exception:
+                                            pass
 
-                                for u_email in all_valid_emails:
-                                    await search_potential.click(force=True)
-                                    await search_potential.fill(u_email)
-                                    
-                                    try:
-                                        await page.locator("select#addselect").wait_for(state="visible", timeout=3000)
-                                    except Exception:
-                                        pass
+                                        potential_opt = page.locator("select#addselect option").filter(has_text=u_email).first
+                                        if await potential_opt.count() > 0:
+                                            await potential_opt.click(force=True)
+                                            add_btn = page.locator("input#add, input[name='add'], input[value*='Add']").first
+                                            if await add_btn.count() > 0:
+                                                await add_btn.click(force=True)
+                                                course_results["group_members_added"].append(u_email)
+                                                logger.info(f"✅ Đã thêm vào Group [{group_name}]: {u_email}")
 
-                                    potential_opt = page.locator("select#addselect option").filter(has_text=u_email).first
-                                    if await potential_opt.count() > 0:
-                                        await potential_opt.click(force=True)
+                                    back_btn = page.locator("input[name='cancel'][value='Back to groups']").first
+                                    if await back_btn.count() > 0:
+                                        await back_btn.click(force=True)
+                                        await wait_for_dom_and_spinners(page, "select#groups", min_pacing_ms=300)
 
-                                        add_btn = page.locator("input#add, input[name='add'], input[value*='Add']").first
-                                        if await add_btn.count() > 0:
-                                            await add_btn.click(force=True)
-                                            results["group_members_added"].append(u_email)
-                                            logger.info(f"✅ Đã thêm vào Group [{group_name}]: {u_email}")
+                                    course_results["group_created"] = group_name
 
-                                back_btn = page.locator("input[name='cancel'][value='Back to groups']").first
-                                if await back_btn.count() > 0:
-                                    await back_btn.click(force=True)
-                                    await wait_for_dom_and_spinners(page, "select#groups", min_pacing_ms=300)
+                    batch_course_results.append(course_results)
 
-                                results["group_created"] = group_name
+                # Tổng kết kết quả toàn bộ chuỗi khóa học
+                total_courses_count = len(batch_course_results)
+                all_enrolled_count = sum(len(c["enrolled_new"]) for c in batch_course_results)
+                all_extended_count = sum(len(c["extended_access"]) for c in batch_course_results)
+                all_failed_count = sum(len(c["not_found"]) for c in batch_course_results)
 
-                # Tổng kết trạng thái chuẩn xác 100%
-                success_count = len(results["enrolled_new"]) + len(results["extended_access"])
-                failed_count = len(results["not_found"])
-
-                if success_count == total_requested:
-                    status = "success"
-                elif success_count > 0:
-                    status = "partial_success"
-                else:
-                    status = "failed"
+                overall_status = "success" if all_failed_count == 0 else ("partial_success" if (all_enrolled_count + all_extended_count) > 0 else "failed")
 
                 return {
-                    "status": status,
-                    "course_id": course_id,
-                    "course_name": course_name,
-                    "message": f"Đã xử lý {success_count}/{total_requested} tài khoản (Mới: {len(results['enrolled_new'])}, Gia hạn/Fallback: {len(results['extended_access'])}, Thất bại: {failed_count}).",
+                    "status": overall_status,
+                    "courses_count": total_courses_count,
+                    "message": f"Hoàn thành xử lý {total_courses_count} khóa học cho {total_requested} người dùng (Mới: {all_enrolled_count}, Gia hạn & Đổi Role: {all_extended_count}, Thất bại: {all_failed_count}).",
                     "summary": {
-                        "total_requested": total_requested,
-                        "enrolled_new_count": len(results["enrolled_new"]),
-                        "extended_access_count": len(results["extended_access"]),
-                        "not_found_count": failed_count,
-                        "group_members_count": len(results["group_members_added"])
+                        "total_courses": total_courses_count,
+                        "total_requested_per_course": total_requested,
+                        "all_enrolled_count": all_enrolled_count,
+                        "all_extended_count": all_extended_count,
+                        "all_failed_count": all_failed_count
                     },
-                    "details": results
+                    "details": batch_course_results
                 }
 
             except Exception as e:
                 logger.error(f"❌ Lỗi ngoại lệ trong quá trình LMS Enrollment: {e}")
-                return {"status": "failed", "error": str(e), "details": results}
+                return {"status": "failed", "error": str(e), "details": batch_course_results}
             finally:
                 await browser.close()
                 gc.collect()
 
     async def enroll_users_pipeline(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Bọc Khóa Slot Concurrency Toàn Cục & Timeout an toàn tối đa 240s."""
-        async with acquire_playwright_slot("Moodle LMS Enroll Pipeline", timeout=240.0):
+        """Bọc Khóa Slot Concurrency Toàn Cục & Timeout an toàn tối đa 300s."""
+        timeout_seconds = 300.0 if len(payload.get("courses", [])) > 1 else 240.0
+        async with acquire_playwright_slot("Moodle LMS Enroll Pipeline", timeout=timeout_seconds):
             try:
-                return await asyncio.wait_for(self._internal_enroll_pipeline(payload), timeout=240.0)
+                return await asyncio.wait_for(self._internal_enroll_pipeline(payload), timeout=timeout_seconds)
             except asyncio.TimeoutError:
-                logger.error("❌ Quá thời gian thực thi (Timeout 240s) cho tác vụ ghi danh Moodle LMS.")
-                return {"status": "failed", "error": "Tác vụ ghi danh bị Timeout (vượt quá 240s)."}
+                logger.error(f"❌ Quá thời gian thực thi (Timeout {timeout_seconds}s) cho tác vụ ghi danh Moodle LMS.")
+                return {"status": "failed", "error": f"Tác vụ ghi danh bị Timeout (vượt quá {timeout_seconds}s)."}
 
     async def modify_user_role(self, course_id: str, email: str, new_role_label: str, mode: str = "mono") -> Dict[str, Any]:
-        """Đổi Mono-Role (gỡ sạch role cũ và gán role mong muốn) kèm State Confirmation."""
+        """Đổi Mono-Role độc lập."""
         async with acquire_playwright_slot(f"Moodle Modify User Role ({email})"):
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=self.headless, args=LOW_RAM_CHROMIUM_ARGS)
@@ -605,44 +686,14 @@ class PlaywrightLMSService:
                     if await user_row.count() == 0:
                         return {"status": "failed", "error": f"Không tìm thấy user {email} trong khóa học."}
 
-                    role_cell = user_row.locator("td.cell.c3, td.c3").first
-                    role_link = role_cell.locator("a.quickeditlink, a").first
-                    await role_link.click(force=True)
-
-                    if mode in ["mono", "replace"]:
-                        while True:
-                            old_badges_cancel = role_cell.locator(".form-autocomplete-selection span.badge span.edw-icon-Cancel, .badge .edw-icon-Cancel")
-                            if await old_badges_cancel.count() > 0:
-                                await old_badges_cancel.first.click(force=True)
-                            else:
-                                break
-
-                    down_arrow = role_cell.locator("span.form-autocomplete-downarrow, .edw-icon-Down-Arrow").first
-                    if await down_arrow.count() > 0:
-                        await down_arrow.click(force=True)
-
-                    new_opt = role_cell.locator(f"ul.form-autocomplete-suggestions li:has-text('{new_role_label}')").first
-                    await new_opt.wait_for(state="visible", timeout=5000)
-                    await new_opt.click(force=True)
-
-                    save_disk_btn = role_cell.locator("i.fa-floppy-o, a:has(i.fa-floppy-o)").first
-                    if await save_disk_btn.count() > 0:
-                        await save_disk_btn.click(force=True)
-                    else:
-                        await page.keyboard.press("Enter")
-
-                    try:
-                        await save_disk_btn.wait_for(state="hidden", timeout=5000)
-                    except Exception:
-                        pass
-
-                    return {"status": "success", "message": f"Đã cập nhật role thành [{new_role_label}] cho {email}"}
+                    res = await self._update_user_role_in_table(page, user_row, new_role_label)
+                    return {"status": "success" if res else "failed", "message": f"Cập nhật role [{new_role_label}] cho {email}"}
                 finally:
                     await browser.close()
                     gc.collect()
 
     async def unenrol_users_pipeline(self, course_id: str, emails: List[str]) -> Dict[str, Any]:
-        """Hàm độc lập xóa danh sách User khỏi khóa học (Unenrol 🗑️)."""
+        """Xóa danh sách User khỏi khóa học (Unenrol 🗑️)."""
         async with acquire_playwright_slot(f"Moodle Unenrol Users ({len(emails)} emails)"):
             clean_emails = self._sanitize_emails(emails)
             if not clean_emails:
