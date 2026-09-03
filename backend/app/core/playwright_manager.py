@@ -163,3 +163,97 @@ async def wait_for_dom_and_spinners(
             await page.wait_for_timeout(min_pacing_ms)
     except Exception as e:
         logger.debug(f"wait_for_dom_and_spinners notice: {e}")
+
+
+async def smart_wait_login_or_error(
+    page: Page,
+    timeout: float = 20000,
+    role_title: str = "Tài khoản",
+    username: str = ""
+) -> tuple[bool, str]:
+    """
+    Chờ phản hồi đăng nhập thông minh theo State Race:
+    - Thoát ngay khi URL đổi sang trang chủ/dashboard hoặc xuất hiện menu người dùng.
+    - Thoát ngay khi xuất hiện thông báo lỗi của Keycloak/Moodle (.alert-error, #input-error...).
+    - Tuyệt đối không dùng hard-coded sleep 2.5s-3s.
+    """
+    import time
+    start_time = time.time()
+    err_loc = page.locator(".alert-error, #input-error, span.kc-feedback-text, .alert.alert-warning, p.instruction")
+    auth_loc = page.locator(".MuiDrawer-root, [data-testid='user-menu'], .usermenu, .userinitials, a[href*='logout'], button:has-text('Logout'), button:has-text('Đăng xuất')")
+
+    while (time.time() - start_time) * 1000 < timeout:
+        # 1. Kiểm tra lỗi trước
+        if await err_loc.count() > 0 and await err_loc.first.is_visible():
+            err_text = (await err_loc.first.inner_text()).strip()
+            err = f"❌ [{role_title} - '{username}'] Đăng nhập thất bại: '{err_text}'"
+            logger.error(err)
+            return False, err
+
+        # 2. Kiểm tra điều kiện thành công
+        curr_url = page.url.lower()
+        if "login" not in curr_url and "authenticate" not in curr_url and "realms" not in curr_url:
+            logger.info(f"✅ [{role_title} - '{username}'] Đăng nhập thành công! URL đích: {page.url}")
+            return True, ""
+
+        if await auth_loc.count() > 0 and await auth_loc.first.is_visible():
+            logger.info(f"✅ [{role_title} - '{username}'] Đăng nhập thành công (Authenticated element confirmed)!")
+            return True, ""
+
+        await asyncio.sleep(0.3)
+
+    err = f"⚠️ [{role_title} - '{username}'] Hết thời gian chờ phản hồi đăng nhập ({timeout/1000}s). URL hiện tại: {page.url}"
+    logger.error(err)
+    return False, err
+
+
+async def smart_wait_for_options_loaded(
+    page: Page,
+    parent_locator = None,
+    min_options: int = 1,
+    timeout: float = 10000
+) -> bool:
+    """
+    Chờ danh sách options trong Material-UI Dropdown hoặc Listbox nạp xong từ API:
+    - Thay thế hoàn toàn cho wait_for_timeout(1800) sau khi chọn Category.
+    - Chờ spinner trong menu ẩn và số lượng li[role='option'] >= min_options.
+    """
+    import time
+    start_time = time.time()
+    options_loc = page.locator("li[role='option'], ul[role='listbox'] li")
+    spinner_loc = page.locator(".MuiCircularProgress-root, .MuiSkeleton-root")
+
+    while (time.time() - start_time) * 1000 < timeout:
+        # Nếu đang có spinner nạp dữ liệu, tiếp tục chờ
+        if await spinner_loc.count() > 0 and await spinner_loc.first.is_visible():
+            await asyncio.sleep(0.2)
+            continue
+
+        count = await options_loc.count()
+        if count >= min_options:
+            return True
+
+        await asyncio.sleep(0.2)
+
+    return False
+
+
+async def smart_poll_condition(
+    check_fn,
+    timeout: float = 15000,
+    poll_interval: float = 1.0
+) -> Any:
+    """
+    Polling kiểm tra trạng thái linh hoạt theo hàm check_fn bất đồng bộ:
+    - Trả về kết quả ngay khi check_fn() trả về giá trị True-like.
+    - Tránh việc ngủ cứng 12s-15s trên Render.
+    """
+    import time
+    start_time = time.time()
+    while (time.time() - start_time) * 1000 < timeout:
+        res = await check_fn()
+        if res:
+            return res
+        await asyncio.sleep(poll_interval)
+    return None
+

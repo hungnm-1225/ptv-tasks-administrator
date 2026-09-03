@@ -42,15 +42,20 @@ export type BotType =
   | 'feedback_doc_triage';
 
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
-export type ExecutionStatus = 'queued' | 'running' | 'success' | 'failed';
+export type ExecutionStatus = 'queued' | 'running' | 'waiting_poll' | 'success' | 'partial_success' | 'failed';
 
 export interface BotAutomationTask {
   id: string;
-  ticket_id: string;
+  ticket_id?: string | null;
   bot_type: BotType | string;
   payload_data: Record<string, any>;
   approval_status: ApprovalStatus;
   execution_status: ExecutionStatus;
+  current_step?: string | null;
+  steps_timeline?: TaskStepInfo[];
+  retry_count?: number;
+  last_error_step?: string | null;
+
   execution_logs?: string;
   created_at: string;
   executed_at?: string;
@@ -97,6 +102,16 @@ export interface BotWorkersStatusResponse {
   google_doc_triage?: string;
   github_dispatcher?: string;
   [key: string]: string | undefined;
+}
+
+export interface TaskStepInfo {
+  step_id: string;
+  step_name: string;
+  status: 'pending' | 'running' | 'success' | 'failed' | 'skipped';
+  started_at?: string;
+  completed_at?: string;
+  error_message?: string;
+  output_data?: Record<string, any>;
 }
 
 export interface BotTerminalLog {
@@ -183,4 +198,46 @@ export interface BoardCardItem {
   subtasks?: BoardSubtask[];
   order_index?: number;
   created_at?: string;
+}
+
+export interface KeycloakActionPayload {
+  action: 'reset_password' | 'set_status' | 'verify_email' | 'send_verify_email' | 'delete_user' | 'git_oidc_provision';
+  email: string;
+  username?: string;
+  new_password?: string;
+  is_active?: boolean;
+}
+
+export interface WorkspaceRpaPayload {
+  action:
+  | 'pipeline_end_to_end'
+  | 'school_create_order'
+  | 'partner_approve_school_order'
+  | 'partner_create_contract'
+  | 'distributor_approve_partner_contract'
+  | 'distributor_create_contract'
+  | 'admin_approve_distributor_contract'
+  | 'bulk_account_creation'
+  | 'school_enroll_users';
+  school_name?: string;
+  school_id?: string;
+  distributor_code?: string;
+  partner_code?: string;
+  order_id?: string;
+  contract_id?: string;
+  courses?: Array<{ course_id: number; course_name: string; quantity: number; expiry_date: string }>;
+  file_url?: string;
+  batch_file_path?: string;
+  accounts_count?: number;
+  run_immediately?: boolean;
+}
+
+export interface LmsEnrollPayload {
+  action: 'enroll_users_pipeline' | 'modify_user_role' | 'unenrol_users_pipeline';
+  course_id: number;
+  emails: string[];
+  role?: 'student' | 'teacher' | 'manager';
+  role_id?: number; // 9: Student, 7: Non-editing teacher, 1: Manager
+  end_date?: string; // YYYY-MM-DD
+  group_name?: string;
 }

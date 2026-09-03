@@ -6,7 +6,7 @@ from typing import Dict, Any, List, Optional
 from playwright.async_api import async_playwright, Page
 
 from app.services.workspace.base import WorkspaceBaseService, BASE_WORKSPACE_URL
-from app.core.playwright_manager import acquire_playwright_slot, wait_for_dom_and_spinners
+from app.core.playwright_manager import acquire_playwright_slot, wait_for_dom_and_spinners, smart_wait_for_options_loaded
 
 logger = logging.getLogger(__name__)
 
@@ -97,10 +97,6 @@ class WorkspaceContractService(WorkspaceBaseService):
             else:
                 await page.locator("li[role='option']").first.click()
 
-            # 🟢 CHỜ API TẢI DANH SÁCH KHÓA HỌC CHO CATEGORY NÀY
-            logger.info("⏳ Chờ API nạp danh sách khóa học...")
-            await page.wait_for_timeout(1800)
-
             # B. Chọn Course (Cột 2)
             course_name_val = c.get("course_name")
             logger.info(f"🎯 Môn #{idx + 1}: Chọn Course = '{course_name_val or 'Mặc định'}'...")
@@ -108,7 +104,9 @@ class WorkspaceContractService(WorkspaceBaseService):
             course_select = course_item.locator("[role='combobox'], .MuiSelect-select").first
             await course_select.wait_for(state="visible", timeout=10000)
             await course_select.click()
-            await page.wait_for_timeout(500)
+
+            # Chờ API nạp danh sách khóa học theo State (thay thế wait_for_timeout 1800ms)
+            await smart_wait_for_options_loaded(page, min_options=1, timeout=8000)
 
             target_opt = None
             if course_name_val:

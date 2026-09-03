@@ -18,9 +18,21 @@ class WorkspaceAccountService(WorkspaceBaseService):
         credentials: Dict[str, str],
         upload_file_path: str,
         record_count: int,
-        download_dir: str = "/tmp/ptv_results"
+        download_dir: str = "/tmp/ptv_results",
+        checkpoint: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         os.makedirs(download_dir, exist_ok=True)
+        checkpoint = checkpoint or {}
+
+        # -------------------------------------------------------------
+        # RESUME CHECKPOINT: Nếu đã có request_id trước đó, bỏ qua upload
+        # -------------------------------------------------------------
+        existing_req_id = checkpoint.get("account_batch_request_id")
+        if existing_req_id:
+            logger.info(f"⏩ [CHECKPOINT] Đã có sẵn Request ID #{existing_req_id} từ phiên trước. Chuyển sang kiểm tra kết quả...")
+            check_res = await self.check_and_export_batch_result(credentials, existing_req_id, download_dir)
+            check_res["checkpoint"] = checkpoint
+            return check_res
 
         async with acquire_playwright_slot("Submit Account Creation Batch"):
             async with async_playwright() as p:
@@ -30,7 +42,7 @@ class WorkspaceAccountService(WorkspaceBaseService):
                         page, credentials.get("username", ""), credentials.get("password", ""), "School"
                     )
                     if not is_ok:
-                        return {"status": "failed", "error": login_err}
+                        return {"status": "failed", "error": login_err, "checkpoint": checkpoint}
 
                     logger.info("📂 Đang mở trang Tạo tài khoản hàng loạt...")
                     await page.goto(
@@ -42,7 +54,7 @@ class WorkspaceAccountService(WorkspaceBaseService):
 
                     file_input = page.locator("input[type='file']")
                     await file_input.set_input_files(upload_file_path)
-                    await page.wait_for_timeout(1000)
+                    await page.wait_for_timeout(800)
 
                     upload_btn = page.locator("//button[normalize-space()='Upload'], button:has-text('Upload')").first
                     await upload_btn.wait_for(state="visible", timeout=10000)
@@ -71,57 +83,69 @@ class WorkspaceAccountService(WorkspaceBaseService):
                             request_id = (await id_cell.inner_text()).strip()
 
                     logger.info(f"🎉 BẮT ĐƯỢC REQUEST ID: [ #{request_id} ] (Dự kiến: {record_count * 10}s)")
+                    if request_id:
+                        checkpoint["account_batch_request_id"] = request_id
 
                     # =============================================================
-                    # 🚀 FAST-PATH: Kiểm tra nhanh tại chỗ nếu batch vừa phải (<= 30 tài khoản)
+                    # 🚀 FAST-PATH: Kiểm tra động (Dynamic Polling) nếu batch <= 30 tài khoản
                     # =============================================================
                     if record_count <= 30 and request_id:
-                        logger.info(f"⚡ [Fast-Path] Đang chờ 12s để thử lấy kết quả ngay cho Request #{request_id}...")
-                        await page.wait_for_timeout(12000)
+                        logger.info(f"⚡ [Fast-Path] Đang thăm dò kết quả cho Request #{request_id} (tối đa 14s)...")
                         
-                        await page.reload(wait_until="domcontentloaded")
-                        await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=1000)
+                        # Thăm dò 3 nhịp (mỗi nhịp ~3.5s) thay vì ngủ cứng 12s
+                        for attempt in range(1, 4):
+                            await asyncio.sleep(3.5)
+                            try:
+                                await page.reload(wait_until="domcontentloaded")
+                                await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=800)
 
-                        target_row = page.locator(
-                            f".MuiDataGrid-row[data-id='{request_id}'], .MuiDataGrid-row:has([data-field='id']:has-text('{request_id}'))"
-                        ).first
+                                target_row = page.locator(
+                                    f".MuiDataGrid-row[data-id='{request_id}'], .MuiDataGrid-row:has([data-field='id']:has-text('{request_id}'))"
+                                ).first
 
-                        if await target_row.count() > 0:
-                            status_cell = target_row.locator("[data-field='status'] .MuiDataGrid-cellContent").first
-                            status_text = (await status_cell.inner_text()).strip().lower()
+                                if await target_row.count() > 0:
+                                    status_cell = target_row.locator("[data-field='status'] .MuiDataGrid-cellContent").first
+                                    status_text = (await status_cell.inner_text()).strip().lower()
 
-                            if any(w in status_text for w in ["done", "completed", "success"]):
-                                logger.info(f"✨ [Fast-Path SUCCESS] Request #{request_id} đã hoàn tất tức thì! Đang tải file kết quả...")
-                                action_btn = target_row.locator("[data-field='actions'] button").first
-                                await action_btn.click()
-                                await page.wait_for_timeout(600)
+                                    if any(w in status_text for w in ["done", "completed", "success"]):
+                                        logger.info(f"✨ [Fast-Path SUCCESS] Request #{request_id} đã hoàn tất tức thì! Đang tải file kết quả...")
+                                        action_btn = target_row.locator("[data-field='actions'] button").first
+                                        await action_btn.click()
+                                        await page.wait_for_timeout(400)
 
-                                async with page.expect_download(timeout=30000) as download_info:
-                                    export_item = page.locator("text=Export, li:has-text('Export')").first
-                                    await export_item.click()
+                                        async with page.expect_download(timeout=30000) as download_info:
+                                            export_item = page.locator("text=Export, li:has-text('Export')").first
+                                            await export_item.click()
 
-                                download = await download_info.value
-                                download_file_path = os.path.join(download_dir, f"RESULT_{request_id}_{download.suggested_filename}")
-                                await download.save_as(download_file_path)
+                                        download = await download_info.value
+                                        download_file_path = os.path.join(download_dir, f"RESULT_{request_id}_{download.suggested_filename}")
+                                        await download.save_as(download_file_path)
 
-                                return {
-                                    "status": "completed",
-                                    "request_id": request_id,
-                                    "result_file_path": download_file_path,
-                                    "fast_path": True
-                                }
+                                        checkpoint["account_batch_completed"] = True
+                                        checkpoint["account_batch_file"] = download_file_path
+
+                                        return {
+                                            "status": "completed",
+                                            "request_id": request_id,
+                                            "result_file_path": download_file_path,
+                                            "fast_path": True,
+                                            "checkpoint": checkpoint
+                                        }
+                            except Exception as poll_err:
+                                logger.debug(f"Fast-path poll attempt {attempt} notice: {poll_err}")
 
                     # Nếu chưa xong, nhả về để Cronjob tiếp quản
                     return {
                         "status": "submitted",
                         "request_id": request_id,
                         "record_count": record_count,
-                        "estimated_wait_seconds": record_count * 10
+                        "estimated_wait_seconds": record_count * 10,
+                        "checkpoint": checkpoint
                     }
 
                 except Exception as e:
                     logger.error(f"❌ Lỗi submit batch: {e}")
-                    return {"status": "failed", "error": str(e)}
+                    return {"status": "failed", "error": str(e), "checkpoint": checkpoint}
                 finally:
                     await browser.close()
 

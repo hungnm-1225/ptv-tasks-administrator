@@ -5,7 +5,7 @@ from typing import Dict, Any, List, Optional
 from playwright.async_api import async_playwright, Page
 
 from app.services.workspace.base import WorkspaceBaseService, BASE_WORKSPACE_URL, normalize_date_iso
-from app.core.playwright_manager import acquire_playwright_slot, wait_for_dom_and_spinners
+from app.core.playwright_manager import acquire_playwright_slot, wait_for_dom_and_spinners, smart_wait_for_options_loaded
 
 logger = logging.getLogger(__name__)
 
@@ -71,10 +71,6 @@ class WorkspaceOrderService(WorkspaceBaseService):
             else:
                 await page.locator("li[role='option']").first.click()
 
-            # 🟢 CHỜ API WORDPRESS NẠP DANH SÁCH KHÓA HỌC VÀO DROPDOWN
-            logger.info(f"⏳ Chờ API nạp danh sách Course cho category '{cat_val}'...")
-            await page.wait_for_timeout(1800)
-
             # B. Chọn Course
             course_name_val = c.get("course_name")
             logger.info(f"🎯 Môn #{idx + 1}: Chọn Course = '{course_name_val or 'Mặc định'}'...")
@@ -82,7 +78,9 @@ class WorkspaceOrderService(WorkspaceBaseService):
             course_select = course_item.locator("[role='combobox'], .MuiSelect-select").first
             await course_select.wait_for(state="visible", timeout=10000)
             await course_select.click()
-            await page.wait_for_timeout(500)
+            
+            # Chờ API nạp danh sách Course theo State (thay thế wait_for_timeout 1800ms)
+            await smart_wait_for_options_loaded(page, min_options=1, timeout=8000)
 
             target_opt = None
             if course_name_val:
@@ -201,10 +199,6 @@ class WorkspaceOrderService(WorkspaceBaseService):
                         else:
                             await page.locator("li[role='option']").first.click()
 
-                        # 🟢 CHỜ API TẢI DANH MỤC KHÓA HỌC
-                        logger.info(f"⏳ Chờ API tải danh sách Course cho category '{category_val}'...")
-                        await page.wait_for_timeout(1800)
-
                         # B. Chọn Course (Cột 2)
                         course_name_val = c.get("course_name")
                         logger.info(f"🎯 Môn #{idx + 1}: Chọn Course = '{course_name_val or 'Mặc định'}'...")
@@ -212,7 +206,9 @@ class WorkspaceOrderService(WorkspaceBaseService):
                         course_select = course_item.locator("[role='combobox'], .MuiSelect-select").first
                         await course_select.wait_for(state="visible", timeout=10000)
                         await course_select.click()
-                        await page.wait_for_timeout(500)
+                        
+                        # Chờ API tải danh sách Course theo State (thay thế wait_for_timeout 1800ms)
+                        await smart_wait_for_options_loaded(page, min_options=1, timeout=8000)
                         
                         if course_name_val:
                             target_opt = page.locator(f"li[role='option']:has-text('{course_name_val}')").first

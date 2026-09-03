@@ -102,9 +102,10 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
                     log_trail += f"[{get_vn_time_str()}] [WARNING] [workspace_rpa] {tag}: Lỗi đọc phả hệ ({lineage_err}), tiếp tục với payload gốc.\n"
 
             if not payload.get("admin_credentials"):
+                admin_pass = getattr(settings, "KEYCLOAK_ADMIN_PASS", None) or getattr(settings, "TEST_ADMIN_PASS", None)
                 payload["admin_credentials"] = {
                     "username": getattr(settings, "TEST_ADMIN_USER", "salesadmin@dtt.vn"),
-                    "password": getattr(settings, "TEST_ADMIN_PASS", "Pythaverse@2026")
+                    "password": admin_pass or ""
                 }
 
         # 3. KÍCH HOẠT WORKER THỰC THI THẬT (KÈM TASK_ID ĐỂ TRUY VẾT)
@@ -115,23 +116,26 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
             execution_result = {"status": "failed", "error": f"Worker '{bot_type}' kết thúc mà không trả về dữ liệu."}
 
         status_res = execution_result.get("status")
+        res_checkpoint = execution_result.get("checkpoint") or payload.get("checkpoint") or {}
+        current_step = execution_result.get("current_step") or payload.get("current_step")
 
         # 🟢 TRƯỜNG HỢP 1: TÁC VỤ CẦN CHỜ XỬ LÝ NGẦM (WAITING_POLL)
         if status_res in ["waiting_poll", "submitted"]:
             wait_msg = execution_result.get("message") or "Đã nộp batch, đang xếp hàng chờ kiểm tra tiến độ..."
             log_trail += f"[{end_time_str}] [INFO] [{bot_type}] {tag}: {wait_msg}\n"
 
-            merged_payload = {**(payload or {}), **execution_result}
+            merged_payload = {**(payload or {}), **execution_result, "checkpoint": res_checkpoint}
 
             supabase.table("bot_automation_tasks").update({
                 "execution_status": "waiting_poll",
+                "current_step": current_step or "waiting_poll",
                 "payload_data": merged_payload,
                 "execution_logs": log_trail,
                 "executed_at": get_vn_iso()
             }).eq("id", task_id).execute()
 
         # 🟢 TRƯỜNG HỢP 2: TÁC VỤ HOÀN TẤT THÀNH CÔNG (SUCCESS)
-        elif status_res in ["success", "simulated", "completed"] or execution_result.get("success_count", 0) > 0:
+        elif status_res in ["success", "simulated", "completed"] or (execution_result.get("success_count", 0) > 0 and not execution_result.get("failed_count")):
             success_msg = execution_result.get("message") or execution_result.get("issue_url") or "Thực thi tác vụ thành công!"
             log_trail += f"[{end_time_str}] [SUCCESS] [{bot_type}] {tag}: {success_msg}\n"
             
@@ -140,10 +144,12 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
             elif "logs" in execution_result:
                 log_trail += f"\n--- TIẾN TRÌNH THỰC THI ---\n{execution_result['logs']}\n"
 
-            merged_payload = {**(payload or {}), **execution_result}
+            merged_payload = {**(payload or {}), **execution_result, "checkpoint": res_checkpoint}
 
             supabase.table("bot_automation_tasks").update({
                 "execution_status": "success",
+                "current_step": "completed",
+                "last_error_step": None,
                 "payload_data": merged_payload,
                 "execution_logs": log_trail,
                 "executed_at": get_vn_iso()
@@ -159,7 +165,25 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
                 except Exception as t_err:
                     logger.warning(f"Không thể đóng ticket #{ticket_id}: {t_err}")
 
-        # 🔴 TRƯỜNG HỢP 3: THẤT BẠI CÓ KIỂM SOÁT
+        # 🟡 TRƯỜNG HỢP 3: HOÀN THÀNH MỘT PHẦN (PARTIAL_SUCCESS)
+        elif status_res == "partial_success":
+            part_msg = execution_result.get("error") or execution_result.get("message") or "Tác vụ hoàn thành một phần."
+            log_trail += f"[{end_time_str}] [WARNING] [{bot_type}] {tag} [PARTIAL SUCCESS]: {part_msg}\n"
+            if "logs" in execution_result:
+                log_trail += f"\n{execution_result['logs']}\n"
+
+            merged_payload = {**(payload or {}), **execution_result, "checkpoint": res_checkpoint}
+
+            supabase.table("bot_automation_tasks").update({
+                "execution_status": "partial_success",
+                "current_step": current_step,
+                "last_error_step": current_step,
+                "payload_data": merged_payload,
+                "execution_logs": log_trail,
+                "executed_at": get_vn_iso()
+            }).eq("id", task_id).execute()
+
+        # 🔴 TRƯỜNG HỢP 4: THẤT BẠI CÓ KIỂM SOÁT (LƯU CHECKPOINT ĐỂ RESUME)
         else:
             err_msg = execution_result.get("error") or execution_result.get("message") or "Thất bại không rõ nguyên nhân."
             log_trail += f"[{end_time_str}] [ERROR] [{bot_type}] {tag}: {err_msg}\n"
@@ -169,8 +193,14 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
             elif "logs" in execution_result:
                 log_trail += f"\n{execution_result['logs']}\n"
 
+            # 🎯 BẢO LƯU CHECKPOINT VÀO PAYLOAD ĐỂ LẦN RETRY SAU CHỈ CẦN RESUME
+            merged_payload = {**(payload or {}), **execution_result, "checkpoint": res_checkpoint}
+
             supabase.table("bot_automation_tasks").update({
                 "execution_status": "failed",
+                "current_step": current_step,
+                "last_error_step": current_step,
+                "payload_data": merged_payload,
                 "execution_logs": log_trail,
                 "executed_at": get_vn_iso()
             }).eq("id", task_id).execute()
@@ -317,7 +347,7 @@ async def approve_task(task_id: str, req: ApproveTaskRequest, background_tasks: 
 
 @router.put("/{task_id}/retry")
 async def retry_task(task_id: str, background_tasks: BackgroundTasks):
-    """API Chạy lại (Retry) tác vụ bị lỗi - Reset trạng thái và tái khởi chạy worker."""
+    """API Chạy lại (Retry) tác vụ bị lỗi - Nhận diện Checkpoint để Resume, chống chạy lại từ đầu."""
     supabase = get_supabase_client()
     time_str = get_vn_time_str()
     now_iso = get_vn_iso()
@@ -332,12 +362,18 @@ async def retry_task(task_id: str, background_tasks: BackgroundTasks):
     payload = task.get("payload_data") or {}
     payload["task_id"] = task_id
     ticket_id = task.get("ticket_id")
+    
+    checkpoint = payload.get("checkpoint", {})
+    last_step = task.get("current_step") or task.get("last_error_step")
+    retry_count = (task.get("retry_count") or 0) + 1
 
-    retry_log = f"[{time_str}] [INFO] [{bot_type}] {tag}: Manual retry triggered by Admin. Re-queuing worker...\n"
+    resume_msg = f"Tiếp tục thực thi từ checkpoint bước: [{last_step}]" if checkpoint and last_step else "Khởi chạy lại từ đầu"
+    retry_log = f"[{time_str}] [INFO] [{bot_type}] {tag}: Manual retry #{retry_count} triggered by Admin. {resume_msg}...\n"
 
     supabase.table("bot_automation_tasks").update({
         "approval_status": "approved",
         "execution_status": "queued",
+        "retry_count": retry_count,
         "execution_logs": retry_log,
         "executed_at": now_iso
     }).eq("id", task_id).execute()
@@ -345,8 +381,8 @@ async def retry_task(task_id: str, background_tasks: BackgroundTasks):
     tasks_cache.invalidate()
     background_tasks.add_task(run_approved_task_worker, task_id, bot_type, payload, ticket_id)
 
-    logger.info(f"🔄 Đã kích hoạt chạy lại Worker cho {tag} ({bot_type})")
-    return {"status": "success", "message": f"Đã kích hoạt chạy lại tác vụ {tag}!"}
+    logger.info(f"🔄 Đã kích hoạt chạy lại Worker cho {tag} ({bot_type}) - Retry #{retry_count} ({resume_msg})")
+    return {"status": "success", "message": f"Đã kích hoạt chạy lại tác vụ {tag} (Lần #{retry_count})! {resume_msg}."}
 
 
 @router.put("/{task_id}/reject")

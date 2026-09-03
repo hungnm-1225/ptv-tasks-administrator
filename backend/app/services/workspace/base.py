@@ -6,7 +6,12 @@ from typing import Optional
 from playwright.async_api import async_playwright, Page, BrowserContext
 
 from app.core.config import settings
-from app.core.playwright_manager import LOW_RAM_CHROMIUM_ARGS, setup_low_ram_routes, wait_for_dom_and_spinners
+from app.core.playwright_manager import (
+    LOW_RAM_CHROMIUM_ARGS, 
+    setup_low_ram_routes, 
+    wait_for_dom_and_spinners,
+    smart_wait_login_or_error
+)
 
 logger = logging.getLogger(__name__)
 BASE_WORKSPACE_URL = "https://pythaverse.space"
@@ -86,20 +91,12 @@ class WorkspaceBaseService:
             submit_btn = page.locator("button[type='submit'], input[type='submit'], button:has-text('Log In'), button:has-text('Đăng nhập')").first
             await submit_btn.click()
             
-            # Chờ chuyển hướng sau đăng nhập
-            await page.wait_for_timeout(2500)
-
-            kc_error_locator = page.locator(".alert-error, #input-error, span.kc-feedback-text, .alert.alert-warning, p.instruction")
-            if await kc_error_locator.count() > 0 and await kc_error_locator.first.is_visible():
-                raw_error_text = (await kc_error_locator.first.inner_text()).strip()
-                err = f"❌ [{role_title} - '{username}'] Đăng nhập thất bại: '{raw_error_text}'"
-                logger.error(err)
-                return False, err
-
-            if "login" in page.url or "authenticate" in page.url:
-                err = f"⚠️ [{role_title} - '{username}'] Không thể chuyển trang sau đăng nhập (URL: {page.url})"
-                logger.warning(err)
-                return False, err
+            # Chờ phản hồi đăng nhập theo State Race (loại bỏ wait_for_timeout 2500ms cứng)
+            is_ok, login_err = await smart_wait_login_or_error(
+                page, timeout=20000, role_title=role_title, username=username
+            )
+            if not is_ok:
+                return False, login_err
 
             logger.info(f"✅ [{role_title}] Đăng nhập thành công: {username}")
             return True, "Đăng nhập thành công"

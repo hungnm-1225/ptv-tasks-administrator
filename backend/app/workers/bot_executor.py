@@ -4,6 +4,7 @@ import logging
 import httpx
 import tempfile
 import asyncio
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional
 
 from app.core.config import settings
@@ -61,8 +62,11 @@ async def execute_approved_bot_task(
 
     task_tag = f"[Task #{str(task_id).replace('-', '')[:8]}]" if task_id else "[Task #N/A]"
     action = payload_data.get("action", "")
+    checkpoint = payload_data.get("checkpoint", {})
     
     logger.info(f"🚀 {task_tag} Bắt đầu thực thi Bot: [{bot_type}] | Action: {action}")
+    if checkpoint:
+        logger.info(f"💾 {task_tag} Nhận Checkpoint từ phiên trước: {list(checkpoint.keys())}")
     
     try:
         # =====================================================================
@@ -90,9 +94,14 @@ async def execute_approved_bot_task(
             school_creds = payload_data.get("school_credentials")
             partner_creds = payload_data.get("partner_credentials")
             distributor_creds = payload_data.get("distributor_credentials")
+            
+            admin_pass = getattr(settings, "KEYCLOAK_ADMIN_PASS", None) or getattr(settings, "TEST_ADMIN_PASS", None)
+            if not admin_pass:
+                logger.warning(f"⚠️ {task_tag} KEYCLOAK_ADMIN_PASS chưa được cấu hình trong biến môi trường!")
+                
             admin_creds = payload_data.get("admin_credentials") or {
                 "username": getattr(settings, "TEST_ADMIN_USER", "salesadmin@dtt.vn"),
-                "password": getattr(settings, "TEST_ADMIN_PASS", "Pythaverse@2026")
+                "password": admin_pass or ""
             }
 
             # 🟢 AUTO-RESOLVER PHẢ HỆ:
@@ -152,38 +161,41 @@ async def execute_approved_bot_task(
                     school_identifier=str(school_name or "000 SCHOOL FOR TESTING PURPOSE"),
                     order_details=order_details,
                     sales_admin_creds=admin_creds,
-                    cof_file_path=cof_path
+                    cof_file_path=cof_path,
+                    checkpoint=checkpoint
                 )
 
             # --- B. SUB-FLOW: DUYỆT ĐƠN LẺ SCHOOL ORDER CÓ SẴN ---
             elif action in ["approve_school_order_standalone", "approve_existing_school_order", "subflow_approve_school_order"]:
-                target_order = order_code or "SCH-ORDER"
+                target_order = order_code or checkpoint.get("order_code") or "SCH-ORDER"
                 if not target_order:
-                    return {"status": "failed", "error": "Thiếu mã Order (order_code) cần phê duyệt."}
+                    return {"status": "failed", "error": "Thiếu mã Order (order_code) cần phê duyệt.", "checkpoint": checkpoint}
                 if not partner_creds:
-                    return {"status": "failed", "error": "Không tìm thấy thông tin đăng nhập của Partner."}
+                    return {"status": "failed", "error": "Không tìm thấy thông tin đăng nhập của Partner.", "checkpoint": checkpoint}
 
                 return await workspace_playwright_service.execute_approve_school_order_standalone(
                     order_identifier=str(target_order),
                     partner_creds=partner_creds,
                     distributor_creds=distributor_creds or {},
                     sales_admin_creds=admin_creds,
-                    courses_needed=courses_list
+                    courses_needed=courses_list,
+                    checkpoint=checkpoint
                 )
 
             # --- C. SUB-FLOW: DUYỆT ĐƠN LẺ PARTNER CONTRACT CÓ SẴN (PRT-...) ---
             elif action in ["approve_partner_contract_standalone", "subflow_approve_partner_contract", "approve_existing_partner_contract"]:
-                target_contract = contract_code
+                target_contract = contract_code or checkpoint.get("prt_contract_code")
                 if not target_contract:
-                    return {"status": "failed", "error": "Thiếu mã Contract (contract_code) cần duyệt."}
+                    return {"status": "failed", "error": "Thiếu mã Contract (contract_code) cần duyệt.", "checkpoint": checkpoint}
                 if not distributor_creds:
-                    return {"status": "failed", "error": "Không tìm thấy thông tin đăng nhập của Distributor."}
+                    return {"status": "failed", "error": "Không tìm thấy thông tin đăng nhập của Distributor.", "checkpoint": checkpoint}
 
                 return await workspace_playwright_service.execute_approve_partner_contract_standalone(
                     contract_identifier=str(target_contract),
                     distributor_creds=distributor_creds,
                     sales_admin_creds=admin_creds,
-                    courses_needed=courses_list
+                    courses_needed=courses_list,
+                    checkpoint=checkpoint
                 )
 
             # --- D. Tạo & Duyệt Chuỗi Đối Tác (Partner -> Distributor) ---
@@ -285,13 +297,18 @@ async def execute_approved_bot_task(
                 submit_res = await workspace_playwright_service.submit_account_creation_batch(
                     credentials=school_creds,
                     upload_file_path=ready_file,
-                    record_count=total_c
+                    record_count=total_c,
+                    checkpoint=checkpoint
                 )
 
                 if submit_res.get("status") == "failed":
                     return submit_res
 
+                if submit_res.get("status") in ["completed", "success"]:
+                    return submit_res
+
                 req_id = submit_res.get("request_id")
+                checkpoint["account_batch_request_id"] = req_id
                 wait_seconds = max(total_c * 15, 30)
                 next_check_time = datetime.now(timezone.utc) + timedelta(seconds=wait_seconds)
                 next_check_iso = next_check_time.isoformat()
@@ -306,6 +323,7 @@ async def execute_approved_bot_task(
                     "cof_file_path": file_path if is_cof else None,
                     "wait_seconds": wait_seconds,
                     "next_check_at": next_check_iso,
+                    "checkpoint": checkpoint,
                     "message": f"Đã nộp thành công file batch ({total_c} tài khoản) với Mã Request #{req_id}. Hệ thống nghỉ {wait_seconds}s (15s/TK) và sẽ tự động quay lại kiểm tra kết quả."
                 }
 
@@ -351,6 +369,33 @@ async def execute_approved_bot_task(
         # =====================================================================
         elif bot_type == "github_issue_creator":
             return await github_service.create_issue(payload_data)
+
+        # =====================================================================
+        # 5. NHÓM TASK FEEDBACK SHEET & GOOGLE DOC TRIAGE
+        # =====================================================================
+        elif bot_type in ["google_doc_comment", "feedback_doc_triage"]:
+            from app.services.google_doc_service import GoogleDocManager
+            doc_url = payload_data.get("doc_url")
+            comment_content = payload_data.get("comment_content") or payload_data.get("comment", "")
+            assignee_email = payload_data.get("assignee_email") or payload_data.get("assigned_email", "")
+
+            if not doc_url:
+                return {"status": "failed", "error": "Thiếu đường dẫn Google Doc (doc_url) trong payload."}
+
+            try:
+                gdoc_mgr = GoogleDocManager()
+                is_ok, msg = gdoc_mgr.add_comment_and_tag(doc_url, comment_content, assignee_email)
+                if is_ok:
+                    return {
+                        "status": "success",
+                        "message": f"Đã tag {assignee_email} vào Google Doc thành công!",
+                        "doc_url": doc_url
+                    }
+                else:
+                    return {"status": "failed", "error": msg, "doc_url": doc_url}
+            except Exception as e:
+                logger.error(f"Lỗi thực thi Google Doc triage: {e}")
+                return {"status": "failed", "error": f"Lỗi Google Doc Service: {e}"}
 
         else:
             return {"status": "failed", "error": f"Loại bot '{bot_type}' chưa được hỗ trợ."}
