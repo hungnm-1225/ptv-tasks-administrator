@@ -94,11 +94,11 @@ Hệ thống sử dụng ma trận 8 bộ nhớ đệm RAM độc lập phân b�
   2. *Tạo & Duyệt Chuỗi (`create_and_approve`):* Master E2E Chain 4 cấp, Partner Chain, Distributor Chain kèm Autocomplete phả hệ 480 trường.
   3. *Tạo tài khoản hàng loạt (`bulk_accounts`):* Nộp batch COF và tính toán nghỉ 15s/tài khoản.
   4. *Ghi danh LMS (`lms_enroll`):* Ghi danh & phân nhóm lớp School Workspace / Moodle LMS.
-- **Persistent Client Cache:** Lưu trữ LocalStorage (`ptv_studio_*`) nạp danh mục trường và môn học với tốc độ 0ms tuyệt đối.
+- **Thuần REST API & Backend RAM Caching:** Nạp danh mục trường và môn học trực tiếp từ REST API (được tăng tốc 1ms qua `WorkspaceMemoryCache` của Backend), loại bỏ hoàn toàn việc lưu trữ dữ liệu vào LocalStorage.
 
 ### 2.10. Quản Lý Danh Mục Khóa Học Song Song (`CoursesManagerPage.tsx` / `/courses`)
 - **Kiến trúc Dual Pane:** Phân biệt rõ 2 bảng khóa học: `workspace_courses` (dùng cho RPA License Chain, COF matching) và `lms_courses` (dùng cho Moodle LMS PLearn enrollment).
-- **SWR Silent Fetch & LocalStorage Cache (`ptv_courses_*`, `ptv_cats_*`):** Tải trang tức thì 0ms và tự động làm mới ngầm.
+- **Thuần REST API & Invalidate Tức Thì:** Nạp trực tiếp từ REST API (`SimpleMemoryCache` 10m), loại bỏ hoàn toàn LocalStorage. Khi thêm/sửa/xóa môn học, tự động xóa cache server để giao diện hiển thị dữ liệu tươi mới ngay lập tức.
 - **CRUD Đơn Lẻ & Tự Sinh URL LMS:** Tự động điền URL Moodle `https://learn.pythaverse.space/course/view.php?id={course_id}`.
 - **Bulk Import Hàng Loạt (SheetJS XLSX + Text Parser):** Hỗ trợ nạp file Excel hoặc paste danh sách văn bản tự do, gửi batch 50 records.
 - **Category Manager:** Hỗ trợ Đổi tên danh mục hàng loạt và Xóa / Gộp khóa học sang danh mục khác (`target_category`).

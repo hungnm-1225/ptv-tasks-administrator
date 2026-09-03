@@ -275,9 +275,11 @@ class WorkspaceLineageService:
         clean_code = contract_code.strip()
         
         try:
+            # Chỉ query theo contract_code (string) — không dùng id.eq vì cột id là UUID
+            # sẽ gây lỗi 22P02 khi input là chuỗi dạng "DST-..." thay vì UUID hợp lệ
             cache_res = supabase.table("workspace_contracts_cache")\
                 .select("*")\
-                .or_(f"contract_code.eq.{clean_code},id.eq.{clean_code}")\
+                .eq("contract_code", clean_code)\
                 .limit(1)\
                 .execute()
             
