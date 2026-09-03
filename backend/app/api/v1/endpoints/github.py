@@ -14,16 +14,17 @@ router = APIRouter()
 
 # Danh sách Model Gemini chuẩn của hệ thống (Fallback 10 tầng)
 GEMINI_MODELS = [
+    "gemini-3.8-flash",
     "gemini-3.7-flash",
-    "gemini-3.6-flash",
     "gemini-3.5-flash-lite",
+    "gemini-3.1-pro-preview",
+    "gemini-3.6-flash",
     "gemini-3.5-flash",
     "gemini-3.1-flash-lite",
-    "gemini-3.1-pro-preview",
     "gemini-3-flash-preview",
-    "gemini-pro-latest",
-    "gemini-flash-latest",
-    "gemini-flash-lite-latest"
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
 ]
 
 def load_system_knowledge(system_name: str) -> str:

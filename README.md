@@ -1,7 +1,7 @@
 # 🚀 BÁCH KHOA TOÀN THƯ KIẾN TRÚC HỆ THỐNG PTV-TASKS-ADMINISTRATOR
 ## Pythaverse Central Admin & Automation Hub (Enterprise Single Source of Truth)
 
-> **Tài liệu Kỹ Thuật Độc Quyền & Tối Cao:** Bản đặc tả kiến trúc toàn diện này được biên soạn nhằm chuẩn hóa và hệ thống lại 100% mã nguồn, sơ đồ luồng dữ liệu, cấu trúc cơ sở dữ liệu, các gói dịch vụ RPA và giao diện người dùng của dự án **`ptv-tasks-administrator`**. Mọi kỹ sư phần mềm, chuyên gia tự động hóa hoặc AI Coder mới chỉ cần đọc tài liệu này là có thể nắm bắt trọn vẹn toàn bộ hệ sinh thái, hiểu rõ từng tệp tin và từng hàm xử lý mà không cần phải duyệt thủ công từng tệp code hay gặp bối rối khi thao tác với một file đơn lẻ.
+> **Tài liệu Kỹ Thuật Độc Quyền & Tối Cao:** Bản đặc tả kiến trúc toàn diện này được biên soạn nhằm chuẩn hóa và hệ thống lại 100% mã nguồn, sơ đồ luồng dữ liệu, cấu trúc cơ sở dữ liệu, các gói dịch vụ RPA, ma trận bộ nhớ đệm RAM và giao diện người dùng của dự án **`ptv-tasks-administrator`**. Mọi kỹ sư phần mềm, chuyên gia tự động hóa hoặc AI Coder mới chỉ cần đọc tài liệu này là có thể nắm bắt trọn vẹn toàn bộ hệ sinh thái, hiểu rõ từng tệp tin và từng hàm xử lý mà không cần phải duyệt thủ công từng tệp code hay gặp bối rối khi thao tác với một file đơn lẻ.
 
 ---
 
@@ -12,7 +12,7 @@
 - **GitHub:** [`https://github.com/hungnm-1225`](https://github.com/hungnm-1225)
 - **Email:** `hungnm@dtt.vn` / `hung.nguyenmanh@dtt.vn`
 - **Hệ sinh thái:** [Pythaverse Space](https://pythaverse.space)
-- **Phiên bản:** `v2.5.0 Enterprise Release` (Cập nhật tháng 08/2026)
+- **Phiên bản:** `v2.5.0 Enterprise Release` (Cập nhật tháng 09/2026)
 
 ---
 
@@ -20,25 +20,28 @@
 
 1. [PHẦN I: TẦM NHÌN HỆ THỐNG & BỐN NGUYÊN TẮC BẤT DI BẤT DỊCH](#-phần-i-tầm-nhìn-hệ-thống--bốn-nguyên-tắc-bất-di-bất-dịch)
 2. [PHẦN II: 7 PHÂN HỆ NGHIỆP VỤ PYTHAVERSE (DOMAIN TRUTH)](#-phần-ii-7-phân-hệ-nghiệp-vụ-pythaverse-domain-truth)
-3. [PHẦN III: STACK CÔNG NGHỆ, THƯ VIỆN & MÔI TRƯỜNG VẬN HÀNH](#-phần-iii-stack-công-nghệ-thư-viện--môi-trường-vận-hành)
-4. [PHẦN IV: SƠ ĐỒ CẤU TRÚC THƯ MỤC MONOREPO TỔNG THỂ](#-phần-iv-sơ-đồ-cấu-trúc-thư-mục-monorepo-tổng-thể)
+3. [PHẦN III: STACK CÔNG NGHỆ, THƯ VIỆN & THÔNG SỐ VẬN HÀNH MÔI TRƯỜNG](#-phần-iii-stack-công-nghệ-thư-viện--thông-số-vận-hành-môi-trường)
+4. [PHẦN IV: SƠ ĐỒ CẤU TRÚC THƯ MỤC MONOREPO TỔNG THỂ & VAI TRÒ TỪNG FILE](#-phần-iv-sơ-đồ-cấu-trúc-thư-mục-monorepo-tổng-thể--vai-trò-từng-file)
 5. [PHẦN V: GIẢI PHẪU CHI TIẾT TỪNG FILE & HÀM XỬ LÝ BACKEND (FASTAPI 0.115)](#-phần-v-giải-phẫu-chi-tiết-từng-file--hàm-xử-lý-backend-fastapi-0115)
-   - [5.1. Entrypoint & Lifespan Crons (`main.py`)](#51-entrypoint--lifespan-crons-mainpy)
+   - [5.1. Entrypoint & Lifespan Crons Lệch Pha (`main.py`)](#51-entrypoint--lifespan-crons-lệch-pha-mainpy)
    - [5.2. Lõi Hệ Thống Core (`app/core/`)](#52-lõi-hệ-thống-core-appcore)
-   - [5.3. Định Nghĩa Dữ Liệu Models (`app/models/`)](#53-định-nghĩa-dữ-liệu-models-appmodels)
+   - [5.3. Định Nghĩa Dữ Liệu Schemas (`app/models/`)](#53-định-nghĩa-dữ-liệu-schemas-appmodels)
    - [5.4. Tri Thức Nghiệp Vụ Brain (`app/brain/knowledge_base.json`)](#54-tri-thức-nghiệp-vụ-brain-appbrainknowledge_basejson)
-   - [5.5. Cổng Giao Tiếp REST API Endpoints (`app/api/v1/endpoints/`)](#55-cổng-giao-tiếp-rest-api-endpoints-appapiv1endpoints)
+   - [5.5. Cổng Giao Tiếp REST API Endpoints & Ma Trận 8 In-Memory Caches (`app/api/v1/endpoints/`)](#55-cổng-giao-tiếp-rest-api-endpoints--ma-trận-8-in-memory-caches-appapiv1endpoints)
    - [5.6. Gói Dịch Vụ Workspace RPA Đa Kế Thừa (`app/services/workspace/`)](#56-gói-dịch-vụ-workspace-rpa-đa-kế-thừa-appservicesworkspace)
    - [5.7. Các Dịch Vụ Nghiệp Vụ Chuyên Biệt (`app/services/`)](#57-các-dịch-vụ-nghiệp-vụ-chuyên-biệt-appservices)
    - [5.8. Bộ Điều Phối Workers Chạy Ngầm (`app/workers/`)](#58-bộ-điều-phối-workers-chạy-ngầm-appworkers)
    - [5.9. Kịch Bản Khởi Tạo Dữ Liệu Scripts (`scripts/`)](#59-kịch-bản-khởi-tạo-dữ-liệu-scripts-scripts)
 6. [PHẦN VI: GIẢI PHẪU CHI TIẾT GIAO DIỆN FRONTEND SPA (REACT 19 + VITE 6 + TAILWIND CSS V4)](#-phần-vi-giải-phẫu-chi-tiết-giao-diện-frontend-spa-react-19--vite-6--tailwind-css-v4)
    - [6.1. Khởi Chạy & Định Tuyến Toàn Cục (`App.tsx`, `main.tsx`)](#61-khởi-chạy--định-tuyến-toàn-cục-apptsx-maintsx)
-   - [6.2. Cấu Hình Tác Giả & Contexts (`config/`, `context/`, `lib/`, `types/`)](#62-cấu-hình-tác-giả--contexts-config-context-lib-types)
-   - [6.3. Bóc Tách Chi Tiết 13 Feature Modules](#63-bóc-tách-chi-tiết-13-feature-modules)
+   - [6.2. Thiết Kế Hệ Thống Design System Bento Grid & Enterprise Pastel OKLCH](#62-thiết-kế-hệ-thống-design-system-bento-grid--enterprise-pastel-oklch)
+   - [6.3. Cấu Hình Tác Giả, Contexts & Tiện Ích Client (`config/`, `context/`, `lib/`, `types/`)](#63-cấu-hình-tác-giả-contexts--tiện-ích-client-config-context-lib-types)
+   - [6.4. Bóc Tách Chi Tiết 13 Feature Modules](#64-bóc-tách-chi-tiết-13-feature-modules)
+   - [6.5. Components Dùng Chung & Bố Cục Layout (`components/common/`, `components/layout/`)](#65-components-dùng-chung--bố-cục-layout-componentscommon-componentslayout)
 7. [PHẦN VII: CƠ SỞ DỮ LIỆU SUPABASE POSTGRESQL 16 (16 BẢNG & STORAGE BUCKET)](#-phần-vii-cơ-sở-dữ-liệu-supabase-postgresql-16-16-bảng--storage-bucket)
 8. [PHẦN VIII: 9 SƠ ĐỒ LUỒNG NGHIỆP VỤ END-TO-END (MERMAID SEQUENCE & FLOWCHARTS)](#-phần-viii-9-sơ-đồ-luồng-nghiệp-vụ-end-to-end-mermaid-sequence--flowcharts)
 9. [PHẦN IX: CẨM NANG VẬN HÀNH & MA TRẬN ĐIỀU HƯỚNG DÀNH CHO AI CODER MỚI](#-phần-ix-cẩm-nang-vận-hành--ma-trận-điều-hướng-dành-cho-ai-coder-mới)
+10. [PHẦN X: CẨM NANG ĐỊNH TUYẾN CHUYÊN GIA AI (INTELLIGENT AGENT ROUTING PLAYBOOK)](#-phần-x-cẩm-nang-định-tuyến-chuyên-gia-ai-intelligent-agent-routing-playbook)
 
 ---
 
@@ -66,6 +69,12 @@
 │  │                             BOT WORKER EXECUTION CENTER                            │  │
 │  │  [Workspace RPA 4-Cấp]  [Keycloak 2-Tier API]  [LMS PLearn Enrol]  [GitHub Dispatch]│  │
 │  └────────────────────────────────────────────────────────────────────────────────────┘  │
+│                                              │                                           │
+│  ┌────────────────────────────────────────────────────────────────────────────────────┐  │
+│  │                    MA TRẬN 8 BỘ NHỚ ĐỆM IN-MEMORY RAM (1MS SPEED)                  │  │
+│  │    Courses (10m) | Workspace (15m) | Board (5m) | Bots (15s) | Tasks (60s)         │  │
+│  │    Tickets (60s) | Monitor (30s)   | Reports (60s)                                 │  │
+│  └────────────────────────────────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────┬───────────────────────────────────────────┘
                                                │ Thực thi tự động
                                                ▼
@@ -91,19 +100,19 @@
 
 Mọi kỹ sư và AI Coder khi tương tác với dự án bắt buộc phải hiểu rõ bản chất nghiệp vụ của 7 phân hệ:
 
-| STT | Phân Hệ | Tên Miền / Giao Thức | Vai Trò Kỹ Thuật & Nghiệp Vụ Cốt Lõi |
-|---|---|---|---|
-| **1** | **School Workspace** | `https://pythaverse.space` | Hệ thống quản trị phân cấp 3 tầng (`Distributor` ➔ `Partner` ➔ `School`). Trường học tạo Order gửi Đối tác; Đối tác cấp License từ Pool hoặc xin Nhà phân phối cấp bù Contract; Quản trị viên Sales Admin phê duyệt tối cao. |
-| **2** | **PLearn LMS** | `https://learn.pythaverse.space` | Cổng đào tạo Moodle LMS (PHP / MariaDB / REST WebServices). Quản lý danh mục khóa học (`SWRP`, `IR`, `ASP`...) và ghi danh tài khoản theo Vai trò (`Student` - 9, `Non-editing teacher` - 7, `Manager` - 1), chia nhóm lớp tự động. |
-| **3** | **PGit Repos** | `https://git.pythaverse.space` | Máy chủ lưu trữ mã nguồn Gitea Git Server. Yêu cầu tài khoản người dùng phải đăng nhập SSO qua Keycloak ít nhất 1 lần để kích hoạt cơ chế JIT (Just-In-Time) provisioning. |
-| **4** | **Keycloak Auth IDP** | `https://eid.pythaverse.space` | Cổng xác thực định danh tập trung OpenID Connect / OAuth2 (Realm: `idp` / `master`). Quản lý thông tin đăng nhập, reset mật khẩu, kích hoạt/khóa tài khoản và xác thực email. |
-| **5** | **Leanbot IDE** | `https://ide.pythaverse.space` | Web IDE lập trình khối kéo thả Blockly / App Inventor kết nối Robot phần cứng Leanbot thông qua Bluetooth BLE Companion APK. |
-| **6** | **Support Helpdesk** | `https://support.pythaverse.space` | Hệ thống tiếp nhận sự cố kỹ thuật osTicket (PHP / MySQL). Được cào dữ liệu tự động định kỳ 5 phút qua Playwright Headless session. |
-| **7** | **PContest** | `https://contest.pythaverse.space` | Hệ thống tổ chức thi đấu lập trình trực tuyến, quản lý bảng xếp hạng Leaderboard và chấm điểm tự động. |
+| STT | Phân Hệ | Tên Miền / Giao Thức | Core Platform | Vai Trò Kỹ Thuật & Nghiệp Vụ Cốt Lõi | Phương Thức Tự Động Hóa |
+|---|---|---|---|---|---|
+| **1** | **School Workspace** | `https://pythaverse.space` | React MUI / Direct REST APIs | Hệ thống quản trị phân cấp 3 tầng (`Distributor` ➔ `Partner` ➔ `School`). Trường học tạo Order gửi Đối tác; Đối tác cấp License từ Pool hoặc xin Nhà phân phối cấp bù Contract; Quản trị viên Sales Admin phê duyệt tối cao. | Playwright Chromium Headless + Direct API Scanner (Gói `workspace/` 8 modules). |
+| **2** | **PLearn LMS** | `https://learn.pythaverse.space` | Moodle LMS (PHP / MariaDB / Edwiser RemUI) | Cổng đào tạo Moodle LMS. Quản lý danh mục khóa học (`SWRP`, `IR`, `ASP`...) và ghi danh tài khoản theo Vai trò (`Student` - 9, `Non-editing teacher` - 7, `Manager` - 1), chia nhóm lớp tự động. | Playwright Headless + Keyword Filter 2 nhịp trên `td.cell.c2` (`playwright_service.py`). |
+| **3** | **PGit Repos** | `https://git.pythaverse.space` | Gitea Git Server (Go / SQLite) | Máy chủ lưu trữ mã nguồn dự án học sinh. Yêu cầu tài khoản người dùng phải đăng nhập SSO qua Keycloak ít nhất 1 lần để kích hoạt cơ chế JIT (Just-In-Time) provisioning. | Kích hoạt SSO OIDC qua Keycloak Admin API / Playwright (`keycloak_service.py`). |
+| **4** | **Keycloak Auth IDP** | `https://eid.pythaverse.space` | Keycloak (Java / WildFly / PostgreSQL) | Cổng xác thực định danh tập trung OpenID Connect / OAuth2 (Realm: `idp` / `master`). Quản lý thông tin đăng nhập, reset mật khẩu, kích hoạt/khóa tài khoản và xác thực email. | 2-Tier Hybrid: Direct REST API (300ms) ➔ Playwright RPA Fallback (`keycloak_service.py`). |
+| **5** | **Leanbot IDE** | `https://ide.pythaverse.space` | Blockly / Web Bluetooth BLE | Web IDE lập trình khối kéo thả Blockly / App Inventor kết nối Robot phần cứng Leanbot thông qua Bluetooth BLE Companion APK. | Synthetic Monitoring Uptime & Latency (`site_monitor_service.py`). |
+| **6** | **Support Helpdesk** | `https://support.pythaverse.space` | osTicket (PHP / MySQL) | Hệ thống tiếp nhận sự cố kỹ thuật osTicket. Được cào dữ liệu tự động định kỳ 5 phút qua Playwright Headless session. | Playwright headless scraper cào vé, custom form fields & files đính kèm (`osticket_service.py`). |
+| **7** | **PContest** | `https://contest.pythaverse.space` | Next.js / Python Judge | Hệ thống tổ chức thi đấu lập trình trực tuyến, quản lý bảng xếp hạng Leaderboard và chấm điểm tự động. | Synthetic Monitoring Uptime & Latency (`site_monitor_service.py`). |
 
 ---
 
-## 🛠️ PHẦN III: STACK CÔNG NGHỆ, THƯ VIỆN & MÔI TRƯỜNG VẬN HÀNH
+## 🛠️ PHẦN III: STACK CÔNG NGHỆ, THƯ VIỆN & THÔNG SỐ VẬN HÀNH MÔI TRƯỜNG
 
 ```
                       ┌────────────────────────────────────────────────────────┐
@@ -119,6 +128,7 @@ Mọi kỹ sư và AI Coder khi tương tác với dự án bắt buộc phải 
                        │ • Lucide React Icons  │      │ • Playwright Async    │
                        │ • Sonner Toast & D&D  │      │ • Fernet Cryptography │
                        │ • Canvas Confetti     │      │ • SheetJS / OpenPyXL  │
+                       │ • Bento Grid Layout   │      │ • 8 In-Memory Caches  │
                        └───────────────────────┘      └───────────────────────┘
                                       │                      │
                                       ▼                      ▼
@@ -132,29 +142,37 @@ Mọi kỹ sư và AI Coder khi tương tác với dự án bắt buộc phải 
                        └──────────────────────────────────────────────────────┘
 ```
 
-### 1. Backend Stack
-- **Ngôn ngữ & Runtime:** Python 3.11+
-- **Web Framework:** FastAPI 0.115 (Asynchronous, OpenAPI/Swagger tự sinh tại `/docs`)
-- **Validation Engine:** Pydantic v2 (Strict Schema Validation)
-- **RPA & Automation Engine:** Playwright Async Chromium (`playwright.async_api`) với cờ tối ưu RAM: `--no-sandbox`, `--disable-dev-shm-usage`, `--disable-gpu`, `--single-process`.
-- **Lập lịch chạy ngầm:** APScheduler 3.10 `AsyncIOScheduler` với 6 Crons tự động.
-- **In-Memory Caching:** Bộ nhớ đệm RAM tự chế (SimpleMemoryCache & WorkspaceMemoryCache, TTL 5-15 phút, phản hồi 1ms, tự động invalidate khi có thao tác CUD).
-- **Mã hóa dữ liệu Két Sắt:** `cryptography.fernet` (Thuật toán mã hóa đối xứng khóa 32 bytes URL-safe base64).
-- **Trí tuệ nhân tạo (AI):** `google-generativeai` tích hợp chuỗi 10 models fallback.
-- **Xử lý Bảng tính:** `openpyxl` kết hợp định dạng màu hex và công thức Excel.
+### 1. Backend Stack & Phiên Bản Chuẩn
+- **Ngôn ngữ & Runtime:** Python `3.11.x`
+- **Web Framework:** FastAPI `0.115.x` (Asynchronous, OpenAPI/Swagger tự sinh tại `/docs`)
+- **Validation Engine:** Pydantic `2.10.x` (Strict Schema Validation & Settings Management)
+- **RPA & Automation Engine:** Playwright Async Chromium (`playwright.async_api: 1.50.x`) với cờ tối ưu RAM nghiêm ngặt.
+- **Lập lịch chạy ngầm:** APScheduler `3.10.x` (`AsyncIOScheduler`) với 6 Crons so le lệch pha.
+- **In-Memory Caching:** Bộ nhớ đệm RAM tự phát triển (Ma trận 8 In-Memory Caches, TTL 15s - 15m, phản hồi 1ms, tự động invalidate khi có thao tác CUD).
+- **Mã hóa dữ liệu Két Sắt:** `cryptography.fernet: ^44.0.x` (Thuật toán mã hóa đối xứng khóa 32 bytes URL-safe base64).
+- **Trí tuệ nhân tạo (AI):** `google-generativeai: ^0.8.4` tích hợp chuỗi 10 models fallback tự phục hồi.
+- **Xử lý Bảng tính:** `openpyxl: ^3.1.5` kết hợp định dạng màu hex và công thức Excel.
+- **HTTP Client:** `httpx: ^0.28.x` cho REST API calls và synthetic monitoring.
 
-### 2. Frontend Stack
-- **Framework UI:** React 19 (Functional Components, Custom Hooks)
-- **Ngôn ngữ:** TypeScript Strict Mode (`strict: true`, tuyệt đối không dùng `any` bừa bãi)
-- **Bundler:** Vite 6 (Hỗ trợ HMR siêu tốc và tối ưu hóa Dynamic Chunk Splitting)
-- **Định tuyến:** React Router DOM v7 (Lazy loading 100% 13 modules với `React.lazy` + `Suspense`)
-- **CSS Styling:** Tailwind CSS v4 (Kiến trúc Design Tokens, Dark/Light Mode, Container Queries, SaaS aesthetic)
-- **Biểu tượng (Icons):** `lucide-react` (Bộ icon đồng nhất, sắc nét)
-- **Thông báo & Hiệu ứng:** `sonner` (Toast notifications) và `canvas-confetti` (Hiệu ứng pháo hoa khi xong việc).
+### 2. Frontend Stack & Phiên Bản Chuẩn
+- **Framework UI:** React `19.0.0` (Functional Components, Custom Hooks, Concurrent Rendering)
+- **Ngôn ngữ:** TypeScript `5.7.x` Strict Mode (`strict: true`, tuyệt đối không dùng `any` bừa bãi)
+- **Bundler:** Vite `6.2.x` (Hỗ trợ HMR siêu tốc và tối ưu hóa Dynamic Chunk Splitting)
+- **Định tuyến:** React Router DOM `v7` (Lazy loading 100% 13 modules với `React.lazy` + `Suspense`)
+- **CSS Styling:** Tailwind CSS `4.0.x` (Kiến trúc Design Tokens hiện đại `@import "tailwindcss";`, Dark/Light Mode, Container Queries, Bento Grid SaaS aesthetic)
+- **Biểu tượng (Icons):** `lucide-react: 0.475.x` (Bộ icon đồng nhất, sắc nét)
+- **Xử lý Excel Client-side:** SheetJS (`xlsx: 0.18.5`)
+- **Thông báo & Hiệu ứng:** `sonner: ^2.0.1` (Toast notifications) và `canvas-confetti: ^1.9.4` (Hiệu ứng pháo hoa khi xong việc).
+
+### 3. Thông Số Tối Ưu RAM Render 512MB (Server Constraints)
+- **V8 JavaScript Heap:** Khóa trần ở 128MB qua cờ `--js-flags=--max-old-space-size=128`.
+- **Playwright Low-RAM Arguments:** `--no-sandbox`, `--disable-dev-shm-usage`, `--disable-gpu`, `--single-process`, `--disable-extensions`, `--disable-background-networking`.
+- **Network Route Interceptor:** Hủy tải toàn bộ tài nguyên `image`, `media`, `font` (`.woff`, `.woff2`, `.ttf`), analytics/tracking (`google-analytics`, `facebook`, `hotjar`, `clarity`, `stats.wp.com`...), giảm 60-80% RAM và tăng tốc 3-5 lần.
+- **Global Concurrency Semaphore:** `asyncio.Semaphore(1)` khóa đơn phiên – tại một thời điểm chỉ cho phép tối đa 1 phiên Chromium hoạt động trên toàn hệ thống.
 
 ---
 
-## 📁 PHẦN IV: SƠ ĐỒ CẤU TRÚC THƯ MỤC MONOREPO TỔNG THỂ
+## 📁 PHẦN IV: SƠ ĐỒ CẤU TRÚC THƯ MỤC MONOREPO TỔNG THỂ & VAI TRÒ TỪNG FILE
 
 ```
 ptv-tasks-administrator/
@@ -162,27 +180,27 @@ ptv-tasks-administrator/
 │   ├── agents/                         # Hồ sơ năng lực chuyên gia (Frontend, Backend, RPA, Security...)
 │   ├── rules/                          # Quy tắc hành vi bắt buộc GEMINI.md
 │   ├── skills/                         # Kỹ năng nghiệp vụ chuyên biệt
-│   └── workflows/                      # Quy trình làm việc tự động hóa
+│   └── workflows/                      # Quy trình làm việc tự động hóa (/brainstorm, /plan, /debug...)
 ├── backend/                            # Ứng dụng Backend FastAPI (Python 3.11)
 │   ├── app/
-│   │   ├── api/v1/                     # Các bộ định tuyến REST API v1
-│   │   │   ├── endpoints/              # 9 Router chi tiết theo miền nghiệp vụ
-│   │   │   │   ├── board.py            # API Quản lý Kanban Board, Thùng rác 30 ngày, Columns, Cards
-│   │   │   │   ├── bots.py             # API Trạng thái Worker, Stream log GMT+7, Retry Worker
-│   │   │   │   ├── courses.py          # API CRUD Khóa học (Workspace vs LMS), In-Memory Cache, Bulk Upsert, Category
-│   │   │   │   ├── github.py           # API Dispatch Issue vào Private Repo & AI Template
-│   │   │   │   ├── monitor.py          # API Giám sát 3-Tab: Public Sites, Auth Matrix, CI/CD Logs
-│   │   │   │   ├── reports.py          # API Thống kê KPI, Dynamic Health 24h, Xuất DTT 3Đ Excel
-│   │   │   │   ├── tasks.py            # API Cổng Duyệt Tác Vụ Human-in-the-Loop, Background Dispatch
-│   │   │   │   ├── tickets.py          # API Hòm thư hợp nhất, Multi-filter, AI Triage thủ công
-│   │   │   │   └── workspace.py        # API Phả hệ 480 trường, RAM Cache, Sync Scanner, Extract COF
+│   │   ├── api/v1/                     # Bộ định tuyến REST API v1
+│   │   │   ├── endpoints/              # 9 Router chi tiết theo miền nghiệp vụ (Có In-Memory Cache)
+│   │   │   │   ├── board.py            # API Kanban Board, Thùng rác 30 ngày, Columns, Cards (BoardMemoryCache)
+│   │   │   │   ├── bots.py             # API Giám sát 8 Workers, Stream log GMT+7, Retry Worker (BotsMemoryCache)
+│   │   │   │   ├── courses.py          # API CRUD Khóa học (Workspace vs LMS), Bulk Upsert, Category (SimpleMemoryCache)
+│   │   │   │   ├── github.py           # API Dispatch Issue vào Private Repo & AI Template Generator
+│   │   │   │   ├── monitor.py          # API Giám sát 3-Tab: Public Sites, Auth Matrix, CI/CD Logs (MonitorMemoryCache)
+│   │   │   │   ├── reports.py          # API Thống kê KPI, Dynamic Health 24h, Xuất DTT 3Đ Excel (ReportsMemoryCache)
+│   │   │   │   ├── tasks.py            # API Cổng Duyệt Tác Vụ Human-in-the-Loop, Background Dispatch (TasksMemoryCache)
+│   │   │   │   ├── tickets.py          # API Hòm thư hợp nhất, Multi-filter, AI Triage thủ công (TicketsMemoryCache)
+│   │   │   │   └── workspace.py        # API Phả hệ 480 trường, RAM Cache, Sync Scanner, Extract COF (WorkspaceMemoryCache)
 │   │   │   └── router.py               # Điểm tập hợp toàn bộ Router v1
-│   │   ├── brain/                      # Tri thức nghiệp vụ AI Triage
+│   │   ├── brain/                      # Tri thức nghiệp vụ AI Triage Grounding
 │   │   │   └── knowledge_base.json     # Định nghĩa 7 phân hệ, từ khóa routing cán bộ phụ trách
 │   │   ├── core/                       # Lõi hệ thống & Quản trị tài nguyên
 │   │   │   ├── config.py               # Pydantic Settings, Biến môi trường, Hàm múi giờ GMT+7
 │   │   │   ├── gemini.py               # AI Engine Triage, Chuỗi 10-Model Fallback tự phục hồi
-│   │   │   ├── playwright_manager.py   # Global Concurrency Semaphore 1-slot, Low-RAM Chromium Args, Route Interceptor
+│   │   │   ├── playwright_manager.py   # Global Semaphore 1-slot, Low-RAM Chromium Args, Route Interceptor
 │   │   │   ├── security.py             # Kiểm tra Domain @dtt.vn, Xác thực Bearer JWT
 │   │   │   └── supabase.py             # Singleton Supabase Client (Service Role Key)
 │   │   ├── models/                     # Schemas Pydantic Validation
@@ -215,7 +233,7 @@ ptv-tasks-administrator/
 │   │   ├── workers/                    # Bộ điều phối thực thi chạy ngầm
 │   │   │   ├── bot_executor.py         # Router Worker trung tâm thực thi 4 loại bot (14 actions)
 │   │   │   └── ticket_processor.py     # Xử lý luồng nạp ticket và kích hoạt AI
-│   │   └── main.py                     # Entrypoint FastAPI, Lifespan 6 Crons, safe_job_wrapper
+│   │   └── main.py                     # Entrypoint FastAPI, Lifespan 6 Crons so le, safe_job_wrapper
 │   ├── scripts/                        # Kịch bản khởi tạo CSDL
 │   │   ├── import_hierarchy.py         # Import 480 trường và mã hóa Fernet vào Két Sắt
 │   │   ├── seed_monitor_credentials.py # Khởi tạo và mã hóa 16 tài khoản test Site Monitor
@@ -233,11 +251,11 @@ ptv-tasks-administrator/
 │   │   │   ├── AuthContext.tsx         # Quản lý phiên đăng nhập Google & Whitelist @dtt.vn
 │   │   │   └── ThemeContext.tsx        # Quản lý giao diện Sáng / Tối (Dark/Light Mode)
 │   │   ├── features/                   # 13 TRANG CHỨC NĂNG CHUYÊN BIỆT
-│   │   │   ├── auth/LoginPage.tsx      # Đăng nhập bảo mật Google OAuth Whitelist
+│   │   │   ├── auth/LoginPage.tsx      # Đăng nhập bảo mật Google OAuth Whitelist @dtt.vn
 │   │   │   ├── board/WorkBoardPage.tsx # Bảng Kanban 6 cột, kéo thả, Confetti, Thùng rác 30 ngày
-│   │   │   ├── bots/BotCommanderPage.tsx # Giám sát 6 Workers, Stream Log GMT+7, Restart
+│   │   │   ├── bots/BotCommanderPage.tsx # Giám sát 8 Workers, Stream Log GMT+7, Restart
 │   │   │   ├── courses/CoursesManagerPage.tsx # Quản lý 2 bảng khóa học, Bulk Upsert, Category
-│   │   │   ├── dashboard/DashboardPage.tsx # Bảng điều khiển KPI tổng quan, Quick Actions
+│   │   │   ├── dashboard/DashboardPage.tsx # Bảng điều khiển Bento KPI tổng quan, Quick Actions
 │   │   │   ├── github/GithubReporterPage.tsx # Điều phối Issue GitHub, AI Template Generator
 │   │   │   ├── inbox/UnifiedInboxPage.tsx # Hòm thư hợp nhất đa kênh, Gemini AI Triage
 │   │   │   ├── landing/LandingPage.tsx # Trang chủ giới thiệu tác giả & 7 phân hệ Pythaverse
@@ -250,9 +268,9 @@ ptv-tasks-administrator/
 │   │   │   ├── api.ts                  # Wrapper gọi API Backend FastAPI chuẩn mực (fetchApi)
 │   │   │   └── supabase.ts             # Supabase Client khởi tạo cho Frontend
 │   │   ├── types/
-│   │   │   └── index.ts                # Toàn bộ định nghĩa TypeScript Strict Types
+│   │   │   └── index.ts                # Toàn bộ định nghĩa TypeScript Strict Types (18+ Interfaces)
 │   │   ├── App.tsx                     # Khởi tạo React Router DOM v7 & Lazy Load 13 Pages
-│   │   ├── index.css                   # Tailwind CSS v4, Font Inter, Typography, Scrollbar
+│   │   ├── index.css                   # Tailwind CSS v4, Font Plus Jakarta Sans, Scrollbar
 │   │   └── main.tsx                    # Khởi tạo React Virtual DOM
 │   ├── package.json                    # Danh mục gói thư viện Frontend & Scripts
 │   ├── tsconfig.json                   # Cấu hình TypeScript Strict Type-Checking
@@ -261,6 +279,10 @@ ptv-tasks-administrator/
 │   ├── migrations/                     # Lịch sử nâng cấp CSDL Supabase
 │   │   └── 20260812000000_initial_schema.sql # Migration khởi tạo CSDL
 │   └── schema.sql                      # Schema chuẩn mực 16 bảng CSDL, RLS, Indexes, Triggers
+├── design-system/                      # Cấu hình Design System Bento Grid & Enterprise Pastel OKLCH
+│   └── ptv-tasks-admin/
+│       └── MASTER.md                   # Bảng màu, typography, shadow, spacing chuẩn
+├── design.md                           # Bản đặc tả Design System Enterprise Pastel & Bento Grid
 ├── Blueprint.md                        # Bản đặc tả kỹ thuật kiến trúc tổng thể Master Blueprint
 ├── GEMINI.md                           # Bộ quy tắc hệ thống & Chỉ dẫn AI Agent Routing
 └── README.md                           # Bách khoa toàn thư kỹ thuật Single Source of Truth
@@ -270,9 +292,9 @@ ptv-tasks-administrator/
 
 ## 🔬 PHẦN V: GIẢI PHẪU CHI TIẾT TỪNG FILE & HÀM XỬ LÝ BACKEND (FASTAPI 0.115)
 
-### 5.1. Entrypoint & Lifespan Crons (`main.py`)
+### 5.1. Entrypoint & Lifespan Crons Lệch Pha (`main.py`)
 - **Tệp tin:** [`backend/app/main.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/main.py)
-- **Vai trò:** Khởi tạo ứng dụng FastAPI, cấu hình CORS, thiết lập bộ quản lý vòng đời `lifespan` kích hoạt 6 tiến trình chạy ngầm (APScheduler) và bảo vệ máy chủ bằng cơ chế `safe_job_wrapper`.
+- **Vai trò:** Khởi tạo ứng dụng FastAPI, cấu hình CORS, thiết lập bộ quản lý vòng đời `lifespan` kích hoạt 6 tiến trình chạy ngầm so le lệch pha (APScheduler) và bảo vệ máy chủ bằng cơ chế `safe_job_wrapper`.
 
 #### Danh Mục Hàm Chi Tiết Trong `main.py`:
 1. `safe_job_wrapper(job_func, job_name: str)`
@@ -281,16 +303,19 @@ ptv-tasks-administrator/
    - **Logic:** `try -> await job_func() -> catch Exception (log lỗi) -> finally (gc.collect())`.
 2. `poll_workspace_long_tasks()`
    - **Mục đích:** Quét bảng `bot_automation_tasks` tìm các tác vụ có `execution_status = 'waiting_poll'` (Pha 2 của Smart Polling Engine).
-   - **Logic:** Mở Chromium Playwright ➔ Gọi `check_and_export_batch_result()` kiểm tra `request_id` ➔ Khi hoàn tất: xuất file `RESULT_accounts.xlsx`, gọi `COFExcelService.write_results_back_to_cof()` ghi ngược kết quả highlight cam `#FCE4D6` & đỏ `#C00000`, tải lên đúng thư mục Google Drive của trường và cập nhật task thành `success`.
+   - **Logic:** Mở Chromium Playwright ➔ Gọi `check_and_export_batch_result()` kiểm tra `request_id` ➔ Khi hoàn tất: xuất file `RESULT_accounts.xlsx`, gọi `COFExcelService.write_results_back_to_cof()` ghi ngược kết quả highlight cam `#FCE4D6` & đỏ `#C00000`, tải lên Supabase Storage và thư mục Google Drive của trường, cập nhật task thành `success` và ticket thành `completed`.
 3. `lifespan(app: FastAPI)`
    - **Mục đích:** Context Manager quản lý khởi động và tắt ứng dụng an toàn.
-   - **6 Lập lịch Cronjob tự động:**
-     - `gmail_cron`: Gọi `poll_unread_gmails` (chu kỳ 5 phút).
-     - `osticket_cron`: Gọi `poll_open_ostickets` (chu kỳ 5 phút).
-     - `sheet_cron`: Gọi `poll_form_feedbacks` (chu kỳ 5 phút).
-     - `site_uptime_cron`: Gọi `poll_site_uptime_cron` (chu kỳ 30 phút).
-     - `workspace_long_tasks_cron`: Gọi `poll_workspace_long_tasks` (chu kỳ 5 phút).
-     - `distributor_cache_scanner_cron`: Gọi `workspace_scanner_service.scan_and_cache_all_distributors` (chu kỳ 45 phút).
+   - **Cơ chế Lập Lịch So Le Lệch Pha 6 Crons (So Le & Chống Tràn RAM):**
+     1. `gmail_cron`: Gọi `poll_unread_gmails` (chu kỳ 5 phút, khởi chạy sau 5s).
+     2. `osticket_cron`: Gọi `poll_open_ostickets` (chu kỳ 5 phút, khởi chạy sau 65s - lệch 1 phút).
+     3. `sheet_cron`: Gọi `poll_form_feedbacks` (chu kỳ 5 phút, khởi chạy sau 125s - lệch 2 phút).
+     4. `workspace_long_tasks_cron`: Gọi `poll_workspace_long_tasks` (chu kỳ 3 phút, khởi chạy sau 185s - lệch 3 phút).
+     5. `site_uptime_cron`: Gọi `poll_site_uptime_cron` (chu kỳ 30 phút, khởi chạy sau 245s - lệch 4 phút).
+     6. `distributor_cache_scanner_cron`: Gọi `workspace_scanner_service.scan_and_cache_all_distributors` (chu kỳ 45 phút, khởi chạy sau 305s - lệch 5 phút).
+4. `health_check()`
+   - **Mục đích:** Endpoint kiểm tra sức khỏe hệ thống tại `/api/v1/health` (hỗ trợ cả GET và HEAD).
+   - **Trả về:** `{"status": "online", "scheduler_running": true, "active_jobs": 6}`.
 
 ---
 
@@ -306,20 +331,11 @@ ptv-tasks-administrator/
 #### 2. [`gemini.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/core/gemini.py)
 - **Mục đích:** Động cơ phân tích, tóm tắt và tự động gán nhãn cho vé (AI Auto-Triage & Categorization).
 - **Hàm `AIEngine.generate_content_with_retry(prompt: str) -> str`:**
-  - Triển khai thuật toán **Auto-Fallback 10 tầng**: Duyệt qua danh sách `GEMINI_MODELS` (`gemini-3.7-flash` ➔ `gemini-3.6-flash` ➔ `gemini-3.5-flash-lite` ➔ `gemini-2.5-flash` ➔ ...). Nếu model hiện tại gặp lỗi `429 (Rate Limit)` hoặc `quota_exhausted`, tự động ghi log cảnh báo và chuyển ngay sang model kế tiếp mà không làm gián đoạn luồng xử lý của người dùng.
+  - Triển khai thuật toán **Auto-Fallback 10 tầng**: Duyệt qua danh sách `GEMINI_MODELS` (`gemini-3.8-flash` ➔ `gemini-3.7-flash` ➔ `gemini-3.5-flash-lite` ➔ `gemini-3.1-pro-preview` ➔ `gemini-3.6-flash` ➔ `gemini-3.5-flash` ➔ `gemini-3.1-flash-lite` ➔ `gemini-3-flash-preview` ➔ `gemini-2.5-pro` ➔ `gemini-2.5-flash`). Nếu model hiện tại gặp lỗi `429 (Rate Limit)` hoặc `quota_exhausted`, tự động ghi log cảnh báo và chuyển ngay sang model kế tiếp.
 - **Hàm `process_ticket_with_ai(ticket_id: str) -> Optional[Dict[str, Any]]`:**
   - Đọc nội dung thô của ticket từ Supabase, nạp `knowledge_base.json` làm ngữ cảnh domain truth, gửi prompt yêu cầu AI bóc tách JSON chuẩn: `category` (`bug`, `account_keycloak`, `lms_enroll`, `license`, `other`), `priority` (`critical`, `normal`), `ai_summary` (tóm tắt bằng Tiếng Việt), `assigned_name` và `assigned_email`. Cập nhật kết quả ngược vào bảng `inbox_tickets`.
 
-#### 3. [`security.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/core/security.py)
-- **Mục đích:** Kiểm soát an ninh tầng API qua giao thức HTTP Bearer Token.
-- **Hàm `verify_dtt_domain_email(email: str) -> bool`:** Kiểm tra phần mở rộng domain của email, bắt buộc phải là `@dtt.vn`.
-- **Hàm `get_current_user_email(credentials: HTTPAuthorizationCredentials) -> str`:** Giải mã JWT Token từ Supabase Auth, trích xuất email người dùng và thực thi kiểm tra Whitelist Domain. Nếu vi phạm, trả về lỗi `HTTP 403 Forbidden` ngay lập tức.
-
-#### 4. [`supabase.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/core/supabase.py)
-- **Mục đích:** Cung cấp singleton client kết nối Supabase PostgreSQL với quyền hạn tối cao (`SUPABASE_SERVICE_ROLE_KEY`), cho phép các background workers thao tác CSDL mà không bị chặn bởi RLS.
-- **Hàm `get_supabase_client() -> Client`:** Trả về đối tượng singleton kết nối Supabase.
-
-#### 5. [`playwright_manager.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/core/playwright_manager.py)
+#### 3. [`playwright_manager.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/core/playwright_manager.py)
 - **Mục đích:** Trung tâm kiểm soát tài nguyên và bộ nhớ trình duyệt Playwright Chromium toàn diện, thiết kế riêng cho môi trường máy chủ Render 512MB RAM.
 - **Cơ chế Khóa Đơn Phiên (Global Concurrency Semaphore):**
   - `PLAYWRIGHT_CONCURRENCY_SEMAPHORE = asyncio.Semaphore(1)`
@@ -331,9 +347,18 @@ ptv-tasks-administrator/
 - **Trợ Thủ Chờ DOM & API Ổn Định:**
   - `wait_for_dom_and_spinners(page, target_selector, min_pacing_ms, timeout)`: Tự động chờ các spinner/overlay của MUI/WordPress/Moodle biến mất (`.MuiCircularProgress-root`, `.MuiSkeleton-root`, `.MuiDataGrid-loadingOverlay`, `.loading-icon`), chờ selector mục tiêu xuất hiện và chèn micro-pacing 300-500ms cho React Virtual DOM cập nhật hoàn tất trước khi thao tác.
 
+#### 4. [`security.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/core/security.py)
+- **Mục đích:** Kiểm soát an ninh tầng API qua giao thức HTTP Bearer Token.
+- **Hàm `verify_dtt_domain_email(email: str) -> bool`:** Kiểm tra phần mở rộng domain của email, bắt buộc phải là `@dtt.vn`.
+- **Hàm `get_current_user_email(credentials: HTTPAuthorizationCredentials) -> str`:** Giải mã JWT Token từ Supabase Auth, trích xuất email người dùng và thực thi kiểm tra Whitelist Domain. Nếu vi phạm, trả về lỗi `HTTP 403 Forbidden` ngay lập tức.
+
+#### 5. [`supabase.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/core/supabase.py)
+- **Mục đích:** Cung cấp singleton client kết nối Supabase PostgreSQL với quyền hạn tối cao (`SUPABASE_SERVICE_ROLE_KEY`), cho phép các background workers thao tác CSDL mà không bị chặn bởi RLS.
+- **Hàm `get_supabase_client() -> Client`:** Trả về đối tượng singleton kết nối Supabase.
+
 ---
 
-### 5.3. Định Nghĩa Dữ Liệu Models (`app/models/`)
+### 5.3. Định Nghĩa Dữ Liệu Schemas (`app/models/`)
 - [`ticket.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/models/ticket.py): Chứa `InboxTicketCreate`, `InboxTicketUpdate`, `TicketFilterParams` kiểm soát dữ liệu tìm kiếm, lọc phân trang và cập nhật vé.
 - [`task.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/models/task.py): Chứa `BotAutomationTaskCreate`, `TaskApprovalRequest` (duyệt/từ chối), `TaskRetryRequest` (chạy lại tác vụ lỗi).
 - [`template.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/models/template.py): Chứa schema cấu hình template Markdown cho GitHub Issue và mapping cột xuất file báo cáo XLSX.
@@ -345,19 +370,92 @@ ptv-tasks-administrator/
 
 ---
 
-### 5.5. Cổng Giao Tiếp REST API Endpoints (`app/api/v1/endpoints/`)
+### 5.5. Cổng Giao Tiếp REST API Endpoints & Ma Trận 8 In-Memory Caches (`app/api/v1/endpoints/`)
 
-| Endpoint Router | Đường Dẫn Prefix | Các Hàm Xử Lý Chính | Chức Năng Chi Tiết |
-|---|---|---|---|
-| [`tickets.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/tickets.py) | `/tickets` | `list_tickets`, `get_ticket`, `complete_ticket`, `dismiss_ticket`, `restore_ticket`, `update_category`, `trigger_ai_triage` | Quản lý toàn bộ vòng đời vé: lọc đa tiêu chí (status, category, source, keyword), đánh dấu hoàn thành, bác bỏ vé (đồng thời mark read trên Gmail), kích hoạt AI Triage thủ công. |
-| [`tasks.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/tasks.py) | `/tasks` | `list_tasks`, `create_task`, `approve_task`, `run_approved_task_worker` | Cổng kiểm soát Human-in-the-Loop: tiếp nhận yêu cầu duyệt từ admin, kích hoạt worker thực thi nền qua `bot_executor`, ghi log thực thi GMT+7 có màu sắc ANSI. |
-| [`bots.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/bots.py) | `/bots` | `get_bot_workers_status`, `get_bot_terminal_logs`, `retry_bot_task`, `format_vn_time`, `clean_log_message` | Giám sát trạng thái hoạt động của các workers (Active/Degraded/Error), stream log hệ thống chuẩn hóa GMT+7 lọc trùng lặp, hỗ trợ khởi động lại worker bằng key name. |
-| [`workspace.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/workspace.py) | `/workspace` | `get_hierarchy_schools`, `get_course_categories`, `get_workspace_courses`, `get_cached_pending_orders`, `get_cached_pending_contracts`, `trigger_distributor_cache_sync`, `extract_cof_content` | Tích hợp **WorkspaceMemoryCache** (TTL 15 phút, phản hồi 1ms), cung cấp danh mục 480 trường học kèm phả hệ cho Autocomplete, đọc dữ liệu cache siêu tốc Orders/Contracts, kích hoạt quét cưỡng bức `sync-cache-now` và bóc tách nội dung COF. |
-| [`courses.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/courses.py) | `/courses` | `list_courses`, `get_categories`, `create_course`, `update_course`, `delete_course`, `bulk_upsert_courses`, `rename_category`, `delete_category` | Tích hợp **SimpleMemoryCache** (TTL 10 phút, phản hồi 1ms, tự động invalidate khi CUD), quản lý song song 2 bảng `workspace_courses` và `lms_courses`, hỗ trợ nhập dữ liệu hàng loạt từ Excel/Text paste qua SheetJS, đổi tên và gộp danh mục môn học hàng loạt. |
-| [`monitor.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/monitor.py) | `/monitor` | `get_sites_status`, `get_site_history`, `get_auth_matrix`, `run_auth_check_now`, `get_deployments`, `get_deployment_logs` | Giám sát toàn diện 3 Tab: Uptime 10 website Pythaverse 24 giờ, Ma trận xác thực 16 tài khoản test 7 vai trò qua giải mã Fernet, và theo dõi tiến trình builds CI/CD Vercel/Render. |
-| [`github.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/github.py) | `/github` | `create_github_issue`, `generate_ai_issue_template` | Tạo GitHub Issue trực tiếp vào Private Repository, tự động sinh tiêu đề và nội dung markdown chuẩn mực bằng AI kết hợp thông tin điều tra QA. |
-| [`reports.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/reports.py) | `/reports` | `get_reports_summary`, `get_kpi_export_data` | Thống kê 4 thẻ chỉ số KPI, tính toán Dynamic Health 24h, biểu đồ tròn cơ cấu loại yêu cầu, biểu đồ cột xu hướng tiếp nhận/xử lý và xuất bảng dữ liệu KPI DTT 3Đ. |
-| [`board.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/board.py) | `/board` | `list_boards`, `create_board`, `update_board`, `trash_board`, `restore_board`, `delete_board_permanent`, `get_board_detail`, `create_card`, `update_card`, `move_card`, `delete_card` | Quản trị đa bảng Kanban, hỗ trợ thùng rác 30 ngày (soft delete/restore), quản lý 6 cột trạng thái, kéo thả thẻ công việc, cập nhật thanh tiến độ subtasks thời gian thực. |
+Toàn bộ hệ thống REST API Backend được tối ưu hóa phản hồi 1ms thông qua **Ma Trận 8 Bộ Nhớ Đệm In-Memory RAM Caching** hoàn toàn độc lập, không phụ thuộc Redis:
+
+| STT | Lớp Cache Engine | Tệp Tin Khai Báo | TTL Mặc Định | Cơ Chế Invalidate (Làm Sạch) | Phạm Vi Dữ Liệu Đệm |
+|---|---|---|---|---|---|
+| **1** | `SimpleMemoryCache` | [`courses.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/courses.py) | 600s (10 phút) | Tự động khi Thêm, Sửa, Xóa, Bulk Upsert, Đổi tên Category. | Danh mục khóa học `workspace_courses`, `lms_courses` và danh sách Category. |
+| **2** | `WorkspaceMemoryCache` | [`workspace.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/workspace.py) | 900s (15 phút) | Khi gọi `sync-cache-now` hoặc cập nhật phả hệ. | Phả hệ 480 trường học, cache Orders/Contracts của 5 Master Distributors. |
+| **3** | `BoardMemoryCache` | [`board.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/board.py) | 300s (5 phút) | Khi tạo/sửa bảng, xóa vào thùng rác, khôi phục, kéo thẻ, cập nhật subtasks. | Danh sách Bảng, Thùng rác, Cột trạng thái, Thẻ công việc. |
+| **4** | `BotsMemoryCache` | [`bots.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/bots.py) | 15s | Khi force sync, purge RAM hoặc kích hoạt retry worker. | Trạng thái Real-time 8 Workers và terminal logs thực thi gần nhất. |
+| **5** | `TasksMemoryCache` | [`tasks.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/tasks.py) | 60s | Khi duyệt task, tạo task mới hoặc cập nhật trạng thái worker. | Danh sách tác vụ tự động hóa trong hàng đợi phê duyệt. |
+| **6** | `TicketsMemoryCache` | [`tickets.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/tickets.py) | 60s | Khi hoàn thành vé, bác bỏ vé, đổi category hoặc sync đa kênh. | Danh sách vé hòm thư đa kênh hợp nhất theo bộ lọc. |
+| **7** | `MonitorMemoryCache` | [`monitor.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/monitor.py) | 30s | Khi quản trị viên bấm nút "Kiểm tra ngay (Check Now)". | Trạng thái Uptime 10 site, lịch sử uptime 45 ngày và nhật ký sự cố. |
+| **8** | `ReportsMemoryCache` | [`reports.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/reports.py) | 60s | Khi có vé hoặc tác vụ mới hoàn tất. | Thống kê 4 thẻ KPI, Dynamic Health 24h, biểu đồ donut và xu hướng 7 ngày. |
+
+#### Giải Phẫu Chi Tiết 9 Router API:
+
+1. **[`tickets.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/tickets.py) (`/tickets`):**
+   - `GET /`: `list_tickets(status, category, source, sort)` – lọc đa tiêu chí, đọc từ `TicketsMemoryCache`.
+   - `POST /sync/osticket`: `trigger_sync_osticket()` – kích hoạt cào vé OS Ticket chạy ngầm và invalidate cache.
+   - `POST /sync/gmail`: `trigger_sync_gmail()` – kích hoạt quét Gmail chạy ngầm và invalidate cache.
+   - `PUT /{ticket_id}/complete`: `complete_ticket()` – đánh dấu hoàn thành vé.
+   - `PUT /{ticket_id}/dismiss`: `dismiss_ticket()` – đưa vé vào thùng rác, đồng thời gọi `mark_email_as_read()` trên Gmail nếu nguồn là email.
+   - `PUT /{ticket_id}/restore`: `restore_ticket()` – khôi phục vé đã bác bỏ về trạng thái `pending`.
+   - `PUT /{ticket_id}/category`: `update_category()` – đổi phân loại vé.
+   - `POST /{ticket_id}/ai-triage`: `trigger_ai_triage()` – kích hoạt lại bộ máy Gemini AI phân tích lại nội dung vé.
+
+2. **[`tasks.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/tasks.py) (`/tasks`):**
+   - `GET /`: `list_tasks(status, limit, offset)` – lấy danh sách task chờ duyệt từ `TasksMemoryCache`.
+   - `POST /`: `create_task(payload)` – tạo task mới; nếu `run_immediately = true` thì kích hoạt ngay worker nền.
+   - `PUT /{task_id}/approve`: `approve_task(payload)` – phê duyệt hoặc từ chối task. Nếu duyệt, đưa `run_approved_task_worker` vào `background_tasks`.
+   - `run_approved_task_worker(task_id, bot_type, payload, ticket_id)`: Hàm thực thi an toàn bọc thép, tự động phân giải credentials phả hệ 3 cấp nếu là `workspace_rpa`, gọi `execute_approved_bot_task`, cập nhật log màu ANSI GMT+7, chuyển trạng thái `waiting_poll`, `success` hoặc `failed`.
+
+3. **[`bots.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/bots.py) (`/bots`):**
+   - `GET /status`: `get_bot_workers_status()` – giám sát 8 workers (`gmail_sync_worker`, `osticket_sync_worker`, `feedback_sheet_worker`, `distributor_cache_worker`, `workspace_license_worker`, `keycloak_api_worker`, `lms_git_worker`, `github_dispatcher`), đếm số lượng task lỗi.
+   - `GET /logs`: `get_bot_terminal_logs()` – stream 30 bản ghi log thực thi gần nhất, chuẩn hóa GMT+7, loại bỏ timestamp trùng lặp qua `clean_log_message`.
+   - `POST /force-sync/{sync_type}`: `force_sync_pipeline()` – ép quét tức thì cho các luồng: `gmail`, `osticket`, `sheet`, `distributor_cache`, `site_uptime`.
+   - `POST /purge-memory`: `purge_system_memory()` – gọi cưỡng bức `gc.collect()` và xóa cache RAM.
+   - `POST /{task_id}/retry`: `retry_bot_task()` – chạy lại 1 task theo UUID hoặc chạy lại toàn bộ task lỗi của một Worker theo tên key.
+
+4. **[`workspace.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/workspace.py) (`/workspace`):**
+   - `GET /hierarchy-schools`: `get_hierarchy_schools(search)` – trả về 480 trường học kèm phả hệ đầy đủ cho Autocomplete, tìm kiếm trong RAM 0.1ms.
+   - `GET /categories`: `get_course_categories()` – trả về danh sách category duy nhất của Workspace.
+   - `GET /courses`: `get_workspace_courses(category)` – danh mục khóa học phục vụ License RPA.
+   - `GET /cached-pending-orders`: `get_cached_pending_orders(school_name, distributor_code)` – đọc cache đơn hàng của trường học.
+   - `GET /cached-pending-contracts`: `get_cached_pending_contracts(contract_type, distributor_code)` – đọc cache hợp đồng PRT / DST.
+   - `POST /sync-cache-now`: `trigger_distributor_cache_sync()` – kích hoạt quét nền 5 Master Distributors.
+   - `POST /extract-cof`: `extract_cof_content(req)` – bóc tách dữ liệu COF text bằng Regular Expressions, map tự động với cache khóa học.
+
+5. **[`courses.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/courses.py) (`/courses`):**
+   - `GET /{course_type}`: `list_courses(course_type, category, search)` – nạp danh mục khóa học `workspace` hoặc `lms`, tìm kiếm & lọc trong RAM.
+   - `GET /{course_type}/categories`: `get_categories(course_type)` – nạp danh mục Category duy nhất.
+   - `POST /{course_type}`: `create_course(course_type, payload)` – thêm khóa học mới, tự sinh URL Moodle `https://learn.pythaverse.space/course/view.php?id={course_id}`.
+   - `PUT /{course_type}/{course_id}`: `update_course()` – cập nhật thông tin khóa học.
+   - `DELETE /{course_type}/{course_id}`: `delete_course()` – xóa khóa học.
+   - `POST /{course_type}/bulk-upsert`: `bulk_upsert_courses()` – nạp hàng loạt từ Excel/Text qua SheetJS theo từng batch 50 records.
+   - `PUT /{course_type}/categories/rename`: `rename_category()` – đổi tên danh mục môn học hàng loạt.
+   - `DELETE /{course_type}/categories`: `delete_category(old_category, target_category)` – xóa hoặc gộp danh mục môn học.
+
+6. **[`board.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/board.py) (`/board`):**
+   - `GET /boards`: `list_boards()` – danh sách các bảng hoạt động từ `BoardMemoryCache`.
+   - `GET /boards/trash`: `list_trash_boards()` – danh sách các bảng trong thùng rác 30 ngày.
+   - `POST /boards`: `create_board(payload)` – tạo bảng mới kèm 6 cột mặc định (`Tiếp Nhận`, `Cần Làm`, `Đang Làm`, `Chờ Duyệt`, `Hoàn Thành`, `Hủy Bỏ`).
+   - `PUT /boards/{board_id}`: `update_board()` – cập nhật tiêu đề, wallpaper, độ mờ overlay/columns/cards.
+   - `DELETE /boards/{board_id}`: `soft_delete_board()` – chuyển bảng vào thùng rác (`is_deleted = TRUE`).
+   - `PUT /boards/{board_id}/restore`: `restore_board()` – khôi phục bảng nguyên vẹn.
+   - `DELETE /boards/{board_id}/permanent`: `permanent_delete_board()` – xóa vĩnh viễn khỏi CSDL.
+   - `GET /boards/{board_id}/columns` & `POST /boards/{board_id}/columns`: quản lý cột trạng thái.
+   - `GET /boards/{board_id}/cards`, `POST /cards`, `PUT /cards/{card_id}`, `PUT /cards/{card_id}/move`, `DELETE /cards/{card_id}`: quản lý thẻ công việc và kéo thả.
+
+7. **[`monitor.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/monitor.py) (`/monitor`):**
+   - `GET /sites`: `get_monitored_sites()` – trạng thái Uptime 10 site Pythaverse và đo latency (RAM Cache 30s).
+   - `POST /check-now`: `check_all_now()` – kiểm tra ngay lập tức toàn bộ 10 website.
+   - `GET /sites/{site_id}/history`: `get_site_history(site_id, days)` – lịch sử uptime 45 ngày.
+   - `GET /sites/{site_id}/hourly`: `get_site_hourly_history(site_id, hours)` – lịch sử uptime 24 giờ.
+   - `GET /auth-matrix`: `get_auth_matrix()` – ma trận xác thực 16 tài khoản test 7 vai trò qua giải mã Fernet.
+   - `POST /auth-matrix/check-now`: `run_auth_check_now()` – kích hoạt kiểm tra xác thực phân quyền ngay.
+   - `GET /deployments` & `GET /deployments/logs`: theo dõi builds CI/CD Vercel & Render.
+
+8. **[`github.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/github.py) (`/github`):**
+   - `POST /create-issue`: `create_github_issue(payload)` – gửi Issue trực tiếp vào Private Repo `PTV-TechHub/Pythaverse2026` bằng GitHub PAT.
+   - `POST /ai-generate-template`: `ai_generate_bug_template(req)` – kết hợp Domain Knowledge từ `knowledge_base.json` + Ghi chú QA thực tế + File đính kèm để sinh Bug Report Markdown nghiêm ngặt (chỉ báo cáo thực nghiệm, không suy diễn nguyên nhân).
+
+9. **[`reports.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/reports.py) (`/reports`):**
+   - `GET /summary`: `get_reports_summary(cat_range, trend_range)` – tổng hợp 4 chỉ số KPI, Dynamic Health 24h, phân bố loại yêu cầu và xu hướng tiếp nhận vs xử lý.
+   - `GET /kpi-export`: `get_kpi_export_data()` – xuất bảng dữ liệu báo cáo KPI chuẩn mực DTT 3Đ (Đúng - Đủ - Đẹp).
 
 ---
 
@@ -368,9 +466,10 @@ Gói dịch vụ RPA được thiết kế theo mô hình **Đa Kế Thừa Tầ
 ```mermaid
 classDiagram
     class WorkspaceBaseService {
-        +create_context(playwright)
+        +create_context(playwright, low_ram)
         +login_role(page, username, password, role)
         +normalize_date_iso(date_str)
+        +_dismiss_welcome_dialog(page)
     }
     class WorkspaceOrderService {
         +school_create_order(credentials, order_data)
@@ -391,6 +490,8 @@ classDiagram
         +execute_approve_school_order_standalone(payload)
         +execute_approve_partner_contract_standalone(payload)
         +execute_admin_approve_contract_standalone(payload)
+        +partner_create_and_approve_chain(payload)
+        +distributor_create_and_approve_chain(payload)
     }
     class WorkspaceAccountService {
         +submit_account_creation_batch(credentials, file_path, count)
@@ -414,7 +515,7 @@ classDiagram
 1. [`base.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workspace/base.py): Chứa `WorkspaceBaseService` khởi tạo Chromium với cờ tiết kiệm tài nguyên (`--no-sandbox`, `--disable-dev-shm-usage`, `--single-process`), xử lý form đăng nhập Keycloak SSO `login_role()` và chuẩn hóa ngày tháng ISO `normalize_date_iso()`.
 2. [`order_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workspace/order_service.py): Chứa `WorkspaceOrderService` xử lý quy trình School tạo Order (`school_create_order`), Partner duyệt Order từ Pool License (`partner_approve_school_order`), và trích xuất chi tiết môn học của Order (`fetch_school_order_detailed_courses`).
 3. [`contract_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workspace/contract_service.py): Chứa `WorkspaceContractService` xử lý quy trình Partner tạo Contract gửi Distributor (`partner_create_contract`), Distributor duyệt Contract (`distributor_approve_partner_contract`), Distributor tạo Contract xin Sales Admin (`distributor_create_contract`), và Sales Admin phê duyệt cấp bù tối cao (`admin_approve_distributor_contract`).
-4. [`orchestrator_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workspace/orchestrator_service.py): Chứa `WorkspaceOrchestratorService` điều phối chuỗi liên hoàn Master E2E Chain 4 cấp (`execute_full_license_hierarchy_chain`) và các subflows độc lập (`execute_approve_school_order_standalone`, `execute_approve_partner_contract_standalone`).
+4. [`orchestrator_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workspace/orchestrator_service.py): Chứa `WorkspaceOrchestratorService` điều phối chuỗi liên hoàn Master E2E Chain 4 cấp (`execute_full_license_hierarchy_chain`) và các subflows độc lập (`execute_approve_school_order_standalone`, `execute_approve_partner_contract_standalone`, `partner_create_and_approve_chain`).
 5. [`account_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workspace/account_service.py): Chứa `WorkspaceAccountService` nộp file batch tạo tài khoản (`submit_account_creation_batch`), tích hợp **Hybrid Fast-Path** (chờ 12s lấy kết quả ngay nếu batch <= 30 tài khoản) và trích xuất `request_id` cho Cronjob tiếp quản nếu batch lớn (`check_and_export_batch_result`).
 6. [`enroll_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workspace/enroll_service.py): Chứa `WorkspaceEnrollService` (`school_enroll_users_and_groups`) tạo Group lớp và ghi danh học sinh/giáo viên trực tiếp trên giao diện School Workspace.
 7. [`workspace_scanner_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workspace/workspace_scanner_service.py): Chứa `WorkspaceScannerService` sử dụng Direct API trong session Playwright của 5 Master Distributors để quét và lưu cache hàng trăm hợp đồng/đơn hàng trong vài giây vào bảng `workspace_contracts_cache` và `workspace_orders_cache`.
@@ -441,7 +542,7 @@ classDiagram
 #### 2. [`keycloak_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/keycloak_service.py) (2-Tier Hybrid Keycloak Identity Engine)
 - **Mục đích:** Quản trị định danh tài khoản tập trung trên Keycloak EID (`eid.pythaverse.space`).
 - **Kiến trúc 2 Tầng (2-Tier Hybrid):**
-  - **Tầng 1 (Direct REST API):** Gọi `execute_via_rest_api()` sử dụng HTTPX kèm `BROWSER_HEADERS` (User-Agent giả lập trình duyệt) để lấy Admin Token và gọi trực tiếp Keycloak Admin REST API (`/auth/admin/realms/{realm}/users`). Hoàn thành trong 300ms.
+  - **Tầng 1 (Direct REST API):** Gọi `execute_via_rest_api()` sử dụng HTTPX kèm `BROWSER_HEADERS` để lấy Admin Token và gọi trực tiếp Keycloak Admin REST API (`/auth/admin/realms/{realm}/users`). Hoàn thành trong 300ms.
   - **Tầng 2 (Playwright RPA Fallback):** Nếu Tầng 1 gặp lỗi WAF hoặc bị chặn mạng, tự động gọi `execute_via_playwright_ui()`, mở Chromium headless, đăng nhập vào giao diện Keycloak Admin Console và thao tác trực tiếp trên Web UI.
 - **Hàm điều phối:** `execute_account_action(payload)` – tự động thực hiện các hành động: `reset_password`, `set_status` (kích hoạt/vô hiệu hóa), `verify_email`, `send_verify_email`, `delete_user`, `git_oidc_provision`.
 
@@ -452,7 +553,6 @@ classDiagram
   - `_format_date_dmy(val)`: **Chuẩn hóa ngày sinh DOB** bắt buộc về định dạng `D/M/YYYY` (ví dụ `1/1/1990` hoặc `15/8/2012`), loại bỏ phần giờ phút rác.
   - `generate_accounts_file_for_upload(students, teachers, output_path)`: Sinh file `accounts.xlsx` 7 cột chuẩn bắt đầu từ dòng 6 (`No.`, `First Name (*)`, `Last Name (*)`, `Mobile number`, `Email (*)`, `Date of Birth (*)`, `Role (*)`).
   - `write_results_back_to_cof(original_cof_path, result_accounts_path, output_cof_path)`: Đọc file `RESULT_accounts.xlsx`, map User/Pass vào Cột 12-13 và Group LMS vào Cột 14 của Tab 2/Tab 3, đồng thời highlight nền cam nhạt (`#FCE4D6`) và chữ in đậm màu đỏ (`#C00000`).
-  - `detect_and_process_excel(file_path, output_dir)`: Tự động nhận diện file tải lên là COF hay file Accounts gốc để điều phối chính xác.
 
 #### 4. [`workspace_lineage_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workspace_lineage_service.py) (Phân Giải Phả Hệ & Giải Mã Két Sắt)
 - **Mục đích:** Cầu nối định danh truy vết phả hệ 3 cấp (`Distributor` ➔ `Partner` ➔ `School`) và giải mã tài khoản bảo mật.
@@ -484,8 +584,8 @@ classDiagram
 ### 5.8. Bộ Điều Phối Workers Chạy Ngầm (`app/workers/`)
 
 #### [`bot_executor.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/workers/bot_executor.py) (Bộ Điều Phối Trung Tâm)
-- **Hàm `execute_approved_bot_task(bot_type: str, payload_data: Dict[str, Any]) -> Dict[str, Any]`:**
-  - Nhận diện `bot_type` và `action` để phân phối chính xác:
+- **Hàm `execute_approved_bot_task(bot_type: str, payload_data: Dict[str, Any], task_id: Optional[str] = None) -> Dict[str, Any]`:**
+  - Nhận diện `bot_type` và `action` để phân phối chính xác **14 Actions**:
     1. **`workspace_rpa` (10 Actions):**
        - `pipeline_end_to_end` / `create_order_and_contracts`: Kích hoạt Master E2E Chain 4 cấp.
        - `approve_school_order_standalone`: Phê duyệt Order có sẵn của School.
@@ -497,9 +597,13 @@ classDiagram
        - `partner_create_contract` / `distributor_approve_contract` / `distributor_create_contract` / `admin_approve_contract`.
        - `bulk_account_creation`: Nộp batch COF và tính toán thời gian nghỉ ngắt quãng 15s/tài khoản (`max(total * 15, 30)`).
        - `school_enroll_users`: Ghi danh học viên & lớp trên School Workspace.
-    2. **`lms_playwright` / `lms_git_provisioning` / `lms_enroll`:** Chuyển tiếp sang `playwright_lms_service.enroll_users_pipeline()`.
-    3. **`keycloak_api`:** Chuyển tiếp sang `keycloak_service.execute_account_action()`.
+    2. **`lms_playwright` / `lms_git_provisioning` / `lms_enroll` (3 Actions):**
+       - `enroll_users_pipeline`: Ghi danh học sinh/giáo viên và phân nhóm lớp.
+       - `modify_user_role`: Đổi vai trò người dùng (Mono-Role).
+       - `unenrol_users_pipeline`: Hủy ghi danh người dùng.
+    3. **`keycloak_api` (1 Action tổng hợp):** Chuyển tiếp sang `keycloak_service.execute_account_action()`.
     4. **`github_issue_creator`:** Chuyển tiếp sang `github_service.create_issue()`.
+    5. **`feedback_doc_triage` / `google_doc_comment`:** Chuyển tiếp sang `google_doc_service.insert_comment_with_mentions()`.
 
 ---
 
@@ -521,33 +625,58 @@ classDiagram
 
 ---
 
-### 6.2. Cấu Hình Tác Giả & Contexts (`config/`, `context/`, `lib/`, `types/`)
+### 6.2. Thiết Kế Hệ Thống Design System Bento Grid & Enterprise Pastel OKLCH
+- **Bố Cục Bento Grid:** Thiết kế giao diện hiện đại dạng mosaic các thẻ bất đối xứng (1x1, 2x1, 2x2, 4x1), khoảng cách đồng nhất 16px, bo tròn góc thẻ 16-24px, viền hairline 1px tinh tế.
+- **Bảng Màu Enterprise Pastel (OKLCH):**
+  - Mặt giấy bề mặt: `--color-paper: oklch(98.4% 0.003 247)` (slate-50 off-white).
+  - Nền trang: `--color-paper-2: oklch(96% 0.008 250)` (slate-100 tint).
+  - Thẻ nâng cao: `--color-paper-3: oklch(99% 0.002 247)`.
+  - Mực văn bản: `--color-ink: oklch(22% 0.020 250)` (slate-900) & `--color-ink-2: oklch(45% 0.015 250)`.
+  - Màu chủ đạo: `--color-primary: oklch(32% 0.020 250)` (slate-800).
+  - Màu điểm nhấn: `--color-accent: oklch(58% 0.140 220)` (sky-500) & `--color-accent-soft: oklch(95% 0.030 220)`.
+  - Ngữ nghĩa: `--color-mint` (Success), `--color-rose` (Destructive), `--color-amber` (Warning).
+- **Quy Chuẩn Typography 2+1:**
+  - Font hiển thị & tiêu đề: **Plus Jakarta Sans** (weights 600, 700, 800, roman).
+  - Font nội dung văn bản: **Plus Jakarta Sans** (weights 400, 500, 600).
+  - Font Terminal/Mã nguồn: **JetBrains Mono** (weights 400, 500, 600).
+- **Chế Độ Dark / Light Mode:** Tự động đồng bộ với thẻ `<html>` qua lớp `.dark`, lưu trạng thái trong `localStorage.getItem('theme')`.
+
+---
+
+### 6.3. Cấu Hình Tác Giả, Contexts & Tiện Ích Client (`config/`, `context/`, `lib/`, `types/`)
 - [`authorConfig.ts`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/config/authorConfig.ts): Lưu trữ thông tin định danh tác giả **Nguyễn Mạnh Hùng**, chức danh Lead AI Engineer & Automation Architect, liên kết mạng xã hội (GitHub, LinkedIn, Facebook, Email, Website) và highlights dự án.
 - [`AuthContext.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/context/AuthContext.tsx): Quản lý trạng thái phiên đăng nhập qua Supabase Auth, tự động kiểm tra đuôi `@dtt.vn`, lưu trữ thông tin user vào React State và tự động logout nếu ngoài miền.
 - [`ThemeContext.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/context/ThemeContext.tsx): Quản lý chuyển đổi chế độ Dark / Light theme, lưu cấu hình vào LocalStorage (`theme`), tự động gắn thẻ `class="dark"` lên thẻ `<html>`.
-- [`lib/api.ts`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/lib/api.ts): Hàm tiện ích `fetchApi<T>(endpoint, options)` bọc chuẩn REST API Backend kèm xử lý lỗi tập trung.
+- [`lib/api.ts`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/lib/api.ts): Hàm tiện ích `fetchApi<T>(endpoint, options)` bọc chuẩn REST API Backend kèm xử lý lỗi tập trung và tiêm Supabase Bearer Token.
 - [`lib/supabase.ts`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/lib/supabase.ts): Khởi tạo Supabase JS Client cho Frontend qua `createClient(VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY)`.
 - [`types/index.ts`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/types/index.ts): Tập hợp 18 interfaces TypeScript nghiêm ngặt (`InboxTicket`, `BotAutomationTask`, `CourseItem`, `BoardItem`, `BoardCardItem`...).
 
 ---
 
-### 6.3. Bóc Tách Chi Tiết 13 Feature Modules
+### 6.4. Bóc Tách Chi Tiết 13 Feature Modules
 
-| STT | Feature Component | Đường Dẫn | Trọng Tâm Giao Diện & Logic Xử Lý Nghiệp Vụ |
-|---|---|---|---|
-| **1** | [`DashboardPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/dashboard/DashboardPage.tsx) | `/dashboard` | **Executive Dashboard:** 4 KPI Metric Cards (Tổng Ticket, Chờ Duyệt, Đã Xử Lý Tháng, Tỷ Lệ Tự Động Hóa), Quick Action buttons dẫn nhanh tới Studio/Courses/GitHub, bảng tóm tắt 5 vé và tác vụ mới nhất. |
-| **2** | [`WorkBoardPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/board/WorkBoardPage.tsx) | `/board` | **Kanban Work Board:** Quản lý đa bảng, tùy biến hình nền/overlay, 6 cột trạng thái (`Backlog`, `To Do`, `In Progress`, `Review`, `Done`, `Abort`), kéo thả HTML5 D&D mượt mà, Subtasks checklist với progress bar, kích hoạt Canvas Confetti khi hoàn thành, và **Thùng Rác 30 Ngày** (Soft Delete/Restore/Xóa vĩnh viễn). |
-| **3** | [`UnifiedInboxPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/inbox/UnifiedInboxPage.tsx) | `/inbox` | **Hòm Thư Đa Kênh Hợp Nhất:** Tiếp nhận ticket từ Gmail, Google Form và OS Ticket; bộ lọc đa tầng (Category, Priority, Source, Status, Keyword); xem trước tệp đính kèm; thẻ tóm tắt AI Gemini Tiếng Việt; gán cán bộ phụ trách; nút điều hướng nhanh sang Automation Studio hoặc GitHub Reporter. |
-| **4** | [`AutomationStudioPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/studio/AutomationStudioPage.tsx) | `/studio` | **Trung Tâm Điều Phối Tác Vụ Độc Lập:** 4 Dispatcher Engines (Keycloak Identity, Workspace License 6 subflows kèm Autocomplete 480 trường, Moodle LMS & Group, Google Feedback Docs); hỗ trợ nạp tệp COF/Accounts; chọn chế độ "Đưa vào hàng đợi" hoặc "Chạy ngay (Run Immediately)". Tích hợp LocalStorage Cache 0ms (`ptv_studio_*`). |
-| **5** | [`TaskManagementPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/tasks/TaskManagementPage.tsx) | `/tasks` | **Cổng Phê Duyệt Human-in-the-Loop:** Danh sách tác vụ chờ duyệt; trình xem chi tiết JSON payload; modal phê duyệt kèm chỉnh sửa tham số; Live Terminal Logs thời gian thực hiển thị log màu sắc ANSI; nút Retry cho tác vụ gặp sự cố. |
-| **6** | [`CoursesManagerPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/courses/CoursesManagerPage.tsx) | `/courses` | **Quản Lý Danh Mục Khóa Học Song Song:** Dual-pane phân tách rõ `workspace_courses` và `lms_courses`; SWR Silent Fetch & LocalStorage Cache 0ms (`ptv_courses_*`); CRUD đơn lẻ tự sinh URL Moodle; Bulk Import SheetJS hỗ trợ nạp Excel và paste văn bản tự do; Category Manager đổi tên và gộp danh mục hàng loạt. |
-| **7** | [`GithubReporterPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/github/GithubReporterPage.tsx) | `/github` | **Điều Phối GitHub Issue:** Tạo Issue trực tiếp vào Private Repo `PTV-TechHub/Pythaverse2026`; bộ máy Gemini AI sinh Title & Markdown Template chuẩn mực từ thông tin ticket và ghi chú QA; xem trước và chỉnh sửa Markdown trước khi gửi. |
-| **8** | [`BotCommanderPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/bots/BotCommanderPage.tsx) | `/bots` | **Giám Sát & Điều Khiển Bot Workers:** 6 thẻ trạng thái worker thời gian thực (Gmail Sync, Keycloak API, Workspace License, LMS Moodle, Google Doc Triage, GitHub Dispatcher); stream log hệ thống GMT+7; nút Restart worker bằng key name. |
-| **9** | [`ReportsExportPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/reports/ReportsExportPage.tsx) | `/reports` | **Phân Tích KPI & Xuất Báo Cáo:** 4 chỉ số KPI tổng quan; Dynamic Health 24h; biểu đồ tròn tỷ trọng Category; biểu đồ cột xu hướng Tiếp nhận vs Xử lý 7 ngày; chức năng xuất file Excel báo cáo KPI DTT 3Đ. |
-| **10** | [`SiteMonitorPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/monitor/SiteMonitorPage.tsx) | `/monitor` | **Giám Sát Hệ Sinh Thái 3 Tab:** Tab 1 Uptime Bar 24h & lịch sử 45 ngày của 10 website Pythaverse; Tab 2 Ma trận xác thực 16 tài khoản test 7 vai trò qua giải mã Fernet; Tab 3 Theo dõi builds CI/CD Vercel & Render kèm stream log terminal. |
-| **11** | [`ProfileSettingsPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/profile/ProfileSettingsPage.tsx) | `/profile` | **Hồ Sơ Tác Giả & Cấu Hình:** Khẳng định quyền tác giả Nguyễn Mạnh Hùng; hiển thị trạng thái các biến môi trường backend/frontend; thông tin phiên bản phát hành `v2.5.0 Enterprise`. |
-| **12** | [`LandingPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/landing/LandingPage.tsx) | `/` | **Trang Chủ Giới Thiệu:** Giới thiệu tác giả và 7 phân hệ trong hệ sinh thái Pythaverse, công nghệ sử dụng, và nút chuyển hướng đăng nhập. |
-| **13** | [`LoginPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/auth/LoginPage.tsx) | `/login` | **Cổng Đăng Nhập Doanh Nghiệp:** Đăng nhập một chạm qua Google OAuth với chính sách bảo mật cưỡng chế Whitelist `@dtt.vn`. |
+| STT | Feature Component | Đường Dẫn | Trọng Tâm Giao Diện & Logic Xử Lý Nghiệp Vụ | Caching Client (0ms) |
+|---|---|---|---|---|
+| **1** | [`DashboardPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/dashboard/DashboardPage.tsx) | `/dashboard` | **Executive Bento Dashboard:** 4 KPI Metric Cards (Tổng Ticket Chờ, Chờ Duyệt, Đã Xử Lý Tháng, Tỷ Lệ Tự Động Hóa), Quick Action buttons dẫn nhanh tới Studio/Courses/GitHub, bảng tóm tắt 5 vé và 5 tác vụ mới nhất. | Gọi `/reports/summary` (RAM Cache Backend). |
+| **2** | [`WorkBoardPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/board/WorkBoardPage.tsx) | `/board` | **Kanban Work Board:** Quản lý đa bảng, tùy biến hình nền/overlay opacity/card opacity, 6 cột trạng thái (`Backlog`, `To Do`, `In Progress`, `Review`, `Done`, `Abort`), kéo thả HTML5 D&D mượt mà, Subtasks checklist với progress bar, kích hoạt Canvas Confetti khi hoàn thành, và **Thùng Rác 30 Ngày** (Soft Delete/Restore/Xóa vĩnh viễn). | Gọi `/board/*` (BoardMemoryCache Backend 5m). |
+| **3** | [`UnifiedInboxPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/inbox/UnifiedInboxPage.tsx) | `/inbox` | **Hòm Thư Đa Kênh Hợp Nhất:** Tiếp nhận ticket từ Gmail, Google Form và OS Ticket; bộ lọc đa tầng (Category, Priority, Source, Status, Keyword); xem trước tệp đính kèm; thẻ tóm tắt AI Gemini Tiếng Việt; gán cán bộ phụ trách; nút điều hướng nhanh sang Automation Studio hoặc GitHub Reporter. | Gọi `/tickets` (TicketsMemoryCache Backend 60s). |
+| **4** | [`AutomationStudioPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/studio/AutomationStudioPage.tsx) | `/studio` | **Trung Tâm Điều Phối Tác Vụ Độc Lập:** 4 Dispatcher Engines (Keycloak Identity, Workspace License 6 subflows kèm Autocomplete 480 trường, Moodle LMS & Group, Google Feedback Docs); hỗ trợ nạp tệp COF/Accounts; chọn chế độ "Đưa vào hàng đợi" hoặc "Chạy ngay (Run Immediately)". | LocalStorage Cache 0ms (`ptv_studio_schools`, `ptv_studio_courses`, `ptv_studio_orders`, `ptv_studio_contracts`). |
+| **5** | [`TaskManagementPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/tasks/TaskManagementPage.tsx) | `/tasks` | **Cổng Phê Duyệt Human-in-the-Loop:** Danh sách tác vụ chờ duyệt; trình xem chi tiết JSON payload; modal phê duyệt kèm chỉnh sửa tham số; Live Terminal Logs thời gian thực hiển thị log màu sắc ANSI; nút Retry cho tác vụ gặp sự cố. | Gọi `/tasks` (TasksMemoryCache Backend 60s). |
+| **6** | [`CoursesManagerPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/courses/CoursesManagerPage.tsx) | `/courses` | **Quản Lý Danh Mục Khóa Học Song Song:** Dual-pane phân tách rõ `workspace_courses` và `lms_courses`; CRUD đơn lẻ tự sinh URL Moodle; Bulk Import SheetJS hỗ trợ nạp Excel và paste văn bản tự do theo batch 50 records; Category Manager đổi tên và gộp danh mục hàng loạt. | LocalStorage SWR Cache 0ms (`ptv_courses_workspace`, `ptv_courses_lms`, `ptv_cats_*`). |
+| **7** | [`GithubReporterPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/github/GithubReporterPage.tsx) | `/github` | **Điều Phối GitHub Issue:** Tạo Issue trực tiếp vào Private Repo `PTV-TechHub/Pythaverse2026`; bộ máy Gemini AI sinh Title & Markdown Template chuẩn mực từ thông tin ticket và ghi chú QA; xem trước và chỉnh sửa Markdown trước khi gửi. | Nạp context từ `knowledge_base.json`. |
+| **8** | [`BotCommanderPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/bots/BotCommanderPage.tsx) | `/bots` | **Giám Sát & Điều Khiển Bot Workers:** 8 thẻ trạng thái worker thời gian thực (Gmail, OSTicket, Sheet, Distributor Cache, Workspace License, Keycloak, LMS, GitHub); stream log hệ thống GMT+7; nút Force Sync on-demand 5 luồng, nút Purge RAM và Batch Retry. | Gọi `/bots/status` (BotsMemoryCache Backend 15s). |
+| **9** | [`ReportsExportPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/reports/ReportsExportPage.tsx) | `/reports` | **Phân Tích KPI & Xuất Báo Cáo:** 4 chỉ số KPI tổng quan; Dynamic Health 24h; biểu đồ tròn tỷ trọng Category; biểu đồ cột xu hướng Tiếp nhận vs Xử lý 7 ngày; chức năng xuất file Excel báo cáo KPI DTT 3Đ. | Gọi `/reports/summary` (ReportsMemoryCache Backend 60s). |
+| **10** | [`SiteMonitorPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/monitor/SiteMonitorPage.tsx) | `/monitor` | **Giám Sát Hệ Sinh Thái 3 Tab:** Tab 1 Uptime Bar 24h & lịch sử 45 ngày của 10 website Pythaverse; Tab 2 Ma trận xác thực 16 tài khoản test 7 vai trò qua giải mã Fernet; Tab 3 Theo dõi builds CI/CD Vercel & Render kèm stream log terminal. | Gọi `/monitor/sites` (MonitorMemoryCache Backend 30s). |
+| **11** | [`ProfileSettingsPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/profile/ProfileSettingsPage.tsx) | `/profile` | **Hồ Sơ Tác Giả & Cấu Hình:** Khẳng định quyền tác giả Nguyễn Mạnh Hùng; hiển thị trạng thái các biến môi trường backend/frontend; thông tin phiên bản phát hành `v2.5.0 Enterprise`. | Render client-side + ping env check. |
+| **12** | [`LandingPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/landing/LandingPage.tsx) | `/` | **Trang Chủ Giới Thiệu:** Giới thiệu tác giả và 7 phân hệ trong hệ sinh thái Pythaverse, công nghệ sử dụng, và nút chuyển hướng đăng nhập. | Static SSR-friendly. |
+| **13** | [`LoginPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/auth/LoginPage.tsx) | `/login` | **Cổng Đăng Nhập Doanh Nghiệp:** Đăng nhập một chạm qua Google OAuth với chính sách bảo mật cưỡng chế Whitelist `@dtt.vn`. | Supabase OAuth Flow. |
+
+---
+
+### 6.5. Components Dùng Chung & Bố Cục Layout (`components/common/`, `components/layout/`)
+- [`Header.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/components/common/Header.tsx): Thanh điều hướng trên cùng, hiển thị tiêu đề trang động, nút chuyển đổi Dark/Light theme, thông tin tài khoản người dùng đăng nhập (`@dtt.vn`) và nút đăng xuất.
+- [`Sidebar.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/components/common/Sidebar.tsx): Cột điều hướng bên trái với logo Pythaverse Hub, danh sách 11 liên kết chức năng được phân nhóm logic, hiệu ứng active route nổi bật và badge bản quyền tác giả **Nguyễn Mạnh Hùng**.
+- [`AppLayout.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/components/layout/AppLayout.tsx): Khung sườn tổng thể bao bọc Sidebar, Header và vùng nội dung chính `<Outlet />`, tích hợp cuộn trang mượt mà và padding chuẩn mực Bento Grid.
 
 ---
 
@@ -573,32 +702,35 @@ Hệ thống sử dụng cơ sở dữ liệu Supabase PostgreSQL 16 với 16 b�
 └─────────────────────────┴──────────────────────────┴───────────────────────────────────┘
 ```
 
-### Chi Tiết Cấu Trúc Bảng Dữ Liệu:
+### Chi Tiết Cấu Trúc 16 Bảng Dữ Liệu:
 
 #### 1. Nhóm Inbox & Tự Động Hóa:
-- `inbox_tickets`: Lưu trữ toàn bộ vé yêu cầu từ Gmail, Google Form, OS Ticket. Các cột chính: `id`, `source`, `sender_email`, `subject`, `raw_content`, `ai_summary`, `category`, `priority`, `status`, `country`, `doc_url`, `attachments` (JSONB), `metadata` (JSONB).
-- `bot_automation_tasks`: Hàng đợi tác vụ tự động hóa chờ phê duyệt (Human-in-the-Loop). Các cột chính: `id`, `ticket_id`, `bot_type`, `payload_data` (JSONB), `approval_status`, `execution_status`, `execution_logs`, `created_at`, `executed_at`.
-- `templates_config`: Cấu hình mẫu Markdown cho GitHub Issues và ánh xạ cột báo cáo XLSX.
+- `inbox_tickets`: Lưu trữ toàn bộ vé yêu cầu từ Gmail, Google Form, OS Ticket. Các cột chính: `id` (UUID PK), `source` (ENUM), `source_id`, `sender_email`, `submitter_name`, `subject`, `raw_content`, `ai_summary`, `category` (ENUM), `priority` (ENUM), `status` (ENUM), `country`, `doc_url`, `attachments` (JSONB), `metadata` (JSONB), `created_at`, `updated_at`.
+- `bot_automation_tasks`: Hàng đợi tác vụ tự động hóa chờ phê duyệt (Human-in-the-Loop). Các cột chính: `id` (UUID PK), `ticket_id` (FK ➔ `inbox_tickets.id`), `bot_type` (ENUM), `payload_data` (JSONB), `approval_status` (ENUM), `execution_status` (VARCHAR: `queued`, `running`, `waiting_poll`, `success`, `failed`), `execution_logs` (TEXT ANSI), `created_at`, `executed_at`.
+- `templates_config`: Cấu hình mẫu Markdown cho GitHub Issues và ánh xạ cột báo cáo XLSX. Các cột: `id`, `template_key` (UNIQUE), `name`, `content_markdown`, `fields_mapping` (JSONB), `updated_at`.
 
 #### 2. Nhóm Phả Hệ Tổ Chức & Két Sắt Mã Hóa:
-- `workspace_organizations`: Cây phả hệ 3 cấp của 480 trường học (`distributor` ➔ `partner` ➔ `school`) qua `parent_id`.
-- `workspace_credentials_vault`: Két sắt lưu trữ tài khoản và mật khẩu đã mã hóa Fernet (`VAULT_SECRET_KEY`) của các đơn vị trong phả hệ.
+- `workspace_organizations`: Cây phả hệ 3 cấp của 480 trường học (`distributor` ➔ `partner` ➔ `school`). Các cột: `id` (UUID PK), `name`, `code`, `role_type` (`distributor`, `partner`, `school`), `parent_id` (Self-referencing FK), `country`, `is_active`, `created_at`.
+- `workspace_credentials_vault`: Két sắt lưu trữ tài khoản và mật khẩu đã mã hóa Fernet (`VAULT_SECRET_KEY`). Các cột: `id` (UUID PK), `org_id` (FK ➔ `workspace_organizations.id`), `username`, `encrypted_password` (Fernet encrypted), `role`, `updated_at`.
 
 #### 3. Nhóm Bộ Nhớ Đệm Scanner & Danh Mục Khóa Học:
-- `workspace_contracts_cache`: Lưu dữ liệu cache các Hợp đồng được quét bởi Direct API Scanner của 5 Master Distributors.
-- `workspace_orders_cache`: Lưu dữ liệu cache các Đơn hàng (Orders) của trường học.
-- `workspace_courses`: Danh mục khóa học phục vụ cấp phát License trên School Workspace và bóc tách COF.
-- `lms_courses`: Danh mục khóa học phục vụ ghi danh trực tiếp trên Moodle LMS PLearn (`learn.pythaverse.space`).
+- `workspace_contracts_cache`: Lưu dữ liệu cache các Hợp đồng được quét bởi Direct API Scanner của 5 Master Distributors. Các cột: `id`, `contract_id`, `distributor_name`, `partner_name`, `total_licenses`, `status`, `raw_data` (JSONB), `synced_at`.
+- `workspace_orders_cache`: Lưu dữ liệu cache các Đơn hàng (Orders) của trường học. Các cột: `id`, `order_id`, `partner_name`, `school_name`, `total_licenses`, `status`, `raw_data` (JSONB), `synced_at`.
+- `workspace_courses`: Danh mục khóa học phục vụ cấp phát License trên School Workspace và bóc tách COF. Các cột: `id`, `course_id` (INT), `category` (VARCHAR), `course_name` (VARCHAR), `sku`, `lms_url`, `created_at`.
+- `lms_courses`: Danh mục khóa học phục vụ ghi danh trực tiếp trên Moodle LMS PLearn (`learn.pythaverse.space`). Các cột: `id`, `course_id` (INT), `category` (VARCHAR), `course_name` (VARCHAR), `lms_url`, `created_at`.
 
 #### 4. Nhóm Giám Sát Sức Khỏe & CI/CD:
-- `site_monitor_credentials`: Lưu trữ 16 tài khoản test cho 7 vai trò được mã hóa Fernet để kiểm tra xác thực định kỳ.
-- `site_downtime_events`: Ghi nhận nhật ký các sự cố downtime (thời gian bắt đầu, kết thúc, thời lượng, mã lỗi HTTP).
-- `site_deploy_configs`: Cấu hình kết nối API Token tới Vercel và Render để theo dõi tiến trình build CI/CD.
+- `site_monitor_credentials`: Lưu trữ 16 tài khoản test cho 7 vai trò được mã hóa Fernet để kiểm tra xác thực định kỳ. Các cột: `id`, `site_id`, `role_label`, `username`, `encrypted_password`, `expected_path`, `is_active`, `last_status`, `last_latency_ms`, `last_checked_at`.
+- `site_downtime_events`: Ghi nhận nhật ký các sự cố downtime. Các cột: `id`, `site_id`, `started_at`, `ended_at`, `duration_s`, `is_ongoing`, `http_code`, `error_message`.
+- `site_deploy_configs`: Cấu hình kết nối API Token tới Vercel và Render để theo dõi tiến trình build CI/CD. Các cột: `id`, `provider` (`vercel`, `render`), `target_id`, `encrypted_api_token`, `is_active`, `created_at`.
 
 #### 5. Nhóm Bảng Công Việc Kanban (Work Board):
-- `work_boards`: Lưu thông tin các bảng Kanban, hình nền `background_url`, màu sắc overlay, cờ `is_default`, `is_deleted` và `deleted_at` (Thùng rác 30 ngày).
-- `work_board_columns`: 6 cột trạng thái (`Backlog`, `To Do`, `In Progress`, `Review`, `Done`, `Abort`) của mỗi bảng kèm thứ tự `order_index`.
-- `work_board_cards`: Thẻ công việc chi tiết, mức độ ưu tiên, phân loại, hạn chót `due_date`, người phụ trách và danh sách `subtasks` (JSONB).
+- `work_boards`: Lưu thông tin các bảng Kanban. Các cột: `id` (UUID PK), `title`, `description`, `background_url`, `overlay_color`, `overlay_opacity`, `column_opacity`, `card_opacity`, `is_default`, `is_deleted`, `deleted_at` (Thùng rác 30 ngày), `categories` (JSONB), `priorities` (JSONB), `created_at`.
+- `work_board_columns`: 6 cột trạng thái của mỗi bảng. Các cột: `id` (UUID PK), `board_id` (FK ➔ `work_boards.id`), `title`, `color`, `column_type` (`backlog`, `todo`, `in_progress`, `review`, `done`, `abort`, `custom`), `order_index`.
+- `work_board_cards`: Thẻ công việc chi tiết. Các cột: `id` (UUID PK), `board_id` (FK), `column_id` (FK), `title`, `description`, `priority`, `category`, `color`, `assigned_name`, `assigned_email`, `due_date`, `subtasks` (JSONB), `order_index`, `created_at`.
+
+#### 6. Storage Bucket:
+- `ticket-attachments`: Lưu trữ file đính kèm email từ Gmail/OS Ticket, các file COF Excel gốc và kết quả `RESULT_accounts.xlsx`.
 
 ---
 
@@ -652,7 +784,7 @@ flowchart TD
     B -- Không (> 30) --> E[Bắt Request ID tại dòng đầu DataGrid]
     E --> F[Đóng Chromium giải phóng RAM]
     F --> G[Đặt task: execution_status = 'waiting_poll']
-    G --> H[Cronjob poll_workspace_long_tasks quét mỗi 5 phút]
+    G --> H[Cronjob poll_workspace_long_tasks quét mỗi 3 phút]
     H --> I{Trạng thái Request ID là Done?}
     I -- Chưa --> J[Giữ nguyên waiting_poll cho chu kỳ kế tiếp]
     I -- Đã Done --> K[Bấm Action Menu ➔ Export RESULT_accounts.xlsx]
@@ -714,9 +846,9 @@ sequenceDiagram
 ### Luồng 5: Ingestion Đa Kênh & Phân Tích Gemini AI Auto-Fallback 10 Tầng
 ```mermaid
 flowchart TD
-    A1[Gmail Workspace Ingestion Cron] --> B[Lưu Ticket thô vào bảng inbox_tickets]
-    A2[Google Sheet Feedback Cron] --> B
-    A3[OS Ticket Playwright Scraper] --> B
+    A1[Gmail Workspace Ingestion Cron - 5s] --> B[Lưu Ticket thô vào bảng inbox_tickets]
+    A2[OS Ticket Playwright Scraper - 65s] --> B
+    A3[Google Sheet Feedback Cron - 125s] --> B
     B --> C[Kích hoạt process_ticket_with_ai]
     C --> D[Đọc tri thức domain từ knowledge_base.json]
     D --> E[Gọi Gemini AI Triage Engine]
@@ -812,7 +944,7 @@ sequenceDiagram
 
 Khi tiếp nhận bất kỳ yêu cầu nào từ người dùng, AI Coder mới **CHỈ CẦN TRA BẢNG DƯỚI ĐÂY** để biết chính xác file và hàm cần can thiệp:
 
-### 1. Bảng Ma Trận Tra Cứu Tác Vụ (Quick Dispatch Matrix)
+### 1. Bảng Ma Trận Tra Cứu Tác Vụ Cực Nhanh (Quick Dispatch Matrix)
 
 | Yêu Cầu Nghiệp Vụ Cần Xử Lý | Tệp Tin Cần Mở | Hàm Xử Lý Trọng Tâm | Ghi Chú Kỹ Thuật |
 |---|---|---|---|
@@ -822,10 +954,10 @@ Khi tiếp nhận bất kỳ yêu cầu nào từ người dùng, AI Coder mới
 | **Thêm / Sửa thao tác Keycloak** | [`backend/app/services/keycloak_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/keycloak_service.py) | `execute_account_action`, `reset_password`, `activate_account` | Luôn giữ 2-Tier: Direct API trước, RPA Fallback sau. |
 | **Sửa / Tối ưu In-Memory Cache Khóa Học** | [`backend/app/api/v1/endpoints/courses.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/courses.py) | `SimpleMemoryCache.invalidate`, `list_courses`, `bulk_upsert_courses` | TTL 10 phút, tự động xóa cache khi CUD. |
 | **Sửa / Tối ưu Cache Phả Hệ 480 Trường** | [`backend/app/api/v1/endpoints/workspace.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/workspace.py) | `WorkspaceMemoryCache`, `get_hierarchy_schools`, `get_cached_pending_orders` | TTL 15 phút, đọc RAM 0.1ms. |
-| **Thêm / Sửa luồng Bot Worker nền** | [`backend/app/workers/bot_executor.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/workers/bot_executor.py) | `execute_approved_bot_task` | Khớp đúng `bot_type` và `action` từ payload. |
-| **Thay đổi chu kỳ Cron / Thêm Cron mới** | [`backend/app/main.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/main.py) | `lifespan`, `safe_job_wrapper` | Bắt buộc bọc bằng `safe_job_wrapper` và gọi `gc.collect()`. |
-| **Sửa giao diện Studio Điều Phối Bot** | [`frontend/src/features/studio/AutomationStudioPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/studio/AutomationStudioPage.tsx) | Component `AutomationStudioPage` | 4 Dispatcher Tabs, Autocomplete 480 trường. |
-| **Sửa giao diện Quản Lý Khóa Học** | [`frontend/src/features/courses/CoursesManagerPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/courses/CoursesManagerPage.tsx) | Component `CoursesManagerPage` | Phân biệt `workspace_courses` và `lms_courses`, SheetJS parser. |
+| **Thêm / Sửa luồng Bot Worker nền** | [`backend/app/workers/bot_executor.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/workers/bot_executor.py) | `execute_approved_bot_task` | Khớp đúng `bot_type` và `action` từ payload (14 actions). |
+| **Thay đổi chu kỳ Cron / Thêm Cron mới** | [`backend/app/main.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/main.py) | `lifespan`, `safe_job_wrapper` | Bắt buộc bọc bằng `safe_job_wrapper` và gọi `gc.collect()`. Khởi chạy so le lệch pha. |
+| **Sửa giao diện Studio Điều Phối Bot** | [`frontend/src/features/studio/AutomationStudioPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/studio/AutomationStudioPage.tsx) | Component `AutomationStudioPage` | 4 Dispatcher Tabs, Autocomplete 480 trường, Cache 0ms `ptv_studio_*`. |
+| **Sửa giao diện Quản Lý Khóa Học** | [`frontend/src/features/courses/CoursesManagerPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/courses/CoursesManagerPage.tsx) | Component `CoursesManagerPage` | Phân biệt `workspace_courses` và `lms_courses`, SheetJS parser batch 50. |
 | **Sửa giao diện Kanban Work Board** | [`frontend/src/features/board/WorkBoardPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/board/WorkBoardPage.tsx) | Component `WorkBoardPage` | 6 Cột trạng thái, Thùng rác 30 ngày, Canvas Confetti. |
 | **Sửa giao diện Giám Sát Hệ Thống** | [`frontend/src/features/monitor/SiteMonitorPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/monitor/SiteMonitorPage.tsx) | Component `SiteMonitorPage` | 3 Tab: Public Sites, Auth Matrix, CI/CD Logs. |
 | **Sửa giao diện Cổng Duyệt Tác Vụ** | [`frontend/src/features/tasks/TaskManagementPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/tasks/TaskManagementPage.tsx) | Component `TaskManagementPage` | Human-in-the-Loop Gate, ANSI logs, Live Terminal. |
@@ -901,9 +1033,32 @@ COF_ROOT_FOLDER_ID="1SEh4I9yJRM8JNi_SC9CltpkyDYeG-I--"
 
 ---
 
-### 4. Quy Chuẩn Khi Mở Rộng Tính Năng Cho AI Coder Mới
-1. **Khi thêm một Endpoint mới:** Bắt buộc tạo router con trong `backend/app/api/v1/endpoints/`, sau đó đăng ký vào `backend/app/api/v1/router.py`. Mọi endpoint can thiệp dữ liệu phải xác thực email `@dtt.vn` qua `get_current_user_email`.
+### 4. Năm Quy Chuẩn Vàng Khi Mở Rộng Tính Năng Mới
+1. **Khi thêm một Endpoint mới:** Bắt buộc tạo router con trong `backend/app/api/v1/endpoints/`, sau đó đăng ký vào `backend/app/api/v1/router.py`. Mọi endpoint can thiệp dữ liệu phải xác thực email `@dtt.vn` qua `get_current_user_email`. Áp dụng In-Memory RAM Caching nếu endpoint được truy vấn thường xuyên.
 2. **Khi thêm một Bảng CSDL mới:** Bắt buộc viết script migration SQL vào `supabase/migrations/` và cập nhật đồng bộ vào `supabase/schema.sql` (kèm RLS policy `admin_dtt_vn_only` và comment mô tả).
 3. **Khi thêm một Worker RPA mới:** Bắt buộc kế thừa từ `WorkspaceBaseService` trong `backend/app/services/workspace/`, đảm bảo gọi Chromium với cờ tiết kiệm RAM và dọn bộ nhớ `gc.collect()` trong khối `finally`.
-4. **Khi thêm một Trang Giao Diện mới:** Tạo thư mục tương ứng trong `frontend/src/features/`, khai báo Route trong `frontend/src/App.tsx` bằng `React.lazy`, sử dụng các primitive UI chuẩn và hỗ trợ đầy đủ 2 chế độ Dark / Light theme.
+4. **Khi thêm một Trang Giao Diện mới:** Tạo thư mục tương ứng trong `frontend/src/features/`, khai báo Route trong `frontend/src/App.tsx` bằng `React.lazy`, tuân thủ cấu trúc Bento Grid, palette màu Enterprise Pastel OKLCH và hỗ trợ đầy đủ 2 chế độ Dark / Light theme.
 5. **Cập Nhật Tài Liệu Đồng Bộ:** Bất kỳ thay đổi kiến trúc nào cũng phải được cập nhật ngay vào file [README.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/README.md) và [GEMINI.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/GEMINI.md) này để giữ vững vai trò **Single Source of Truth** của dự án.
+
+---
+
+## 🤖 PHẦN X: CẨM NANG ĐỊNH TUYẾN CHUYÊN GIA AI (INTELLIGENT AGENT ROUTING PLAYBOOK)
+
+Khi AI Assistant thực thi bất kỳ nhiệm vụ lập trình hay phân tích nào trong workspace, hệ thống **BẮT BUỘC TỰ ĐỘNG** kích hoạt hồ sơ chuyên gia tương ứng từ `.agent/agents/`:
+
+| Lĩnh Vực / Phạm Vi Tác Vụ | Agent Chuyên Gia | Hồ Sơ Tham Chiếu | Trọng Tâm Quy Chuẩn Áp Dụng |
+|---|---|---|---|
+| **Frontend UI/UX** | `frontend-specialist` | `.agent/agents/frontend-specialist.md` | React 19, TypeScript Strict, Tailwind CSS v4, Bento Grid, Enterprise Pastel OKLCH, Dark/Light theme, SaaS aesthetic, chống AI-slop, loại bỏ nhãn song ngữ thừa. |
+| **Backend & REST APIs** | `backend-specialist` | `.agent/agents/backend-specialist.md` | Python 3.11, FastAPI 0.115, Pydantic v2 validation, Async/Await, APScheduler 6 Crons so le, Safe Job Wrapper, In-Memory RAM Caching 1ms. |
+| **Database & Storage** | `database-architect` | `.agent/agents/database-architect.md` | Supabase PostgreSQL 16 (16 bảng CSDL + Storage Bucket), ENUMs, Foreign Keys, RLS Policies `@dtt.vn`, Performance Indexes, Triggers. |
+| **RPA & Web Scraping** | `qa-automation-engineer` | `.agent/agents/qa-automation-engineer.md` | Playwright Async Chromium, Gói `workspace/` modularized 8 modules, Scanner Direct API, Moodle Keyword Filter 2 nhịp, Viewport chuẩn, Selector kiên cố, Smart Polling, dọn RAM `gc.collect()`. |
+| **Security & Identity** | `security-auditor` | `.agent/agents/security-auditor.md` | Whitelist Domain `@dtt.vn`, Fernet Credential Vault (`VAULT_SECRET_KEY`), Keycloak Admin REST API + Playwright Fallback, Bearer Token validation. |
+| **Điều Phối Đa Nhiệm** | `orchestrator` | `.agent/agents/orchestrator.md` | Phân tích luồng end-to-end, giải quyết xung đột dữ liệu, thiết kế pipeline liên thông đa dịch vụ. |
+| **Gỡ Lỗi & Điều Tra Lỗi** | `debugger` | `.agent/agents/debugger.md` | 4-Phase Systematic Debugging, bắt log thực thi GMT+7, cô lập nguyên nhân gốc rễ, Gemini 10-model fallback. |
+
+### Checklist Tự Kiểm Tra Trước Khi Trả Lời (Agent Routing Checklist):
+1. Đã nhận diện đúng Agent chuyên môn cho lĩnh vực yêu cầu chưa?
+2. Đã thông báo định tuyến: `🤖 **Applying knowledge of @[agent-name]...**` chưa?
+3. Đã đảm bảo ngôn ngữ phản hồi bằng **Tiếng Việt**, tên biến/hàm/mã nguồn bằng **Tiếng Anh** chưa?
+4. Đã gắn link tệp tin định dạng `[Tên tệp](file:///...)` chưa?
+5. Đã bảo đảm tuân thủ 4 Nguyên Tắc Thiết Kế Bất Di Bất Dịch chưa?
