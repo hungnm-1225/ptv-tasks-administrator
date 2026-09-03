@@ -39,7 +39,11 @@ export type BotType =
   | 'lms_git_provisioning'
   | 'github_issue_creator'
   | 'google_doc_comment'
-  | 'feedback_doc_triage';
+  | 'feedback_doc_triage'
+  | 'git_collaborator'
+  | 'git_playwright'
+  | 'git_repo_collaborator';
+
 
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 export type ExecutionStatus = 'queued' | 'running' | 'waiting_poll' | 'success' | 'partial_success' | 'failed';
@@ -142,6 +146,8 @@ export interface CourseItem {
   course_name: string;
   sku?: string | null;
   lms_url: string;
+  git_repo_url?: string | null;
+  git_repo_target?: 'none' | 'teacher_only' | 'all' | string | null;
   created_at?: string;
 }
 

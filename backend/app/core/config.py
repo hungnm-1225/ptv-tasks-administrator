@@ -33,18 +33,18 @@ class Settings(BaseSettings):
     GEMINI_PRIMARY_MODEL: str = "gemini-3.8-flash"
     GEMINI_FALLBACK_MODEL: str = "gemini-3.7-flash"
     GEMINI_MODELS: List[str] = [
-    "gemini-3.8-flash",
-    "gemini-3.7-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-pro-preview",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-3.1-flash-lite",
-    "gemini-3-flash-preview",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-]
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-pro-preview",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-3-flash-preview",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+    ]
 
     # --- KEYCLOAK IDENTITY IDP ---
     KEYCLOAK_SERVER_URL: str = ""
@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     KEYCLOAK_CLIENT_ID: str = "admin-cli"
     KEYCLOAK_ADMIN_USER: str = "admin"
     KEYCLOAK_ADMIN_PASS: str = ""
+
+    # --- PYTHAVERSE GIT (GITBUCKET ENGINE) ---
+    GIT_SERVER_URL: str = "https://git.pythaverse.space"
+    GIT_ADMIN_USER: str = "ptvadmin"
+    GIT_ADMIN_PASS: str = ""
 
     # --- OS TICKET HELPDESK ENGINE ---
     OSTICKET_URL: str = "https://support.pythaverse.space"

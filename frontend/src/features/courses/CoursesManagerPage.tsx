@@ -30,6 +30,7 @@ import {
     FolderOpen,
     Pencil,
     CheckCircle2,
+    GitBranch,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
@@ -38,6 +39,7 @@ import { CourseItem } from '../../types';
 
 type CoursePaneType = 'workspace' | 'lms';
 type BulkInputMode = 'file' | 'text';
+type GitRepoTargetType = 'none' | 'teacher_only' | 'all';
 
 interface ParsedImportItem {
     course_id: number;
@@ -45,6 +47,8 @@ interface ParsedImportItem {
     course_name: string;
     sku?: string | null;
     lms_url: string;
+    git_repo_url?: string | null;
+    git_repo_target?: GitRepoTargetType;
     isValid: boolean;
     error?: string;
 }
@@ -71,6 +75,8 @@ export const CoursesManagerPage: React.FC = () => {
     const [formCourseName, setFormCourseName] = useState<string>('');
     const [formSku, setFormSku] = useState<string>('');
     const [formLmsUrl, setFormLmsUrl] = useState<string>('');
+    const [formGitRepoUrl, setFormGitRepoUrl] = useState<string>('');
+    const [formGitRepoTarget, setFormGitRepoTarget] = useState<GitRepoTargetType>('none');
     const [formError, setFormError] = useState<string | null>(null);
 
     // Modal Bulk Import
@@ -89,7 +95,7 @@ export const CoursesManagerPage: React.FC = () => {
     const [editingCatNew, setEditingCatNew] = useState<string>('');
     const [isCatSubmitting, setIsCatSubmitting] = useState<boolean>(false);
 
-    // Modal Merge & Delete Category (Thay thế window.prompt)
+    // Modal Merge & Delete Category
     const [mergeModalCat, setMergeModalCat] = useState<{ cat: string; count: number } | null>(null);
     const [targetMergeCat, setTargetMergeCat] = useState<string>('');
 
@@ -119,13 +125,11 @@ export const CoursesManagerPage: React.FC = () => {
         loadData();
     }, [loadData]);
 
-    // Tab Switcher
     const handleTabChange = (pane: CoursePaneType) => {
         if (activePane === pane) return;
         setActivePane(pane);
     };
 
-    // Copy SKU helper
     const handleCopySku = (sku: string, e?: React.MouseEvent) => {
         if (e) e.stopPropagation();
         if (!sku || sku === '---') return;
@@ -135,7 +139,6 @@ export const CoursesManagerPage: React.FC = () => {
         setTimeout(() => setCopiedSku(null), 2000);
     };
 
-    // Filtered courses
     const filteredCourses = useMemo(() => {
         return courses.filter((item) => {
             const matchCat = selectedCategory === 'all' || item.category === selectedCategory;
@@ -145,6 +148,7 @@ export const CoursesManagerPage: React.FC = () => {
                 item.course_name.toLowerCase().includes(q) ||
                 item.course_id.toString().includes(q) ||
                 (item.sku && item.sku.toLowerCase().includes(q)) ||
+                (item.git_repo_url && item.git_repo_url.toLowerCase().includes(q)) ||
                 item.category.toLowerCase().includes(q);
 
             return matchCat && matchSearch;
@@ -167,6 +171,8 @@ export const CoursesManagerPage: React.FC = () => {
             setFormCourseName(course.course_name);
             setFormSku(course.sku || '');
             setFormLmsUrl(course.lms_url || `https://learn.pythaverse.space/course/view.php?id=${course.course_id}`);
+            setFormGitRepoUrl(course.git_repo_url || '');
+            setFormGitRepoTarget((course.git_repo_target as GitRepoTargetType) || (course.git_repo_url ? 'teacher_only' : 'none'));
         } else {
             setEditingCourse(null);
             setFormCourseId('');
@@ -174,6 +180,8 @@ export const CoursesManagerPage: React.FC = () => {
             setFormCourseName('');
             setFormSku('');
             setFormLmsUrl('');
+            setFormGitRepoUrl('');
+            setFormGitRepoTarget('none');
         }
         setIsModalOpen(true);
     };
@@ -192,6 +200,8 @@ export const CoursesManagerPage: React.FC = () => {
         }
 
         const finalUrl = formLmsUrl.trim() || `https://learn.pythaverse.space/course/view.php?id=${cId}`;
+        const finalGitRepo = formGitRepoUrl.trim() || null;
+        const finalGitTarget = finalGitRepo ? formGitRepoTarget : 'none';
 
         setIsSubmitting(true);
         const payload = {
@@ -200,6 +210,8 @@ export const CoursesManagerPage: React.FC = () => {
             course_name: formCourseName.trim(),
             sku: formSku.trim() || null,
             lms_url: finalUrl,
+            git_repo_url: finalGitRepo,
+            git_repo_target: finalGitTarget,
         };
 
         try {
@@ -276,6 +288,8 @@ export const CoursesManagerPage: React.FC = () => {
                     const name = String(row[2] || '').trim();
                     const sku = row[3] ? String(row[3]).trim() : null;
                     let url = row[4] ? String(row[4]).trim() : '';
+                    const gitRepo = row[5] ? String(row[5]).trim() : null;
+                    const gitTarget = (row[6] ? String(row[6]).trim().toLowerCase() : (gitRepo ? 'teacher_only' : 'none')) as GitRepoTargetType;
 
                     if (!url && !isNaN(cId)) {
                         url = `https://learn.pythaverse.space/course/view.php?id=${cId}`;
@@ -293,6 +307,8 @@ export const CoursesManagerPage: React.FC = () => {
                         course_name: name,
                         sku: sku,
                         lms_url: url,
+                        git_repo_url: gitRepo,
+                        git_repo_target: gitTarget,
                         isValid,
                         error: error || undefined,
                     });
@@ -348,6 +364,8 @@ export const CoursesManagerPage: React.FC = () => {
                 const name = parts[2] || '';
                 const sku = parts[3] || null;
                 let url = parts[4] || '';
+                const gitRepo = parts[5] || null;
+                const gitTarget = (parts[6]?.toLowerCase() || (gitRepo ? 'teacher_only' : 'none')) as GitRepoTargetType;
 
                 if (!url && !isNaN(cId)) {
                     url = `https://learn.pythaverse.space/course/view.php?id=${cId}`;
@@ -365,6 +383,8 @@ export const CoursesManagerPage: React.FC = () => {
                     course_name: name,
                     sku: sku,
                     lms_url: url,
+                    git_repo_url: gitRepo,
+                    git_repo_target: gitTarget,
                     isValid,
                     error: error || undefined,
                 });
@@ -374,15 +394,14 @@ export const CoursesManagerPage: React.FC = () => {
         setBulkPreview(parsedList);
     };
 
-    // Nạp 4 môn học mẫu
     const loadSampleBulkData = () => {
-        const sample = `654\tSWRP\tSWRP 9: LEANBOT Programming Applications with IoT [V2] (EN)\tPTV-SWRP-09
-780\tASP\tASP Elementary Intermediate (EN)\tPTV-ASP-EL-01
-812\tIR\tInternational Robothon 2026 Strategy Guide (EN)\tPTV-IR-2026
-940\tOther\tAdvanced Digital Twin Simulation with Pythaverse Virtual Engine (EN)\tPTV-OTH-DT`;
+        const sample = `654\tSWRP\tSWRP 9: LEANBOT Programming Applications with IoT [V2] (EN)\tPTV-SWRP-09\thttps://learn.pythaverse.space/course/view.php?id=654\thttps://git.pythaverse.space/ptvswrp/SWRP11_Teacher\tteacher_only
+780\tASP\tASP Elementary Intermediate (EN)\tPTV-ASP-EL-01\thttps://learn.pythaverse.space/course/view.php?id=780\t\tnone
+812\tIR\tInternational Robothon 2026 Strategy Guide (EN)\tPTV-IR-2026\thttps://learn.pythaverse.space/course/view.php?id=812\thttps://git.pythaverse.space/ptvir/IR2026_All\tall
+940\tOther\tAdvanced Digital Twin Simulation with Pythaverse Virtual Engine (EN)\tPTV-OTH-DT\thttps://learn.pythaverse.space/course/view.php?id=940\t\tnone`;
         setBulkRawText(sample);
         handleParseBulkText(sample);
-        toast.info('Đã nạp 4 khóa học mẫu để xem trước!');
+        toast.info('Đã nạp 4 khóa học mẫu (có kèm cấu hình Git Repo) để xem trước!');
     };
 
     const handleExecuteBulkUpsert = async () => {
@@ -475,11 +494,11 @@ export const CoursesManagerPage: React.FC = () => {
                     <div className="flex items-center gap-2.5">
                         <BookOpen className="w-6 h-6 text-indigo-600 dark:text-indigo-400 shrink-0" />
                         <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white font-sans">
-                            Quản Lý Danh Mục Khóa Học
+                            Quản Lý Danh Mục Khóa Học & Git Repos
                         </h1>
                     </div>
                     <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 font-medium max-w-3xl leading-relaxed">
-                        Tra cứu, đồng bộ và quản trị cấu hình khóa học hệ sinh thái Pythaverse.
+                        Tra cứu, đồng bộ cấu hình khóa học và quản trị liên kết Pythaverse Git Repository.
                     </p>
                 </div>
 
@@ -511,7 +530,6 @@ export const CoursesManagerPage: React.FC = () => {
 
             {/* 2. Action & Search Control Bar */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md p-3 sm:p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-                {/* Search Input & Refresh Button (Mở rộng toàn diện, không giới hạn co sụp) */}
                 <div className="flex items-center gap-2 flex-1 min-w-0">
                     <div className="relative flex-1 min-w-[200px]">
                         <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -519,7 +537,7 @@ export const CoursesManagerPage: React.FC = () => {
                             type="text"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            placeholder="Tìm theo tên môn học, Course ID, SKU, danh mục..."
+                            placeholder="Tìm theo tên môn học, Course ID, SKU, Git Repo, danh mục..."
                             className="w-full pl-10 pr-9 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 rounded-xl text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-2xs"
                         />
                         {searchQuery && (
@@ -542,7 +560,6 @@ export const CoursesManagerPage: React.FC = () => {
                     </button>
                 </div>
 
-                {/* Action Buttons */}
                 <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0">
                     <button
                         onClick={() => setIsCatModalOpen(true)}
@@ -662,6 +679,9 @@ export const CoursesManagerPage: React.FC = () => {
                         {filteredCourses.map((course) => {
                             const lmsUrl =
                                 course.lms_url || `https://learn.pythaverse.space/course/view.php?id=${course.course_id}`;
+                            const gitRepo = course.git_repo_url?.trim();
+                            const gitTarget = course.git_repo_target || 'none';
+                            const repoShortName = gitRepo ? gitRepo.split('/').pop() || 'Repo' : '';
 
                             return (
                                 <div
@@ -706,6 +726,25 @@ export const CoursesManagerPage: React.FC = () => {
                                                 <span className="text-slate-400 font-mono">---</span>
                                             )}
                                         </div>
+
+                                        {/* 🐙 Git Repo Badge Row (NẾU CÓ) */}
+                                        {gitRepo && gitTarget !== 'none' && (
+                                            <div className="mt-2.5 flex items-center gap-1.5">
+                                                <a
+                                                    href={gitRepo}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    title={`Mở Git Repo: ${gitRepo}`}
+                                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300 border border-violet-200/70 dark:border-violet-800/50 hover:bg-violet-100 transition-all max-w-full truncate"
+                                                >
+                                                    <GitBranch className="w-3 h-3 shrink-0 text-violet-600 dark:text-violet-400" />
+                                                    <span className="truncate font-mono">{repoShortName}</span>
+                                                    <span className="opacity-75 text-[10px]">
+                                                        ({gitTarget === 'teacher_only' ? 'Chỉ GV' : 'Cả GV & HS'})
+                                                    </span>
+                                                </a>
+                                            </div>
+                                        )}
                                     </div>
 
                                     {/* Bottom Row: View on LMS Link & Action Icons */}
@@ -874,7 +913,7 @@ export const CoursesManagerPage: React.FC = () => {
             )}
 
             {/* ========================================================================= */}
-            {/* MODAL GỘP & XÓA DANH MỤC (CATEGORY MERGE & DELETE - REACT PORTAL) */}
+            {/* MODAL GỘP & XÓA DANH MỤC */}
             {/* ========================================================================= */}
             {mergeModalCat && createPortal(
                 <div
@@ -990,7 +1029,7 @@ export const CoursesManagerPage: React.FC = () => {
             )}
 
             {/* ========================================================================= */}
-            {/* MODAL 2: Nhập Nhanh Danh Sách Khóa Học (Bulk Import - REACT PORTAL) */}
+            {/* MODAL 2: Nhập Nhanh Danh Sách Khóa Học (Bulk Import) */}
             {/* ========================================================================= */}
             {isBulkModalOpen && createPortal(
                 <div
@@ -1095,9 +1134,9 @@ export const CoursesManagerPage: React.FC = () => {
                                         {uploadedFileName ? `Đã chọn: ${uploadedFileName}` : 'Bấm để chọn file Excel (.xlsx, .xls) hoặc CSV'}
                                     </p>
                                     <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
-                                        Cột yêu cầu trong file:{' '}
+                                        Cột trong file:{' '}
                                         <span className="font-mono text-slate-600 dark:text-slate-300">
-                                            Course ID | Category | Course Name | SKU (tùy chọn)
+                                            Course ID | Category | Course Name | SKU | LMS URL | Git Repo URL | Target (none/teacher_only/all)
                                         </span>
                                     </p>
                                 </div>
@@ -1123,7 +1162,7 @@ export const CoursesManagerPage: React.FC = () => {
                                     rows={5}
                                     value={bulkRawText}
                                     onChange={(e) => handleParseBulkText(e.target.value)}
-                                    placeholder={`Ví dụ:\n654\tSWRP\tSWRP 9: LEANBOT Programming\tPTV-SWRP-09\n780\tASP\tASP Elementary Intermediate (EN)\tPTV-ASP-EL-01`}
+                                    placeholder={`Ví dụ:\n654\tSWRP\tSWRP 9: LEANBOT Programming\tPTV-SWRP-09\thttps://learn.pythaverse.space/course/view.php?id=654\thttps://git.pythaverse.space/ptvswrp/SWRP11_Teacher\tteacher_only`}
                                     className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-mono text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 leading-relaxed"
                                 />
                                 <div className="mt-1.5 flex items-center justify-between text-xs">
@@ -1145,7 +1184,7 @@ export const CoursesManagerPage: React.FC = () => {
                                 <span>Xem trước ({bulkPreview.filter((p) => p.isValid).length} khóa học hợp lệ):</span>
                                 {bulkPreview.length > 0 && (
                                     <span className="text-emerald-600 dark:text-emerald-400 text-[11px] font-bold">
-                                        ✓ Đã tự động tạo Link LMS
+                                        ✓ Đã tự động tạo Link LMS & Nhận diện Git Repo
                                     </span>
                                 )}
                             </div>
@@ -1163,6 +1202,7 @@ export const CoursesManagerPage: React.FC = () => {
                                                 <th className="p-2">Category</th>
                                                 <th className="p-2">Tên Môn Học</th>
                                                 <th className="p-2">SKU</th>
+                                                <th className="p-2">Git Repo</th>
                                                 <th className="p-2 text-center">Trạng Thái</th>
                                             </tr>
                                         </thead>
@@ -1184,10 +1224,20 @@ export const CoursesManagerPage: React.FC = () => {
                                                             {item.category}
                                                         </span>
                                                     </td>
-                                                    <td className="p-2 text-slate-800 dark:text-slate-200 truncate max-w-[180px] font-medium">
+                                                    <td className="p-2 text-slate-800 dark:text-slate-200 truncate max-w-[160px] font-medium">
                                                         {item.course_name}
                                                     </td>
                                                     <td className="p-2 font-mono text-slate-500">{item.sku || '---'}</td>
+                                                    <td className="p-2">
+                                                        {item.git_repo_url ? (
+                                                            <span className="inline-flex items-center gap-1 text-violet-600 dark:text-violet-400 font-mono text-[10px]">
+                                                                <GitBranch className="w-3 h-3" />
+                                                                {item.git_repo_target === 'all' ? 'Tất cả' : 'Chỉ GV'}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-slate-400 font-mono">---</span>
+                                                        )}
+                                                    </td>
                                                     <td className="p-2 text-center">
                                                         {item.isValid ? (
                                                             <span className="inline-flex items-center gap-1 text-emerald-600 text-[11px] font-bold">
@@ -1235,7 +1285,7 @@ export const CoursesManagerPage: React.FC = () => {
             )}
 
             {/* ========================================================================= */}
-            {/* MODAL 3: Thêm / Chỉnh Sửa Khóa Học Đơn Lẻ (REACT PORTAL) */}
+            {/* MODAL 3: Thêm / Chỉnh Sửa Khóa Học Đơn Lẻ (CÓ PHẦN GIT REPO) */}
             {/* ========================================================================= */}
             {isModalOpen && createPortal(
                 <div
@@ -1250,7 +1300,7 @@ export const CoursesManagerPage: React.FC = () => {
                         exit={{ opacity: 0, scale: 0.95, y: 15 }}
                         transition={{ duration: 0.2 }}
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-[min(94vw,560px)] shadow-2xl p-6 sm:p-7 relative my-auto"
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-[min(94vw,600px)] shadow-2xl p-6 sm:p-7 relative my-auto max-h-[90vh] overflow-y-auto"
                     >
                         <button
                             onClick={() => setIsModalOpen(false)}
@@ -1345,6 +1395,60 @@ export const CoursesManagerPage: React.FC = () => {
                                 />
                             </div>
 
+                            {/* 🐙 KHU VỰC CẤU HÌNH GIT REPO MỚI */}
+                            <div className="p-4 rounded-2xl bg-violet-50/70 dark:bg-violet-950/30 border border-violet-200/80 dark:border-violet-800/50 space-y-3">
+                                <div className="flex items-center gap-2 text-xs font-bold text-violet-800 dark:text-violet-300">
+                                    <GitBranch className="w-4 h-4 text-violet-600" />
+                                    <span>Cấu Hình Pythaverse Git Repository (Tùy chọn)</span>
+                                </div>
+
+                                <div>
+                                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                                        Đường dẫn Git Repo gốc:
+                                    </label>
+                                    <input
+                                        type="url"
+                                        value={formGitRepoUrl}
+                                        onChange={(e) => {
+                                            setFormGitRepoUrl(e.target.value);
+                                            if (e.target.value.trim() && formGitRepoTarget === 'none') {
+                                                setFormGitRepoTarget('teacher_only');
+                                            }
+                                        }}
+                                        placeholder="https://git.pythaverse.space/ptvswrp/SWRP11_Teacher"
+                                        className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:border-violet-500"
+                                    />
+                                    <p className="text-[10px] text-slate-400 mt-1">
+                                        Chỉ cần dán link repo gốc, hệ thống sẽ tự động thêm vào /settings/collaborators khi ghi danh.
+                                    </p>
+                                </div>
+
+                                <div>
+                                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                                        Đối tượng phân quyền Repo khi ghi danh:
+                                    </label>
+                                    <div className="grid grid-cols-3 gap-2">
+                                        {[
+                                            { id: 'none', label: 'Không có Repo' },
+                                            { id: 'teacher_only', label: 'Chỉ Giáo Viên' },
+                                            { id: 'all', label: 'Cả GV & Học Sinh' },
+                                        ].map((opt) => (
+                                            <button
+                                                key={opt.id}
+                                                type="button"
+                                                onClick={() => setFormGitRepoTarget(opt.id as GitRepoTargetType)}
+                                                className={`py-2 px-2 text-center rounded-xl text-xs font-semibold transition cursor-pointer border ${formGitRepoTarget === opt.id
+                                                    ? 'border-violet-600 bg-violet-600 text-white shadow-xs'
+                                                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-50'
+                                                    }`}
+                                            >
+                                                {opt.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+
                             <div className="mt-6 flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
                                 <button
                                     type="button"
@@ -1370,7 +1474,7 @@ export const CoursesManagerPage: React.FC = () => {
             )}
 
             {/* ========================================================================= */}
-            {/* MODAL 4: Xác Nhận Xóa Khóa Học (REACT PORTAL) */}
+            {/* MODAL 4: Xác Nhận Xóa Khóa Học */}
             {/* ========================================================================= */}
             {deleteModalCourse && createPortal(
                 <div

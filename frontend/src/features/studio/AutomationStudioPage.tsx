@@ -25,10 +25,10 @@ import {
   Code2,
   Send,
   Sparkles,
-  SlidersHorizontal,
   Upload,
   Info,
   ClipboardCheck,
+  GitBranch,
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { BotType } from '../../types';
@@ -106,8 +106,10 @@ interface PreparedTaskSummary {
 export const AutomationStudioPage: React.FC = () => {
   const navigate = useNavigate();
 
-  // 3 Cỗ Máy Tự Động Hóa Chính
-  const [selectedBotType, setSelectedBotType] = useState<'workspace_rpa' | 'keycloak_api' | 'feedback_doc_triage'>('workspace_rpa');
+  // 4 Cỗ Máy Tự Động Hóa Chính
+  const [selectedBotType, setSelectedBotType] = useState<
+    'workspace_rpa' | 'keycloak_api' | 'git_collaborator' | 'feedback_doc_triage'
+  >('workspace_rpa');
 
   // 4 Mục chính của Workspace RPA
   const [workspaceMainCategory, setWorkspaceMainCategory] = useState<
@@ -127,7 +129,6 @@ export const AutomationStudioPage: React.FC = () => {
   // Contact Info & Ghi chú dự phòng
   const [contactInfo, setContactInfo] = useState<string>('Admin Automation Hub (operation@pythaverse.space)');
   const [additionalNotes, setAdditionalNotes] = useState<string>('Pythaverse Auto-Pipeline Managed');
-  const [showAutoTopupSettings, setShowAutoTopupSettings] = useState<boolean>(false);
 
   // Tìm kiếm & Item được chọn
   const [universalSearchQuery, setUniversalSearchQuery] = useState<string>('');
@@ -184,7 +185,7 @@ export const AutomationStudioPage: React.FC = () => {
 
   const [selectedCourses, setSelectedCourses] = useState<OrderCourseSelection[]>([]);
 
-  // 🌟 NÂNG CẤP LMS: HỖ TRỢ NHIỀU KHÓA HỌC TRONG 1 LẦN GHI DANH
+  // LMS State
   const [lmsSelectedCourses, setLmsSelectedCourses] = useState<LmsCourseSelectionItem[]>([
     {
       category: 'TRAINING COURSES',
@@ -213,6 +214,11 @@ export const AutomationStudioPage: React.FC = () => {
   const [kcEnableStatus, setKcEnableStatus] = useState<boolean>(false);
   const [kcStatusAction, setKcStatusAction] = useState<'enable' | 'disable'>('enable');
 
+  // 🐙 Pythaverse Git Controls (MỚI)
+  const [gitRepoUrl, setGitRepoUrl] = useState<string>('https://git.pythaverse.space/ptvswrp/SWRP11_Teacher');
+  const [gitTargetRole, setGitTargetRole] = useState<'GUEST' | 'DEVELOPER' | 'ADMIN'>('GUEST');
+  const [gitUsersList, setGitUsersList] = useState<string>('hsdttemd\ngvdttemd');
+
   // Feedback Doc
   const [docUrl, setDocUrl] = useState<string>('');
   const [assigneeEmail, setAssigneeEmail] = useState<string>('hung.nguyenmanh@dtt.vn');
@@ -225,7 +231,7 @@ export const AutomationStudioPage: React.FC = () => {
   // Modal State
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState<boolean>(false);
   const [preparedPayload, setPreparedPayload] = useState<{
-    bot_type: BotType | 'lms_playwright';
+    bot_type: BotType | 'lms_playwright' | 'git_collaborator';
     payload_data: Record<string, any>;
     summary: PreparedTaskSummary;
   } | null>(null);
@@ -418,7 +424,6 @@ export const AutomationStudioPage: React.FC = () => {
     setSelectedCourses(selectedCourses.filter((_, idx) => idx !== index));
   };
 
-  // 🌟 HÀM THÊM / XÓA KHÓA HỌC LMS DÀNH CHO MULTI-ENROLL
   const handleAddLmsCourseRow = () => {
     const defaultCat = lmsCategoriesList[0] || (lmsCoursesList[0] ? lmsCoursesList[0].category : 'TRAINING COURSES');
     const matchCourses = lmsCoursesList.filter((c) => c.category === defaultCat);
@@ -450,7 +455,6 @@ export const AutomationStudioPage: React.FC = () => {
   };
 
   const handleOpenConfirmModal = () => {
-    console.log("👉 Đã nhấn nút Kiểm tra & Kích hoạt Worker!");
     let payload: Record<string, any> = {
       is_manual_dispatch: true,
       creator: 'Admin Studio',
@@ -465,7 +469,7 @@ export const AutomationStudioPage: React.FC = () => {
       detailsList: [],
     };
 
-    let actualBotType: BotType | 'lms_playwright' = selectedBotType;
+    let actualBotType: BotType | 'lms_playwright' | 'git_collaborator' = selectedBotType;
 
     if (selectedBotType === 'workspace_rpa') {
       summary.engineName = '🏢 Workspace RPA & LMS Pipeline';
@@ -680,7 +684,6 @@ export const AutomationStudioPage: React.FC = () => {
           return;
         }
 
-        // 🌟 Payload gửi mảng `courses` an toàn tuyệt đối
         payload = {
           action: 'direct_moodle_lms_enroll',
           platform: 'learn.pythaverse.space',
@@ -709,6 +712,39 @@ export const AutomationStudioPage: React.FC = () => {
           `Tự động cập nhật Role & Gia hạn: Có kích hoạt`,
         ];
       }
+    } else if (selectedBotType === 'git_collaborator') {
+      // 🐙 THÊM THÀNH VIÊN VÀO REPOSITORY GIT (GITBUCKET)
+      const cleanRepo = gitRepoUrl.trim();
+      if (!cleanRepo) {
+        toast.error('Vui lòng nhập đường dẫn Repository trên git.pythaverse.space!');
+        return;
+      }
+
+      const usersArr = gitUsersList
+        .split(/[\n,;]+/)
+        .map((u) => u.trim())
+        .filter((u) => u.length > 0);
+
+      if (usersArr.length === 0) {
+        toast.error('Vui lòng nhập ít nhất 1 username hoặc email cần thêm vào Repo!');
+        return;
+      }
+
+      payload = {
+        action: 'add_repo_collaborators',
+        repo_url: cleanRepo,
+        role: gitTargetRole,
+        users: usersArr,
+      };
+
+      summary.engineName = '🐙 Pythaverse Git (GitBucket Collaborator RPA)';
+      summary.actionTitle = `Thêm ${usersArr.length} Thành Viên Vào Repo Với Quyền [${gitTargetRole}]`;
+      summary.targetEntity = cleanRepo;
+      summary.detailsList = [
+        `Kho lưu trữ: ${cleanRepo}`,
+        `Vai trò gán: ${gitTargetRole} (Mặc định: GUEST)`,
+        `Số lượng tài khoản xử lý: ${usersArr.length} người dùng (${usersArr.slice(0, 3).join(', ')}${usersArr.length > 3 ? '...' : ''})`,
+      ];
     } else if (selectedBotType === 'keycloak_api') {
       const rawEmails = kcTargetEmail
         .split(/[\n,;]+/)
@@ -780,7 +816,7 @@ export const AutomationStudioPage: React.FC = () => {
       summary,
     });
     setIsConfirmModalOpen(true);
-    toast.info("Đã mở bảng xác nhận thông số thực thi!");
+    toast.info('Đã mở bảng xác nhận thông số thực thi!');
   };
 
   const handleConfirmExecute = async () => {
@@ -970,7 +1006,7 @@ export const AutomationStudioPage: React.FC = () => {
         </motion.div>
       </div>
 
-      {/* 3. Bước 1: Chọn Cỗ Máy Tự Động Hóa */}
+      {/* 3. Bước 1: Chọn Cỗ Máy Tự Động Hóa (4 ENGINES) */}
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <div className="flex items-center gap-2">
@@ -981,10 +1017,11 @@ export const AutomationStudioPage: React.FC = () => {
               Chọn Cỗ Máy Tự Động Hóa
             </h2>
           </div>
-          <span className="text-[11px] text-slate-400">3 Động cơ khả dụng</span>
+          <span className="text-[11px] text-slate-400">4 Động cơ khả dụng</span>
         </div>
 
-        <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
+          {/* Engine 1: Workspace */}
           <button
             id="engine-card-workspace"
             onClick={() => setSelectedBotType('workspace_rpa')}
@@ -1007,7 +1044,7 @@ export const AutomationStudioPage: React.FC = () => {
                   Workspace & LMS
                 </h3>
                 <p className={`text-xs mt-0.5 ${selectedBotType === 'workspace_rpa' ? 'text-blue-100' : 'text-slate-500 dark:text-slate-400'}`}>
-                  Đơn Hàng, Hợp Đồng & LMS
+                  Đơn Hàng & Moodle
                 </p>
               </div>
             </div>
@@ -1021,6 +1058,7 @@ export const AutomationStudioPage: React.FC = () => {
             )}
           </button>
 
+          {/* Engine 2: Keycloak */}
           <button
             id="engine-card-keycloak"
             onClick={() => setSelectedBotType('keycloak_api')}
@@ -1057,6 +1095,44 @@ export const AutomationStudioPage: React.FC = () => {
             )}
           </button>
 
+          {/* Engine 3: Pythaverse Git (MỚI) */}
+          <button
+            id="engine-card-git"
+            onClick={() => setSelectedBotType('git_collaborator')}
+            className={`group relative flex flex-col justify-between rounded-3xl border p-5 text-left transition-all duration-150 cursor-pointer ${selectedBotType === 'git_collaborator'
+              ? 'border-violet-600 bg-violet-600 text-white shadow-md shadow-violet-500/20 ring-2 ring-violet-500/30'
+              : 'border-violet-100 dark:border-violet-950/60 bg-violet-50/50 dark:bg-slate-900 hover:border-violet-300 hover:shadow-xs'
+              }`}
+          >
+            <div className="flex items-center gap-3.5">
+              <div
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl transition-colors ${selectedBotType === 'git_collaborator'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-violet-100 dark:bg-violet-950/60 text-violet-600 dark:text-violet-400'
+                  }`}
+              >
+                <GitBranch className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className={`text-sm font-bold tracking-tight ${selectedBotType === 'git_collaborator' ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
+                  Pythaverse Git
+                </h3>
+                <p className={`text-xs mt-0.5 ${selectedBotType === 'git_collaborator' ? 'text-violet-100' : 'text-slate-500 dark:text-slate-400'}`}>
+                  Thêm Vào Repo
+                </p>
+              </div>
+            </div>
+
+            {selectedBotType === 'git_collaborator' && (
+              <div className="mt-3 flex items-center justify-end">
+                <span className="flex items-center gap-1 rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-white">
+                  <Check className="h-3 w-3" /> Đang chọn
+                </span>
+              </div>
+            )}
+          </button>
+
+          {/* Engine 4: Feedback Sheet */}
           <button
             id="engine-card-feedback"
             onClick={() => setSelectedBotType('feedback_doc_triage')}
@@ -1079,7 +1155,7 @@ export const AutomationStudioPage: React.FC = () => {
                   Feedback Sheet
                 </h3>
                 <p className={`text-xs mt-0.5 ${selectedBotType === 'feedback_doc_triage' ? 'text-emerald-100' : 'text-slate-500 dark:text-slate-400'}`}>
-                  Ghi Chú & Tag Doc Tự Động
+                  Ghi Chú & Tag Doc
                 </p>
               </div>
             </div>
@@ -1695,7 +1771,7 @@ export const AutomationStudioPage: React.FC = () => {
             </div>
           )}
 
-          {/* 🌟 WORKFLOW 4: GHI DANH LMS (NÂNG CẤP HỖ TRỢ NHIỀU KHÓA HỌC TRONG 1 PHIÊN) */}
+          {/* WORKFLOW 4: GHI DANH LMS */}
           {workspaceMainCategory === 'lms_enroll' && (
             <div className="space-y-5 pt-2">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-2xl border border-emerald-200/70 dark:border-emerald-900/40 bg-emerald-50/40 dark:bg-emerald-950/20 p-4">
@@ -1764,7 +1840,6 @@ export const AutomationStudioPage: React.FC = () => {
                         )}
                       </div>
 
-                      {/* Dropdown Phân loại & Môn học */}
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                         <div>
                           <label className="text-[10px] font-bold uppercase text-slate-500">Phân loại ({lmsCategoriesList.length} Cats):</label>
@@ -1823,7 +1898,6 @@ export const AutomationStudioPage: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Ngày bắt đầu, Ngày hết hạn & Group */}
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                         <div>
                           <label className="text-[10px] font-bold uppercase text-slate-500 flex items-center gap-1">
@@ -1889,7 +1963,7 @@ export const AutomationStudioPage: React.FC = () => {
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                   <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200">
                     <UserCheck className="h-4 w-4 text-indigo-600" />
-                    <span>Phương Thức Gán Vai Trò (Áp dụng chung cho tất cả các khóa trên):</span>
+                    <span>Phương Thức Gán Vai Trò:</span>
                   </div>
 
                   <div className="flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1">
@@ -1936,7 +2010,7 @@ export const AutomationStudioPage: React.FC = () => {
 
                     <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-3.5 space-y-2">
                       <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
-                        <span>🧑‍🏫 Trợ Giảng (Non-editing Teacher):</span>
+                        <span>🧑‍🏫 Giáo Viên (Non-editing Teacher):</span>
                         <span className="font-mono text-amber-600">
                           {lmsTeacherEmails.split('\n').filter((x) => x.trim().length > 0).length}
                         </span>
@@ -1978,7 +2052,7 @@ export const AutomationStudioPage: React.FC = () => {
                         className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3.5 py-2 text-xs text-slate-900 dark:text-white cursor-pointer"
                       >
                         <option value="student">🎓 Học Viên (Student)</option>
-                        <option value="non_editing_teacher">🧑‍🏫 Trợ Giảng (Non-editing Teacher)</option>
+                        <option value="non_editing_teacher">🧑‍🏫 Giáo Viên (Non-editing Teacher)</option>
                         <option value="manager">🛡️ Quản Lý (Manager)</option>
                       </select>
                     </div>
@@ -2195,7 +2269,90 @@ export const AutomationStudioPage: React.FC = () => {
         </div>
       )}
 
-      {/* 6. Feedback Sheet Engine Workplace */}
+      {/* 🌟 6. CỖ MÁY MỚI: Pythaverse Git Collaborator Engine Workplace */}
+      {selectedBotType === 'git_collaborator' && (
+        <div className="space-y-5 rounded-[2rem] border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 sm:p-7 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 dark:border-slate-800/80 pb-3">
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
+              <GitBranch className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+              <span>Phân Quyền Kho Mã Nguồn Pythaverse Git (GitBucket):</span>
+            </div>
+            <span className="rounded-full bg-violet-100 dark:bg-violet-950/70 px-2.5 py-0.5 text-[10px] font-bold text-violet-700 dark:text-violet-300">
+              git.pythaverse.space
+            </span>
+          </div>
+
+          <div className="space-y-4">
+            {/* Repo URL Input */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <label className="font-semibold text-slate-700 dark:text-slate-300">
+                  Đường Dẫn Repository Gốc: <span className="text-rose-500">*</span>
+                </label>
+                <span className="text-slate-400 text-[11px]">Hệ thống tự động thêm /settings/collaborators</span>
+              </div>
+              <input
+                type="text"
+                value={gitRepoUrl}
+                onChange={(e) => setGitRepoUrl(e.target.value)}
+                placeholder="https://git.pythaverse.space/ptvswrp/SWRP11_Teacher"
+                className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 px-4 py-2.5 font-mono text-xs text-slate-900 dark:text-white focus:border-violet-500 focus:bg-white focus:outline-hidden"
+              />
+            </div>
+
+            {/* Target Role Selector */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Chọn Vai Trò (Role) Cần Gán:
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: 'GUEST', label: 'Guest (Khách xem)', desc: 'Khuyên dùng cho học sinh/GV' },
+                  { id: 'DEVELOPER', label: 'Developer (Lập trình)', desc: 'Có quyền push code' },
+                  { id: 'ADMIN', label: 'Admin (Quản trị)', desc: 'Toàn quyền cấu hình repo' },
+                ].map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => setGitTargetRole(r.id as any)}
+                    className={`rounded-2xl border p-3 text-left transition-all cursor-pointer ${gitTargetRole === r.id
+                      ? 'border-violet-600 bg-violet-50/80 dark:bg-violet-950/40 ring-1 ring-violet-500'
+                      : 'border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 hover:bg-slate-50'
+                      }`}
+                  >
+                    <p className={`text-xs font-bold ${gitTargetRole === r.id ? 'text-violet-700 dark:text-violet-300' : 'text-slate-800 dark:text-slate-200'}`}>
+                      {r.label}
+                    </p>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{r.desc}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Users Textarea */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-300">
+                <span>DANH SÁCH USERNAME HOẶC EMAIL (MỖI DÒNG 1 TÀI KHOẢN):</span>
+                <span className="font-mono text-[11px] text-violet-600">
+                  {gitUsersList.split(/[\n,;]+/).filter((x) => x.trim().length > 0).length} tài khoản
+                </span>
+              </div>
+              <textarea
+                rows={4}
+                value={gitUsersList}
+                onChange={(e) => setGitUsersList(e.target.value)}
+                placeholder="hsdttemd&#10;gvdttemd&#10;student1@pythaverse.space"
+                className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 font-mono text-xs text-slate-900 dark:text-white focus:border-violet-500 focus:outline-hidden leading-relaxed"
+              />
+              <p className="text-[11px] text-slate-400">
+                💡 Lưu ý: Nếu người dùng chưa từng đăng nhập Pythaverse Git lần nào, tài khoản có thể chưa được đồng bộ từ Keycloak (JIT). Bot sẽ tự động cảnh báo bỏ qua mà không làm dừng cả batch.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 7. Feedback Sheet Engine Workplace */}
       {selectedBotType === 'feedback_doc_triage' && (
         <div className="space-y-5 rounded-[2rem] border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 sm:p-7 shadow-xs">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 dark:border-slate-800/80 pb-3">
@@ -2258,7 +2415,7 @@ export const AutomationStudioPage: React.FC = () => {
         </div>
       )}
 
-      {/* 7. Sticky 1-Click Execution Bar */}
+      {/* 8. Sticky 1-Click Execution Bar */}
       <div className="sticky bottom-4 z-20">
         <div className="rounded-3xl border border-indigo-400/40 dark:border-indigo-800 bg-white/90 dark:bg-slate-900/90 p-2 sm:p-2.5 shadow-xl backdrop-blur-md">
           <button
@@ -2274,7 +2431,7 @@ export const AutomationStudioPage: React.FC = () => {
         </div>
       </div>
 
-      {/* 🌟 8. Confirmation Modal SỬ DỤNG CREATEPORTAL ĐỂ GẮN THẲNG VÀO DOCUMENT.BODY (CHỐNG BẪY SCROLL) */}
+      {/* 9. Confirmation Modal SỬ DỤNG CREATEPORTAL */}
       {isConfirmModalOpen && preparedPayload && typeof document !== 'undefined' && createPortal(
         <div
           onClick={(e) => { if (e.target === e.currentTarget) setIsConfirmModalOpen(false); }}

@@ -13,6 +13,7 @@ from app.services.workspace_lineage_service import workspace_lineage_service
 from app.services.keycloak_service import keycloak_service
 from app.services.github_service import github_service
 from app.services.playwright_service import playwright_lms_service
+from app.services.git_service import git_playwright_service
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,10 @@ async def execute_approved_bot_task(
                 logger.info(f"🎓 {task_tag} Điều hướng sang Playwright LMS Direct Enroller...")
                 return await playwright_lms_service.enroll_users_pipeline(payload_data)
 
+            if action in ["git_add_collaborators", "add_repo_collaborators"]:
+                logger.info(f"🐙 {task_tag} Điều hướng sang Git Playwright Collaborator Service...")
+                return await git_playwright_service.add_collaborators_pipeline(payload_data)
+
             # Bóc tách và làm sạch thông tin phả hệ
             hierarchy = payload_data.get("hierarchy") or {}
             school_name = clean_entity_str(
@@ -95,8 +100,6 @@ async def execute_approved_bot_task(
             partner_creds = payload_data.get("partner_credentials")
             distributor_creds = payload_data.get("distributor_credentials")
             
-            # TEST_ADMIN_USER / TEST_ADMIN_PASS → Tài khoản Sales Admin trên pythaverse.space/admin-workspace
-            # KEYCLOAK_ADMIN_PASS              → Tài khoản quản trị Keycloak IDP (khác hệ thống, không dùng ở đây)
             admin_pass = getattr(settings, "TEST_ADMIN_PASS", None)
             if not admin_pass:
                 logger.warning(f"⚠️ {task_tag} TEST_ADMIN_PASS chưa được cấu hình trong Render Environment Variables!")
@@ -138,7 +141,6 @@ async def execute_approved_bot_task(
                 if c_lin and c_lin.get("distributor"):
                     distributor_creds = c_lin.get("distributor")
 
-            # Chuẩn hóa dữ liệu order / courses
             courses_list = payload_data.get("courses") or []
             order_details = payload_data.get("order_details") or {
                 "contact_info": payload_data.get("contact_info", "Admin Automation Hub (operation@pythaverse.space)"),
@@ -277,7 +279,6 @@ async def execute_approved_bot_task(
             # --- L. Tạo tài khoản hàng loạt (Công thức 15s/Tài khoản) ---
             elif action == "bulk_account_creation":
                 from app.services.cof_excel_service import COFExcelService
-                from datetime import datetime, timezone, timedelta
 
                 file_path = payload_data.get("upload_file_path")
                 if not file_path and payload_data.get("attachment_url"):
@@ -398,6 +399,13 @@ async def execute_approved_bot_task(
             except Exception as e:
                 logger.error(f"Lỗi thực thi Google Doc triage: {e}")
                 return {"status": "failed", "error": f"Lỗi Google Doc Service: {e}"}
+
+        # =====================================================================
+        # 6. NHÓM TASK PYTHAVERSE GIT COLLABORATOR BOT (GITBUCKET ENGINE)
+        # =====================================================================
+        elif bot_type in ["git_collaborator", "git_playwright", "git_repo_collaborator"]:
+            logger.info(f"🐙 {task_tag} Kích hoạt Git Playwright Collaborator Pipeline...")
+            return await git_playwright_service.add_collaborators_pipeline(payload_data)
 
         else:
             return {"status": "failed", "error": f"Loại bot '{bot_type}' chưa được hỗ trợ."}
