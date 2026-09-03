@@ -49,45 +49,14 @@ interface ParsedImportItem {
     error?: string;
 }
 
-// ⚡ TRỢ THỦ PERSISTENT CACHE CHO KHÓA HỌC (LƯU LOCALSTORAGE - 0MS INSTANT RENDER)
-const getCoursesCache = (pane: CoursePaneType): { courses: CourseItem[] | null; categories: string[] | null } => {
-    try {
-        const rawCourses = localStorage.getItem(`ptv_courses_${pane}`);
-        const rawCats = localStorage.getItem(`ptv_cats_${pane}`);
-        return {
-            courses: rawCourses ? JSON.parse(rawCourses) : null,
-            categories: rawCats ? JSON.parse(rawCats) : null,
-        };
-    } catch {
-        return { courses: null, categories: null };
-    }
-};
-
-const setCoursesCache = (pane: CoursePaneType, courses: CourseItem[], categories: string[]) => {
-    try {
-        localStorage.setItem(`ptv_courses_${pane}`, JSON.stringify(courses));
-        localStorage.setItem(`ptv_cats_${pane}`, JSON.stringify(categories));
-    } catch { }
-};
-
-const clearCoursesCache = (pane: CoursePaneType) => {
-    try {
-        localStorage.removeItem(`ptv_courses_${pane}`);
-        localStorage.removeItem(`ptv_cats_${pane}`);
-    } catch { }
-};
-
 export const CoursesManagerPage: React.FC = () => {
     const [activePane, setActivePane] = useState<CoursePaneType>('workspace');
 
-    // ⚡ Lấy ngay từ localStorage khi mở trang (0ms)
-    const initialCache = useMemo(() => getCoursesCache(activePane), [activePane]);
-
-    const [courses, setCourses] = useState<CourseItem[]>(initialCache.courses || []);
-    const [categories, setCategories] = useState<string[]>(initialCache.categories || []);
+    const [courses, setCourses] = useState<CourseItem[]>([]);
+    const [categories, setCategories] = useState<string[]>([]);
     const [selectedCategory, setSelectedCategory] = useState<string>('all');
     const [searchQuery, setSearchQuery] = useState<string>('');
-    const [isLoading, setIsLoading] = useState<boolean>(!initialCache.courses);
+    const [isLoading, setIsLoading] = useState<boolean>(true);
     const [copiedSku, setCopiedSku] = useState<string | null>(null);
 
     // Modal Thêm / Sửa
@@ -124,14 +93,9 @@ export const CoursesManagerPage: React.FC = () => {
     const [mergeModalCat, setMergeModalCat] = useState<{ cat: string; count: number } | null>(null);
     const [targetMergeCat, setTargetMergeCat] = useState<string>('');
 
-    // ⚡ SWR SILENT FETCH
+    // ⚡ TẢI TRỰC TIẾP TỪ API
     const loadData = useCallback(async (forceSpinner = false) => {
-        const cached = getCoursesCache(activePane);
-        if (cached.courses && !forceSpinner) {
-            setCourses(cached.courses);
-            setCategories(cached.categories || []);
-            setIsLoading(false);
-        } else {
+        if (forceSpinner) {
             setIsLoading(true);
         }
 
@@ -140,13 +104,10 @@ export const CoursesManagerPage: React.FC = () => {
                 fetchApi<CourseItem[]>(`/courses/${activePane}`),
                 fetchApi<string[]>(`/courses/${activePane}/categories`),
             ]);
-            setCoursesCache(activePane, coursesData, catsData);
             setCourses(coursesData);
             setCategories(catsData);
         } catch (err: any) {
-            if (!cached.courses) {
-                toast.error('Lỗi khi tải dữ liệu khóa học: ' + (err.message || err));
-            }
+            toast.error('Lỗi khi tải dữ liệu khóa học: ' + (err.message || err));
         } finally {
             setIsLoading(false);
         }
@@ -255,7 +216,6 @@ export const CoursesManagerPage: React.FC = () => {
                 });
                 toast.success(`Đã thêm mới khóa học #${payload.course_id} thành công!`);
             }
-            clearCoursesCache(activePane);
             setIsModalOpen(false);
             loadData(true);
         } catch (err: any) {
@@ -272,7 +232,6 @@ export const CoursesManagerPage: React.FC = () => {
         try {
             await fetchApi(`/courses/${activePane}/${deleteModalCourse.id}`, { method: 'DELETE' });
             toast.success(`Đã xóa khóa học #${deleteModalCourse.course_id}`);
-            clearCoursesCache(activePane);
             setCourses((prev) => prev.filter((c) => c.id !== deleteModalCourse.id));
             setDeleteModalCourse(null);
         } catch (err: any) {
@@ -440,7 +399,6 @@ export const CoursesManagerPage: React.FC = () => {
                 body: JSON.stringify({ courses: validOnes }),
             });
             toast.success(res.message || `Đã đồng bộ ${validOnes.length} khóa học thành công!`);
-            clearCoursesCache(activePane);
             setIsBulkModalOpen(false);
             setBulkRawText('');
             setUploadedFileName('');
@@ -469,7 +427,6 @@ export const CoursesManagerPage: React.FC = () => {
                 }),
             });
             toast.success(`Đã đổi tên danh mục "${oldCat}" thành "${editingCatNew.trim().toUpperCase()}"!`);
-            clearCoursesCache(activePane);
             setEditingCatOld(null);
             setEditingCatNew('');
             loadData(true);
@@ -501,7 +458,6 @@ export const CoursesManagerPage: React.FC = () => {
                 }
             );
             toast.success(`Đã gộp danh mục "${mergeModalCat.cat}" vào "${targetMergeCat.trim().toUpperCase()}" thành công!`);
-            clearCoursesCache(activePane);
             setMergeModalCat(null);
             loadData(true);
         } catch (err: any) {

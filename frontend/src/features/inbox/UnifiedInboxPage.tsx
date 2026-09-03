@@ -108,21 +108,6 @@ interface ScrapedPendingItem {
   courses_data?: any[];
 }
 
-const getInboxCache = <T,>(key: string): T | null => {
-  try {
-    const raw = localStorage.getItem(`ptv_inbox_${key}`);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-};
-
-const setInboxCache = (key: string, data: any) => {
-  try {
-    localStorage.setItem(`ptv_inbox_${key}`, JSON.stringify(data));
-  } catch { }
-};
-
 const stripHtmlTags = (htmlString: string | null | undefined): string => {
   if (!htmlString) return '';
   return htmlString
@@ -178,23 +163,15 @@ export const UnifiedInboxPage: React.FC = () => {
   const navigate = useNavigate();
 
   // State bộ lọc và tìm kiếm Inbox
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedSource, setSelectedSource] = useState<string>('all');
+  const [selectedStatus, setSelectedStatus] = useState<string>('pending');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [selectedStatus, setSelectedStatus] = useState<string>('all');
+  const [selectedSource, setSelectedSource] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
   const [activeCategoryDropdown, setActiveCategoryDropdown] = useState<string | null>(null);
 
-  const filterCacheKey = useMemo(() => {
-    return `list_${selectedStatus}_${selectedCategory}_${selectedSource}_${sortOrder}`;
-  }, [selectedStatus, selectedCategory, selectedSource, sortOrder]);
-
-  const initialCachedTickets = useMemo(() => {
-    return getInboxCache<InboxTicket[]>(filterCacheKey) || [];
-  }, [filterCacheKey]);
-
-  const [tickets, setTickets] = useState<InboxTicket[]>(initialCachedTickets);
-  const [loading, setLoading] = useState<boolean>(initialCachedTickets.length === 0);
+  const [tickets, setTickets] = useState<InboxTicket[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [expandedContent, setExpandedContent] = useState<Record<string, boolean>>({});
   const [previewFile, setPreviewFile] = useState<{ filename: string; url: string } | null>(null);
@@ -221,12 +198,12 @@ export const UnifiedInboxPage: React.FC = () => {
   const [parsedOrderCourses, setParsedOrderCourses] = useState<any[]>([]);
 
   // Metadata Phả hệ & Khóa học
-  const [schoolsList, setSchoolsList] = useState<HierarchySchoolItem[]>(() => getInboxCache<HierarchySchoolItem[]>('schools') || []);
-  const [workspaceCategoriesList, setWorkspaceCategoriesList] = useState<string[]>(() => getInboxCache<string[]>('wsCats') || ['SWRP', 'IR', 'ASP', 'Other']);
-  const [workspaceCoursesList, setWorkspaceCoursesList] = useState<CourseItem[]>(() => getInboxCache<CourseItem[]>('wsCourses') || []);
+  const [schoolsList, setSchoolsList] = useState<HierarchySchoolItem[]>([]);
+  const [workspaceCategoriesList, setWorkspaceCategoriesList] = useState<string[]>(['SWRP', 'IR', 'ASP', 'Other']);
+  const [workspaceCoursesList, setWorkspaceCoursesList] = useState<CourseItem[]>([]);
 
-  const [lmsCategoriesList, setLmsCategoriesList] = useState<string[]>(() => getInboxCache<string[]>('lmsCats') || []);
-  const [lmsCoursesList, setLmsCoursesList] = useState<CourseItem[]>(() => getInboxCache<CourseItem[]>('lmsCourses') || []);
+  const [lmsCategoriesList, setLmsCategoriesList] = useState<string[]>([]);
+  const [lmsCoursesList, setLmsCoursesList] = useState<CourseItem[]>([]);
   const [lmsCourseCategory, setLmsCourseCategory] = useState<string>('');
   const [lmsCourseId, setLmsCourseId] = useState<number>(0);
   const [lmsCourseName, setLmsCourseName] = useState<string>('');
@@ -291,13 +268,9 @@ export const UnifiedInboxPage: React.FC = () => {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const SPREADSHEET_ID = '1rZgFBD2PuZWL1jvQefcYZztCQvo99Lhx0GATTKvj1Go';
 
-  // Nạp danh sách tickets
+  // Nạp danh sách tickets trực tiếp từ API
   const loadTickets = useCallback(async (forceSpinner = false) => {
-    const cached = getInboxCache<InboxTicket[]>('all_tickets_master');
-    if (cached && !forceSpinner) {
-      setTickets(cached);
-      setLoading(false);
-    } else if (forceSpinner || !cached) {
+    if (forceSpinner) {
       setLoading(true);
     }
 
@@ -305,19 +278,16 @@ export const UnifiedInboxPage: React.FC = () => {
       const endpoint = `/tickets?sort=desc`;
       const data = await fetchApi<InboxTicket[]>(endpoint);
       if (data) {
-        setInboxCache('all_tickets_master', data);
         setTickets(data);
       }
     } catch (err) {
-      if (!cached) {
-        toast.error('Không thể tải danh sách ticket: ' + (err as Error).message);
-      }
+      toast.error('Không thể tải danh sách ticket: ' + (err as Error).message);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Nạp metadata ngầm (SWR)
+  // Nạp metadata ngầm trực tiếp từ API
   useEffect(() => {
     const loadAllMetadata = async () => {
       try {
@@ -330,24 +300,19 @@ export const UnifiedInboxPage: React.FC = () => {
         ]);
 
         if (schools) {
-          setInboxCache('schools', schools);
           setSchoolsList(schools);
         }
         if (wsCats && wsCats.length > 0) {
-          setInboxCache('wsCats', wsCats);
           setWorkspaceCategoriesList(wsCats);
         }
         if (wsCourses) {
-          setInboxCache('wsCourses', wsCourses);
           setWorkspaceCoursesList(wsCourses);
         }
         if (lmsCats && lmsCats.length > 0) {
-          setInboxCache('lmsCats', lmsCats);
           setLmsCategoriesList(lmsCats);
           setLmsCourseCategory(lmsCats[0]);
         }
         if (lmsCourses && lmsCourses.length > 0) {
-          setInboxCache('lmsCourses', lmsCourses);
           setLmsCoursesList(lmsCourses);
           const firstCat = lmsCats && lmsCats.length > 0 ? lmsCats[0] : lmsCourses[0].category;
           const matchFirst = lmsCourses.filter((c) => c.category === firstCat);
@@ -475,7 +440,6 @@ export const UnifiedInboxPage: React.FC = () => {
     const prevTickets = [...tickets];
     const updated = tickets.map(t => t.id === ticketId ? { ...t, category: newCategory as any } : t);
     setTickets(updated);
-    setInboxCache(filterCacheKey, updated);
     toast.success(`Đã cập nhật phân loại thành [${newCategory.toUpperCase()}]`);
 
     try {
@@ -497,7 +461,6 @@ export const UnifiedInboxPage: React.FC = () => {
       : tickets.map(t => t.id === ticketId ? { ...t, status: 'dismissed' as any } : t);
 
     setTickets(updated);
-    setInboxCache(filterCacheKey, updated);
     toast.success('Đã chuyển ticket vào mục Đã Bỏ Qua');
 
     try {
@@ -515,7 +478,6 @@ export const UnifiedInboxPage: React.FC = () => {
     const prevTickets = [...tickets];
     const updated = tickets.map(t => t.id === ticketId ? { ...t, status: 'pending' as any } : t);
     setTickets(updated);
-    setInboxCache(filterCacheKey, updated);
     toast.success('Đã khôi phục ticket về Hòm Thư');
 
     try {
@@ -533,7 +495,6 @@ export const UnifiedInboxPage: React.FC = () => {
     const prevTickets = [...tickets];
     const updated = tickets.map(t => t.id === ticketId ? { ...t, status: 'completed' as any } : t);
     setTickets(updated);
-    setInboxCache(filterCacheKey, updated);
     toast.success('Đã đánh dấu hoàn thành ticket!');
 
     try {

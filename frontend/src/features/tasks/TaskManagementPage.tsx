@@ -36,22 +36,6 @@ import { fetchApi } from '../../lib/api';
 import { BotAutomationTask } from '../../types';
 import { toast } from 'sonner';
 
-// ⚡ TRỢ THỦ PERSISTENT STORAGE (LƯU LOCALSTORAGE - 0MS INSTANT RENDER)
-const getTaskLocalCache = <T,>(key: string): T | null => {
-  try {
-    const raw = localStorage.getItem(`ptv_tasks_${key}`);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-};
-
-const setTaskLocalCache = (key: string, data: any) => {
-  try {
-    localStorage.setItem(`ptv_tasks_${key}`, JSON.stringify(data));
-  } catch { }
-};
-
 const extractCleanEmail = (raw: any): string => {
   if (!raw || typeof raw !== 'string') return '';
   const match = raw.match(/[\w\.-]+@[\w\.-]+\.\w+/);
@@ -80,12 +64,8 @@ export const TaskManagementPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'all' | 'pending' | 'executed' | 'failed'>('all');
   const [viewMode, setViewMode] = useState<'table' | 'bento'>('table');
 
-  const initialCachedTasks = useMemo(() => {
-    return getTaskLocalCache<BotAutomationTask[]>('master_task_cache') || [];
-  }, []);
-
-  const [tasks, setTasks] = useState<BotAutomationTask[]>(initialCachedTasks);
-  const [loading, setLoading] = useState<boolean>(initialCachedTasks.length === 0);
+  const [tasks, setTasks] = useState<BotAutomationTask[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
   const [selectedBotFilter, setSelectedBotFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -123,13 +103,9 @@ export const TaskManagementPage: React.FC = () => {
   const [rejecting, setRejecting] = useState<boolean>(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
 
-  // ⚡ SWR TẢI TASKS
+  // ⚡ TẢI DANH SÁCH TÁC VỤ TRỰC TIẾP TỪ API
   const loadTasks = useCallback(async (forceSpinner = false) => {
-    const cached = getTaskLocalCache<BotAutomationTask[]>('master_task_cache');
-    if (cached && !forceSpinner) {
-      setTasks(cached);
-      setLoading(false);
-    } else if (forceSpinner || !cached) {
+    if (forceSpinner) {
       setLoading(true);
     }
 
@@ -137,7 +113,6 @@ export const TaskManagementPage: React.FC = () => {
       const data = await fetchApi<BotAutomationTask[]>('/tasks');
       if (data) {
         setTasks(data);
-        setTaskLocalCache('master_task_cache', data);
 
         // Cập nhật lại detailDrawerTask nếu đang mở
         if (detailDrawerTaskIdRef.current) {
@@ -146,9 +121,7 @@ export const TaskManagementPage: React.FC = () => {
         }
       }
     } catch (err) {
-      if (!cached) {
-        toast.error('Không thể nạp danh sách tác vụ bot: ' + (err as Error).message);
-      }
+      toast.error('Không thể nạp danh sách tác vụ bot: ' + (err as Error).message);
     } finally {
       setLoading(false);
     }
@@ -356,7 +329,6 @@ export const TaskManagementPage: React.FC = () => {
     } : t);
 
     setTasks(updatedTasks);
-    setTaskLocalCache('master_task_cache', updatedTasks);
     setSelectedTask(null);
     const taskIdShort = taskId ? taskId.slice(0, 8) : '';
     toast.success(`Đã phê duyệt và khởi chạy worker #${taskIdShort}!`);
@@ -389,7 +361,6 @@ export const TaskManagementPage: React.FC = () => {
     } : t);
 
     setTasks(updatedTasks);
-    setTaskLocalCache('master_task_cache', updatedTasks);
     setSelectedTask(null);
     const taskIdShort = taskId ? taskId.slice(0, 8) : '';
     toast.info(`Đã từ chối tác vụ #${taskIdShort}.`);

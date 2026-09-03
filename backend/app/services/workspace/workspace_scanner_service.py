@@ -82,7 +82,10 @@ class WorkspaceScannerService(WorkspaceBaseService):
 
                         # Mở trang dashboard để nạp session & lấy distributor_id
                         await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/dashboard", wait_until="domcontentloaded", timeout=45000)
-                        await page.wait_for_timeout(1000)
+                        try:
+                            await page.wait_for_function("() => !!window.user?.distributor_id", timeout=6000)
+                        except Exception:
+                            pass
 
                         # Lấy distributor_id từ biến toàn cục window.user
                         dist_id = await page.evaluate("() => window.user?.distributor_id || null")

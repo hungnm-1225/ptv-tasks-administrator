@@ -220,13 +220,14 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
         # 1. Thử duyệt tại Partner
         partner_res = await self.partner_approve_school_order(partner_creds, order_identifier)
         if partner_res.get("status") == "success":
+            checkpoint["order_approved"] = True
             log_step(f"✅ Partner đã duyệt thành công School Order [{order_identifier}]!")
-            return {"status": "success", "order_code": order_identifier, "logs": "\n".join(logs)}
+            return {"status": "success", "order_code": order_identifier, "checkpoint": checkpoint, "current_step": "completed", "logs": "\n".join(logs)}
 
         if partner_res.get("status") != "insufficient_pool":
             err = partner_res.get("error", "Lỗi duyệt Order tại Partner")
             log_step(f"❌ {err}")
-            return {"status": "failed", "error": err, "logs": "\n".join(logs)}
+            return {"status": "failed", "error": err, "checkpoint": checkpoint, "current_step": "partner_approve_school_order", "logs": "\n".join(logs)}
 
         # 2. Kho thiếu -> Kiểm tra PRT code đã tạo chưa
         prt_code = checkpoint.get("prt_contract_code")
@@ -245,7 +246,7 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
                 "courses": courses_needed
             })
             if prt_contract.get("status") != "success":
-                return {"status": "failed", "error": prt_contract.get("error"), "logs": "\n".join(logs)}
+                return {"status": "failed", "error": prt_contract.get("error"), "checkpoint": checkpoint, "current_step": "create_prt_contract", "logs": "\n".join(logs)}
 
             prt_code = prt_contract.get("contract_code")
             checkpoint["prt_contract_code"] = prt_code
@@ -262,16 +263,17 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
             checkpoint=checkpoint
         )
         if prt_resolve_res.get("status") != "success":
-            return {"status": "failed", "error": prt_resolve_res.get("error"), "logs": "\n".join(logs)}
+            return {"status": "failed", "error": prt_resolve_res.get("error"), "checkpoint": checkpoint, "current_step": "approve_prt_contract", "logs": "\n".join(logs)}
 
         # 4. Partner duyệt lại School Order lần cuối
         log_step(f"🤝 Partner duyệt lại School Order [{order_identifier}] sau khi cấp bù...")
         final_res = await self.partner_approve_school_order(partner_creds, order_identifier)
         if final_res.get("status") != "success":
-            return {"status": "failed", "error": final_res.get("error"), "logs": "\n".join(logs)}
+            return {"status": "failed", "error": final_res.get("error"), "checkpoint": checkpoint, "current_step": "partner_final_approve", "logs": "\n".join(logs)}
 
+        checkpoint["order_approved"] = True
         log_step(f"🏁 ĐÃ DUYỆT THÀNH CÔNG SCHOOL ORDER: [{order_identifier}]!")
-        return {"status": "success", "order_code": order_identifier, "logs": "\n".join(logs)}
+        return {"status": "success", "order_code": order_identifier, "checkpoint": checkpoint, "current_step": "completed", "logs": "\n".join(logs)}
 
     async def execute_approve_partner_contract_standalone(
         self,
@@ -299,8 +301,9 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
         )
 
         if dist_res.get("status") == "success":
+            checkpoint["prt_approved"] = True
             log_step(f"✅ Distributor đã duyệt thành công Contract [{contract_identifier}]!")
-            return {"status": "success", "contract_code": contract_identifier, "logs": "\n".join(logs)}
+            return {"status": "success", "contract_code": contract_identifier, "checkpoint": checkpoint, "current_step": "completed", "logs": "\n".join(logs)}
 
         if dist_res.get("status") == "insufficient_pool_created_dst":
             dst_code = dist_res.get("dst_contract_code")
@@ -310,7 +313,7 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
             # 1. Sales Admin duyệt DST Contract
             admin_res = await self.admin_approve_distributor_contract(sales_admin_creds, dst_code)
             if admin_res.get("status") != "success":
-                return {"status": "failed", "error": admin_res.get("error"), "logs": "\n".join(logs)}
+                return {"status": "failed", "error": admin_res.get("error"), "checkpoint": checkpoint, "current_step": "admin_approve_dst", "logs": "\n".join(logs)}
 
             checkpoint["dst_approved"] = True
 
@@ -322,14 +325,15 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
                 auto_create_dst_if_short=False
             )
             if final_res.get("status") != "success":
-                return {"status": "failed", "error": final_res.get("error"), "logs": "\n".join(logs)}
+                return {"status": "failed", "error": final_res.get("error"), "checkpoint": checkpoint, "current_step": "distributor_approve_prt", "logs": "\n".join(logs)}
 
+            checkpoint["prt_approved"] = True
             log_step(f"🏁 ĐÃ DUYỆT THÀNH CÔNG PARTNER CONTRACT: [{contract_identifier}]!")
-            return {"status": "success", "contract_code": contract_identifier, "logs": "\n".join(logs)}
+            return {"status": "success", "contract_code": contract_identifier, "checkpoint": checkpoint, "current_step": "completed", "logs": "\n".join(logs)}
 
         err = dist_res.get("error", "Lỗi duyệt Partner Contract")
         log_step(f"❌ {err}")
-        return {"status": "failed", "error": err, "logs": "\n".join(logs)}
+        return {"status": "failed", "error": err, "checkpoint": checkpoint, "current_step": "distributor_approve_prt_contract", "logs": "\n".join(logs)}
 
     async def execute_partner_create_and_approve_chain(
         self,

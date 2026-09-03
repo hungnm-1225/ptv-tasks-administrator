@@ -21,6 +21,23 @@ const AutomationStudioPage = lazy(() => import('./features/studio/AutomationStud
 const CoursesManagerPage = lazy(() => import('./features/courses/CoursesManagerPage').then(m => ({ default: m.CoursesManagerPage })));
 const WorkBoardPage = lazy(() => import('./features/board/WorkBoardPage').then(m => ({ default: m.WorkBoardPage })));
 
+// 🧹 Dọn dẹp triệt để các key cache localStorage cũ (ptv_*) tồn đọng từ các phiên trước
+const purgeStaleDataCaches = () => {
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('ptv_')) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k));
+  } catch { }
+};
+
+// Chạy dọn dẹp cache một lần duy nhất khi ứng dụng tải
+purgeStaleDataCaches();
+
 const PageLoadingFallback: React.FC = () => (
   <div className="min-h-[50vh] flex flex-col items-center justify-center text-ink-2 gap-3">
     <Loader2 className="w-8 h-8 animate-spin text-accent" />

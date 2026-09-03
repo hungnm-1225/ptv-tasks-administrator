@@ -115,6 +115,8 @@ async def poll_workspace_long_tasks():
 
             supabase.table("bot_automation_tasks").update({
                 "execution_status": "success",
+                "current_step": "completed",
+                "last_error_step": None,
                 "payload_data": payload,
                 "execution_logs": (task.get("execution_logs") or "") + new_log,
                 "executed_at": datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).isoformat()

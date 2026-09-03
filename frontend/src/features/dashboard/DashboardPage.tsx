@@ -29,26 +29,10 @@ const CHART_PALETTE = [
 
 export type TimeRangeOption = '7d' | '30d' | 'this_month';
 
-// ⚡ LẤY BASELINE CACHE TỪ LOCALSTORAGE (HIỂN THỊ NGAY 0MS KHÔNG SPINNER)
-const getDashboardCache = (): ReportsSummary | null => {
-  try {
-    const raw = localStorage.getItem('ptv_dashboard_summary_cache');
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-};
-
-const setDashboardCache = (data: ReportsSummary) => {
-  try {
-    localStorage.setItem('ptv_dashboard_summary_cache', JSON.stringify(data));
-  } catch { }
-};
-
 export const DashboardPage: React.FC = () => {
-  // 1. State Quản trị dữ liệu & Time Range đồng bộ toàn trang (Khởi tạo Lazy 0ms từ Cache)
-  const [summary, setSummary] = useState<ReportsSummary | null>(() => getDashboardCache());
-  const [isInitialLoading, setIsInitialLoading] = useState<boolean>(() => !getDashboardCache());
+  // 1. State Quản trị dữ liệu & Time Range đồng bộ toàn trang (Tải trực tiếp từ API)
+  const [summary, setSummary] = useState<ReportsSummary | null>(null);
+  const [isInitialLoading, setIsInitialLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
   // Time Range thống nhất cho toàn bộ Dashboard
@@ -61,7 +45,7 @@ export const DashboardPage: React.FC = () => {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
 
-  // 2. ⚡ SWR FETCH: Đồng bộ toàn bộ KPI & Charts theo Time Range (Tách rời state khỏi dependency để triệt tiêu vòng lặp)
+  // 2. ⚡ TẢI TRỰC TIẾP TỪ API: Đồng bộ toàn bộ KPI & Charts theo Time Range
   const fetchDashboardData = useCallback(async (range: TimeRangeOption) => {
     setIsRefreshing(true);
 
@@ -70,7 +54,6 @@ export const DashboardPage: React.FC = () => {
       const data = await fetchApi<ReportsSummary>(
         `/reports/summary?cat_range=${range}&trend_range=${range}`
       );
-      setDashboardCache(data);
       setSummary(data);
     } catch (err) {
       console.error('Lỗi khi tải báo cáo tổng quan:', err);

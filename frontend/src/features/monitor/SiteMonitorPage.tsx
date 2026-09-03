@@ -113,22 +113,6 @@ interface DeploymentItem {
   provider: 'vercel' | 'render';
 }
 
-// ⚡ TRỢ THỦ PERSISTENT STORAGE CHO MONITOR (LƯU LOCALSTORAGE - 0MS)
-const getMonitorLocalCache = <T,>(key: string): T | null => {
-  try {
-    const raw = localStorage.getItem(`ptv_mon_${key}`);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-};
-
-const setMonitorLocalCache = (key: string, data: any) => {
-  try {
-    localStorage.setItem(`ptv_mon_${key}`, JSON.stringify(data));
-  } catch { }
-};
-
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function formatDuration(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
@@ -170,10 +154,6 @@ const UptimeBar: React.FC<UptimeBarProps> = ({
 }) => {
   const [hours, setHours] = useState<HourlyHistoryItem[]>(() => {
     if (history && history.length > 0) return history;
-    if (siteId) {
-      const cached = getMonitorLocalCache<HourlyHistoryItem[]>(`hourly_${siteId}`);
-      if (cached) return cached;
-    }
     return [];
   });
   const [tooltip, setTooltip] = useState<{ item: HourlyHistoryItem; x: number } | null>(null);
@@ -188,7 +168,6 @@ const UptimeBar: React.FC<UptimeBarProps> = ({
       fetchApi<{ history: HourlyHistoryItem[] }>(`/monitor/sites/${siteId}/hourly?hours=24`)
         .then(res => {
           setHours(res.history || []);
-          setMonitorLocalCache(`hourly_${siteId}`, res.history || []);
         })
         .catch(() => {
           const list: HourlyHistoryItem[] = Array.from({ length: 24 }, (_, i) => ({
@@ -292,38 +271,32 @@ export const SiteMonitorPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'public' | 'auth_matrix' | 'cicd_deploy'>('public');
 
   // ⚡ KHỞI TẠO STATE NGAY TỪ LOCALSTORAGE (0MS TUYỆT ĐỐI)
-  const cachedSites = useMemo(() => getMonitorLocalCache<MonitoredSite[]>('public_sites') || MOCK_SITES, []);
-  const cachedSummary = useMemo(() => getMonitorLocalCache<MonitorSummary>('public_summary') || MOCK_SUMMARY, []);
-  const cachedIncidents = useMemo(() => getMonitorLocalCache<Incident[]>('public_incidents') || [], []);
-
   // Tab 1 States
-  const [sites, setSites] = useState<MonitoredSite[]>(cachedSites);
-  const [summary, setSummary] = useState<MonitorSummary | null>(cachedSummary);
-  const [incidents, setIncidents] = useState<Incident[]>(cachedIncidents);
-  const [loading, setLoading] = useState(!getMonitorLocalCache('public_sites'));
+  const [sites, setSites] = useState<MonitoredSite[]>(MOCK_SITES);
+  const [summary, setSummary] = useState<MonitorSummary | null>(MOCK_SUMMARY);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState('');
 
   // Tab 2 States (Auth Matrix)
-  const cachedAuth = useMemo(() => getMonitorLocalCache<AuthCredentialCheck[]>('auth_matrix') || MOCK_AUTH_CHECKS, []);
-  const [authChecks, setAuthChecks] = useState<AuthCredentialCheck[]>(cachedAuth);
-  const [authLoading, setAuthLoading] = useState(!getMonitorLocalCache('auth_matrix'));
+  const [authChecks, setAuthChecks] = useState<AuthCredentialCheck[]>(MOCK_AUTH_CHECKS);
+  const [authLoading, setAuthLoading] = useState(true);
   const [runningAuthCheck, setRunningAuthCheck] = useState(false);
   const [authFilterSite, setAuthFilterSite] = useState<string>('ALL');
 
   // Tab 3 States (CI/CD Deployments & Logs)
-  const cachedDeploy = useMemo(() => getMonitorLocalCache<DeploymentItem[]>('deployments') || MOCK_DEPLOYMENTS, []);
-  const [deployments, setDeployments] = useState<DeploymentItem[]>(cachedDeploy);
-  const [deployLoading, setDeployLoading] = useState(!getMonitorLocalCache('deployments'));
+  const [deployments, setDeployments] = useState<DeploymentItem[]>(MOCK_DEPLOYMENTS);
+  const [deployLoading, setDeployLoading] = useState(true);
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [currentLogs, setCurrentLogs] = useState('');
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [selectedDeployTitle, setSelectedDeployTitle] = useState('');
   const [copied, setCopied] = useState(false);
 
-  // ⚡ 1. SWR TẢI TAB 1 NGẦM
+  // ⚡ 1. TẢI TAB 1 TRỰC TIẾP TỪ API
   const loadPublicSites = useCallback(async (forceSpinner = false) => {
-    if (forceSpinner || !getMonitorLocalCache('public_sites')) {
+    if (forceSpinner) {
       setLoading(true);
     }
     try {
@@ -331,8 +304,6 @@ export const SiteMonitorPage: React.FC = () => {
       const enriched = data.sites.map(s => ({ ...s, history: [], historyLoading: true }));
       setSites(enriched);
       setSummary(data.summary);
-      setMonitorLocalCache('public_sites', enriched);
-      setMonitorLocalCache('public_summary', data.summary);
       setLastRefreshed(new Date().toLocaleTimeString('vi-VN'));
 
       enriched.forEach(async (site) => {
@@ -344,10 +315,8 @@ export const SiteMonitorPage: React.FC = () => {
         }
       });
     } catch {
-      if (!getMonitorLocalCache('public_sites')) {
-        setSites(MOCK_SITES);
-        setSummary(MOCK_SUMMARY);
-      }
+      setSites(MOCK_SITES);
+      setSummary(MOCK_SUMMARY);
       setLastRefreshed(new Date().toLocaleTimeString('vi-VN'));
     } finally {
       setLoading(false);
@@ -356,34 +325,30 @@ export const SiteMonitorPage: React.FC = () => {
     try {
       const inc = await fetchApi<{ incidents: Incident[] }>('/monitor/incidents?limit=50');
       setIncidents(inc.incidents || []);
-      setMonitorLocalCache('public_incidents', inc.incidents || []);
     } catch {
       setIncidents([]);
     }
   }, []);
 
-  // ⚡ 2. SWR TẢI TAB 2 (AUTH MATRIX) NGẦM
+  // ⚡ 2. TẢI TAB 2 (AUTH MATRIX) TRỰC TIẾP TỪ API
   const loadAuthMatrix = useCallback(async (forceSpinner = false) => {
-    if (forceSpinner || !getMonitorLocalCache('auth_matrix')) {
+    if (forceSpinner) {
       setAuthLoading(true);
     }
     try {
       const data = await fetchApi<{ credentials: AuthCredentialCheck[] }>('/monitor/auth-matrix');
       const creds = data.credentials || [];
       setAuthChecks(creds);
-      setMonitorLocalCache('auth_matrix', creds);
     } catch {
-      if (!getMonitorLocalCache('auth_matrix')) {
-        setAuthChecks(MOCK_AUTH_CHECKS);
-      }
+      setAuthChecks(MOCK_AUTH_CHECKS);
     } finally {
       setAuthLoading(false);
     }
   }, []);
 
-  // ⚡ 3. SWR TẢI TAB 3 (CI/CD DEPLOYS) NGẦM
+  // ⚡ 3. TẢI TAB 3 (CI/CD DEPLOYS) TRỰC TIẾP TỪ API
   const loadDeployments = useCallback(async (forceSpinner = false) => {
-    if (forceSpinner || !getMonitorLocalCache('deployments')) {
+    if (forceSpinner) {
       setDeployLoading(true);
     }
     try {
@@ -402,11 +367,8 @@ export const SiteMonitorPage: React.FC = () => {
 
       const finalList = list.length > 0 ? list : MOCK_DEPLOYMENTS;
       setDeployments(finalList);
-      setMonitorLocalCache('deployments', finalList);
     } catch {
-      if (!getMonitorLocalCache('deployments')) {
-        setDeployments(MOCK_DEPLOYMENTS);
-      }
+      setDeployments(MOCK_DEPLOYMENTS);
     } finally {
       setDeployLoading(false);
     }
@@ -431,8 +393,6 @@ export const SiteMonitorPage: React.FC = () => {
       });
       setSites(updated);
       setSummary(data.summary);
-      setMonitorLocalCache('public_sites', updated);
-      setMonitorLocalCache('public_summary', data.summary);
       setLastRefreshed(new Date().toLocaleTimeString('vi-VN'));
       toast.success(`Đã kiểm tra ${data.sites.length} website — ${data.summary.up_count} UP / ${data.summary.down_count} DOWN`);
     } catch {
@@ -450,7 +410,6 @@ export const SiteMonitorPage: React.FC = () => {
       const data = await fetchApi<{ results: AuthCredentialCheck[] }>('/monitor/auth-matrix/check-now', { method: 'POST' });
       const resList = data.results || [];
       setAuthChecks(resList);
-      setMonitorLocalCache('auth_matrix', resList);
       toast.success('✅ Đã hoàn tất kiểm tra xác thực chuyên sâu!');
     } catch {
       toast.error('Lỗi khi chạy Auth Checks');

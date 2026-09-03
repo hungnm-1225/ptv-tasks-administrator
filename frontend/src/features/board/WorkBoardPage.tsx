@@ -41,46 +41,13 @@ const PRESET_OVERLAYS = [
     { name: 'Xám Khói (Slate)', color: '#334155' }
 ];
 
-// ⚡ TRỢ THỦ PERSISTENT STORAGE (LƯU LOCALSTORAGE - HIỂN THỊ TỨC THÌ 0MS)
-const getBoardLocalCache = <T,>(key: string): T | null => {
-    try {
-        const raw = localStorage.getItem(`ptv_wb_${key}`);
-        return raw ? JSON.parse(raw) : null;
-    } catch {
-        return null;
-    }
-};
-
-const setBoardLocalCache = (key: string, data: any) => {
-    try {
-        localStorage.setItem(`ptv_wb_${key}`, JSON.stringify(data));
-    } catch { }
-};
-
 export const WorkBoardPage: React.FC = () => {
-    // ⚡ KHỞI TẠO STATE NGAY TỪ LOCALSTORAGE (0MS TUYỆT ĐỐI)
-    const initialBoards = useMemo(() => getBoardLocalCache<BoardItem[]>('boards_list') || [], []);
-    const initialActiveId = useMemo(() => {
-        const savedId = getBoardLocalCache<string>('active_id');
-        if (savedId && initialBoards.some((b) => b.id === savedId)) return savedId;
-        const defaultB = initialBoards.find((b) => b.is_default) || initialBoards[0];
-        return defaultB ? defaultB.id : '';
-    }, [initialBoards]);
-
-    const initialColumns = useMemo(() => {
-        return initialActiveId ? getBoardLocalCache<BoardColumnItem[]>(`cols_${initialActiveId}`) || [] : [];
-    }, [initialActiveId]);
-
-    const initialCards = useMemo(() => {
-        return initialActiveId ? getBoardLocalCache<BoardCardItem[]>(`cards_${initialActiveId}`) || [] : [];
-    }, [initialActiveId]);
-
-    const [boards, setBoards] = useState<BoardItem[]>(initialBoards);
-    const [trashBoards, setTrashBoards] = useState<BoardItem[]>(() => getBoardLocalCache<BoardItem[]>('trash_list') || []);
-    const [activeBoardId, setActiveBoardId] = useState<string>(initialActiveId);
-    const [columns, setColumns] = useState<BoardColumnItem[]>(initialColumns);
-    const [cards, setCards] = useState<BoardCardItem[]>(initialCards);
-    const [isLoading, setIsLoading] = useState<boolean>(initialColumns.length === 0);
+    const [boards, setBoards] = useState<BoardItem[]>([]);
+    const [trashBoards, setTrashBoards] = useState<BoardItem[]>([]);
+    const [activeBoardId, setActiveBoardId] = useState<string>('');
+    const [columns, setColumns] = useState<BoardColumnItem[]>([]);
+    const [cards, setCards] = useState<BoardCardItem[]>([]);
+    const [isLoading, setIsLoading] = useState<boolean>(true);
 
     // Filters
     const [searchQuery, setSearchQuery] = useState<string>('');
@@ -138,7 +105,7 @@ export const WorkBoardPage: React.FC = () => {
 
     const bgFileInputRef = useRef<HTMLInputElement>(null);
 
-    // ⚡ 1. SWR TẢI BOARDS NGẦM
+    // ⚡ 1. TẢI BOARDS TRỰC TIẾP TỪ API
     const loadBoards = useCallback(async () => {
         try {
             const [activeData, trashData] = await Promise.all([
@@ -147,14 +114,11 @@ export const WorkBoardPage: React.FC = () => {
             ]);
             setBoards(activeData);
             setTrashBoards(trashData);
-            setBoardLocalCache('boards_list', activeData);
-            setBoardLocalCache('trash_list', trashData);
 
             if (activeData.length > 0) {
                 if (!activeBoardId || !activeData.some((b) => b.id === activeBoardId)) {
                     const defaultB = activeData.find((b) => b.is_default) || activeData[0];
                     setActiveBoardId(defaultB.id);
-                    setBoardLocalCache('active_id', defaultB.id);
                 }
             }
         } catch (err: any) {
@@ -168,18 +132,11 @@ export const WorkBoardPage: React.FC = () => {
         loadBoards();
     }, [loadBoards]);
 
-    // ⚡ 2. SWR TẢI CỘT & THẺ NGẦM
+    // ⚡ 2. TẢI CỘT & THẺ TRỰC TIẾP TỪ API
     const loadBoardData = useCallback(async (boardId: string, forceSpinner = false) => {
         if (!boardId) return;
 
-        const cachedCols = getBoardLocalCache<BoardColumnItem[]>(`cols_${boardId}`);
-        const cachedCards = getBoardLocalCache<BoardCardItem[]>(`cards_${boardId}`);
-
-        if (cachedCols && cachedCards && !forceSpinner) {
-            setColumns(cachedCols);
-            setCards(cachedCards);
-            setIsLoading(false);
-        } else if (forceSpinner) {
+        if (forceSpinner) {
             setIsLoading(true);
         }
 
@@ -190,12 +147,8 @@ export const WorkBoardPage: React.FC = () => {
             ]);
             setColumns(colsData);
             setCards(cardsData);
-            setBoardLocalCache(`cols_${boardId}`, colsData);
-            setBoardLocalCache(`cards_${boardId}`, cardsData);
         } catch (err: any) {
-            if (!cachedCols) {
-                toast.error('Lỗi tải dữ liệu bảng: ' + (err.message || err));
-            }
+            toast.error('Lỗi tải dữ liệu bảng: ' + (err.message || err));
         } finally {
             setIsLoading(false);
         }
@@ -203,7 +156,6 @@ export const WorkBoardPage: React.FC = () => {
 
     useEffect(() => {
         if (activeBoardId) {
-            setBoardLocalCache('active_id', activeBoardId);
             loadBoardData(activeBoardId);
             const curBoard = boards.find((b) => b.id === activeBoardId);
             if (curBoard) {
@@ -275,7 +227,6 @@ export const WorkBoardPage: React.FC = () => {
 
         const updatedCards = cards.map((c) => (c.id === draggedCardId ? { ...c, column_id: targetColumnId } : c));
         setCards(updatedCards);
-        setBoardLocalCache(`cards_${activeBoardId}`, updatedCards);
         setDraggedCardId(null);
 
         try {
@@ -312,7 +263,6 @@ export const WorkBoardPage: React.FC = () => {
             toast.success('Đã thêm thẻ mới!');
             const updated = [res.data, ...cards];
             setCards(updated);
-            setBoardLocalCache(`cards_${activeBoardId}`, updated);
             setInlineTaskTitle('');
             setInlineAddingColId(null);
             setQuickAddPriority('low');
@@ -350,7 +300,6 @@ export const WorkBoardPage: React.FC = () => {
 
             const updatedBoards = boards.map((b) => (b.id === activeBoardId ? { ...b, background_url: publicUrl } : b));
             setBoards(updatedBoards);
-            setBoardLocalCache('boards_list', updatedBoards);
             toast.success('Đã áp dụng ảnh nền mới!', { id: toastId });
         } catch (err: any) {
             toast.error('Lỗi tải ảnh: ' + (err.message || err), { id: toastId });
@@ -391,7 +340,6 @@ export const WorkBoardPage: React.FC = () => {
             );
 
             setBoards(updatedBoards);
-            setBoardLocalCache('boards_list', updatedBoards);
             toast.success('Đã lưu toàn bộ thiết lập Board!');
             setIsSettingsModalOpen(false);
         } catch (err: any) {
@@ -487,7 +435,6 @@ export const WorkBoardPage: React.FC = () => {
             toast.success('Đã lưu thay đổi thẻ!');
             const updated = cards.map((c) => (c.id === activeCard.id ? res.data : c));
             setCards(updated);
-            setBoardLocalCache(`cards_${activeBoardId}`, updated);
             setIsCardModalOpen(false);
         } catch (err: any) {
             toast.error('Lỗi lưu thẻ: ' + (err.message || err));
@@ -1241,9 +1188,7 @@ export const WorkBoardPage: React.FC = () => {
                                 toast.success(`Đã tạo bảng "${newBoardTitle}"!`);
                                 const updated = [...boards, res.data];
                                 setBoards(updated);
-                                setBoardLocalCache('boards_list', updated);
                                 setActiveBoardId(res.data.id);
-                                setBoardLocalCache('active_id', res.data.id);
                                 setIsNewBoardModalOpen(false);
                                 setNewBoardTitle('');
                             }}
@@ -1551,7 +1496,6 @@ export const WorkBoardPage: React.FC = () => {
                                                 await fetchApi(`/board/cards/${activeCard.id}`, { method: 'DELETE' });
                                                 const updated = cards.filter((c) => c.id !== activeCard.id);
                                                 setCards(updated);
-                                                setBoardLocalCache(`cards_${activeBoardId}`, updated);
                                                 setConfirmDialog(null);
                                                 setIsCardModalOpen(false);
                                                 toast.success('Đã xóa thẻ nhiệm vụ!');

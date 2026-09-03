@@ -46,51 +46,45 @@ class WorkspaceEnrollService(WorkspaceBaseService):
                     await wait_for_dom_and_spinners(page, "text=User Enrollment", min_pacing_ms=500)
 
                     await page.click("text=GROUP MANAGEMENT")
-                    await page.wait_for_timeout(600)
+                    await wait_for_dom_and_spinners(page, "input[placeholder*='Group Name'], input[name='group_name']", min_pacing_ms=400)
 
                     formatted_group_name = f"{school_name} {group_name_raw} {start_date[:5]}".strip()
                     await page.fill("input[placeholder*='Group Name'], input[name='group_name']", formatted_group_name)
-                    await page.wait_for_timeout(200)
                     await page.click("button:has-text('Create Group')")
-                    await page.wait_for_timeout(1500)
+                    # Chờ xử lý tạo Group và spinner ẩn hoàn toàn (thay thế wait_for_timeout 1500ms)
+                    await wait_for_dom_and_spinners(page, min_pacing_ms=800)
 
                     await page.click("text=BULK IMPORT")
-                    await page.wait_for_timeout(600)
+                    await wait_for_dom_and_spinners(page, "//div[contains(., 'Groups') and contains(@class, 'select')] | //select", min_pacing_ms=400)
 
                     group_dropdown = page.locator("//div[contains(., 'Groups') and contains(@class, 'select')] | //select").first
                     await group_dropdown.click()
-                    await page.wait_for_timeout(300)
                     await page.locator(f"text={formatted_group_name}").first.click()
-                    await page.wait_for_timeout(400)
 
                     if student_emails:
                         role_dropdown = page.locator("//div[contains(., 'Assign Role') and contains(@class, 'select')] | //select").last
                         await role_dropdown.click()
-                        await page.wait_for_timeout(200)
                         await page.locator("text=Student").last.click()
-                        await page.wait_for_timeout(300)
 
                         students_text = "\n".join(student_emails)
                         await page.fill("textarea[placeholder*='Paste user data'], textarea", students_text)
-                        await page.wait_for_timeout(300)
                         await page.click("button:has-text('Import and Enroll Users')")
-                        await page.wait_for_timeout(3000)
+                        # Chờ API ghi danh học sinh hoàn tất theo State (thay thế wait_for_timeout 3000ms)
+                        await wait_for_dom_and_spinners(page, min_pacing_ms=1000)
 
                     if teacher_emails:
                         role_dropdown = page.locator("//div[contains(., 'Assign Role') and contains(@class, 'select')] | //select").last
                         await role_dropdown.click()
-                        await page.wait_for_timeout(200)
                         await page.locator("text=Teacher").last.click()
-                        await page.wait_for_timeout(300)
 
                         teachers_text = "\n".join(teacher_emails)
                         await page.fill("textarea[placeholder*='Paste user data'], textarea", teachers_text)
-                        await page.wait_for_timeout(300)
                         await page.click("button:has-text('Import and Enroll Users')")
-                        await page.wait_for_timeout(2500)
+                        # Chờ API ghi danh giáo viên hoàn tất theo State (thay thế wait_for_timeout 2500ms)
+                        await wait_for_dom_and_spinners(page, min_pacing_ms=1000)
 
                     await page.click("button:has-text('Close')")
-                    await page.wait_for_timeout(800)
+                    await wait_for_dom_and_spinners(page, min_pacing_ms=400)
 
                     return {
                         "status": "success",

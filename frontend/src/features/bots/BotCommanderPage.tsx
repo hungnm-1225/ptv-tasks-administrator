@@ -53,21 +53,6 @@ interface ExecutionWorkerConfig {
   iconClass: string;
 }
 
-const getBotLocalCache = <T,>(key: string): T | null => {
-  try {
-    const raw = localStorage.getItem(`ptv_bot_${key}`);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-};
-
-const setBotLocalCache = (key: string, data: any) => {
-  try {
-    localStorage.setItem(`ptv_bot_${key}`, JSON.stringify(data));
-  } catch { }
-};
-
 const INGESTION_PIPELINES: IngestionWorkerConfig[] = [
   {
     key: 'gmail_sync_worker',
@@ -151,12 +136,9 @@ const EXECUTION_ENGINES: ExecutionWorkerConfig[] = [
 ];
 
 export const BotCommanderPage: React.FC = () => {
-  const initialStatus = useMemo(() => getBotLocalCache<Record<string, { status: string; failed_count: number }>>('workers_status'), []);
-  const initialLogs = useMemo(() => getBotLocalCache<BotTerminalLog[]>('terminal_logs') || [], []);
-
-  const [botStatus, setBotStatus] = useState<Record<string, { status: string; failed_count: number }> | null>(initialStatus);
-  const [logs, setLogs] = useState<BotTerminalLog[]>(initialLogs);
-  const [loading, setLoading] = useState<boolean>(!initialStatus);
+  const [botStatus, setBotStatus] = useState<Record<string, { status: string; failed_count: number }> | null>(null);
+  const [logs, setLogs] = useState<BotTerminalLog[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
 
   const [syncingType, setSyncingType] = useState<string | null>(null);
   const [retryingKey, setRetryingKey] = useState<string | null>(null);
@@ -170,9 +152,9 @@ export const BotCommanderPage: React.FC = () => {
 
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
 
+  // ⚡ TẢI TRỰC TIẾP TỪ API
   const loadBotData = useCallback(async (showToast = false, forceSpinner = false) => {
-    const cachedStatus = getBotLocalCache<Record<string, { status: string; failed_count: number }>>('workers_status');
-    if (!cachedStatus || forceSpinner) {
+    if (forceSpinner) {
       setLoading(true);
     }
 
@@ -183,8 +165,6 @@ export const BotCommanderPage: React.FC = () => {
       ]);
       setBotStatus(statusData);
       setLogs(logsData);
-      setBotLocalCache('workers_status', statusData);
-      setBotLocalCache('terminal_logs', logsData);
       if (showToast) toast.success('Đã cập nhật trạng thái Workers & Logs thời gian thực!');
     } catch (err) {
       console.error('Lỗi khi nạp dữ liệu Bot Commander:', err);
@@ -267,7 +247,6 @@ export const BotCommanderPage: React.FC = () => {
       raw_line: `[${nowLocal}] [INFO] [Console]: Terminal cleared.`
     }];
     setLogs(cleared);
-    setBotLocalCache('terminal_logs', cleared);
     toast.info('Đã xóa sạch nhật ký terminal');
   };
 

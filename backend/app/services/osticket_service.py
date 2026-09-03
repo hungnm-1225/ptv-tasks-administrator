@@ -57,7 +57,10 @@ class OSTicketService:
                 await page.fill("input[name='userid'], #name", OSTICKET_USER)
                 await page.fill("input[name='passwd'], #pass", OSTICKET_PASS)
                 await page.click("input[type='submit'], button[type='submit']")
-                await page.wait_for_timeout(2500)
+                try:
+                    await page.wait_for_url(lambda u: "login.php" not in u, timeout=12000)
+                except Exception:
+                    pass
 
             if "login.php" in page.url:
                 logger.error("❌ Đăng nhập OS Ticket thất bại! Vui lòng kiểm tra lại tài khoản/mật khẩu.")

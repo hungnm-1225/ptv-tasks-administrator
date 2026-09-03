@@ -1,9 +1,10 @@
 # backend/app/core/playwright_manager.py
 import re
 import gc
+import time
 import logging
 import asyncio
-from typing import Optional
+from typing import Optional, Any
 from contextlib import asynccontextmanager
 from playwright.async_api import Route, Page, BrowserContext
 
@@ -218,7 +219,6 @@ async def smart_wait_for_options_loaded(
     - Thay thế hoàn toàn cho wait_for_timeout(1800) sau khi chọn Category.
     - Chờ spinner trong menu ẩn và số lượng li[role='option'] >= min_options.
     """
-    import time
     start_time = time.time()
     options_loc = page.locator("li[role='option'], ul[role='listbox'] li")
     spinner_loc = page.locator(".MuiCircularProgress-root, .MuiSkeleton-root")
@@ -248,7 +248,6 @@ async def smart_poll_condition(
     - Trả về kết quả ngay khi check_fn() trả về giá trị True-like.
     - Tránh việc ngủ cứng 12s-15s trên Render.
     """
-    import time
     start_time = time.time()
     while (time.time() - start_time) * 1000 < timeout:
         res = await check_fn()

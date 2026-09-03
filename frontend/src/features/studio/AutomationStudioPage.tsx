@@ -106,24 +106,6 @@ interface PreparedTaskSummary {
   detailsList: string[];
 }
 
-// ⚡ HÀM TRỢ THỦ PERSISTENT CACHE (LƯU LOCALSTORAGE - SỐNG SÓT QUA CẢ CTRL+SHIFT+R)
-const getPersistedCache = <T,>(key: string): T | null => {
-  try {
-    const raw = localStorage.getItem(`ptv_studio_${key}`);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-};
-
-const setPersistedCache = (key: string, data: any) => {
-  try {
-    localStorage.setItem(`ptv_studio_${key}`, JSON.stringify(data));
-  } catch {
-    // Bỏ qua nếu đầy quota storage
-  }
-};
-
 export const AutomationStudioPage: React.FC = () => {
   const navigate = useNavigate();
 
@@ -160,26 +142,21 @@ export const AutomationStudioPage: React.FC = () => {
     'Afiq requests and approves the requests, Hung QA processes the contract via Automation Hub'
   );
 
-  // ⚡ KHỞI TẠO DANH SÁCH NGAY TỪ LOCALSTORAGE (0MS TUYỆT ĐỐI)
-  const initialCacheList = useMemo(() => {
-    return getPersistedCache<ScrapedPendingItem[]>(`list_${approveSubFlow}`) || [];
-  }, [approveSubFlow]);
-
-  const [isScrapingLive, setIsScrapingLive] = useState<boolean>(initialCacheList.length === 0);
+  const [isScrapingLive, setIsScrapingLive] = useState<boolean>(true);
   const [isLoadingOrderDetails, setIsLoadingOrderDetails] = useState<boolean>(false);
-  const [scrapedPendingList, setScrapedPendingList] = useState<ScrapedPendingItem[]>(initialCacheList);
+  const [scrapedPendingList, setScrapedPendingList] = useState<ScrapedPendingItem[]>([]);
   const [parsedOrderCourses, setParsedOrderCourses] = useState<any[]>([]);
 
   // Bộ lọc trạng thái
   const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
 
-  // Metadata Workspace & LMS khởi tạo từ LocalStorage
-  const [schoolsList, setSchoolsList] = useState<HierarchySchoolItem[]>(() => getPersistedCache<HierarchySchoolItem[]>('schools') || []);
-  const [workspaceCategoriesList, setWorkspaceCategoriesList] = useState<string[]>(() => getPersistedCache<string[]>('wsCats') || ['SWRP', 'IR', 'ASP', 'Other']);
-  const [workspaceCoursesList, setWorkspaceCoursesList] = useState<CourseItem[]>(() => getPersistedCache<CourseItem[]>('wsCourses') || []);
+  // Metadata Workspace & LMS khởi tạo trực tiếp
+  const [schoolsList, setSchoolsList] = useState<HierarchySchoolItem[]>([]);
+  const [workspaceCategoriesList, setWorkspaceCategoriesList] = useState<string[]>(['SWRP', 'IR', 'ASP', 'Other']);
+  const [workspaceCoursesList, setWorkspaceCoursesList] = useState<CourseItem[]>([]);
 
-  const [lmsCategoriesList, setLmsCategoriesList] = useState<string[]>(() => getPersistedCache<string[]>('lmsCats') || []);
-  const [lmsCoursesList, setLmsCoursesList] = useState<CourseItem[]>(() => getPersistedCache<CourseItem[]>('lmsCourses') || []);
+  const [lmsCategoriesList, setLmsCategoriesList] = useState<string[]>([]);
+  const [lmsCoursesList, setLmsCoursesList] = useState<CourseItem[]>([]);
   const [lmsCourseCategory, setLmsCourseCategory] = useState<string>('');
   const [lmsCourseId, setLmsCourseId] = useState<number>(0);
   const [lmsCourseName, setLmsCourseName] = useState<string>('');
@@ -264,24 +241,19 @@ export const AutomationStudioPage: React.FC = () => {
         ]);
 
         if (schools) {
-          setPersistedCache('schools', schools);
           setSchoolsList(schools);
         }
         if (wsCats && wsCats.length > 0) {
-          setPersistedCache('wsCats', wsCats);
           setWorkspaceCategoriesList(wsCats);
         }
         if (wsCourses) {
-          setPersistedCache('wsCourses', wsCourses);
           setWorkspaceCoursesList(wsCourses);
         }
         if (lmsCats && lmsCats.length > 0) {
-          setPersistedCache('lmsCats', lmsCats);
           setLmsCategoriesList(lmsCats);
           setLmsCourseCategory(lmsCats[0]);
         }
         if (lmsCourses && lmsCourses.length > 0) {
-          setPersistedCache('lmsCourses', lmsCourses);
           setLmsCoursesList(lmsCourses);
           const firstCat = lmsCats && lmsCats.length > 0 ? lmsCats[0] : lmsCourses[0].category;
           const matchFirst = lmsCourses.filter((c) => c.category === firstCat);
@@ -355,15 +327,9 @@ export const AutomationStudioPage: React.FC = () => {
     }
   };
 
-  // ⚡ SWR FETCH ĐƠN HÀNG VỚI LOCALSTORAGE
+  // ⚡ FETCH ĐƠN HÀNG TRỰC TIẾP TỪ API
   const handleFetchCachedList = async () => {
-    const localData = getPersistedCache<ScrapedPendingItem[]>(`list_${approveSubFlow}`);
-    if (localData && localData.length > 0) {
-      setScrapedPendingList(localData);
-      setIsScrapingLive(false);
-    } else {
-      setIsScrapingLive(true);
-    }
+    setIsScrapingLive(true);
 
     try {
       let freshData: ScrapedPendingItem[] = [];
@@ -378,12 +344,9 @@ export const AutomationStudioPage: React.FC = () => {
         freshData = res?.contracts || [];
       }
 
-      setPersistedCache(`list_${approveSubFlow}`, freshData);
       setScrapedPendingList(freshData);
     } catch (err) {
-      if (!localData) {
-        toast.error('Lỗi đọc dữ liệu Cache: ' + (err as Error).message);
-      }
+      toast.error('Lỗi đọc dữ liệu danh sách: ' + (err as Error).message);
     } finally {
       setIsScrapingLive(false);
     }
