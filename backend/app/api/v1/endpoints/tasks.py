@@ -289,6 +289,9 @@ async def create_task(payload: Dict[str, Any], background_tasks: BackgroundTasks
             "payload_data": payload_data,
             "approval_status": initial_approval,
             "execution_status": "queued",
+            "current_step": "init",
+            "last_error_step": None,
+            "retry_count": 0,
             "execution_logs": initial_log,
             "created_at": now_iso,
             "executed_at": now_iso if run_immediately else None

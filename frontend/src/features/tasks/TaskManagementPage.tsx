@@ -461,6 +461,13 @@ export const TaskManagementPage: React.FC = () => {
             <span>THẤT BẠI</span>
           </span>
         );
+      } else if (execution === 'partial_success') {
+        return (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 dark:bg-amber-950/60 px-2.5 py-1 text-xs font-bold text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 shadow-2xs">
+            <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+            <span>HOÀN THÀNH 1 PHẦN</span>
+          </span>
+        );
       } else if (execution === 'waiting_poll') {
         return (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 dark:bg-amber-950/60 px-2.5 py-1 text-xs font-bold text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 shadow-2xs">
@@ -820,6 +827,16 @@ export const TaskManagementPage: React.FC = () => {
                       {/* Trạng Thái & File Result */}
                       <td className="py-4 px-4 align-top whitespace-nowrap space-y-1.5">
                         <div>{renderStatusBadge(task.approval_status, task.execution_status, payload)}</div>
+                        {task.current_step && task.current_step !== 'completed' && task.current_step !== 'init' && (
+                          <div className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">
+                            <span className="font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-[10px]">
+                              {task.current_step}
+                            </span>
+                            {task.retry_count && task.retry_count > 0 ? (
+                              <span className="text-amber-600 dark:text-amber-400 font-semibold">(#{task.retry_count})</span>
+                            ) : null}
+                          </div>
+                        )}
                         {resultUrl && (
                           <a
                             href={resultUrl}
@@ -852,7 +869,7 @@ export const TaskManagementPage: React.FC = () => {
                             </button>
                           ) : (
                             <>
-                              {task.execution_status === 'failed' && (
+                              {(task.execution_status === 'failed' || task.execution_status === 'partial_success') && (
                                 <button
                                   onClick={(e) => handleRetryTask(task.id, e)}
                                   disabled={retryingId === task.id}
@@ -905,8 +922,15 @@ export const TaskManagementPage: React.FC = () => {
                     {renderStatusBadge(task.approval_status, task.execution_status, payload)}
                   </div>
 
-                  <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[10px] font-bold ${info.badgeColor}`}>
-                    <span>{task.bot_type}</span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[10px] font-bold ${info.badgeColor}`}>
+                      <span>{task.bot_type}</span>
+                    </div>
+                    {task.current_step && task.current_step !== 'completed' && task.current_step !== 'init' && (
+                      <span className="font-mono bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-1.5 py-0.5 rounded text-[10px]">
+                        Bước: {task.current_step} {task.retry_count && task.retry_count > 0 ? `(#${task.retry_count})` : ''}
+                      </span>
+                    )}
                   </div>
 
                   <h3 className="text-sm font-bold text-slate-900 dark:text-white leading-snug group-hover:text-indigo-600 transition-colors line-clamp-2">
@@ -934,12 +958,24 @@ export const TaskManagementPage: React.FC = () => {
                         Duyệt
                       </button>
                     ) : (
-                      <button
-                        onClick={() => openDetailDrawer(task)}
-                        className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-700 dark:text-slate-300"
-                      >
-                        Chi Tiết
-                      </button>
+                      <>
+                        {(task.execution_status === 'failed' || task.execution_status === 'partial_success') && (
+                          <button
+                            onClick={(e) => handleRetryTask(task.id, e)}
+                            disabled={retryingId === task.id}
+                            className="rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950/50 px-2.5 py-1 text-xs font-bold text-amber-800 dark:text-amber-300 hover:bg-amber-100 transition cursor-pointer flex items-center gap-1"
+                          >
+                            {retryingId === task.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCw className="h-3 w-3" />}
+                            <span>Chạy Lại</span>
+                          </button>
+                        )}
+                        <button
+                          onClick={() => openDetailDrawer(task)}
+                          className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-700 dark:text-slate-300"
+                        >
+                          Chi Tiết
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -987,16 +1023,16 @@ export const TaskManagementPage: React.FC = () => {
               </div>
 
               <div className="flex items-center gap-2">
-                {detailDrawerTask.execution_status === 'failed' && (
+                {(detailDrawerTask.execution_status === 'failed' || detailDrawerTask.execution_status === 'partial_success') && (
                   <button
                     onClick={(e) => {
                       handleRetryTask(detailDrawerTask.id, e);
                     }}
                     disabled={retryingId === detailDrawerTask.id}
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700 transition shadow-xs cursor-pointer disabled:opacity-60"
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950/50 px-3 py-1.5 text-xs font-bold text-amber-800 dark:text-amber-300 hover:bg-amber-100 transition shadow-xs cursor-pointer disabled:opacity-60"
                   >
                     {retryingId === detailDrawerTask.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCw className="h-3.5 w-3.5" />}
-                    <span>Chạy Lại Tác Vụ</span>
+                    <span>Chạy Lại</span>
                   </button>
                 )}
                 {detailDrawerTask.approval_status === 'pending' && (
@@ -1027,10 +1063,25 @@ export const TaskManagementPage: React.FC = () => {
             {/* Drawer Scrollable Content */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
               <div>
-                <div className="mb-2">
+                <div className="mb-2 flex items-center gap-2 flex-wrap">
                   <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 border border-indigo-200/60">
                     {detailDrawerTask.bot_type}
                   </span>
+                  {detailDrawerTask.current_step && detailDrawerTask.current_step !== 'init' && (
+                    <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs font-mono text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                      Bước: {detailDrawerTask.current_step}
+                    </span>
+                  )}
+                  {detailDrawerTask.last_error_step && (
+                    <span className="inline-flex items-center gap-1 rounded-md bg-rose-50 dark:bg-rose-950/50 px-2 py-0.5 text-xs font-bold text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-800">
+                      Lỗi tại: {detailDrawerTask.last_error_step}
+                    </span>
+                  )}
+                  {detailDrawerTask.retry_count && detailDrawerTask.retry_count > 0 ? (
+                    <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 dark:bg-amber-950/50 px-2 py-0.5 text-xs font-bold text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                      Lần retry: #{detailDrawerTask.retry_count}
+                    </span>
+                  ) : null}
                 </div>
                 <h2 className="text-base font-bold text-slate-900 dark:text-white">
                   {getTaskBusinessInfo(detailDrawerTask).title}

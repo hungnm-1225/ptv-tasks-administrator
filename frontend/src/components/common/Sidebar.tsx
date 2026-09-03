@@ -129,8 +129,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
                         <Icon
                           size={16}
                           className={`shrink-0 transition-colors ${isActive
-                              ? 'text-indigo-600 dark:text-indigo-400'
-                              : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-700 dark:group-hover:text-slate-300'
+                            ? 'text-indigo-600 dark:text-indigo-400'
+                            : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-700 dark:group-hover:text-slate-300'
                             }`}
                         />
                         <span className="truncate">{item.label}</span>
@@ -149,28 +149,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
               );
             })}
           </nav>
-        </div>
-
-        {/* Bottom Bento Storage & Queue Card */}
-        <div className="p-4 m-3.5 mt-auto bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200/80 dark:border-slate-800 shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">Storage & Queue</div>
-            <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 font-mono">75%</span>
-          </div>
-
-          <div className="w-full bg-slate-200 dark:bg-slate-700 h-1.5 rounded-full mt-2 overflow-hidden">
-            <div className="bg-indigo-600 dark:bg-indigo-500 w-[75%] h-full rounded-full transition-all duration-500" />
-          </div>
-
-          <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500 font-mono">
-            <span>15.2 GB / 20 GB</span>
-            <span className="text-emerald-600 dark:text-emerald-400 font-bold font-sans">Healthy</span>
-          </div>
-
-          <div className="pt-2 mt-2 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between text-[10px] text-slate-400 font-mono">
-            <span>PTV Admin Hub</span>
-            <span className="font-bold text-slate-600 dark:text-slate-300">v2.5.0 Enterprise</span>
-          </div>
         </div>
       </aside>
     </>
