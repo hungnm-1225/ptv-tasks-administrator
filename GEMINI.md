@@ -88,17 +88,21 @@ Hệ thống sử dụng ma trận 8 bộ nhớ đệm RAM độc lập phân b�
 
 ### 2.9. Điều Phối Tác Vụ Độc Lập Automation Studio (`AutomationStudioPage.tsx` / `/studio`)
 - Cho phép Quản trị viên chủ động khởi tạo và điều phối các tác vụ Bot RPA/API mà không cần gắn với một ticket hòm thư đầu vào (`ticket_id = null`, `is_manual_dispatch = true`).
-- Tích hợp 4 Dispatcher Engines: `workspace_rpa`, `keycloak_api`, `lms_playwright`, `feedback_doc_triage`.
-- **4 Nhóm Tác Vụ Workspace RPA:** 
-  1. *Phê duyệt (`approve`):* Duyệt School Order, Partner Contract, Admin Approve Contract.
-  2. *Tạo & Duyệt Chuỗi (`create_and_approve`):* Master E2E Chain 4 cấp, Partner Chain, Distributor Chain kèm Autocomplete phả hệ 480 trường.
-  3. *Tạo tài khoản hàng loạt (`bulk_accounts`):* Nộp batch COF và tính toán nghỉ 15s/tài khoản.
-  4. *Ghi danh LMS (`lms_enroll`):* Ghi danh & phân nhóm lớp School Workspace / Moodle LMS.
+- Tích hợp 4 Dispatcher Engines:
+  1. `workspace_rpa`: Động cơ RPA School Workspace với 4 phân nhóm:
+     - *Phê duyệt (`approve`):* Duyệt School Order, Partner Contract, Admin Approve Contract.
+     - *Tạo & Duyệt Chuỗi (`create_and_approve`):* Master E2E Chain 4 cấp, Partner Chain, Distributor Chain kèm Autocomplete phả hệ 480 trường.
+     - *Tạo tài khoản hàng loạt (`bulk_accounts`):* Nộp batch COF và tính toán nghỉ 15s/tài khoản (kèm Hybrid Fast-Check 3 nhịp).
+     - *Ghi danh LMS (`lms_enroll`):* Ghi danh & phân nhóm lớp School Workspace / Moodle LMS.
+  2. `keycloak_api`: Động cơ định danh Keycloak OIDC 2-Tier (Reset Password, Set Status, Verify Email, Send Verify Email, Git OIDC Provisioning).
+  3. `git_collaborator`: Động cơ tự động hóa thêm Collaborators vào GitBucket Repository (`git.pythaverse.space`), gán vai trò `ADMIN`, `DEVELOPER`, `GUEST` và áp dụng thay đổi tự động.
+  4. `feedback_doc_triage`: Động cơ phân loại & chèn comment tag email người phụ trách vào Google Docs.
 - **Thuần REST API & Backend RAM Caching:** Nạp danh mục trường và môn học trực tiếp từ REST API (được tăng tốc 1ms qua `WorkspaceMemoryCache` của Backend), loại bỏ hoàn toàn việc lưu trữ dữ liệu vào LocalStorage.
 
 ### 2.10. Quản Lý Danh Mục Khóa Học Song Song (`CoursesManagerPage.tsx` / `/courses`)
 - **Kiến trúc Dual Pane:** Phân biệt rõ 2 bảng khóa học: `workspace_courses` (dùng cho RPA License Chain, COF matching) và `lms_courses` (dùng cho Moodle LMS PLearn enrollment).
 - **Thuần REST API & Invalidate Tức Thì:** Nạp trực tiếp từ REST API (`SimpleMemoryCache` 10m), loại bỏ hoàn toàn LocalStorage. Khi thêm/sửa/xóa môn học, tự động xóa cache server để giao diện hiển thị dữ liệu tươi mới ngay lập tức.
+- **Hỗ Trợ Git Repositories:** Hỗ trợ liên kết danh sách Git Repositories (`git_repos`) với từng môn học, cho phép tra cứu và tìm kiếm theo đường dẫn kho lưu trữ mã nguồn.
 - **CRUD Đơn Lẻ & Tự Sinh URL LMS:** Tự động điền URL Moodle `https://learn.pythaverse.space/course/view.php?id={course_id}`.
 - **Bulk Import Hàng Loạt (SheetJS XLSX + Text Parser):** Hỗ trợ nạp file Excel hoặc paste danh sách văn bản tự do, gửi batch 50 records.
 - **Category Manager:** Hỗ trợ Đổi tên danh mục hàng loạt và Xóa / Gộp khóa học sang danh mục khác (`target_category`).
@@ -123,6 +127,12 @@ Hệ thống sử dụng ma trận 8 bộ nhớ đệm RAM độc lập phân b�
 - Thẻ trạng thái Real-time (`Active` / `Degraded`), stream log GMT+7 làm sạch tag.
 - Nút Force Sync 5 luồng on-demand, nút Purge RAM `gc.collect()` và Batch Retry các tác vụ lỗi.
 
+### 2.15. Tự Động Hóa Pythaverse Git Collaborator (`git_service.py` / `git.pythaverse.space`)
+- **GitBucket Automation:** Quản lý thành viên cộng tác (Collaborators) tại `/settings/collaborators` của kho lưu trữ GitBucket Pythaverse Git.
+- **Đăng nhập SSO OIDC:** Tự động đăng nhập cổng Pythaverse eID Keycloak qua form OIDC (bảo toàn phiên đăng nhập, né nút header, chống redirect loop).
+- **Phân vai trò linh hoạt:** Hỗ trợ gán vai trò mục tiêu (`ADMIN`, `DEVELOPER`, `GUEST` - mặc định `GUEST`), tự động chuyển đổi vai trò nếu user đã tồn tại trong repo, xử lý an toàn trường hợp tài khoản chưa kích hoạt SSO JIT provisioning.
+- **Lưu cấu hình an toàn:** Nhận diện số lượng thay đổi mới và kích hoạt "Apply changes" lưu cấu hình lên máy chủ Git an toàn.
+
 ---
 
 ## 3. BỐN NGUYÊN TẮC BẤT DI BẤT DỊCH (ABSOLUTE RULES)
@@ -131,7 +141,8 @@ Hệ thống sử dụng ma trận 8 bộ nhớ đệm RAM độc lập phân b�
    - Tuyệt đối KHÔNG chạy ngầm bất kỳ tác vụ can thiệp hệ thống nào (Keycloak API, Playwright RPA, GitHub Issue...) nếu chưa có trạng thái `approval_status = 'approved'` do Quản trị viên phê duyệt trên Web Portal (trừ khi admin chủ động chọn `run_immediately = true` từ Studio).
 2. **Kiểm Soát Miền Doanh Nghiệp (@dtt.vn Whitelist):**
    - Chỉ người dùng có email Google thuộc miền `@dtt.vn` (đặc biệt quản trị viên tối cao `hung.nguyenmanh@dtt.vn`) mới có quyền truy cập hệ thống. Tự động từ chối và đăng xuất mọi tài khoản ngoài miền.
-3. **Memory Collection Safeguard & Lập Lịch So Le 6 Crons:**
+3. **Memory Collection Safeguard, Phân Làn Kép Dual-Lane & Lập Lịch So Le 6 Crons:**
+   - **Dual-Lane Concurrency Architecture:** Quản lý phiên Playwright Chromium theo 2 làn độc lập: Làn 1 `PLAYWRIGHT_ADMIN_SEMAPHORE` (1 slot VIP dành riêng cho Quản trị viên duyệt tác vụ và Studio, không bao giờ bị nghẽn) và Làn 2 `PLAYWRIGHT_CRON_SEMAPHORE` (1 slot dành cho các cronjobs quét ngầm: osTicket, Scanner, Smart Poller). Tổng tối đa toàn hệ thống là 2 instances Chromium (~300MB RAM an toàn trên máy chủ Render 512MB RAM). Đã loại bỏ hoàn toàn cờ `--single-process` (gây crash/deadlock) và khóa trần V8 Heap ở 128MB (`--js-flags=--max-old-space-size=128`).
    - Mọi tiến trình chạy ngầm hoặc tác vụ Playwright trong `safe_job_wrapper` BẮT BUỘC phải gọi `gc.collect()` trong khối `finally` để giải phóng bộ nhớ nhị phân trên môi trường Render 512MB RAM.
    - 6 Crons trong `main.py` BẮT BUỘC xuất phát lệch pha (5s, 65s, 125s, 185s, 245s, 305s) để ngăn chặn chạy trùng lặp gây tràn RAM.
 4. **Google Gemini Auto-Fallback 10 Tầng:**
