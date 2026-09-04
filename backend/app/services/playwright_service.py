@@ -23,10 +23,10 @@ class PlaywrightLMSService:
     """
     Playwright Worker tự động hóa 100% trên Moodle PLearn Edwiser RemUI (learn.pythaverse.space):
     - Đăng nhập Keycloak OpenID Connect SSO an toàn 1 lần duy nhất cho toàn bộ chuỗi khóa học.
-    - Event-Driven Architecture: Bắt gói tin AJAX /lib/ajax/service.php và DOM state changes (loại bỏ sleep tĩnh).
     - Hỗ trợ Ghi danh Hàng Loạt Nhiều Khóa Học (Batch Multi-Course) trong cùng 1 phiên làm việc.
     - Tự động bung 'Show more...', cài đặt cả Starting from (Start date) và Enrolment ends (End date).
-    - Smart Fallback: Lọc 2 nhịp (Keyword Pill -> Apply Filter) & khớp chính xác cột td.c2 để Gia hạn ngày VÀ Đổi Role (Mono-Role ✏️).
+    - Smart Fallback 2 nhịp chuẩn: Lọc Tag Pill -> Apply Filter -> Đổi Mono-Role ✏️ -> Gia hạn ngày ⚙️.
+    - Triệt tiêu lỗi Element is outside of viewport.
     - Xóa người dùng khỏi khóa học (Unenrol 🗑️).
     - Tạo Group & Phân nhóm lớp tự động từng khóa.
     """
@@ -114,7 +114,7 @@ class PlaywrightLMSService:
             except Exception:
                 pass
 
-            # Chờ xác nhận đã vào trong Moodle (State Confirmation)
+            # Chờ xác nhận đã vào trong Moodle
             user_menu = page.locator(".usermenu, a[title='User menu'], .userinitials, .site-name, a[href*='/login/logout.php']").first
             try:
                 await user_menu.wait_for(state="visible", timeout=20000)
@@ -155,9 +155,10 @@ class PlaywrightLMSService:
 
     async def _apply_keyword_filter(self, page: Page, email: str) -> None:
         """
-        Thao tác chuẩn hóa bộ lọc Keyword 2 nhịp:
-        - Bắt trực tiếp event DOM & API Network response.
-        - Tuyệt đối không dùng sleep đoán mò.
+        Thao tác chuẩn hóa bộ lọc Keyword 2 nhịp (Chuẩn hóa theo file test):
+        - Nhịp 1: Chọn Keywords -> Gõ email vào ô Type... -> Nhấn Enter sinh Tag Pill.
+        - Nhịp 2: Bấm Apply filters -> Chờ AJAX Moodle nạp lại bảng.
+        - Triệt tiêu hoàn toàn lỗi 'Element is outside of the viewport'.
         """
         try:
             # 1. Reset filter cũ nếu có
@@ -165,19 +166,18 @@ class PlaywrightLMSService:
             if await reset_btn.count() > 0 and await reset_btn.is_visible():
                 await reset_btn.click(force=True)
                 try:
-                    await page.locator("div.loading-icon, .overlay-icon").wait_for(state="hidden", timeout=4000)
+                    await page.locator("div.loading-icon, .overlay-icon").wait_for(state="hidden", timeout=3000)
                 except Exception:
                     pass
 
-            # 2. Chọn trường lọc Keywords bằng cả Playwright native và jQuery trigger
-            select_loc = page.locator("div[data-filterregion='filters'] select[data-filterfield='type'], select[data-filterfield='type']").first
-            if await select_loc.count() > 0:
-                await select_loc.wait_for(state="visible", timeout=8000)
-                await select_loc.select_option(value="keywords")
-                
-            # Đảm bảo jQuery event change được kích hoạt để Moodle JS render ô Type...
+            # 2. Đảm bảo chọn filter type là Keyword
+            type_select = page.locator("select[data-filterfield='type']").first
+            if await type_select.count() > 0 and await type_select.is_enabled():
+                await type_select.select_option(value="keywords")
+            
+            # Ép Moodle JS kích hoạt render trường value
             await page.evaluate("""() => {
-                const sel = document.querySelector("div[data-filterregion='filters'] select[data-filterfield='type'], select[data-filterfield='type']");
+                const sel = document.querySelector("select[data-filterfield='type']");
                 if (sel) {
                     sel.value = 'keywords';
                     if (window.jQuery) {
@@ -188,56 +188,43 @@ class PlaywrightLMSService:
                 }
             }""")
 
-            # 3. Nhịp 1: Chờ ô Type... xuất hiện thực tế trong DOM và gõ email
-            kw_input = page.locator(
-                "div[data-filterregion='value'] input, input[placeholder='Type...'], div[data-filter-type='keywords'] input, input.form-control[placeholder*='Type']"
-            ).first
-            
-            try:
-                await kw_input.wait_for(state="visible", timeout=8000)
-            except Exception:
-                val_region = page.locator("div[data-filterregion='value']").first
-                if await val_region.count() > 0:
-                    await val_region.click(force=True)
-                await kw_input.wait_for(state="visible", timeout=5000)
-
+            # 3. Nhịp 1: Chờ ô Type... xuất hiện thực tế, scroll vào view và gõ email + Enter
+            kw_input = page.locator("div[data-filterregion='value'] input[placeholder='Type...'], div[data-filter-type='keywords'] input, div[data-filterregion='value'] input").first
+            await kw_input.wait_for(state="visible", timeout=10000)
+            await kw_input.scroll_into_view_if_needed()
             await kw_input.click(force=True)
             await kw_input.fill("")
             await kw_input.fill(email)
             await kw_input.press("Enter")
 
-            # Chờ Tag Pill email được Moodle tạo xong trong DOM
-            tag_badge = page.locator(
-                f"div[data-filterregion='value'] .form-autocomplete-selection span.badge:has-text('{email}'), div[data-filterregion='value'] span.badge:has-text('{email}')"
-            ).first
+            # Chờ Tag Pill xuất hiện trong khung selection
+            tag_badge = page.locator("div[data-filterregion='value'] .form-autocomplete-selection span.badge, div[data-filterregion='value'] span.badge").filter(has_text=email).first
             try:
                 await tag_badge.wait_for(state="visible", timeout=5000)
             except Exception:
                 pass
 
-            # 4. Nhịp 2: Bấm Apply filters và bắt trực tiếp Response AJAX cập nhật bảng
+            # 4. Nhịp 2: Bấm Apply filters và bắt Response AJAX cập nhật bảng
             apply_btn = page.locator("button[data-filteraction='apply']:has-text('Apply filters'), button[data-filteraction='apply']").first
             if await apply_btn.count() > 0:
+                await apply_btn.scroll_into_view_if_needed()
                 try:
-                    # Bắt gói tin AJAX service.php khi Moodle nạp lại bảng
                     async with page.expect_response(
                         lambda r: "service.php" in r.url and r.status == 200,
                         timeout=12000
                     ):
                         await apply_btn.click(force=True)
                 except Exception:
-                    # Fallback click nếu AJAX đã fire trước đó
-                    if await apply_btn.is_visible():
-                        await apply_btn.click(force=True)
+                    await apply_btn.click(force=True)
 
-            # Chờ các spinner biến mất hoàn toàn
+            # Chờ bảng nạp xong
             try:
                 await page.locator("div.loading-icon, .MuiCircularProgress-root, .overlay-icon").wait_for(state="hidden", timeout=6000)
             except Exception:
                 pass
 
         except Exception as e:
-            logger.warning(f"⚠️ Cảnh báo áp dụng bộ lọc Keyword: {e}. Tiếp tục quét trực tiếp bảng...")
+            logger.warning(f"⚠️ Cảnh báo áp dụng bộ lọc Keyword: {e}. Tiếp tục quét bảng...")
 
     async def _update_user_role_in_table(self, page: Page, user_row: Locator, target_role_label: str) -> bool:
         """Cập nhật vai trò (Mono-Role) trực tiếp ở cột Roles (td.cell.c3) bằng icon bút chì ✏️."""
@@ -258,7 +245,6 @@ class PlaywrightLMSService:
             await pencil_btn.scroll_into_view_if_needed()
             await pencil_btn.click(force=True)
 
-            # Chờ dropdown role inline mở ra
             down_arrow = role_cell.locator("span.form-autocomplete-downarrow, .edw-icon-Down-Arrow").first
             try:
                 await down_arrow.wait_for(state="visible", timeout=4000)
@@ -270,6 +256,7 @@ class PlaywrightLMSService:
                 old_cancel = role_cell.locator(".form-autocomplete-selection span.badge span.edw-icon-Cancel, .badge .edw-icon-Cancel")
                 if await old_cancel.count() > 0:
                     await old_cancel.first.click(force=True)
+                    await asyncio.sleep(0.2)
                 else:
                     break
 
@@ -280,7 +267,7 @@ class PlaywrightLMSService:
             await new_opt.wait_for(state="visible", timeout=4000)
             await new_opt.click(force=True)
 
-            # Bấm nút lưu (icon đĩa mềm) và bắt response lưu role
+            # Bấm nút lưu (icon đĩa mềm)
             save_disk = role_cell.locator("i.fa-floppy-o, a:has(i.fa-floppy-o)").first
             if await save_disk.count() > 0 and await save_disk.is_visible():
                 try:
@@ -348,11 +335,11 @@ class PlaywrightLMSService:
             page.set_default_timeout(35000)
 
             try:
-                # 🔑 ĐĂNG NHẬP 1 LẦN DUY NHẤT CHO CẢ BATCH
+                # 🔑 ĐĂNG NHẬP 1 LẦN DUY NHẤT CHO TOÀN BỘ CÁC KHÓA
                 if not await self._login_moodle_sso(page):
                     return {"status": "failed", "error": "Không thể đăng nhập vào hệ thống Moodle PLearn."}
 
-                # VÒNG LẶP DUYỆT TỪNG KHÓA HỌC TRONG CÙNG 1 PHIÊN BROWSER
+                # VÒNG LẶP DUYỆT TỪNG KHÓA HỌC
                 for c_idx, c_info in enumerate(raw_courses):
                     course_id = str(c_info.get("course_id", "")).strip()
                     course_name = c_info.get("course_name", f"Course #{course_id}")
@@ -433,7 +420,6 @@ class PlaywrightLMSService:
                                     if is_expanded != "true":
                                         await show_more_link.scroll_into_view_if_needed()
                                         await show_more_link.click(force=True)
-                                        # Chờ div advanced mở ra
                                         try:
                                             await modal.locator("#form-advanced-div").wait_for(state="visible", timeout=4000)
                                         except Exception:
@@ -470,7 +456,7 @@ class PlaywrightLMSService:
                                     if (year) {{ year.value = '{date_info["year"]}'; year.dispatchEvent(new Event('change', {{ bubbles: true }})); }}
                                 }}""")
 
-                            # 3. Đợi ô Search của RequireJS xuất hiện
+                            # 3. Đợi ô Search của RequireJS
                             search_user_input = modal.locator(
                                 "#fitem_id_userlist input[placeholder='Search'], #fitem_id_userlist input[role='combobox'], #fitem_id_userlist input.form-control"
                             ).first
@@ -533,6 +519,8 @@ class PlaywrightLMSService:
 
                             for email in emails_need_fallback:
                                 user_extended = False
+                                
+                                # Áp dụng bộ lọc Keyword 2 nhịp (đã loại bỏ Outside Viewport)
                                 await self._apply_keyword_filter(page, email)
 
                                 user_row = page.locator("table#participants tbody tr").filter(

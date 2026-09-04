@@ -47,6 +47,8 @@ class CourseSchema(BaseModel):
     course_name: str
     sku: Optional[str] = None
     lms_url: Optional[str] = None
+    # 🐙 Hỗ trợ mảng danh sách Git Repositories
+    git_repos: Optional[List[Dict[str, Any]]] = None
 
     @model_validator(mode="after")
     def auto_fill_lms_url(self):
@@ -61,6 +63,8 @@ class CourseUpdateSchema(BaseModel):
     course_name: Optional[str] = None
     sku: Optional[str] = None
     lms_url: Optional[str] = None
+    # 🐙 Hỗ trợ mảng danh sách Git Repositories khi cập nhật
+    git_repos: Optional[List[Dict[str, Any]]] = None
 
 
 class BulkCoursesPayload(BaseModel):
@@ -109,7 +113,7 @@ async def list_courses(
         cat_clean = category.strip().lower()
         data = [c for c in data if str(c.get("category", "")).strip().lower() == cat_clean]
 
-    # Tìm kiếm từ khóa trong RAM
+    # Tìm kiếm từ khóa trong RAM (hỗ trợ cả tìm kiếm theo URL Git Repo)
     if search:
         s_lower = search.strip().lower()
         data = [
@@ -118,6 +122,7 @@ async def list_courses(
             or s_lower in str(c.get("course_name", "") or "").lower()
             or s_lower in str(c.get("sku", "") or "").lower()
             or s_lower in str(c.get("category", "") or "").lower()
+            or s_lower in str(c.get("git_repos", "") or "").lower()
         ]
         
     return data
