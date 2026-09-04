@@ -39,7 +39,7 @@ import { CourseItem, GitRepoConfig } from '../../types';
 
 type CoursePaneType = 'workspace' | 'lms';
 type BulkInputMode = 'file' | 'text';
-type GitRepoTargetType = 'teacher_only' | 'all' | 'student_only';
+type GitRepoTargetType = 'teacher_only' | 'all';
 
 interface ParsedImportItem {
     course_id: number;
@@ -768,10 +768,8 @@ export const CoursesManagerPage: React.FC = () => {
                                                     const shortName = repo.repo_url ? repo.repo_url.split('/').pop() || 'Repo' : 'Repo';
                                                     const targetText =
                                                         repo.target === 'teacher_only'
-                                                            ? 'Chỉ GV'
-                                                            : repo.target === 'student_only'
-                                                                ? 'Chỉ HS'
-                                                                : 'Cả GV & HS';
+                                                            ? 'GV (Non-editing)'
+                                                            : 'Cả GV & HS';
 
                                                     return (
                                                         <a
@@ -780,11 +778,11 @@ export const CoursesManagerPage: React.FC = () => {
                                                             target="_blank"
                                                             rel="noreferrer"
                                                             title={`Mở Git Repo: ${repo.repo_url} (${targetText})`}
-                                                            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[10px] font-semibold bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300 border border-violet-200/70 dark:border-violet-800/50 hover:bg-violet-100 transition-all max-w-[200px] truncate"
+                                                            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[10px] font-semibold bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300 border border-violet-200/70 dark:border-violet-800/50 hover:bg-violet-100 transition-all max-w-[220px] truncate"
                                                         >
                                                             <GitBranch className="w-2.5 h-2.5 shrink-0 text-violet-600 dark:text-violet-400" />
                                                             <span className="truncate font-mono">{shortName}</span>
-                                                            <span className="opacity-75 text-[9px]">({targetText})</span>
+                                                            <span className="opacity-75 text-[9px] font-sans">({targetText})</span>
                                                         </a>
                                                     );
                                                 })}
@@ -1486,20 +1484,21 @@ export const CoursesManagerPage: React.FC = () => {
                                                 </div>
 
                                                 <div className="flex items-center gap-2">
-                                                    <span className="text-[11px] font-semibold text-slate-500 shrink-0">Cấp cho:</span>
-                                                    <div className="grid grid-cols-3 gap-1.5 flex-1">
+                                                    <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 shrink-0">
+                                                        Cấp cho:
+                                                    </span>
+                                                    <div className="grid grid-cols-2 gap-1.5 flex-1">
                                                         {[
-                                                            { id: 'teacher_only', label: 'Chỉ Giáo Viên' },
-                                                            { id: 'all', label: 'Cả GV & HS' },
-                                                            { id: 'student_only', label: 'Chỉ Học Sinh' },
+                                                            { id: 'teacher_only', label: 'Giáo viên (Non-editing Teacher)' },
+                                                            { id: 'all', label: 'Cả GV & Học Sinh' },
                                                         ].map((opt) => (
                                                             <button
                                                                 key={opt.id}
                                                                 type="button"
                                                                 onClick={() => handleUpdateRepoRow(rIdx, 'target', opt.id)}
-                                                                className={`py-1 px-1.5 text-center rounded-lg text-[11px] font-semibold transition cursor-pointer border ${repoItem.target === opt.id
+                                                                className={`py-1.5 px-2 text-center rounded-lg text-[11px] font-semibold transition-all cursor-pointer border ${repoItem.target === opt.id
                                                                     ? 'border-violet-600 bg-violet-600 text-white shadow-2xs font-bold'
-                                                                    : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100'
+                                                                    : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-750'
                                                                     }`}
                                                             >
                                                                 {opt.label}
