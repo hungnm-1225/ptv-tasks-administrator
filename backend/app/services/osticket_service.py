@@ -316,9 +316,9 @@ class OSTicketService:
             await detail_page.close()
 
     async def poll_open_ostickets(self):
-        """Quét danh sách Open Queue và cào các vé mới nhất (Được bọc Semaphore Concurrency Slot)."""
-        supabase = get_supabase_client()
-        async with acquire_playwright_slot("OSTicket Queue Polling"):
+        """Quét danh sách Open Queue và cào các vé mới nhất (Chạy trên Làn nền cron, không chặn Admin)."""
+    supabase = get_supabase_client()
+    async with acquire_playwright_slot("OSTicket Queue Polling", timeout=60.0, lane="cron"):
             async with async_playwright() as p:
                 browser, context, page = await self._create_context(p)
                 try:
