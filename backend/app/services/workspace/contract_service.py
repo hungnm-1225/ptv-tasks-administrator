@@ -440,18 +440,7 @@ class WorkspaceContractService(WorkspaceBaseService):
             async with async_playwright() as p:
                 browser, context, page = await self._create_context(p)
                 try:
-                    # Lấy thông tin Admin từ config, nếu không có sẽ dùng thông tin truyền vào (fallback)
-                    forced_admin_user = getattr(settings, "TEST_ADMIN_USER", None) or "adminworkspace"
-                    forced_admin_pass = getattr(settings, "TEST_ADMIN_PASS", None) or getattr(settings, "KEYCLOAK_ADMIN_PASS", None) or ""
-
-                    logger.info(f"👑 [Sales Admin Guard] Sử dụng tài khoản tối cao từ Render: '{forced_admin_user}'")
-
-                    is_ok, login_err = await self.login_role(
-                        page, 
-                        forced_admin_user, 
-                        forced_admin_pass, 
-                        "Sales Admin"
-                    )
+                    is_ok, login_err = await self.login_role(page, credentials.get("username", ""), credentials.get("password", ""), "Sales Admin")
                     if not is_ok:
                         return {"status": "failed", "error": login_err}
 

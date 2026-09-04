@@ -100,14 +100,25 @@ async def execute_approved_bot_task(
             partner_creds = payload_data.get("partner_credentials")
             distributor_creds = payload_data.get("distributor_credentials")
             
-            admin_pass = getattr(settings, "TEST_ADMIN_PASS", None)
-            if not admin_pass:
-                logger.warning(f"⚠️ {task_tag} TEST_ADMIN_PASS chưa được cấu hình trong Render Environment Variables!")
-                
-            admin_creds = payload_data.get("admin_credentials") or {
-                "username": getattr(settings, "TEST_ADMIN_USER", "salesadmin@dtt.vn"),
-                "password": admin_pass or ""
-            }
+            # =========================================================================
+            # 🛡️ BỌC THÉP CREDENTIALS SALES ADMIN TỐI CAO TỪ RENDER ENVIRONMENT
+            # =========================================================================
+            raw_admin_user = str(getattr(settings, "TEST_ADMIN_USER", "")).strip() or "salesadmin@dtt.vn"
+            raw_admin_pass = str(getattr(settings, "TEST_ADMIN_PASS", "")).strip()
+
+            if not raw_admin_pass:
+                logger.warning(f"⚠️ {task_tag} TEST_ADMIN_PASS bị rỗng hoặc chưa được cấu hình trên Render!")
+            
+            admin_creds = payload_data.get("admin_credentials")
+            if not admin_creds or not admin_creds.get("username"):
+                admin_creds = {
+                    "username": raw_admin_user,
+                    "password": raw_admin_pass
+                }
+            
+            logger.info(f"🛡️ {task_tag} Đã nạp thông tin Sales Admin: Username='{admin_creds['username']}', Password Length={len(admin_creds['password'])} ký tự.")
+            # =========================================================================
+
 
             # 🟢 AUTO-RESOLVER PHẢ HỆ:
             if (distributor_name or payload_data.get("distributor_code")) and not distributor_creds:
