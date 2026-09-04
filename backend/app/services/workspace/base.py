@@ -80,18 +80,37 @@ class WorkspaceBaseService:
             # Chờ input xuất hiện và ổn định
             await wait_for_dom_and_spinners(page, "input[name='username'], input[name='email'], #username", min_pacing_ms=300)
             
-            uname_input = page.locator("input[name='username'], input[name='email'], #username").first
-            await uname_input.fill(username)
+            # 👉 BƠM TRỰC TIẾP USERNAME BẰNG JS DOM (CHỐNG LỆCH KÝ TỰ)
+            uname_selector = "input[name='username'], input[name='email'], #username"
+            await page.locator(uname_selector).first.wait_for(state="visible", timeout=10000)
+            await page.evaluate(f"""({{ selector, val }}) => {{
+                const el = document.querySelector(selector);
+                if (el) {{
+                    el.value = val;
+                    el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                }}
+            }}""", {"selector": uname_selector.split(",")[0].strip(), "val": username})
             await page.wait_for_timeout(200)
 
-            pwd_input = page.locator("input[name='password'], #password").first
-            await pwd_input.fill(password)
+            # 👉 BƠM TRỰC TIẾP PASSWORD BẰNG JS DOM (BẢO TOÀN 100% KÝ TỰ ĐẶC BIỆT @, !, #)
+            pwd_selector = "input[name='password'], #password"
+            await page.locator(pwd_selector).first.wait_for(state="visible", timeout=10000)
+            await page.evaluate(f"""({{ selector, val }}) => {{
+                const el = document.querySelector(selector);
+                if (el) {{
+                    el.value = val;
+                    el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                }}
+            }}""", {"selector": pwd_selector.split(",")[0].strip(), "val": password})
             await page.wait_for_timeout(300)
 
+            # Click nút đăng nhập
             submit_btn = page.locator("button[type='submit'], input[type='submit'], button:has-text('Log In'), button:has-text('Đăng nhập')").first
             await submit_btn.click()
             
-            # Chờ phản hồi đăng nhập theo State Race (loại bỏ wait_for_timeout 2500ms cứng)
+            # Chờ phản hồi đăng nhập theo State Race
             is_ok, login_err = await smart_wait_login_or_error(
                 page, timeout=20000, role_title=role_title, username=username
             )
