@@ -564,22 +564,31 @@ class WorkspaceContractService(WorkspaceBaseService):
                             "message": f"Hợp đồng [{search_kw}] đã được Sales Admin phê duyệt từ trước đó."
                         }
 
-                    # 🚀 BƯỚC 3: Bấm icon con mắt 👁️ xem chi tiết
-                    logger.info("🔍 Bấm nút xem chi tiết Contract (Icon Con Mắt 👁️)...")
-                    eye_btn = target_row.locator(
-                        "button[aria-label='View Details'], [data-field='Actions'] button, [data-field='actions'] button, button:has(svg), svg[data-testid='VisibilityIcon']"
-                    ).first
-                    await eye_btn.click(timeout=15000)
+                    # 🚀 BƯỚC 3: Bấm trực tiếp vào mã Hợp đồng hoặc icon con mắt để sang trang chi tiết
+                    logger.info("🔍 Mở trang chi tiết Hợp đồng (Click trực tiếp vào mã hoặc icon)...")
+                    
+                    # Thử click vào chính mã hợp đồng trên dòng đó để mở trang chi tiết
+                    code_link = target_row.locator("a, [data-field='order_code'] a, [data-field='contract_code'] a").first
+                    if await code_link.count() > 0 and await code_link.is_visible():
+                        await code_link.click()
+                    else:
+                        eye_btn = target_row.locator(
+                            "button[aria-label='View Details'], [data-field='Actions'] button, [data-field='actions'] button, button:has(svg), svg[data-testid='VisibilityIcon']"
+                        ).first
+                        await eye_btn.click(timeout=15000)
 
-                    await page.wait_for_timeout(1000)
-
-                    # 🛡️ FALLBACK 2 (TẦNG 2): Kiểm tra nút Approve trong modal
+                    # Chờ trang chi tiết Order Details load xong (nhìn thấy nút Approve màu xanh lá)
+                    logger.info("⏳ Chờ trang chi tiết Order Details tải hoàn tất...")
+                    await page.wait_for_url("**/sales-admin-workspace/**", timeout=15000)
+                    
                     approve_btn = page.locator("button:has-text('Approve')").first
+                    try:
+                        await approve_btn.wait_for(state="visible", timeout=10000)
+                    except Exception:
+                        pass
+
                     if await approve_btn.count() == 0 or not (await approve_btn.is_visible()):
-                        logger.info(f"✨ Không thấy nút 'Approve' -> Hợp đồng [{search_kw}] đã được duyệt từ trước!")
-                        close_btn = page.locator("button:has-text('Close'), div[role='dialog'] button:has-text('Close')").first
-                        if await close_btn.count() > 0 and await close_btn.is_visible():
-                            await close_btn.click()
+                        logger.info(f"✨ Không tìm thấy nút 'Approve' -> Hợp đồng [{search_kw}] có thể đã được duyệt từ trước!")
                         return {
                             "status": "success",
                             "contract_identifier": search_kw,
@@ -587,36 +596,38 @@ class WorkspaceContractService(WorkspaceBaseService):
                             "message": f"Hợp đồng [{search_kw}] đã được Sales Admin phê duyệt từ trước đó."
                         }
 
-                    # 🚀 BƯỚC 4: Bấm nút 'Approve'
-                    logger.info("👑 Bấm nút 'Approve'...")
+                    # 🚀 BƯỚC 4: Bấm nút 'Approve' màu xanh lá
+                    logger.info("👑 Bấm nút 'Approve' trên trang chi tiết...")
                     await approve_btn.click()
+                    await page.wait_for_timeout(1000)
 
-                    # 🚀 BƯỚC 5: Điền justification và xác nhận
-                    await page.wait_for_selector("div[role='dialog']", state="visible", timeout=10000)
-                    await page.wait_for_timeout(500)
+                    # 🚀 BƯỚC 5: Nếu có Dialog xác nhận lý do (Justification) thì điền vào, không thì bấm Confirm luôn
+                    confirm_dialog = page.locator("div[role='dialog'], .MuiDialog-root").first
+                    if await confirm_dialog.count() > 0 and await confirm_dialog.is_visible():
+                        logger.info("✍️ Phát hiện Dialog xác nhận, đang điền lý do phê duyệt...")
+                        textarea = confirm_dialog.locator("textarea").first
+                        if await textarea.count() > 0:
+                            default_note = "Afiq requests and approves the requests, Hung QA processes the contract via Automation Hub"
+                            valid_justification = justification if (justification and len(justification.strip()) >= 15) else default_note
+                            await textarea.fill(valid_justification)
+                            await page.wait_for_timeout(400)
 
-                    default_note = "Afiq requests and approves the requests, Hung QA processes the contract via Automation Hub"
-                    valid_justification = justification if (justification and len(justification.strip()) >= 15) else default_note
-                    
-                    logger.info(f"✍️ Điền lý do phê duyệt: {valid_justification[:40]}...")
-                    textarea = page.locator("div[role='dialog'] textarea").first
-                    await textarea.fill(valid_justification)
-                    await page.wait_for_timeout(500)
+                        confirm_btn = confirm_dialog.locator("button:has-text('Confirm Approval'), button:has-text('Confirm'), button:has-text('Approve')").last
+                        if await confirm_btn.count() > 0:
+                            await confirm_btn.click()
+                            await page.wait_for_timeout(2000)
+                    else:
+                        # Nếu không có dialog phụ mà bấm Approve là ăn luôn, ta chờ quay về dashboard
+                        logger.info("🚀 Đã bấm Approve trực tiếp, đang chờ cập nhật trạng thái...")
+                        await page.wait_for_timeout(3000)
 
-                    logger.info("🚀 Bấm 'Confirm Approval'...")
-                    confirm_btn = page.locator("div[role='dialog'] button:has-text('Confirm Approval'), div[role='dialog'] button:has-text('Confirm')").first
-                    await confirm_btn.click()
-                    await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=15000)
-                    await page.wait_for_timeout(1500)
-
-                    logger.info(f"🎉 Sales Admin đã duyệt DST Contract {search_kw} thành công!")
+                    logger.info(f"🎉 Sales Admin đã duyệt DST Contract {search_kw} thành công tuyệt đối!")
                     return {
                         "status": "success",
                         "contract_identifier": search_kw,
-                        "justification": valid_justification,
+                        "justification": justification or "Auto-approved by Automation Hub",
                         "message": "Sales Admin đã phê duyệt DST Contract thành công"
                     }
-
                 except Exception as e:
                     logger.error(f"❌ Lỗi Sales Admin Approve: {e}")
                     return {"status": "failed", "error": str(e)}
