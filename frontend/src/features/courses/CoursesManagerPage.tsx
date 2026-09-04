@@ -264,6 +264,97 @@ export const CoursesManagerPage: React.FC = () => {
             toast.error('Không thể xóa: ' + (err.message || err));
         }
     };
+    // 🧠 Hàm bóc tách thông minh chuỗi Git Repos (hỗ trợ cả từ khóa và tag [teacher]/[all])
+    const parseGitReposString = (rawStr: string): GitRepoConfig[] => {
+        if (!rawStr || !rawStr.trim()) return [];
+        const reposList: GitRepoConfig[] = [];
+
+        rawStr.split(';').forEach((part) => {
+            let trimmed = part.trim();
+            if (!trimmed) return;
+
+            let target: GitRepoTargetType = 'all';
+
+            // 1. Kiểm tra tag tường minh dạng [teacher] hoặc [all]
+            if (/\[(teacher|gv|teacher_only)\]/i.test(trimmed)) {
+                target = 'teacher_only';
+                trimmed = trimmed.replace(/\[(teacher|gv|teacher_only)\]/gi, '').trim();
+            } else if (/\[(all|both|student|hs)\]/i.test(trimmed)) {
+                target = 'all';
+                trimmed = trimmed.replace(/\[(all|both|student|hs)\]/gi, '').trim();
+            } else {
+                // 2. Nhận diện tự động theo từ khóa trong link URL
+                const lower = trimmed.toLowerCase();
+                if (
+                    lower.includes('teacher') ||
+                    lower.includes('_gv') ||
+                    lower.includes('solution') ||
+                    lower.includes('dapan') ||
+                    lower.includes('guide')
+                ) {
+                    target = 'teacher_only';
+                } else {
+                    target = 'all';
+                }
+            }
+
+            if (trimmed) {
+                reposList.push({ repo_url: trimmed, target });
+            }
+        });
+
+        return reposList;
+    };
+
+    // 📥 Hàm tải trực tiếp File Excel Mẫu chuẩn về máy tính người dùng
+    const handleDownloadSampleExcel = () => {
+        try {
+            const sampleData = [
+                {
+                    'Course ID (*)': 654,
+                    'Category (*)': 'SWRP',
+                    'Tên Khóa Học (*)': 'SWRP 9: LEANBOT Programming Applications with IoT [V2] (EN)',
+                    'Mã SKU': 'PTV-SWRP-09',
+                    'LMS URL (Có thể để trống)': 'https://learn.pythaverse.space/course/view.php?id=654',
+                    'Git Repos (Cách nhau bởi dấu ;)': 'https://git.pythaverse.space/ptvswrp/SWRP11_Teacher; https://git.pythaverse.space/ptvswrp/SWRP11_Starter',
+                },
+                {
+                    'Course ID (*)': 780,
+                    'Category (*)': 'ASP',
+                    'Tên Khóa Học (*)': 'ASP Elementary Intermediate (EN)',
+                    'Mã SKU': 'PTV-ASP-EL-01',
+                    'LMS URL (Có thể để trống)': '',
+                    'Git Repos (Cách nhau bởi dấu ;)': 'https://git.pythaverse.space/ptvasp/ASP_Solution [teacher]; https://git.pythaverse.space/ptvasp/ASP_Project [all]',
+                },
+                {
+                    'Course ID (*)': 812,
+                    'Category (*)': 'IR',
+                    'Tên Khóa Học (*)': 'International Robothon 2026 Strategy Guide (EN)',
+                    'Mã SKU': 'PTV-IR-2026',
+                    'LMS URL (Có thể để trống)': '',
+                    'Git Repos (Cách nhau bởi dấu ;)': 'https://git.pythaverse.space/ptvir/IR2026_All',
+                },
+            ];
+
+            const ws = XLSX.utils.json_to_sheet(sampleData);
+            // Thiết lập độ rộng cột cho đẹp mắt
+            ws['!cols'] = [
+                { wch: 14 }, // Course ID
+                { wch: 14 }, // Category
+                { wch: 55 }, // Tên Khóa Học
+                { wch: 18 }, // SKU
+                { wch: 40 }, // LMS URL
+                { wch: 65 }, // Git Repos
+            ];
+
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'DanhMucKhoaHoc');
+            XLSX.writeFile(wb, 'Mau_Nhap_Khoa_Hoc_Pythaverse.xlsx');
+            toast.success('Đã tải xuống file Excel mẫu chuẩn thành công!');
+        } catch (err: any) {
+            toast.error('Lỗi khi tạo file Excel mẫu: ' + (err.message || err));
+        }
+    };
 
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -310,15 +401,7 @@ export const CoursesManagerPage: React.FC = () => {
 
                     const reposList: GitRepoConfig[] = [];
                     if (gitReposRaw) {
-                        gitReposRaw.split(';').forEach((rPart) => {
-                            const trimmed = rPart.trim();
-                            if (trimmed) {
-                                reposList.push({
-                                    repo_url: trimmed,
-                                    target: trimmed.toLowerCase().includes('teacher') ? 'teacher_only' : 'all',
-                                });
-                            }
-                        });
+                        const reposList = parseGitReposString(gitReposRaw);
                     }
 
                     const isValid = !isNaN(cId) && cId > 0 && name.length > 0 && cat.length > 0;
@@ -1180,19 +1263,35 @@ export const CoursesManagerPage: React.FC = () => {
                                     </p>
                                 </div>
 
-                                <div className="mt-2 flex items-center justify-between text-xs">
-                                    <button
-                                        type="button"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            loadSampleBulkData();
-                                        }}
-                                        className="text-emerald-600 dark:text-emerald-400 font-semibold hover:underline inline-flex items-center gap-1 cursor-pointer"
-                                    >
-                                        <Download className="w-3.5 h-3.5" />
-                                        <span>Nạp nhanh dữ liệu mẫu kiểm thử</span>
-                                    </button>
-                                    <span className="text-slate-400">Hỗ trợ định dạng UTF-8 CSV, TSV, XLSX</span>
+                                <div className="mt-2.5 flex items-center justify-between text-xs">
+                                    <div className="flex items-center gap-3">
+                                        {/* Nút 1: Tải file Excel mẫu thực tế về máy */}
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDownloadSampleExcel();
+                                            }}
+                                            className="text-emerald-700 dark:text-emerald-400 font-bold hover:underline inline-flex items-center gap-1.5 cursor-pointer bg-emerald-50 dark:bg-emerald-950/50 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800/60"
+                                        >
+                                            <Download className="w-3.5 h-3.5" />
+                                            <span>Tải File Excel Mẫu (.xlsx)</span>
+                                        </button>
+
+                                        {/* Nút 2: Nạp nhanh xem trước trên giao diện */}
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                loadSampleBulkData();
+                                            }}
+                                            className="text-indigo-600 dark:text-indigo-400 font-semibold hover:underline inline-flex items-center gap-1 cursor-pointer"
+                                        >
+                                            <span>Điền dữ liệu thử nghiệm</span>
+                                        </button>
+                                    </div>
+
+                                    <span className="text-slate-400 text-[11px]">Hỗ trợ .xlsx, .xls, .csv (UTF-8)</span>
                                 </div>
                             </div>
                         ) : (
@@ -1267,9 +1366,25 @@ export const CoursesManagerPage: React.FC = () => {
                                                         {item.course_name}
                                                     </td>
                                                     <td className="p-2 font-mono text-slate-500">{item.sku || '---'}</td>
-                                                    <td className="p-2 font-mono text-violet-600 dark:text-violet-400 font-bold">
+                                                    <td className="p-2 font-mono">
                                                         {item.git_repos && item.git_repos.length > 0 ? (
-                                                            <span>🐙 {item.git_repos.length} repos</span>
+                                                            <div className="flex flex-wrap gap-1 max-w-[260px]">
+                                                                {item.git_repos.map((r, rIdx) => (
+                                                                    <span
+                                                                        key={rIdx}
+                                                                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${r.target === 'teacher_only'
+                                                                            ? 'bg-violet-100 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800'
+                                                                            : 'bg-sky-100 dark:bg-sky-950/70 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800'
+                                                                            }`}
+                                                                    >
+                                                                        <GitBranch className="w-2.5 h-2.5 shrink-0" />
+                                                                        <span className="truncate max-w-[90px]">{r.repo_url.split('/').pop()}</span>
+                                                                        <span className="text-[9px] opacity-80">
+                                                                            ({r.target === 'teacher_only' ? 'GV' : 'Cả Lớp'})
+                                                                        </span>
+                                                                    </span>
+                                                                ))}
+                                                            </div>
                                                         ) : (
                                                             <span className="text-slate-400 font-normal">---</span>
                                                         )}

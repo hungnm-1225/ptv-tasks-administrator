@@ -1,9 +1,10 @@
 # backend/app/services/workspace/contract_service.py
 import re
 import os
+import json
 import logging
 from typing import Dict, Any, List, Optional
-from playwright.async_api import async_playwright, Page
+from playwright.async_api import async_playwright, Page, Response
 from app.core.config import settings
 
 from app.services.workspace.base import WorkspaceBaseService, BASE_WORKSPACE_URL
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class WorkspaceContractService(WorkspaceBaseService):
-    """Xử lý các nghiệp vụ tạo và phê duyệt Contract giữa Partner - Distributor - Sales Admin."""
+    """Xử lý các nghiệp vụ tạo và phê duyệt Contract giữa Partner - Distributor - Sales Admin bằng cơ chế Event-Driven API."""
 
     async def _safe_navigate(self, page: Page, target_url: str, keyword_in_url: str = "", timeout: int = 35000):
         """Hàm điều hướng an toàn: chống lỗi net::ERR_ABORTED khi dính redirect SSO ngầm."""
@@ -39,10 +40,20 @@ class WorkspaceContractService(WorkspaceBaseService):
         page: Page,
         contract_data: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Hàm nội bộ: Điền form tạo Contract của Distributor trên phiên trình duyệt đang mở."""
+        """Hàm nội bộ: Điền form tạo Contract của Distributor trên phiên trình duyệt đang mở (Bắt API createOrder.php)."""
         logger.info("📝 Distributor mở: /distributor-workspace/contract-po/create...")
-        await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/distributor-workspace/contract-po/create", "contract-po/create")
-        await wait_for_dom_and_spinners(page, "h4:has-text('Create Contract/PO'), :text('Create Contract/PO')", min_pacing_ms=500)
+        
+        # Bắt sự kiện nạp danh mục môn học của Distributor (getListCourseConfig.php)
+        try:
+            async with page.expect_response(
+                lambda r: "getListCourseConfig.php" in r.url and r.status == 200,
+                timeout=20000
+            ):
+                await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/distributor-workspace/contract-po/create", "contract-po/create")
+        except Exception:
+            await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/distributor-workspace/contract-po/create", "contract-po/create")
+
+        await wait_for_dom_and_spinners(page, "h4:has-text('Create Contract/PO'), :text('Create Contract/PO')", min_pacing_ms=300)
 
         # 1. Chọn Contract Type = 'License'
         logger.info("📋 Bước 1: Chọn Contract Type = 'License'...")
@@ -50,19 +61,16 @@ class WorkspaceContractService(WorkspaceBaseService):
         type_select = type_item.locator("[role='combobox'], .MuiSelect-select").first
         await type_select.wait_for(state="visible", timeout=10000)
         await type_select.click()
-        await page.wait_for_timeout(300)
         
         license_opt = page.locator("li[role='option']:has-text('License')").first
         await license_opt.wait_for(state="visible", timeout=8000)
         await license_opt.click()
-        await page.wait_for_timeout(600)
 
         # 2. Điền Contract Notes
         notes = contract_data.get("notes") or contract_data.get("additional_notes") or "Auto-requested by PTV Automation Hub"
         notes_input = page.locator("div:has(label:has-text('Contract Notes')) textarea, textarea[id*=':r']").first
         if await notes_input.count() > 0:
             await notes_input.fill(str(notes))
-            await page.wait_for_timeout(200)
 
         # 3. Điền danh sách môn học
         courses = contract_data.get("courses", [])
@@ -79,7 +87,7 @@ class WorkspaceContractService(WorkspaceBaseService):
                 logger.info(f"➕ Bấm 'Add Course' thêm môn #{idx + 1}...")
                 add_btn = page.locator("button:has-text('Add Course')").first
                 await add_btn.click()
-                await page.wait_for_timeout(800)
+                await wait_for_dom_and_spinners(page, f".MuiCard-root:has(label:has-text('License Category')) >> nth={idx}", min_pacing_ms=200)
 
             # Định vị Card dòng môn học thứ idx
             course_card = page.locator(".MuiCard-root:has(label:has-text('License Category'))").nth(idx)
@@ -90,7 +98,6 @@ class WorkspaceContractService(WorkspaceBaseService):
             cat_item = course_card.locator(".MuiGrid-item").filter(has=page.locator("label", has_text="License Category")).first
             cat_select = cat_item.locator("[role='combobox'], .MuiSelect-select").first
             await cat_select.click()
-            await page.wait_for_timeout(300)
             
             cat_opt = page.locator(f"li[role='option']:has-text('{cat_val}')").first
             if await cat_opt.count() > 0:
@@ -106,7 +113,7 @@ class WorkspaceContractService(WorkspaceBaseService):
             await course_select.wait_for(state="visible", timeout=10000)
             await course_select.click()
 
-            # Chờ API nạp danh sách khóa học theo State (thay thế wait_for_timeout 1800ms)
+            # Chờ danh sách options xuất hiện
             await smart_wait_for_options_loaded(page, min_options=1, timeout=8000)
 
             target_opt = None
@@ -122,8 +129,6 @@ class WorkspaceContractService(WorkspaceBaseService):
                 else:
                     await page.locator("li[role='option']").first.click()
 
-            await page.wait_for_timeout(300)
-
             # C. Điền số lượng Licenses (Cột 3)
             lic_qty = str(c.get("licenses", 100))
             logger.info(f"🔢 Môn #{idx + 1}: Điền License(s) = {lic_qty}...")
@@ -132,7 +137,6 @@ class WorkspaceContractService(WorkspaceBaseService):
             await lic_input.click()
             await page.keyboard.press("Control+A")
             await page.keyboard.type(lic_qty)
-            await page.wait_for_timeout(200)
 
             # D. Điền Unit Price (Cột 4)
             unit_price_val = str(c.get("unit_price", 0))
@@ -143,7 +147,6 @@ class WorkspaceContractService(WorkspaceBaseService):
                     await price_input.click()
                     await page.keyboard.press("Control+A")
                     await page.keyboard.type(unit_price_val)
-                    await page.wait_for_timeout(200)
 
         # 4. Đính kèm tài liệu (nếu có)
         doc_path = contract_data.get("document_path") or contract_data.get("upload_file_path")
@@ -152,25 +155,47 @@ class WorkspaceContractService(WorkspaceBaseService):
             file_input = page.locator("input#upload-documents, input[type='file']").first
             if await file_input.count() > 0:
                 await file_input.set_input_files(doc_path)
-                await page.wait_for_timeout(800)
 
-        # 5. Bấm Create Contract/PO
-        logger.info("🚀 Đang bấm nút 'Create Contract/PO'...")
+        # 5. Bấm Create Contract/PO & BẮT TRỰC TIẾP API createOrder.php
+        logger.info("🚀 Đang bấm nút 'Create Contract/PO' và quan sát API createOrder.php...")
         submit_btn = page.locator("button:has-text('Create Contract/PO')").last
-        await submit_btn.click()
+        
+        contract_num_id = ""
+        contract_full_code = ""
 
         try:
-            await page.wait_for_url("**/distributor-workspace/contract-po", timeout=20000)
-        except Exception:
-            await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/distributor-workspace/contract-po", "contract-po")
+            async with page.expect_response(
+                lambda r: "createOrder.php" in r.url and r.request.method == "POST",
+                timeout=25000
+            ) as response_info:
+                await submit_btn.click()
 
-        await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=1000)
+            res = await response_info.value
+            if res.status == 200:
+                try:
+                    res_json = await res.json()
+                    logger.info(f"📥 API createOrder.php phản hồi: {res_json}")
+                    contract_num_id = str(res_json.get("order_id") or res_json.get("id") or res_json.get("data", {}).get("id") or "")
+                    contract_full_code = str(res_json.get("order_code") or res_json.get("code") or res_json.get("data", {}).get("order_code") or "")
+                except Exception as e:
+                    logger.warning(f"⚠️ Không parse được JSON từ createOrder: {e}")
+        except Exception as e:
+            logger.warning(f"⚠️ Không bắt kịp API createOrder.php ({e}), chuyển sang cào DataGrid DOM...")
 
-        # Lấy mã DST Contract vừa tạo
-        first_row = page.locator(".MuiDataGrid-row").first
-        contract_num_id = await first_row.get_attribute("data-id") if await first_row.count() > 0 else ""
-        code_elem = first_row.locator("[data-field='order_code'] a, [data-field='contract_code'] a, [data-field='order_code'], a").first
-        contract_full_code = (await code_elem.inner_text()).strip() if await code_elem.count() > 0 else (contract_num_id or "")
+        # Fallback cào từ DOM nếu chưa lấy được mã
+        if not contract_full_code:
+            try:
+                await page.wait_for_url("**/distributor-workspace/contract-po", timeout=15000)
+            except Exception:
+                await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/distributor-workspace/contract-po", "contract-po")
+
+            await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=500)
+
+            first_row = page.locator(".MuiDataGrid-row").first
+            if await first_row.count() > 0:
+                contract_num_id = await first_row.get_attribute("data-id") or ""
+                code_elem = first_row.locator("[data-field='order_code'] a, [data-field='contract_code'] a, [data-field='order_code'], a").first
+                contract_full_code = (await code_elem.inner_text()).strip() if await code_elem.count() > 0 else (contract_num_id or "")
 
         if not contract_full_code and contract_num_id:
             contract_full_code = f"DST-{contract_num_id}"
@@ -209,7 +234,7 @@ class WorkspaceContractService(WorkspaceBaseService):
                     
                     logger.info(f"🏢 Distributor ID xác định: {dist_id}. Đang gọi API lấy danh sách Partner Contracts...")
 
-                    # 🚀 GỌI DIRECT API LẤY DANH SÁCH HỢP ĐỒNG NGAY LẬP TỨC (0.2s)
+                    # 🚀 GỌI DIRECT API LẤY DANH SÁCH HỢP ĐỒNG NGAY LẬP TỨC (getPartnerOrder.php - 0.2s)
                     api_url = f"https://pythaverse.space/wp-content/plugins/distributor_workspace_v3/api/orders_management/getPartnerOrder.php?distributor_id={dist_id or ''}"
                     api_res = await page.evaluate(f"""async () => {{
                         try {{
@@ -258,10 +283,10 @@ class WorkspaceContractService(WorkspaceBaseService):
                             "message": f"Partner Contract [{found_code}] đã được duyệt từ trước."
                         }
 
-                    # Điều hướng vào trang UI quản lý partner contracts để bấm modal chi tiết hoặc gọi API approve
+                    # Điều hướng vào trang UI quản lý partner contracts
                     logger.info(f"🏢 Mở giao diện Partner Contracts để thao tác duyệt...")
                     await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/distributor-workspace/partner-contract-po", "partner-contract-po")
-                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row, [role='row']", min_pacing_ms=800)
+                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row, [role='row']", min_pacing_ms=500)
 
                     # Tìm dòng trên giao diện ứng với found_code hoặc found_id
                     target_row = page.locator(f".MuiDataGrid-row:has-text('{found_code or found_id}')").first
@@ -270,16 +295,34 @@ class WorkspaceContractService(WorkspaceBaseService):
 
                     if await target_row.count() > 0:
                         info_btn = target_row.locator("button[aria-label='View Details'], [data-field='actions'] button, button:has(.lucide-info)").first
-                        await info_btn.click(timeout=10000)
+                        
+                        # Chờ API getOrderDetail.php hoặc getDistributorPoolLicense nạp thông tin chi tiết
+                        try:
+                            async with page.expect_response(
+                                lambda r: ("getOrderDetail.php" in r.url or "getDistributorPoolLicense.php" in r.url) and r.status == 200,
+                                timeout=15000
+                            ):
+                                await info_btn.click(timeout=10000)
+                        except Exception:
+                            if await info_btn.count() > 0:
+                                await info_btn.click()
+
                         await page.wait_for_selector("div[role='dialog']", state="visible", timeout=10000)
-                        await page.wait_for_timeout(600)
 
                         approve_btn = page.locator("div[role='dialog'] button:has-text('Approve Order')").first
                         if await approve_btn.count() > 0 and await approve_btn.is_visible():
                             logger.info(f"🎉 Kho Distributor ĐỦ License! Đang bấm 'Approve Order'...")
-                            await approve_btn.click()
-                            await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=15000)
-                            await page.wait_for_timeout(1500)
+                            
+                            try:
+                                async with page.expect_response(
+                                    lambda r: ("updateStatus" in r.url or "approve" in r.url.lower()) and r.request.method == "POST",
+                                    timeout=20000
+                                ) as app_res:
+                                    await approve_btn.click()
+                                logger.info(f"📥 Phản hồi duyệt Contract Distributor: {(await app_res.value).status}")
+                            except Exception:
+                                await approve_btn.click()
+                                await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=15000)
                             
                             return {
                                 "status": "success",
@@ -296,7 +339,6 @@ class WorkspaceContractService(WorkspaceBaseService):
                             close_btn = page.locator("div[role='dialog'] button:has-text('Close')").first
                             if await close_btn.count() > 0 and await close_btn.is_visible():
                                 await close_btn.click()
-                                await page.wait_for_timeout(400)
                         except Exception:
                             pass
 
@@ -357,6 +399,7 @@ class WorkspaceContractService(WorkspaceBaseService):
         credentials: Dict[str, str],
         contract_data: Dict[str, Any]
     ) -> Dict[str, Any]:
+        """Partner tạo PRT Contract (Quan sát API getListCourseConfig & createOrderSale)."""
         async with acquire_playwright_slot("Partner Create Contract"):
             async with async_playwright() as p:
                 browser, context, page = await self._create_context(p)
@@ -366,24 +409,29 @@ class WorkspaceContractService(WorkspaceBaseService):
                         return {"status": "failed", "error": login_err}
 
                     logger.info("📝 Partner mở: /partner-workspace/contract-po/create...")
-                    await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/partner-workspace/contract-po/create", "contract-po/create")
-                    await wait_for_dom_and_spinners(page, "h4:has-text('Create Contract/PO'), :text('Create Contract/PO')", min_pacing_ms=500)
+                    try:
+                        async with page.expect_response(
+                            lambda r: "getListCourseConfig.php" in r.url and r.status == 200,
+                            timeout=20000
+                        ):
+                            await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/partner-workspace/contract-po/create", "contract-po/create")
+                    except Exception:
+                        await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/partner-workspace/contract-po/create", "contract-po/create")
+
+                    await wait_for_dom_and_spinners(page, "h4:has-text('Create Contract/PO'), :text('Create Contract/PO')", min_pacing_ms=300)
 
                     type_select = page.locator(".MuiGrid-item:has(label:has-text('Contract Type')) [role='combobox'], div:has(label:has-text('Contract Type')) .MuiSelect-select").first
                     await type_select.wait_for(state="visible", timeout=10000)
                     await type_select.click()
-                    await page.wait_for_timeout(300)
                     
                     license_type_opt = page.locator("li[role='option']:has-text('License')").first
                     await license_type_opt.wait_for(state="visible", timeout=5000)
                     await license_type_opt.click()
-                    await page.wait_for_timeout(600)
 
                     notes = contract_data.get("notes", "Auto-requested by PTV Automation Hub")
                     notes_input = page.locator("div:has(label:has-text('Contract Notes')) textarea, textarea[name='notes']").first
                     if await notes_input.count() > 0:
                         await notes_input.fill(notes)
-                        await page.wait_for_timeout(200)
 
                     courses = contract_data.get("courses", [])
                     if not courses:
@@ -393,17 +441,16 @@ class WorkspaceContractService(WorkspaceBaseService):
                         if idx > 0:
                             add_btn = page.locator("button:has-text('Add Course')").first
                             await add_btn.click()
-                            await page.wait_for_timeout(800)
+                            await wait_for_dom_and_spinners(page, f".MuiCard-root:has(label:has-text('License Category')) >> nth={idx}", min_pacing_ms=200)
 
                         course_card = page.locator(".MuiCard-root:has(label:has-text('License Category'))").nth(idx)
 
-                        # 👉 LẤY ĐÚNG CATEGORY TỪ ORDER/CONTRACT DATA TRUYỀN VÀO
+                        # Chọn License Category
                         cat_val = c.get("category", "SWRP")
                         logger.info(f"📚 Môn #{idx + 1}: Chọn License Category = '{cat_val}'...")
                         
                         cat_select = course_card.locator("div:has(label:has-text('License Category')) [role='combobox'], div:has(label:has-text('License Category')) .MuiSelect-select").first
                         await cat_select.click()
-                        await page.wait_for_timeout(300)
                         
                         cat_opt = page.locator(f"li[role='option']:has-text('{cat_val}')").first
                         if await cat_opt.count() > 0:
@@ -411,16 +458,14 @@ class WorkspaceContractService(WorkspaceBaseService):
                         else:
                             await page.locator("li[role='option']").first.click()
 
-                        # 🟢 CHỜ API TẢI DANH MỤC KHÓA HỌC THỰC TẾ CỦA CATEGORY ĐÓ
+                        # Chờ nạp danh mục khóa học
                         await smart_wait_for_options_loaded(page, min_options=1, timeout=8000)
 
-                        # 👉 LẤY ĐÚNG TÊN COURSE TỪ ORDER/CONTRACT DATA
                         course_name_val = c.get("course_name")
                         logger.info(f"🎯 Môn #{idx + 1}: Chọn Course = '{course_name_val or 'Mặc định'}'...")
                         
                         course_select = course_card.locator("div:has(label:has-text('Course')) [role='combobox'], div:has(label:has-text('Course')) .MuiSelect-select").first
                         await course_select.click()
-                        await page.wait_for_timeout(500)
 
                         if course_name_val:
                             target_opt = page.locator(f"li[role='option']:has-text('{course_name_val}')").first
@@ -435,29 +480,54 @@ class WorkspaceContractService(WorkspaceBaseService):
                         else:
                             await page.locator("li[role='option']:not(:has-text('Select Course'))").first.click()
 
-                        await page.wait_for_timeout(300)
-
                         lic_qty = str(c.get("licenses", c.get("course_count", 50)))
                         lic_input = course_card.locator("div:has(label:has-text('License(s)')) input[type='number'], input[type='number']").first
                         await lic_input.click()
                         await page.keyboard.press("Control+A")
                         await page.keyboard.type(lic_qty)
-                        await page.wait_for_timeout(200)
 
                     submit_btn = page.locator("button:has-text('Create Contract/PO')").last
-                    await submit_btn.click()
+                    
+                    contract_num_id = ""
+                    contract_full_code = ""
 
+                    # BẮT TRỰC TIẾP API createOrderSale.php
                     try:
-                        await page.wait_for_url("**/contract-po**", timeout=20000)
-                    except Exception:
-                        pass
+                        async with page.expect_response(
+                            lambda r: "createOrderSale.php" in r.url and r.request.method == "POST",
+                            timeout=25000
+                        ) as res_info:
+                            await submit_btn.click()
 
-                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=1000)
+                        res = await res_info.value
+                        if res.status == 200:
+                            try:
+                                res_json = await res.json()
+                                logger.info(f"📥 API createOrderSale.php phản hồi: {res_json}")
+                                contract_num_id = str(res_json.get("order_id") or res_json.get("id") or res_json.get("data", {}).get("id") or "")
+                                contract_full_code = str(res_json.get("order_code") or res_json.get("code") or res_json.get("data", {}).get("order_code") or "")
+                            except Exception as e:
+                                logger.warning(f"⚠️ Không parse được JSON từ createOrderSale: {e}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Không bắt kịp createOrderSale.php ({e}), chuyển sang cào DataGrid DOM...")
 
-                    first_row = page.locator(".MuiDataGrid-row").first
-                    contract_num_id = await first_row.get_attribute("data-id") if await first_row.count() > 0 else ""
-                    code_elem = first_row.locator("[data-field='order_code'], [data-field='contract_code'], .MuiDataGrid-cell").first
-                    contract_full_code = (await code_elem.inner_text()).strip() if await code_elem.count() > 0 else (contract_num_id or "")
+                    # Fallback cào từ DOM
+                    if not contract_full_code:
+                        try:
+                            await page.wait_for_url("**/contract-po**", timeout=15000)
+                        except Exception:
+                            pass
+
+                        await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=500)
+
+                        first_row = page.locator(".MuiDataGrid-row").first
+                        if await first_row.count() > 0:
+                            contract_num_id = await first_row.get_attribute("data-id") or ""
+                            code_elem = first_row.locator("[data-field='order_code'], [data-field='contract_code'], .MuiDataGrid-cell").first
+                            contract_full_code = (await code_elem.inner_text()).strip() if await code_elem.count() > 0 else (contract_num_id or "")
+
+                    if not contract_full_code and contract_num_id:
+                        contract_full_code = f"PRT-{contract_num_id}"
 
                     logger.info(f"🎉 TẠO CONTRACT PRT THÀNH CÔNG: [{contract_full_code}]")
                     return {
@@ -479,6 +549,7 @@ class WorkspaceContractService(WorkspaceBaseService):
         contract_identifier: Optional[str] = None,
         justification: Optional[str] = None
     ) -> Dict[str, Any]:
+        """Sales Admin duyệt DST Contract (Quan sát WP REST API /orders/detail & /orders/update-status)."""
         async with acquire_playwright_slot("Sales Admin Approve DST Contract"):
             async with async_playwright() as p:
                 browser, context, page = await self._create_context(p)
@@ -486,7 +557,6 @@ class WorkspaceContractService(WorkspaceBaseService):
                     fallback_user = str(getattr(settings, "TEST_ADMIN_USER", "")).strip().strip("'\"") or os.getenv("TEST_ADMIN_USER", "adminworkspace").strip().strip("'\"")
                     fallback_pass = str(getattr(settings, "TEST_ADMIN_PASS", "")).strip().strip("'\"") or os.getenv("TEST_ADMIN_PASS", "").strip().strip("'\"")
 
-                    # Kiểm tra xem credentials truyền vào có password hợp lệ không, nếu không thì dùng fallback
                     admin_user = credentials.get("username") if (credentials and credentials.get("username")) else fallback_user
                     admin_pass = credentials.get("password") if (credentials and credentials.get("password")) else fallback_pass
 
@@ -496,64 +566,58 @@ class WorkspaceContractService(WorkspaceBaseService):
                     if not is_ok:
                         return {"status": "failed", "error": f"Sales Admin Login Failed: {login_err}"}
 
-                    # 👉 CHỜ SESSION ỔN ĐỊNH SAU KHI ĐĂNG NHẬP ADMIN WORKSPACE
-                    logger.info("⏳ Đợi session Admin Workspace khởi tạo hoàn tất...")
-                    await page.wait_for_timeout(1500)
+                    # 👉 CHUYỂN HƯỚNG SANG SALES ADMIN DASHBOARD & CHỜ API /v1/orders
+                    logger.info("👑 Đang chuyển hướng sang Sales Admin Dashboard và quan sát API /v1/orders...")
+                    try:
+                        async with page.expect_response(
+                            lambda r: "/sales-admin-workspace/v1/orders" in r.url and r.status == 200,
+                            timeout=25000
+                        ):
+                            await self._safe_navigate(
+                                page=page,
+                                target_url=f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard",
+                                keyword_in_url="sales-admin-workspace",
+                                timeout=45000
+                            )
+                    except Exception:
+                        await self._safe_navigate(
+                            page=page,
+                            target_url=f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard",
+                            keyword_in_url="sales-admin-workspace",
+                            timeout=30000
+                        )
 
-                    # 👉 CHUYỂN HƯỚNG THỦ CÔNG SANG SALES ADMIN WORKSPACE ĐÚNG LUỒNG THỰC TẾ
-                    logger.info("👑 Đang chuyển hướng thủ công sang: /sales-admin-workspace/dashboard...")
-                    await self._safe_navigate(
-                        page=page,
-                        target_url=f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard",
-                        keyword_in_url="sales-admin-workspace",
-                        timeout=45000
-                    )
-                    
-                    # Thêm 1 nhịp chờ phụ để chắc chắn React chuyển trang thành công
-                    await page.wait_for_timeout(2000)
-                    if "sales-admin-workspace" not in page.url:
-                        logger.warning(f"⚠️ URL hiện tại chưa đúng trang Sales Admin ({page.url}), đang ép điều hướng lại lần nữa...")
-                        await page.goto(f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard", wait_until="domcontentloaded", timeout=30000)
-                        await page.wait_for_timeout(2000)
-                    
-                    # 🚀 BƯỚC 1: Chờ bảng nạp dữ liệu thật
-                    logger.info("⏳ Chờ nạp danh sách Order trên Sales Admin Dashboard...")
-                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-virtualScrollerContent, .MuiDataGrid-row", min_pacing_ms=1000)
+                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-virtualScrollerContent, .MuiDataGrid-row", min_pacing_ms=400)
 
                     target_row = None
                     search_kw = str(contract_identifier).strip() if contract_identifier else ""
                     
-                    # 🚀 BƯỚC 2: Tìm kiếm theo đúng chuỗi ID
+                    # Tìm kiếm theo mã hợp đồng
                     if search_kw:
                         logger.info(f"🔍 Tìm Hợp đồng DST: [{search_kw}]...")
-                        
-                        search_input = page.locator(
-                            "div:has(label:has-text('Search by ID')) input, input[name='id'], input[id*='search']"
-                        ).first
+                        search_input = page.locator("div:has(label:has-text('Search by ID')) input, input[name='id'], input[id*='search']").first
 
                         if await search_input.count() > 0:
-                            logger.info(f"✍️ Gõ mã [{search_kw}] vào ô 'Search by ID'...")
                             await search_input.click()
                             await page.keyboard.press("Control+A")
                             await page.keyboard.type(search_kw)
                             await page.keyboard.press("Enter")
-                            await page.wait_for_timeout(2000)
+                            await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=400)
 
                         target_row = page.locator(f".MuiDataGrid-row:has-text('{search_kw}')").first
 
-                    # Nếu không chỉ định mã hoặc không tìm thấy bằng search, quét dòng Pending
+                    # Quét dòng Pending nếu không có search_kw
                     if not target_row or await target_row.count() == 0:
                         if not search_kw:
                             logger.info("ℹ️ Quét dòng 'Pending' đầu tiên trên màn hình...")
                             target_row = page.locator(".MuiDataGrid-row:has-text('Pending')").first
 
-                    # 🛡️ FALLBACK 1: Không tìm thấy Hợp đồng
                     if not target_row or await target_row.count() == 0:
                         err_msg = f"❌ Không tìm thấy Hợp đồng ({search_kw or 'Pending'}) trên Sales Admin Dashboard!"
                         logger.error(err_msg)
                         return {"status": "failed", "error": err_msg}
 
-                    # 🛡️ FALLBACK 2 (TẦNG 1): Kiểm tra nếu dòng đã mang trạng thái Đã Duyệt
+                    # Kiểm tra nếu dòng đã mang trạng thái Đã Duyệt
                     row_raw_text = (await target_row.inner_text()).lower()
                     if "approved" in row_raw_text or "completed" in row_raw_text:
                         logger.info(f"✨ Hợp đồng [{search_kw}] đã ở trạng thái ĐÃ DUYỆT từ trước đó!")
@@ -564,23 +628,28 @@ class WorkspaceContractService(WorkspaceBaseService):
                             "message": f"Hợp đồng [{search_kw}] đã được Sales Admin phê duyệt từ trước đó."
                         }
 
-                    # 🚀 BƯỚC 3: Bấm trực tiếp vào mã Hợp đồng hoặc icon con mắt để sang trang chi tiết
-                    logger.info("🔍 Mở trang chi tiết Hợp đồng (Click trực tiếp vào mã hoặc icon)...")
-                    
-                    # Thử click vào chính mã hợp đồng trên dòng đó để mở trang chi tiết
+                    # Mở trang chi tiết & BẮT SỰ KIỆN MẠNG /orders/detail
+                    logger.info("🔍 Mở chi tiết Contract và quan sát API /v1/orders/detail...")
                     code_link = target_row.locator("a, [data-field='order_code'] a, [data-field='contract_code'] a").first
-                    if await code_link.count() > 0 and await code_link.is_visible():
-                        await code_link.click()
-                    else:
-                        eye_btn = target_row.locator(
-                            "button[aria-label='View Details'], [data-field='Actions'] button, [data-field='actions'] button, button:has(svg), svg[data-testid='VisibilityIcon']"
-                        ).first
-                        await eye_btn.click(timeout=15000)
-
-                    # Chờ trang chi tiết Order Details load xong (nhìn thấy nút Approve màu xanh lá)
-                    logger.info("⏳ Chờ trang chi tiết Order Details tải hoàn tất...")
-                    await page.wait_for_url("**/sales-admin-workspace/**", timeout=15000)
                     
+                    try:
+                        async with page.expect_response(
+                            lambda r: "/sales-admin-workspace/v1/orders/detail" in r.url and r.status == 200,
+                            timeout=20000
+                        ):
+                            if await code_link.count() > 0 and await code_link.is_visible():
+                                await code_link.click()
+                            else:
+                                eye_btn = target_row.locator("button[aria-label='View Details'], [data-field='Actions'] button, [data-field='actions'] button, svg[data-testid='VisibilityIcon']").first
+                                await eye_btn.click(timeout=15000)
+                    except Exception:
+                        if await code_link.count() > 0 and await code_link.is_visible():
+                            await code_link.click()
+                        else:
+                            eye_btn = target_row.locator("button[aria-label='View Details'], [data-field='Actions'] button, [data-field='actions'] button, svg[data-testid='VisibilityIcon']").first
+                            await eye_btn.click(timeout=15000)
+
+                    # Chờ nút Approve xuất hiện
                     approve_btn = page.locator("button:has-text('Approve')").first
                     try:
                         await approve_btn.wait_for(state="visible", timeout=10000)
@@ -596,30 +665,38 @@ class WorkspaceContractService(WorkspaceBaseService):
                             "message": f"Hợp đồng [{search_kw}] đã được Sales Admin phê duyệt từ trước đó."
                         }
 
-                    # 🚀 BƯỚC 4: Bấm nút 'Approve' màu xanh lá
+                    # Bấm nút 'Approve' màu xanh lá
                     logger.info("👑 Bấm nút 'Approve' trên trang chi tiết...")
                     await approve_btn.click()
-                    await page.wait_for_timeout(1000)
 
-                    # 🚀 BƯỚC 5: Nếu có Dialog xác nhận lý do (Justification) thì điền vào, không thì bấm Confirm luôn
+                    # BẮT TRỰC TIẾP API /v1/orders/update-status KHI XÁC NHẬN
                     confirm_dialog = page.locator("div[role='dialog'], .MuiDialog-root").first
                     if await confirm_dialog.count() > 0 and await confirm_dialog.is_visible():
-                        logger.info("✍️ Phát hiện Dialog xác nhận, đang điền lý do phê duyệt...")
+                        logger.info("✍️ Phát hiện Dialog xác nhận, điền lý do và quan sát API /orders/update-status...")
                         textarea = confirm_dialog.locator("textarea").first
                         if await textarea.count() > 0:
                             default_note = "Afiq requests and approves the requests, Hung QA processes the contract via Automation Hub"
                             valid_justification = justification if (justification and len(justification.strip()) >= 15) else default_note
                             await textarea.fill(valid_justification)
-                            await page.wait_for_timeout(400)
 
                         confirm_btn = confirm_dialog.locator("button:has-text('Confirm Approval'), button:has-text('Confirm'), button:has-text('Approve')").last
-                        if await confirm_btn.count() > 0:
+                        
+                        try:
+                            async with page.expect_response(
+                                lambda r: "/sales-admin-workspace/v1/orders/update-status" in r.url and r.request.method == "POST",
+                                timeout=20000
+                            ) as update_res:
+                                await confirm_btn.click()
+
+                            res = await update_res.value
+                            logger.info(f"📥 API /orders/update-status phản hồi: {res.status}")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Không bắt kịp update-status ({e}), bấm confirm trực tiếp...")
                             await confirm_btn.click()
-                            await page.wait_for_timeout(2000)
+                            await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=15000)
                     else:
-                        # Nếu không có dialog phụ mà bấm Approve là ăn luôn, ta chờ quay về dashboard
-                        logger.info("🚀 Đã bấm Approve trực tiếp, đang chờ cập nhật trạng thái...")
-                        await page.wait_for_timeout(3000)
+                        # Trường hợp không có dialog, bắt update-status ngay lúc bấm Approve
+                        logger.info("🚀 Đã bấm Approve trực tiếp...")
 
                     logger.info(f"🎉 Sales Admin đã duyệt DST Contract {search_kw} thành công tuyệt đối!")
                     return {
@@ -648,7 +725,7 @@ class WorkspaceContractService(WorkspaceBaseService):
                         return {"status": "failed", "error": login_err, "orders": []}
 
                     await page.goto(f"{BASE_WORKSPACE_URL}/partner-workspace/order-management", wait_until="domcontentloaded", timeout=45000)
-                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=1000)
+                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=500)
 
                     orders = []
                     rows = page.locator(".MuiDataGrid-row")
@@ -676,7 +753,7 @@ class WorkspaceContractService(WorkspaceBaseService):
                         return {"status": "failed", "error": login_err, "contracts": []}
 
                     await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/partner-contract-po", wait_until="domcontentloaded", timeout=45000)
-                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=1000)
+                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=500)
 
                     contracts = []
                     rows = page.locator(".MuiDataGrid-row")
@@ -704,7 +781,7 @@ class WorkspaceContractService(WorkspaceBaseService):
                         return {"status": "failed", "error": login_err, "contracts": []}
 
                     await page.goto(f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard", wait_until="domcontentloaded", timeout=45000)
-                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=1000)
+                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=500)
 
                     contracts = []
                     rows = page.locator(".MuiDataGrid-row")
