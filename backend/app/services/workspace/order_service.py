@@ -22,7 +22,6 @@ class WorkspaceOrderService(WorkspaceBaseService):
         """Hàm nội bộ: Partner điền form tạo PRT Contract gửi Distributor trong cùng 1 phiên (Bắt API Event)."""
         logger.info("📝 Partner mở: /partner-workspace/contract-po/create...")
         
-        # Bắt sự kiện nạp danh mục môn học ban đầu của Partner (getListCourseConfig.php)
         try:
             async with page.expect_response(
                 lambda r: "getListCourseConfig.php" in r.url and r.status == 200,
@@ -30,8 +29,9 @@ class WorkspaceOrderService(WorkspaceBaseService):
             ):
                 await page.goto(f"{BASE_WORKSPACE_URL}/partner-workspace/contract-po/create", wait_until="domcontentloaded", timeout=45000)
         except Exception:
-            logger.info("ℹ️ getListCourseConfig.php đã nạp từ cache hoặc DOM sẵn sàng.")
+            logger.info("ℹ️ getListCourseConfig.php đã nạp hoặc DOM sẵn sàng.")
 
+        await self._dismiss_welcome_dialog(page)
         await wait_for_dom_and_spinners(page, "h4:has-text('Create Contract/PO'), :text('Create Contract/PO')", min_pacing_ms=300)
 
         # 1. Chọn Contract Type = 'License'
@@ -39,11 +39,11 @@ class WorkspaceOrderService(WorkspaceBaseService):
         type_item = page.locator(".MuiGrid-item").filter(has=page.locator("label", has_text="Contract Type")).first
         type_select = type_item.locator("[role='combobox'], .MuiSelect-select").first
         await type_select.wait_for(state="visible", timeout=10000)
-        await type_select.click()
+        await type_select.click(force=True)
 
         license_opt = page.locator("li[role='option']:has-text('License')").first
         await license_opt.wait_for(state="visible", timeout=8000)
-        await license_opt.click()
+        await license_opt.click(force=True)
 
         # 2. Điền Contract Notes
         notes = contract_data.get("notes") or contract_data.get("additional_notes") or "Auto-requested by PTV Automation Hub to topup School Order"
@@ -60,7 +60,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
             if idx > 0:
                 logger.info(f"➕ Bấm 'Add Course' thêm môn #{idx + 1}...")
                 add_btn = page.locator("button:has-text('Add Course')").first
-                await add_btn.click()
+                await add_btn.click(force=True)
                 await wait_for_dom_and_spinners(page, f".MuiCard-root:has(label:has-text('License Category')) >> nth={idx}", min_pacing_ms=200)
 
             course_card = page.locator(".MuiCard-root:has(label:has-text('License Category'))").nth(idx)
@@ -70,13 +70,13 @@ class WorkspaceOrderService(WorkspaceBaseService):
             logger.info(f"📚 Môn #{idx + 1}: Chọn License Category = '{cat_val}'...")
             cat_item = course_card.locator(".MuiGrid-item").filter(has=page.locator("label", has_text="License Category")).first
             cat_select = cat_item.locator("[role='combobox'], .MuiSelect-select").first
-            await cat_select.click()
+            await cat_select.click(force=True)
 
             cat_opt = page.locator(f"li[role='option']:has-text('{cat_val}')").first
             if await cat_opt.count() > 0:
-                await cat_opt.click()
+                await cat_opt.click(force=True)
             else:
-                await page.locator("li[role='option']").first.click()
+                await page.locator("li[role='option']").first.click(force=True)
 
             # B. Chọn Course
             course_name_val = c.get("course_name")
@@ -84,9 +84,8 @@ class WorkspaceOrderService(WorkspaceBaseService):
             course_item = course_card.locator(".MuiGrid-item").filter(has=page.locator("label", has_text=re.compile(r"^Course"))).first
             course_select = course_item.locator("[role='combobox'], .MuiSelect-select").first
             await course_select.wait_for(state="visible", timeout=10000)
-            await course_select.click()
+            await course_select.click(force=True)
             
-            # Chờ danh sách options hiển thị
             await smart_wait_for_options_loaded(page, min_options=1, timeout=8000)
 
             target_opt = None
@@ -94,19 +93,19 @@ class WorkspaceOrderService(WorkspaceBaseService):
                 target_opt = page.locator(f"li[role='option']:has-text('{course_name_val}')").first
 
             if target_opt and await target_opt.count() > 0:
-                await target_opt.click()
+                await target_opt.click(force=True)
             else:
                 valid_opts = page.locator("li[role='option']:not(:has-text('Select Course'))")
                 if await valid_opts.count() > 0:
-                    await valid_opts.first.click()
+                    await valid_opts.first.click(force=True)
                 else:
-                    await page.locator("li[role='option']").first.click()
+                    await page.locator("li[role='option']").first.click(force=True)
 
             # C. Điền số lượng Licenses
             lic_qty = str(c.get("licenses", 50))
             lic_item = course_card.locator(".MuiGrid-item").filter(has=page.locator("label", has_text="License(s)")).first
             lic_input = lic_item.locator("input[type='number']").first
-            await lic_input.click()
+            await lic_input.click(force=True)
             await page.keyboard.press("Control+A")
             await page.keyboard.type(lic_qty)
 
@@ -122,15 +121,17 @@ class WorkspaceOrderService(WorkspaceBaseService):
                 lambda r: "createOrderSale.php" in r.url and r.request.method == "POST",
                 timeout=25000
             ) as response_info:
-                await submit_btn.click()
+                await submit_btn.click(force=True)
 
             res = await response_info.value
             if res.status == 200:
                 try:
                     res_json = await res.json()
                     logger.info(f"📥 API createOrderSale.php phản hồi: {res_json}")
-                    contract_num_id = str(res_json.get("order_id") or res_json.get("id") or res_json.get("data", {}).get("id") or "")
-                    contract_full_code = str(res_json.get("order_code") or res_json.get("code") or res_json.get("data", {}).get("order_code") or "")
+                    # Bóc tách chính xác từ data JSON
+                    data_obj = res_json.get("data") if isinstance(res_json.get("data"), dict) else res_json
+                    contract_num_id = str(data_obj.get("order_id") or data_obj.get("id") or "")
+                    contract_full_code = str(data_obj.get("order_code") or data_obj.get("order_sale_id_format") or "")
                 except Exception as e:
                     logger.warning(f"⚠️ Không parse được JSON từ createOrderSale: {e}")
         except Exception as e:
@@ -176,7 +177,6 @@ class WorkspaceOrderService(WorkspaceBaseService):
                         return {"status": "failed", "error": login_err}
 
                     logger.info("🏫 Mở trang danh sách Order: /school-workspace/orders...")
-                    # Chờ getListOrder.php phản hồi để trang ổn định
                     try:
                         async with page.expect_response(
                             lambda r: "getListOrder.php" in r.url and r.status == 200,
@@ -186,11 +186,12 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     except Exception:
                         await page.goto(f"{BASE_WORKSPACE_URL}/school-workspace/orders", wait_until="domcontentloaded", timeout=45000)
 
+                    await self._dismiss_welcome_dialog(page)
                     await wait_for_dom_and_spinners(page, "button:has-text('Create Order')", min_pacing_ms=300)
 
                     create_order_btn = page.locator("button:has-text('Create Order')").first
                     await create_order_btn.wait_for(state="visible", timeout=15000)
-                    await create_order_btn.click()
+                    await create_order_btn.click(force=True)
 
                     # Chờ Dialog mở ra hoàn toàn
                     await page.wait_for_selector("div[role='dialog']", state="visible", timeout=15000)
@@ -214,7 +215,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     for idx, c in enumerate(courses):
                         if idx > 0:
                             logger.info(f"➕ Bấm 'Add Course' thêm môn #{idx + 1}...")
-                            await page.click("div[role='dialog'] button:has-text('Add Course')")
+                            await page.click("div[role='dialog'] button:has-text('Add Course')", force=True)
                             await wait_for_dom_and_spinners(page, f"div[role='dialog'] .MuiGrid-container >> nth={idx}", min_pacing_ms=200)
 
                         course_card = page.locator("div[role='dialog'] .MuiGrid-container").nth(idx)
@@ -224,24 +225,23 @@ class WorkspaceOrderService(WorkspaceBaseService):
                         logger.info(f"📚 Môn #{idx + 1}: Chọn License Category = '{category_val}' và chờ API getCourseConfig.php...")
                         cat_item = course_card.locator(".MuiGrid-item").filter(has=page.locator("label", has_text="License Category")).first
                         cat_select = cat_item.locator("[role='combobox'], .MuiSelect-select").first
-                        await cat_select.click()
+                        await cat_select.click(force=True)
 
                         cat_option = page.locator(f"li[role='option']:has-text('{category_val}')").first
                         
-                        # Bắt sự kiện mạng getCourseConfig.php ngay khi click chọn Category
                         try:
                             async with page.expect_response(
                                 lambda r: "getCourseConfig.php" in r.url and r.status == 200,
                                 timeout=12000
                             ):
                                 if await cat_option.count() > 0:
-                                    await cat_option.click()
+                                    await cat_option.click(force=True)
                                 else:
-                                    await page.locator("li[role='option']").first.click()
+                                    await page.locator("li[role='option']").first.click(force=True)
                         except Exception:
                             logger.info("ℹ️ getCourseConfig.php nạp nhanh hoặc không có request mới.")
                             if await cat_option.count() > 0:
-                                await cat_option.click()
+                                await cat_option.click(force=True)
 
                         # B. Chọn Course (Cột 2)
                         course_name_val = c.get("course_name")
@@ -249,25 +249,25 @@ class WorkspaceOrderService(WorkspaceBaseService):
                         course_item = course_card.locator(".MuiGrid-item").filter(has=page.locator("label", has_text=re.compile(r"^Course"))).first
                         course_select = course_item.locator("[role='combobox'], .MuiSelect-select").first
                         await course_select.wait_for(state="visible", timeout=10000)
-                        await course_select.click()
+                        await course_select.click(force=True)
                         
                         await smart_wait_for_options_loaded(page, min_options=1, timeout=8000)
                         
                         if course_name_val:
                             target_opt = page.locator(f"li[role='option']:has-text('{course_name_val}')").first
                             if await target_opt.count() > 0:
-                                await target_opt.click()
+                                await target_opt.click(force=True)
                             else:
-                                await page.locator("li[role='option']:not(:has-text('Select Course'))").first.click()
+                                await page.locator("li[role='option']:not(:has-text('Select Course'))").first.click(force=True)
                         else:
-                            await page.locator("li[role='option']:not(:has-text('Select Course'))").first.click()
+                            await page.locator("li[role='option']:not(:has-text('Select Course'))").first.click(force=True)
 
                         # C. Điền License(s)
                         licenses_count = str(c.get("licenses", 50))
                         logger.info(f"🔢 Môn #{idx + 1}: Điền License(s) = {licenses_count}...")
                         lic_item = course_card.locator(".MuiGrid-item").filter(has=page.locator("label", has_text="License(s)")).first
                         lic_input = lic_item.locator("input[type='number']").first
-                        await lic_input.click()
+                        await lic_input.click(force=True)
                         await page.keyboard.press("Control+A")
                         await page.keyboard.type(licenses_count)
 
@@ -285,13 +285,13 @@ class WorkspaceOrderService(WorkspaceBaseService):
                             end_input = end_item.locator("input").first
                             await end_input.fill(end_date_val)
 
-                    # 4. Điền Additional Notes (nếu có)
+                    # 4. Điền Additional Notes
                     if order_data.get("additional_notes"):
                         notes_textarea = page.locator("div[role='dialog'] textarea").first
                         if await notes_textarea.count() > 0:
                             await notes_textarea.fill(order_data["additional_notes"])
 
-                    # 5. Bấm Create Order trong Dialog & BẮT TRỰC TIẾP API schoolCreateOrder.php
+                    # 5. Bấm Create Order & BẮT TRỰC TIẾP API schoolCreateOrder.php
                     logger.info("🚀 Đang bấm 'Create Order' và quan sát API schoolCreateOrder.php...")
                     submit_dialog_btn = page.locator("div[role='dialog'] button:has-text('Create Order')").last
                     
@@ -303,21 +303,28 @@ class WorkspaceOrderService(WorkspaceBaseService):
                             lambda r: "schoolCreateOrder.php" in r.url and r.request.method == "POST",
                             timeout=25000
                         ) as response_info:
-                            await submit_dialog_btn.click()
+                            await submit_dialog_btn.click(force=True)
 
                         res = await response_info.value
                         if res.status == 200:
                             try:
                                 res_json = await res.json()
                                 logger.info(f"📥 API schoolCreateOrder.php phản hồi: {res_json}")
-                                order_num_id = str(res_json.get("order_id") or res_json.get("id") or res_json.get("data", {}).get("id") or "")
-                                order_full_code = str(res_json.get("order_code") or res_json.get("code") or res_json.get("data", {}).get("order_code") or "")
+                                
+                                # 👉 BÓC TÁCH CHUẨN XÁC: ĐỌC TỪ data OBJECT
+                                data_obj = res_json.get("data") if isinstance(res_json.get("data"), dict) else res_json
+                                order_num_id = str(data_obj.get("id") or data_obj.get("order_id") or "")
+                                order_full_code = str(
+                                    data_obj.get("school_order_id_format") or 
+                                    data_obj.get("order_code") or 
+                                    data_obj.get("partner_order_id_format") or ""
+                                )
                             except Exception as e:
                                 logger.warning(f"⚠️ Không parse được JSON từ schoolCreateOrder: {e}")
                     except Exception as e:
                         logger.warning(f"⚠️ Không bắt kịp API schoolCreateOrder.php ({e}), chuyển sang cào DataGrid DOM...")
 
-                    # Fallback cào từ DOM nếu API không trả mã trong JSON
+                    # Fallback cào từ DOM
                     if not order_full_code:
                         await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=15000)
                         await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=500)
@@ -326,12 +333,12 @@ class WorkspaceOrderService(WorkspaceBaseService):
                         if await first_row.count() > 0:
                             order_num_id = await first_row.get_attribute("data-id") or ""
                             order_code_elem = first_row.locator("[data-field='school_order_id'] a, [data-field='school_order_id'], .MuiDataGrid-cell").first
-                            order_full_code = (await order_code_elem.inner_text()).strip() if await order_code_elem.count() > 0 else (order_num_id or "")
+                            order_full_code = (await order_code_elem.inner_text()).strip() if await code_elem.count() > 0 else (order_num_id or "")
 
                     if not order_full_code and order_num_id:
                         order_full_code = f"SCH-{order_num_id}"
 
-                    logger.info(f"🎉 TẠO ORDER THÀNH CÔNG: [{order_full_code}]")
+                    logger.info(f"🎉 TẠO ORDER THÀNH CÔNG: [{order_full_code}] (ID: {order_num_id})")
                     return {
                         "status": "success",
                         "order_id": order_num_id,
@@ -372,6 +379,8 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     except Exception:
                         await page.goto(f"{BASE_WORKSPACE_URL}/partner-workspace/order-management", wait_until="domcontentloaded", timeout=45000)
 
+                    # Đóng mọi modal rác có thể chặn pointer events
+                    await self._dismiss_welcome_dialog(page)
                     await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=500)
 
                     target_row = None
@@ -393,8 +402,11 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     if await target_row.count() == 0:
                         return {"status": "failed", "error": f"Không tìm thấy Order ({order_identifier}) ở trạng thái 'Awaiting Partner'"}
 
-                    # Mở chi tiết đơn hàng & Chờ API getOrderDetail.php + getPartnerPoolLicense.php
-                    logger.info(f"🔍 Bấm xem chi tiết Order [{order_identifier or 'Awaiting'}] và đợi API nạp chi tiết...")
+                    # Cuộn vào tầm nhìn để chống lỗi layout
+                    await target_row.scroll_into_view_if_needed()
+
+                    # Mở chi tiết đơn hàng
+                    logger.info(f"🔍 Bấm xem chi tiết Order [{order_identifier or 'Awaiting'}]...")
                     action_btn = target_row.locator("button[aria-label='View Details'], [data-field='actions'] button, [data-field=' '] button, button:has(.lucide-menu), button:has(.lucide-info)").first
                     
                     try:
@@ -402,16 +414,17 @@ class WorkspaceOrderService(WorkspaceBaseService):
                             lambda r: "getOrderDetail.php" in r.url and r.status == 200,
                             timeout=15000
                         ):
-                            await action_btn.click(timeout=15000)
+                            # Dùng force=True để click xuyên qua nếu còn overlay mỏng
+                            await action_btn.click(timeout=15000, force=True)
                             view_menu_item = page.locator("li[role='menuitem']:has-text('View'), .MuiMenuItem-root:has-text('View')").first
                             if await view_menu_item.count() > 0 and await view_menu_item.is_visible():
-                                await view_menu_item.click()
+                                await view_menu_item.click(force=True)
                     except Exception:
                         if await action_btn.count() > 0:
-                            await action_btn.click()
+                            await action_btn.click(force=True)
                             view_menu_item = page.locator("li[role='menuitem']:has-text('View'), .MuiMenuItem-root:has-text('View')").first
                             if await view_menu_item.count() > 0 and await view_menu_item.is_visible():
-                                await view_menu_item.click()
+                                await view_menu_item.click(force=True)
 
                     await page.wait_for_selector("div[role='dialog']", state="visible", timeout=15000)
 
@@ -421,14 +434,14 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     for i in range(pool_count):
                         try:
                             current_dd = pool_dropdowns.nth(i)
-                            await current_dd.click()
+                            await current_dd.click(force=True)
                             opts = page.locator("li[role='option']")
                             await opts.first.wait_for(state="visible", timeout=3000)
                             best_opt = opts.locator(":has-text('Category License'), :has-text('Available')").first
                             if await best_opt.count() > 0:
-                                await best_opt.click()
+                                await best_opt.click(force=True)
                             elif await opts.count() > 0:
-                                await opts.first.click()
+                                await opts.first.click(force=True)
                         except Exception:
                             pass
 
@@ -436,20 +449,20 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     can_approve = (await approve_btn.count() > 0) and (await approve_btn.is_visible())
 
                     if can_approve:
-                        logger.info("🎉 Kho Partner ĐỦ License! Đang bấm 'Approve Order' và quan sát API updateStatusOrder.php...")
+                        logger.info("🎉 Kho Partner ĐỦ License! Đang bấm 'Approve Order'...")
                         
                         try:
                             async with page.expect_response(
                                 lambda r: "updateStatusOrder.php" in r.url and r.request.method == "POST",
                                 timeout=20000
                             ) as res_info:
-                                await approve_btn.click()
+                                await approve_btn.click(force=True)
 
                             res = await res_info.value
                             logger.info(f"📥 API updateStatusOrder.php status code: {res.status}")
                         except Exception as e:
-                            logger.warning(f"⚠️ Không bắt kịp updateStatusOrder.php ({e}), bấm trực tiếp và chờ dialog ẩn...")
-                            await approve_btn.click()
+                            logger.warning(f"⚠️ Không bắt kịp updateStatusOrder.php ({e}), bấm trực tiếp...")
+                            await approve_btn.click(force=True)
                             await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=15000)
                         
                         return {
@@ -460,12 +473,12 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     else:
                         logger.warning("⚠️ Kho Partner KHÔNG ĐỦ License để duyệt Order!")
 
-                        # 🟢 TỐI ƯU 1-SESSION: CHUYỂN THẲNG SANG TẠO PRT CONTRACT GỬI DISTRIBUTOR
+                        # 🟢 TỐI ƯU 1-SESSION: CHUYỂN THẲNG SANG TẠO PRT CONTRACT GỬI DISTRIBUTOR NGAY TẠI PHIÊN NÀY
                         if auto_create_prt_if_short:
-                            logger.info(f"⚡ [1-SESSION PARTNER] Chuyển trang tạo PRT Contract ngay trên phiên hiện tại...")
+                            logger.info(f"⚡ [1-SESSION PARTNER] Thiếu License! Trực tiếp mở form tạo PRT Contract gửi Distributor...")
                             close_btn = page.locator("div[role='dialog'] button:has-text('Close')").first
                             if await close_btn.count() > 0:
-                                await close_btn.click()
+                                await close_btn.click(force=True)
 
                             prt_contract_res = await self._fill_partner_create_contract_form(
                                 page=page,
@@ -489,7 +502,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
 
                         close_btn = page.locator("div[role='dialog'] button:has-text('Close')").first
                         if await close_btn.count() > 0:
-                            await close_btn.click()
+                            await close_btn.click(force=True)
 
                         return {
                             "status": "insufficient_pool",
