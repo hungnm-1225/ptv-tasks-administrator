@@ -444,13 +444,25 @@ class WorkspaceContractService(WorkspaceBaseService):
                     if not is_ok:
                         return {"status": "failed", "error": login_err}
 
-                    logger.info("👑 Mở: /sales-admin-workspace/dashboard...")
+                    # 👉 CHỜ SESSION ỔN ĐỊNH SAU KHI ĐĂNG NHẬP ADMIN WORKSPACE
+                    logger.info("⏳ Đợi session Admin Workspace khởi tạo hoàn tất...")
+                    await page.wait_for_timeout(1500)
+
+                    # 👉 CHUYỂN HƯỚNG THỦ CÔNG SANG SALES ADMIN WORKSPACE ĐÚNG LUỒNG THỰC TẾ
+                    logger.info("👑 Đang chuyển hướng thủ công sang: /sales-admin-workspace/dashboard...")
                     await self._safe_navigate(
                         page=page,
                         target_url=f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard",
                         keyword_in_url="sales-admin-workspace",
-                        timeout=35000
+                        timeout=45000
                     )
+                    
+                    # Thêm 1 nhịp chờ phụ để chắc chắn React chuyển trang thành công
+                    await page.wait_for_timeout(2000)
+                    if "sales-admin-workspace" not in page.url:
+                        logger.warning(f"⚠️ URL hiện tại chưa đúng trang Sales Admin ({page.url}), đang ép điều hướng lại lần nữa...")
+                        await page.goto(f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard", wait_until="domcontentloaded", timeout=30000)
+                        await page.wait_for_timeout(2000)
                     
                     # 🚀 BƯỚC 1: Chờ bảng nạp dữ liệu thật
                     logger.info("⏳ Chờ nạp danh sách Order trên Sales Admin Dashboard...")
