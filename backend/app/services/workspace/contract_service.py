@@ -440,9 +440,18 @@ class WorkspaceContractService(WorkspaceBaseService):
             async with async_playwright() as p:
                 browser, context, page = await self._create_context(p)
                 try:
-                    is_ok, login_err = await self.login_role(page, credentials.get("username", ""), credentials.get("password", ""), "Sales Admin")
+                    fallback_user = str(getattr(settings, "TEST_ADMIN_USER", "")).strip().strip("'\"") or os.getenv("TEST_ADMIN_USER", "adminworkspace").strip().strip("'\"")
+                    fallback_pass = str(getattr(settings, "TEST_ADMIN_PASS", "")).strip().strip("'\"") or os.getenv("TEST_ADMIN_PASS", "").strip().strip("'\"")
+
+                    # Kiểm tra xem credentials truyền vào có password hợp lệ không, nếu không thì dùng fallback
+                    admin_user = credentials.get("username") if (credentials and credentials.get("username")) else fallback_user
+                    admin_pass = credentials.get("password") if (credentials and credentials.get("password")) else fallback_pass
+
+                    logger.info(f"👑 [Sales Admin Guard] Sử dụng tài khoản: '{admin_user}' (Độ dài mật khẩu: {len(admin_pass)} ký tự)")
+
+                    is_ok, login_err = await self.login_role(page, admin_user, admin_pass, "Sales Admin")
                     if not is_ok:
-                        return {"status": "failed", "error": login_err}
+                        return {"status": "failed", "error": f"Sales Admin Login Failed: {login_err}"}
 
                     # 👉 CHỜ SESSION ỔN ĐỊNH SAU KHI ĐĂNG NHẬP ADMIN WORKSPACE
                     logger.info("⏳ Đợi session Admin Workspace khởi tạo hoàn tất...")
