@@ -100,8 +100,18 @@ async def execute_approved_bot_task(
             partner_creds = payload_data.get("partner_credentials")
             distributor_creds = payload_data.get("distributor_credentials")
             
-            raw_admin_user = str(getattr(settings, "TEST_ADMIN_USER", "")).strip().strip("'\"") or "salesadmin@dtt.vn"
+            raw_admin_user = str(getattr(settings, "TEST_ADMIN_USER", "")).strip().strip("'\"")
             raw_admin_pass = str(getattr(settings, "TEST_ADMIN_PASS", "")).strip().strip("'\"")
+
+            # Nếu settings chưa có, thử đọc trực tiếp từ os.environ trên Render
+            if not raw_admin_user:
+                raw_admin_user = str(os.getenv("TEST_ADMIN_USER", "")).strip().strip("'\"")
+            if not raw_admin_pass:
+                raw_admin_pass = str(os.getenv("TEST_ADMIN_PASS", "")).strip().strip("'\"")
+
+            # Fallback an toàn cuối cùng nếu cả Render cũng trống
+            if not raw_admin_user:
+                raw_admin_user = "salesadmin@dtt.vn"
 
             if not raw_admin_pass:
                 logger.warning(f"⚠️ {task_tag} TEST_ADMIN_PASS bị rỗng hoặc chưa được cấu hình trên Render!")
@@ -113,8 +123,12 @@ async def execute_approved_bot_task(
                     "password": raw_admin_pass
                 }
             else:
+                if "username" in admin_creds:
+                    admin_creds["username"] = str(admin_creds["username"]).strip().strip("'\"")
                 if "password" in admin_creds:
                     admin_creds["password"] = str(admin_creds["password"]).strip().strip("'\"")
+
+            logger.info(f"📦 {task_tag} Đã nạp thông tin Sales Admin từ Render: Username='{admin_creds.get('username')}', Password Length={len(admin_creds.get('password', ''))} ký tự.")
 
             # 🟢 AUTO-RESOLVER PHẢ HỆ:
             if (distributor_name or payload_data.get("distributor_code")) and not distributor_creds:
