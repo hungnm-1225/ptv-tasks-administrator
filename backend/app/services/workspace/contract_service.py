@@ -365,7 +365,10 @@ class WorkspaceContractService(WorkspaceBaseService):
 
                         course_card = page.locator(".MuiCard-root:has(label:has-text('License Category'))").nth(idx)
 
+                        # 👉 LẤY ĐÚNG CATEGORY TỪ ORDER/CONTRACT DATA TRUYỀN VÀO
                         cat_val = c.get("category", "SWRP")
+                        logger.info(f"📚 Môn #{idx + 1}: Chọn License Category = '{cat_val}'...")
+                        
                         cat_select = course_card.locator("div:has(label:has-text('License Category')) [role='combobox'], div:has(label:has-text('License Category')) .MuiSelect-select").first
                         await cat_select.click()
                         await page.wait_for_timeout(300)
@@ -376,10 +379,13 @@ class WorkspaceContractService(WorkspaceBaseService):
                         else:
                             await page.locator("li[role='option']").first.click()
 
-                        # 🟢 CHỜ API TẢI DANH MỤC KHÓA HỌC
-                        await page.wait_for_timeout(1800)
+                        # 🟢 CHỜ API TẢI DANH MỤC KHÓA HỌC THỰC TẾ CỦA CATEGORY ĐÓ
+                        await smart_wait_for_options_loaded(page, min_options=1, timeout=8000)
 
+                        # 👉 LẤY ĐÚNG TÊN COURSE TỪ ORDER/CONTRACT DATA
                         course_name_val = c.get("course_name")
+                        logger.info(f"🎯 Môn #{idx + 1}: Chọn Course = '{course_name_val or 'Mặc định'}'...")
+                        
                         course_select = course_card.locator("div:has(label:has-text('Course')) [role='combobox'], div:has(label:has-text('Course')) .MuiSelect-select").first
                         await course_select.click()
                         await page.wait_for_timeout(500)
@@ -389,13 +395,17 @@ class WorkspaceContractService(WorkspaceBaseService):
                             if await target_opt.count() > 0:
                                 await target_opt.click()
                             else:
-                                await page.locator("li[role='option']").first.click()
+                                valid_opts = page.locator("li[role='option']:not(:has-text('Select Course'))")
+                                if await valid_opts.count() > 0:
+                                    await valid_opts.first.click()
+                                else:
+                                    await page.locator("li[role='option']").first.click()
                         else:
-                            await page.locator("li[role='option']").first.click()
+                            await page.locator("li[role='option']:not(:has-text('Select Course'))").first.click()
 
                         await page.wait_for_timeout(300)
 
-                        lic_qty = str(c.get("licenses", 50))
+                        lic_qty = str(c.get("licenses", c.get("course_count", 50)))
                         lic_input = course_card.locator("div:has(label:has-text('License(s)')) input[type='number'], input[type='number']").first
                         await lic_input.click()
                         await page.keyboard.press("Control+A")

@@ -207,7 +207,7 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
         courses_needed: Optional[List[Dict[str, Any]]] = None,
         checkpoint: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Duyệt School Order với bộ đệm trạng thái Checkpoint."""
+        """Duyệt School Order theo chuẩn Boomerang Xuyên Suốt (Cascade Resolution)."""
         checkpoint = checkpoint or {}
         logs = []
 
@@ -215,65 +215,71 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
             logger.info(msg)
             logs.append(msg)
 
-        log_step(f"🚀 [SUB-FLOW] Duyệt School Order: [{order_identifier}]")
+        log_step(f"🚀 [SUB-FLOW BOOMERANG] Bắt đầu duyệt School Order: [{order_identifier}]")
 
-        # 1. Thử duyệt tại Partner
-        partner_res = await self.partner_approve_school_order(partner_creds, order_identifier)
+        # 1. Đọc chi tiết môn học thực tế từ School Order nếu chưa có (để giữ đúng ASP, SWRP...)
+        if not courses_needed:
+            log_step("🔍 Đang mở Order Details đọc chính xác danh sách môn học & số lượng của School...")
+            detail_res = await self.fetch_school_order_detailed_courses(partner_creds, order_identifier)
+            courses_needed = detail_res.get("courses", [])
+            if courses_needed:
+                log_step(f"📚 Đã bóc tách được {len(courses_needed)} môn học từ Order (Ví dụ: Category={courses_needed[0].get('category')}, Course={courses_needed[0].get('course_name')})")
+
+        # 2. Thử duyệt tại Partner lần 1
+        partner_res = await self.partner_approve_school_order(
+            credentials=partner_creds,
+            order_identifier=order_identifier,
+            auto_create_prt_if_short=True,
+            courses_needed=courses_needed
+        )
+
         if partner_res.get("status") == "success":
             checkpoint["order_approved"] = True
-            log_step(f"✅ Partner đã duyệt thành công School Order [{order_identifier}]!")
+            log_step(f"✅ Partner đã duyệt thành công School Order [{order_identifier}] ngay từ vòng đầu!")
             return {"status": "success", "order_code": order_identifier, "checkpoint": checkpoint, "current_step": "completed", "logs": "\n".join(logs)}
 
-        if partner_res.get("status") != "insufficient_pool":
-            err = partner_res.get("error", "Lỗi duyệt Order tại Partner")
-            log_step(f"❌ {err}")
-            return {"status": "failed", "error": err, "checkpoint": checkpoint, "current_step": "partner_approve_school_order", "logs": "\n".join(logs)}
-
-        # 2. Kho thiếu -> Kiểm tra PRT code đã tạo chưa
-        prt_code = checkpoint.get("prt_contract_code")
-        if not prt_code:
-            if not courses_needed:
-                log_step("🔍 Đang mở Order Details đọc thông tin môn học & số lượng...")
-                detail_res = await self.fetch_school_order_detailed_courses(partner_creds, order_identifier)
-                courses_needed = detail_res.get("courses", [])
-
-            if not courses_needed:
-                courses_needed = [{"category": "SWRP", "course_name": None, "licenses": 50}]
-
-            log_step(f"📝 Tạo PRT Contract xin {len(courses_needed)} môn từ Distributor '{distributor_creds.get('name')}'...")
-            prt_contract = await self.partner_create_contract(partner_creds, {
-                "notes": f"Auto-topup to approve School Order {order_identifier}",
-                "courses": courses_needed
-            })
-            if prt_contract.get("status") != "success":
-                return {"status": "failed", "error": prt_contract.get("error"), "checkpoint": checkpoint, "current_step": "create_prt_contract", "logs": "\n".join(logs)}
-
-            prt_code = prt_contract.get("contract_code")
+        # 3. Nếu kho Partner thiếu License, hệ thống đã tự động tạo PRT Contract (trả về status 'insufficient_pool_created_prt')
+        if partner_res.get("status") == "insufficient_pool_created_prt":
+            prt_code = partner_res.get("prt_contract_code")
             checkpoint["prt_contract_code"] = prt_code
-            log_step(f"✅ Đã tạo Contract PRT: [{prt_code}]")
-        else:
-            log_step(f"⏩ Đã có sẵn PRT Contract [{prt_code}] từ Checkpoint.")
+            log_step(f"⚡ [BOOMERANG CHIỀU LÊN] Partner đã tạo xong PRT Contract [{prt_code}]. Đang chuyển lên Distributor duyệt cấp bù...")
 
-        # 3. Distributor duyệt PRT Contract (Tự động leo lên Sales Admin nếu thiếu)
-        prt_resolve_res = await self.execute_approve_partner_contract_standalone(
-            contract_identifier=prt_code,
-            distributor_creds=distributor_creds,
-            sales_admin_creds=sales_admin_creds,
-            courses_needed=courses_needed,
-            checkpoint=checkpoint
-        )
-        if prt_resolve_res.get("status") != "success":
-            return {"status": "failed", "error": prt_resolve_res.get("error"), "checkpoint": checkpoint, "current_step": "approve_prt_contract", "logs": "\n".join(logs)}
+            # 4. Kích hoạt Distributor (và Sales Admin nếu cần) duyệt PRT Contract vừa tạo
+            prt_resolve_res = await self.execute_approve_partner_contract_standalone(
+                contract_identifier=prt_code,
+                distributor_creds=distributor_creds,
+                sales_admin_creds=sales_admin_creds,
+                courses_needed=courses_needed,
+                checkpoint=checkpoint
+            )
+            if prt_resolve_res.get("status") != "success":
+                err_prt = prt_resolve_res.get("error", "Lỗi duyệt PRT Contract ở tầng trên")
+                log_step(f"❌ [LỖI CẤP BÙ TẦNG TRÊN]: {err_prt}")
+                return {"status": "failed", "error": err_prt, "checkpoint": checkpoint, "current_step": "approve_prt_contract", "logs": "\n".join(logs)}
 
-        # 4. Partner duyệt lại School Order lần cuối
-        log_step(f"🤝 Partner duyệt lại School Order [{order_identifier}] sau khi cấp bù...")
-        final_res = await self.partner_approve_school_order(partner_creds, order_identifier)
-        if final_res.get("status") != "success":
-            return {"status": "failed", "error": final_res.get("error"), "checkpoint": checkpoint, "current_step": "partner_final_approve", "logs": "\n".join(logs)}
+            checkpoint["prt_approved"] = True
+            log_step(f"🎉 [BOOMERANG CHIỀU VỀ] Cấp bù thành công! Đang quay trở lại để Partner duyệt dứt điểm School Order [{order_identifier}]...")
 
-        checkpoint["order_approved"] = True
-        log_step(f"🏁 ĐÃ DUYỆT THÀNH CÔNG SCHOOL ORDER: [{order_identifier}]!")
-        return {"status": "success", "order_code": order_identifier, "checkpoint": checkpoint, "current_step": "completed", "logs": "\n".join(logs)}
+            # 5. Chiếc boomerang quay trở lại đích: Partner duyệt lại School Order lần cuối
+            final_res = await self.partner_approve_school_order(
+                credentials=partner_creds,
+                order_identifier=order_identifier,
+                auto_create_prt_if_short=False, # Không tạo nữa vì đã có kho bù
+                courses_needed=courses_needed
+            )
+            if final_res.get("status") != "success":
+                err_final = final_res.get("error", "Lỗi Partner duyệt lại Order lần cuối")
+                log_step(f"❌ {err_final}")
+                return {"status": "failed", "error": err_final, "checkpoint": checkpoint, "current_step": "partner_final_approve", "logs": "\n".join(logs)}
+
+            checkpoint["order_approved"] = True
+            log_step(f"🏁 [BOOMERANG HOÀN TẤT] ĐÃ DUYỆT THÀNH CÔNG SCHOOL ORDER: [{order_identifier}]!")
+            return {"status": "success", "order_code": order_identifier, "checkpoint": checkpoint, "current_step": "completed", "logs": "\n".join(logs)}
+
+        err = partner_res.get("error", "Lỗi duyệt School Order tại Partner")
+        log_step(f"❌ {err}")
+        return {"status": "failed", "error": err, "checkpoint": checkpoint, "current_step": "partner_approve_school_order", "logs": "\n".join(logs)}
+    
 
     async def execute_approve_partner_contract_standalone(
         self,
