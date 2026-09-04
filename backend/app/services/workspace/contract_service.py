@@ -190,7 +190,7 @@ class WorkspaceContractService(WorkspaceBaseService):
         auto_create_dst_if_short: bool = True,
         courses_needed: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
-        """Duyệt Partner Contract. TÍCH HỢP LIỀN MẠCH 1-SESSION."""
+        """Duyệt Partner Contract bằng cơ chế Direct API kết hợp UI Fallback siêu tốc."""
         async with acquire_playwright_slot("Distributor Approve Partner Contract"):
             async with async_playwright() as p:
                 browser, context, page = await self._create_context(p)
@@ -199,100 +199,132 @@ class WorkspaceContractService(WorkspaceBaseService):
                     if not is_ok:
                         return {"status": "failed", "error": login_err}
 
-                    logger.info("🏢 Distributor mở: /distributor-workspace/partner-contract-po...")
+                    # Lấy distributor_id từ session trình duyệt
+                    await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/dashboard", wait_until="domcontentloaded", timeout=30000)
+                    try:
+                        await page.wait_for_function("() => !!window.user?.distributor_id", timeout=5000)
+                    except Exception:
+                        pass
+                    dist_id = await page.evaluate("() => window.user?.distributor_id || null")
+                    
+                    logger.info(f"🏢 Distributor ID xác định: {dist_id}. Đang gọi API lấy danh sách Partner Contracts...")
+
+                    # 🚀 GỌI DIRECT API LẤY DANH SÁCH HỢP ĐỒNG NGAY LẬP TỨC (0.2s)
+                    api_url = f"https://pythaverse.space/wp-content/plugins/distributor_workspace_v3/api/orders_management/getPartnerOrder.php?distributor_id={dist_id or ''}"
+                    api_res = await page.evaluate(f"""async () => {{
+                        try {{
+                            const r = await fetch('{api_url}');
+                            return await r.json();
+                        }} catch(e) {{
+                            return {{ code: 500, error: e.toString() }};
+                        }}
+                    }}""")
+
+                    contracts_list = api_res.get("data", []) if isinstance(api_res, dict) else []
+                    target_contract_obj = None
+
+                    search_code = str(contract_identifier).strip() if contract_identifier else ""
+                    for c in contracts_list:
+                        c_code = str(c.get("order_code", ""))
+                        c_id = str(c.get("id", ""))
+                        if search_code and (search_code in c_code or search_code in c_id):
+                            target_contract_obj = c
+                            break
+                    
+                    # Nếu không tìm thấy bằng search_code, lấy bản ghi Pending đầu tiên
+                    if not target_contract_obj and contracts_list:
+                        for c in contracts_list:
+                            if "pending" in str(c.get("status", "")).lower():
+                                target_contract_obj = c
+                                break
+                        if not target_contract_obj:
+                            target_contract_obj = contracts_list[0]
+
+                    if not target_contract_obj:
+                        return {"status": "failed", "error": f"Không tìm thấy Partner Contract ({search_code}) qua Direct API"}
+
+                    found_code = target_contract_obj.get("order_code")
+                    found_id = target_contract_obj.get("id")
+                    raw_status = str(target_contract_obj.get("status", "")).lower()
+
+                    logger.info(f"🎯 Đã tìm thấy hợp đồng qua API: ID=[{found_id}], Code=[{found_code}], Status=[{raw_status}]")
+
+                    if "approved" in raw_status or "completed" in raw_status:
+                        logger.info(f"✨ Partner Contract [{found_code}] đã được duyệt từ trước!")
+                        return {
+                            "status": "success",
+                            "contract_identifier": found_code or contract_identifier,
+                            "already_approved": True,
+                            "message": f"Partner Contract [{found_code}] đã được duyệt từ trước."
+                        }
+
+                    # Điều hướng vào trang UI quản lý partner contracts để bấm modal chi tiết hoặc gọi API approve
+                    logger.info(f"🏢 Mở giao diện Partner Contracts để thao tác duyệt...")
                     await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/distributor-workspace/partner-contract-po", "partner-contract-po")
-                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row, [role='row']", min_pacing_ms=1000)
+                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row, [role='row']", min_pacing_ms=800)
 
-                    target_row = None
-                    if contract_identifier:
-                        logger.info(f"🔍 Đang tìm Hợp đồng Partner: [{contract_identifier}]...")
-                        target_row = page.locator(f".MuiDataGrid-row:has-text('{contract_identifier}')").first
-
-                        if await target_row.count() == 0:
-                            search_input = page.locator("input[placeholder*='Search'], .MuiTextField-root input, input[type='text']").first
-                            if await search_input.count() > 0:
-                                await search_input.fill(contract_identifier)
-                                await page.keyboard.press("Enter")
-                                await page.wait_for_timeout(1500)
-                                target_row = page.locator(f".MuiDataGrid-row:has-text('{contract_identifier}')").first
-
-                    if not target_row or await target_row.count() == 0:
+                    # Tìm dòng trên giao diện ứng với found_code hoặc found_id
+                    target_row = page.locator(f".MuiDataGrid-row:has-text('{found_code or found_id}')").first
+                    if await target_row.count() == 0:
                         target_row = page.locator(".MuiDataGrid-row:has-text('Pending')").first
 
-                    if not target_row or await target_row.count() == 0:
-                        return {"status": "failed", "error": f"Không tìm thấy Partner Contract ({contract_identifier}) trên bảng"}
+                    if await target_row.count() > 0:
+                        info_btn = target_row.locator("button[aria-label='View Details'], [data-field='actions'] button, button:has(.lucide-info)").first
+                        await info_btn.click(timeout=10000)
+                        await page.wait_for_selector("div[role='dialog']", state="visible", timeout=10000)
+                        await page.wait_for_timeout(600)
 
-                    # Kiểm tra nếu đã approved
-                    row_text = (await target_row.inner_text()).lower()
-                    if "approved" in row_text or "completed" in row_text:
-                        logger.info(f"✨ Partner Contract [{contract_identifier}] đã được duyệt từ trước!")
-                        return {
-                            "status": "success",
-                            "contract_identifier": contract_identifier,
-                            "already_approved": True,
-                            "message": f"Partner Contract [{contract_identifier}] đã được duyệt từ trước."
-                        }
+                        approve_btn = page.locator("div[role='dialog'] button:has-text('Approve Order')").first
+                        if await approve_btn.count() > 0 and await approve_btn.is_visible():
+                            logger.info(f"🎉 Kho Distributor ĐỦ License! Đang bấm 'Approve Order'...")
+                            await approve_btn.click()
+                            await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=15000)
+                            await page.wait_for_timeout(1500)
+                            
+                            return {
+                                "status": "success",
+                                "contract_identifier": found_code or contract_identifier,
+                                "message": f"Distributor đã phê duyệt thành công Partner Contract [{found_code or contract_identifier}]!"
+                            }
 
-                    logger.info(f"🔍 Đang bấm nút 'View Details' cho Contract [{contract_identifier or 'Pending'}]...")
-                    info_btn = target_row.locator("button[aria-label='View Details'], [data-field='actions'] button, button:has(.lucide-info)").first
-                    await info_btn.click(timeout=15000)
-
-                    await page.wait_for_selector("div[role='dialog']", state="visible", timeout=15000)
-                    await page.wait_for_timeout(800)
-
-                    approve_btn = page.locator("div[role='dialog'] button:has-text('Approve Order')").first
-                    can_approve = (await approve_btn.count() > 0) and (await approve_btn.is_visible())
-
-                    if can_approve:
-                        logger.info(f"🎉 Kho Distributor ĐỦ License! Đang bấm 'Approve Order' cho Contract [{contract_identifier}]...")
-                        await approve_btn.click()
-                        await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=15000)
-                        await page.wait_for_timeout(1500)
-                        
-                        return {
-                            "status": "success",
-                            "contract_identifier": contract_identifier,
-                            "message": f"Distributor đã phê duyệt thành công Partner Contract [{contract_identifier}]!"
-                        }
-                    else:
-                        logger.warning(f"⚠️ Kho Distributor KHÔNG ĐỦ License (Insufficient pool resources)!")
-                        
-                        if auto_create_dst_if_short:
-                            logger.info(f"⚡ [1-SESSION SPEEDUP] Trực tiếp chuyển sang trang tạo Contract không cần login lại...")
+                    # Nếu nút Approve không sáng lên hoặc thiếu kho, tiến hành tạo DST Contract cấp bù
+                    logger.warning(f"⚠️ Kho Distributor KHÔNG ĐỦ License hoặc không tìm thấy nút Approve!")
+                    
+                    if auto_create_dst_if_short:
+                        logger.info(f"⚡ [1-SESSION SPEEDUP] Trực tiếp chuyển sang trang tạo DST Contract cấp bù...")
+                        try:
                             close_btn = page.locator("div[role='dialog'] button:has-text('Close')").first
-                            if await close_btn.count() > 0:
+                            if await close_btn.count() > 0 and await close_btn.is_visible():
                                 await close_btn.click()
-                                await page.wait_for_timeout(500)
+                                await page.wait_for_timeout(400)
+                        except Exception:
+                            pass
 
-                            dst_contract_res = await self._fill_distributor_create_contract_form(
-                                page=page,
-                                contract_data={
-                                    "notes": f"Auto-topup to approve PRT Contract {contract_identifier}",
-                                    "courses": courses_needed or [{"category": "SWRP", "course_name": None, "licenses": 100}]
-                                }
-                            )
+                        dst_contract_res = await self._fill_distributor_create_contract_form(
+                            page=page,
+                            contract_data={
+                                "notes": f"Auto-topup to approve PRT Contract {found_code or contract_identifier}",
+                                "courses": courses_needed or [{"category": "SWRP", "course_name": None, "licenses": 100}]
+                            }
+                        )
 
-                            if dst_contract_res.get("status") == "success":
-                                dst_code = dst_contract_res.get("contract_code")
-                                logger.info(f"✅ [1-SESSION] Đã tạo thành công DST Contract [{dst_code}] gửi Sales Admin!")
-                                return {
-                                    "status": "insufficient_pool_created_dst",
-                                    "contract_identifier": contract_identifier,
-                                    "dst_contract_code": dst_code,
-                                    "message": f"Kho thiếu License, đã trực tiếp tạo DST Contract [{dst_code}] gửi Sales Admin."
-                                }
-                            else:
-                                return dst_contract_res
+                        if dst_contract_res.get("status") == "success":
+                            dst_code = dst_contract_res.get("contract_code")
+                            logger.info(f"✅ [1-SESSION] Đã tạo thành công DST Contract [{dst_code}] gửi Sales Admin!")
+                            return {
+                                "status": "insufficient_pool_created_dst",
+                                "contract_identifier": found_code or contract_identifier,
+                                "dst_contract_code": dst_code,
+                                "message": f"Kho thiếu License, đã trực tiếp tạo DST Contract [{dst_code}] gửi Sales Admin."
+                            }
+                        else:
+                            return dst_contract_res
 
-                        close_btn = page.locator("div[role='dialog'] button:has-text('Close')").first
-                        if await close_btn.count() > 0:
-                            await close_btn.click()
-
-                        return {
-                            "status": "insufficient_pool",
-                            "contract_identifier": contract_identifier,
-                            "message": f"Kho Distributor không đủ License cho Contract [{contract_identifier}]."
-                        }
+                    return {
+                        "status": "insufficient_pool",
+                        "contract_identifier": found_code or contract_identifier,
+                        "message": f"Kho Distributor không đủ License cho Contract [{found_code or contract_identifier}]."
+                    }
 
                 except Exception as e:
                     logger.error(f"❌ Lỗi Distributor Duyệt Partner Contract: {e}")
