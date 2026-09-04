@@ -4,6 +4,7 @@ import os
 import logging
 from typing import Dict, Any, List, Optional
 from playwright.async_api import async_playwright, Page
+from app.core.config import settings
 
 from app.services.workspace.base import WorkspaceBaseService, BASE_WORKSPACE_URL
 from app.core.playwright_manager import acquire_playwright_slot, wait_for_dom_and_spinners, smart_wait_for_options_loaded
