@@ -77,8 +77,8 @@ class PlaywrightLMSService:
     async def _login_moodle_sso(self, page: Page) -> bool:
         """Đăng nhập Moodle qua Keycloak SSO kháng lỗi Navigation Destroyed."""
         try:
-            admin_user = getattr(settings, "TEST_ADMIN_USER", None) or "adminworkspace"
-            admin_pass = getattr(settings, "TEST_ADMIN_PASS", None) or getattr(settings, "KEYCLOAK_ADMIN_PASS", None) or ""
+            admin_user = getattr(settings, "TEST_ADMIN_USER", None)
+            admin_pass = getattr(settings, "TEST_ADMIN_PASS", None)
 
             if not admin_pass:
                 logger.error("❌ Không tìm thấy mật khẩu quản trị Keycloak trong biến môi trường!")

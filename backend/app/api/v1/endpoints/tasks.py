@@ -102,7 +102,7 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
                     log_trail += f"[{get_vn_time_str()}] [WARNING] [workspace_rpa] {tag}: Lỗi đọc phả hệ ({lineage_err}), tiếp tục với payload gốc.\n"
 
             if not payload.get("admin_credentials"):
-                admin_pass = getattr(settings, "KEYCLOAK_ADMIN_PASS", None) or getattr(settings, "TEST_ADMIN_PASS", None)
+                admin_pass = getattr(settings, "TEST_ADMIN_PASS", None) or getattr(settings, "TEST_ADMIN_PASS", None)
                 payload["admin_credentials"] = {
                     "username": getattr(settings, "TEST_ADMIN_USER", "salesadmin@dtt.vn"),
                     "password": admin_pass or ""

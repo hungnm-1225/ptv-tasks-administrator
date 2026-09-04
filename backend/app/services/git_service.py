@@ -64,8 +64,8 @@ class GitPlaywrightService:
     async def _login_git_oidc(self, page: Page) -> bool:
         """Đăng nhập Pythaverse Git qua Pythaverse eID Keycloak."""
         try:
-            admin_user = getattr(settings, "GIT_ADMIN_USER", None) or "ptvadmin"
-            admin_pass = getattr(settings, "GIT_ADMIN_PASS", None) or getattr(settings, "KEYCLOAK_ADMIN_PASS", None) or ""
+            admin_user = getattr(settings, "GIT_ADMIN_USER", None)
+            admin_pass = getattr(settings, "GIT_ADMIN_PASS", None)
 
             if not admin_pass:
                 logger.error("❌ Không tìm thấy mật khẩu quản trị Git/Keycloak trong biến môi trường!")

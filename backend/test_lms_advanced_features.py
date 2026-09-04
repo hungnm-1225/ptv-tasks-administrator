@@ -18,8 +18,8 @@ def parse_date(date_str: str):
     return {"day": str(dt.day), "month": str(dt.month), "year": str(dt.year)}
 
 async def test_filter_and_edit():
-    admin_user = settings.TEST_ADMIN_USER or "adminworkspace"
-    admin_pass = settings.TEST_ADMIN_PASS or settings.KEYCLOAK_ADMIN_PASS or ""
+    admin_user = settings.TEST_ADMIN_USER
+    admin_pass = settings.TEST_ADMIN_PASS
     date_info = parse_date(TEST_NEW_END_DATE)
 
     async with async_playwright() as p:
