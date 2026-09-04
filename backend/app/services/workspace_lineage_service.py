@@ -275,8 +275,6 @@ class WorkspaceLineageService:
         clean_code = contract_code.strip()
         
         try:
-            # Query theo contract_code (VARCHAR) — không dùng id.eq vì cột id là UUID
-            # Tránh lỗi 22P02 khi input là chuỗi dạng "DST-..." thay vì UUID hợp lệ
             cache_res = supabase.table("workspace_contracts_cache")\
                 .select("*")\
                 .eq("contract_code", clean_code)\
@@ -285,30 +283,40 @@ class WorkspaceLineageService:
             
             if cache_res.data and len(cache_res.data) > 0:
                 item = cache_res.data[0]
+                contract_type = str(item.get("contract_type", "")).upper()
                 dist_name = item.get("distributor_name") or item.get("receiver_name")
-                partner_name = item.get("partner_name") or item.get("sender_name")
+                sender_name = item.get("sender_name")
+                partner_name = item.get("partner_name")
                 
                 dist_creds = None
                 partner_creds = None
                 
-                # "Sales Admin" là tài khoản system tối cao — không tồn tại trong
-                # workspace_organizations nên không cần resolve, tránh warning giả
                 is_sales_admin_receiver = dist_name and dist_name.strip().lower() in (
                     "sales admin", "salesadmin", "admin"
                 )
                 
-                if dist_name and not is_sales_admin_receiver:
-                    d_res = WorkspaceLineageService.resolve_by_distributor(dist_name)
-                    if d_res:
-                        dist_creds = d_res.get("distributor")
-                        
-                if partner_name:
-                    p_res = WorkspaceLineageService.resolve_by_partner(partner_name)
-                    if p_res:
-                        partner_creds = p_res.get("partner")
-                        if not dist_creds:
-                            # DST Contract gửi Sales Admin: lấy Distributor qua Partner cha
-                            dist_creds = p_res.get("distributor")
+                # 👉 XỬ LÝ PHÂN NHÁNH THÔNG MINH THEO LOẠI HỢP ĐỒNG
+                if contract_type == "DST" or clean_code.startswith("DST"):
+                    # Hợp đồng DST: Distributor (sender_name) gửi lên Sales Admin
+                    target_dist = sender_name or dist_name
+                    if target_dist:
+                        d_res = WorkspaceLineageService.resolve_by_distributor(target_dist)
+                        if d_res:
+                            dist_creds = d_res.get("distributor")
+                else:
+                    # Hợp đồng PRT hoặc mặc định: Partner gửi Distributor
+                    if dist_name and not is_sales_admin_receiver:
+                        d_res = WorkspaceLineageService.resolve_by_distributor(dist_name)
+                        if d_res:
+                            dist_creds = d_res.get("distributor")
+                            
+                    target_partner = partner_name or sender_name
+                    if target_partner:
+                        p_res = WorkspaceLineageService.resolve_by_partner(target_partner)
+                        if p_res:
+                            partner_creds = p_res.get("partner")
+                            if not dist_creds:
+                                dist_creds = p_res.get("distributor")
                             
                 if dist_creds or partner_creds:
                     return {"distributor": dist_creds, "partner": partner_creds}
