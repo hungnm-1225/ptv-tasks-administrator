@@ -4,7 +4,7 @@ import re
 import time
 import uuid
 from fastapi import APIRouter, HTTPException, BackgroundTasks
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timezone, timedelta
 from app.core.supabase import get_supabase_client
 from app.workers.bot_executor import execute_approved_bot_task
@@ -73,13 +73,39 @@ def is_valid_uuid(val: str) -> bool:
     except (ValueError, AttributeError, TypeError):
         return False
 
-def clean_log_message(msg: str) -> str:
-    """Bóc tách bỏ timestamp và prefix tag trùng lặp đã bị lồng trong nội dung log."""
-    cleaned = msg.strip()
-    cleaned = re.sub(r"^\[\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\]\s*", "", cleaned)
-    cleaned = re.sub(r"^\[(INFO|ERROR|SUCCESS|APPROVAL|WARNING|RETRY|DEBUG)\]\s*", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"^\[[\w\d_-]+\]:\s*", "", cleaned)
-    return cleaned.strip()
+def parse_log_line_with_timestamp(line: str, fallback_time_str: str) -> Tuple[str, str, str]:
+    """
+    Bóc tách chính xác: (Thời gian thực tế GMT+7, Mức độ Log, Nội dung Log sạch).
+    Bảo toàn timestamp gốc của từng dòng thay vì bị đè bởi executed_at.
+    """
+    raw = line.strip()
+    actual_time = fallback_time_str
+    level = "INFO"
+
+    # 1. Trích xuất Timestamp gốc ở đầu dòng nếu có (ví dụ: [2026-09-05 14:16:31] hoặc [2026-09-05T14:16:31Z])
+    ts_match = re.match(r"^\[(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)\]\s*", raw)
+    if ts_match:
+        actual_time = format_vn_time(ts_match.group(1))
+        raw = raw[ts_match.end():].strip()
+
+    # 2. Trích xuất Level (INFO/SUCCESS/ERROR/APPROVAL/WARNING/RETRY/DEBUG)
+    lvl_match = re.match(r"^\[(INFO|SUCCESS|ERROR|APPROVAL|WARNING|RETRY|DEBUG)\]\s*", raw, flags=re.IGNORECASE)
+    if lvl_match:
+        found_lvl = lvl_match.group(1).upper()
+        level = "SUCCESS" if found_lvl in ["SUCCESS", "APPROVAL"] else ("ERROR" if found_lvl in ["ERROR", "FAILED"] else found_lvl)
+        raw = raw[lvl_match.end():].strip()
+    else:
+        if "success" in raw.lower() or "thành công" in raw.lower():
+            level = "SUCCESS"
+        elif "error" in raw.lower() or "fail" in raw.lower() or "lỗi" in raw.lower():
+            level = "ERROR"
+        elif "warning" in raw.lower() or "cảnh báo" in raw.lower():
+            level = "WARNING"
+
+    # 3. Loại bỏ prefix tag thừa nếu có (ví dụ: [git_collaborator] hoặc [Task #...]:)
+    raw = re.sub(r"^\[[\w\d_-]+\]:\s*", "", raw)
+
+    return actual_time, level, raw.strip()
 
 
 @router.get("/status")
@@ -115,7 +141,7 @@ async def get_bot_workers_status() -> Dict[str, Any]:
                 worker_stats["workspace_license_worker"]["failed_count"] += 1
             elif b_type == "keycloak_api":
                 worker_stats["keycloak_api_worker"]["failed_count"] += 1
-            elif b_type in ["lms_playwright", "lms_git_provisioning"]:
+            elif b_type in ["lms_playwright", "lms_git_provisioning", "git_collaborator", "git_playwright"]:
                 worker_stats["lms_git_worker"]["failed_count"] += 1
             elif b_type == "github_issue_creator":
                 worker_stats["github_dispatcher"]["failed_count"] += 1
@@ -135,7 +161,7 @@ async def get_bot_workers_status() -> Dict[str, Any]:
 
 @router.get("/logs")
 async def get_bot_terminal_logs() -> List[Dict[str, Any]]:
-    """Lấy danh sách log thực thi từ database với múi giờ Việt Nam (Có RAM Cache)."""
+    """Lấy danh sách log thực thi với dòng thời gian chính xác từng bước (Có RAM Cache)."""
     cache_key = "bot_terminal_logs"
     cached = bots_cache.get(cache_key)
     if cached is not None:
@@ -158,47 +184,47 @@ async def get_bot_terminal_logs() -> List[Dict[str, Any]]:
             b_type = t.get("bot_type") or "Worker"
             e_status = t.get("execution_status") or "queued"
             
-            raw_time = t.get("executed_at") or t.get("created_at")
-            time_str = format_vn_time(raw_time)
+            # Thời điểm tạo task (Approval / Queue) LUÔN lấy created_at
+            created_time_str = format_vn_time(t.get("created_at"))
+            # Thời điểm hoàn tất (nếu có)
+            executed_time_str = format_vn_time(t.get("executed_at") or t.get("created_at"))
             
+            # 1. Dòng khởi tạo trạng thái: BẮT BUỘC dùng thời điểm tạo (created_at)
             logs_output.append({
-                "timestamp": time_str,
+                "timestamp": created_time_str,
                 "level": "INFO",
                 "worker": b_type,
                 "message": f"Task #{t_id_short} queued with status '{t.get('approval_status')}'",
-                "raw_line": f"[{time_str}] [INFO] [{b_type}]: Task #{t_id_short} queued with status '{t.get('approval_status')}'"
+                "raw_line": f"[{created_time_str}] [INFO] [{b_type}]: Task #{t_id_short} queued with status '{t.get('approval_status')}'"
             })
             
+            # 2. Các dòng log thực thi chi tiết bên trong: Bóc tách timestamp riêng của từng dòng
             if t.get("execution_logs"):
                 for line in t["execution_logs"].split("\n"):
                     if line.strip():
-                        level = "SUCCESS" if "success" in line.lower() else "ERROR" if "error" in line.lower() or "fail" in line.lower() else "INFO"
-                        cleaned_msg = clean_log_message(line)
-                        if not cleaned_msg:
-                            cleaned_msg = line.strip()
-
+                        line_time, line_level, clean_msg = parse_log_line_with_timestamp(line, fallback_time_str=executed_time_str)
                         logs_output.append({
-                            "timestamp": time_str,
-                            "level": level,
+                            "timestamp": line_time,
+                            "level": line_level,
                             "worker": b_type,
-                            "message": cleaned_msg,
-                            "raw_line": f"[{time_str}] [{level}] [{b_type}]: {cleaned_msg}"
+                            "message": clean_msg,
+                            "raw_line": f"[{line_time}] [{line_level}] [{b_type}]: {clean_msg}"
                         })
             elif e_status == "success":
                 logs_output.append({
-                    "timestamp": time_str,
+                    "timestamp": executed_time_str,
                     "level": "SUCCESS",
                     "worker": b_type,
                     "message": f"Task #{t_id_short} executed successfully.",
-                    "raw_line": f"[{time_str}] [SUCCESS] [{b_type}]: Task #{t_id_short} executed successfully."
+                    "raw_line": f"[{executed_time_str}] [SUCCESS] [{b_type}]: Task #{t_id_short} executed successfully."
                 })
             elif e_status == "failed":
                 logs_output.append({
-                    "timestamp": time_str,
+                    "timestamp": executed_time_str,
                     "level": "ERROR",
                     "worker": b_type,
                     "message": f"Task #{t_id_short} execution failed.",
-                    "raw_line": f"[{time_str}] [ERROR] [{b_type}]: Task #{t_id_short} execution failed."
+                    "raw_line": f"[{executed_time_str}] [ERROR] [{b_type}]: Task #{t_id_short} execution failed."
                 })
         
         bots_cache.set(cache_key, logs_output, ttl=10)
