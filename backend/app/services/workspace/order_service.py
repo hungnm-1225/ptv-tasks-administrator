@@ -306,7 +306,6 @@ class WorkspaceOrderService(WorkspaceBaseService):
                                 res_json = await res.json()
                                 logger.info(f"📥 API schoolCreateOrder.php phản hồi: {res_json}")
                                 
-                                # 👉 BÓC TÁCH CHUẨN XÁC: ĐỌC TỪ data OBJECT
                                 data_obj = res_json.get("data") if isinstance(res_json.get("data"), dict) else res_json
                                 order_num_id = str(data_obj.get("id") or data_obj.get("order_id") or "")
                                 order_full_code = str(
@@ -385,7 +384,6 @@ class WorkspaceOrderService(WorkspaceBaseService):
                             await search_input.click(force=True)
                             await page.keyboard.press("Control+A")
                             await page.keyboard.type(search_code)
-                            # Đợi DataGrid lọc client-side
                             await page.wait_for_timeout(600)
 
                     # Tìm dòng kết quả
@@ -398,7 +396,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     if await target_row.count() == 0:
                         return {"status": "failed", "error": f"Không tìm thấy Order [{search_code}] trên danh sách Partner!"}
 
-                    # Bấm nút Action menu (button chứa lucide-menu ở cột cuối)
+                    # Bấm nút Action menu (button chứa icon lucide-menu)
                     logger.info(f"🔍 Bấm mở menu Action của Order [{search_code}]...")
                     action_btn = target_row.locator("button:has(.lucide-menu), [data-field=' '] button, .MuiButton-containedPrimary").first
                     await action_btn.scroll_into_view_if_needed()
@@ -424,7 +422,6 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     # 🔄 BƯỚC THẨM ĐỊNH LICENSE: Chọn Pool License có Available đáp ứng số lượng
                     logger.info("🧐 Kiểm tra và phân bổ Pool License trong Dialog...")
                     
-                    # Quét các khối Pool License Selection trong dialog
                     pool_sections = page.locator("div[role='dialog'] div:has(label:has-text('Pool License'))")
                     pool_count = await pool_sections.count()
                     
@@ -438,7 +435,6 @@ class WorkspaceOrderService(WorkspaceBaseService):
                             await dropdown.click(force=True)
                             await page.wait_for_timeout(400)
 
-                            # Lấy danh sách các options trong Popover vừa mở
                             options = page.locator("li[role='option']")
                             opt_count = await options.count()
                             
@@ -447,12 +443,10 @@ class WorkspaceOrderService(WorkspaceBaseService):
                                 opt = options.nth(o_idx)
                                 opt_text = await opt.inner_text()
                                 
-                                # Phân tích chuỗi "Available: X"
                                 avail_match = re.search(r"Available:\s*(\d+)", opt_text)
                                 if avail_match:
                                     avail_num = int(avail_match.group(1))
                                     if avail_num > 0:
-                                        # Tìm thấy license còn dư, ưu tiên chọn
                                         selected_opt = opt
                                         logger.info(f"✅ Tìm thấy kho hợp lệ: '{opt_text.strip()}' (Available: {avail_num})")
                                         break
@@ -463,7 +457,6 @@ class WorkspaceOrderService(WorkspaceBaseService):
                             else:
                                 logger.warning(f"⚠️ Môn #{i+1}: Không có Pool License nào còn Available!")
                                 all_courses_satisfied = False
-                                # Đóng dropdown lại
                                 await page.keyboard.press("Escape")
                                 await page.wait_for_timeout(200)
 

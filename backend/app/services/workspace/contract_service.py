@@ -52,7 +52,6 @@ class WorkspaceContractService(WorkspaceBaseService):
         except Exception:
             await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/distributor-workspace/contract-po/create", "contract-po/create")
 
-        await self._dismiss_welcome_dialog(page)
         await wait_for_dom_and_spinners(page, "h4:has-text('Create Contract/PO'), :text('Create Contract/PO')", min_pacing_ms=300)
 
         # 1. Chọn Contract Type = 'License'
@@ -91,7 +90,7 @@ class WorkspaceContractService(WorkspaceBaseService):
 
             course_card = page.locator(".MuiCard-root:has(label:has-text('License Category'))").nth(idx)
 
-            # A. Chọn License Category (Cột 1)
+            # A. Chọn License Category
             cat_val = c.get("category") or "SWRP"
             logger.info(f"📚 Môn #{idx + 1}: Chọn License Category = '{cat_val}'...")
             cat_item = course_card.locator(".MuiGrid-item").filter(has=page.locator("label", has_text="License Category")).first
@@ -104,7 +103,7 @@ class WorkspaceContractService(WorkspaceBaseService):
             else:
                 await page.locator("li[role='option']").first.click(force=True)
 
-            # B. Chọn Course (Cột 2)
+            # B. Chọn Course
             course_name_val = c.get("course_name")
             logger.info(f"🎯 Môn #{idx + 1}: Chọn Course = '{course_name_val or 'Mặc định'}'...")
             course_item = course_card.locator(".MuiGrid-item").filter(has=page.locator("label", has_text=re.compile(r"^Course"))).first
@@ -127,7 +126,7 @@ class WorkspaceContractService(WorkspaceBaseService):
                 else:
                     await page.locator("li[role='option']").first.click(force=True)
 
-            # C. Điền số lượng Licenses (Cột 3)
+            # C. Điền số lượng Licenses
             lic_qty = str(c.get("licenses", 100))
             logger.info(f"🔢 Môn #{idx + 1}: Điền License(s) = {lic_qty}...")
             lic_item = course_card.locator(".MuiGrid-item").filter(has=page.locator("label", has_text="License(s)")).first
@@ -136,7 +135,7 @@ class WorkspaceContractService(WorkspaceBaseService):
             await page.keyboard.press("Control+A")
             await page.keyboard.type(lic_qty)
 
-            # D. Điền Unit Price (Cột 4)
+            # D. Điền Unit Price
             unit_price_val = str(c.get("unit_price", 0))
             price_item = course_card.locator(".MuiGrid-item").filter(has=page.locator("label", has_text="Unit Price")).first
             if await price_item.count() > 0:
@@ -174,7 +173,6 @@ class WorkspaceContractService(WorkspaceBaseService):
                     res_json = await res.json()
                     logger.info(f"📥 API createOrder.php phản hồi: {res_json}")
                     
-                    # 👉 BÓC TÁCH CHUẨN XÁC: ĐỌC TỪ data OBJECT, BỎ QUA STATUS CODE 201
                     data_obj = res_json.get("data") if isinstance(res_json.get("data"), dict) else res_json
                     contract_num_id = str(data_obj.get("id") or data_obj.get("order_id") or "")
                     contract_full_code = str(
@@ -231,7 +229,6 @@ class WorkspaceContractService(WorkspaceBaseService):
 
                     # Lấy distributor_id từ session trình duyệt
                     await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/dashboard", wait_until="domcontentloaded", timeout=30000)
-                    await self._dismiss_welcome_dialog(page)
                     
                     try:
                         await page.wait_for_function("() => !!window.user?.distributor_id", timeout=5000)
@@ -292,7 +289,6 @@ class WorkspaceContractService(WorkspaceBaseService):
                     # Mở giao diện Partner Contracts
                     logger.info(f"🏢 Mở giao diện Partner Contracts để thao tác duyệt...")
                     await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/distributor-workspace/partner-contract-po", "partner-contract-po")
-                    await self._dismiss_welcome_dialog(page)
                     await wait_for_dom_and_spinners(page, ".MuiDataGrid-row, [role='row']", min_pacing_ms=500)
 
                     target_row = page.locator(f".MuiDataGrid-row:has-text('{found_code or found_id}')").first
@@ -424,7 +420,6 @@ class WorkspaceContractService(WorkspaceBaseService):
                     except Exception:
                         await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/partner-workspace/contract-po/create", "contract-po/create")
 
-                    await self._dismiss_welcome_dialog(page)
                     await wait_for_dom_and_spinners(page, "h4:has-text('Create Contract/PO'), :text('Create Contract/PO')", min_pacing_ms=300)
 
                     type_select = page.locator(".MuiGrid-item:has(label:has-text('Contract Type')) [role='combobox'], div:has(label:has-text('Contract Type')) .MuiSelect-select").first
@@ -594,7 +589,6 @@ class WorkspaceContractService(WorkspaceBaseService):
                             timeout=30000
                         )
 
-                    await self._dismiss_welcome_dialog(page)
                     await wait_for_dom_and_spinners(page, ".MuiDataGrid-virtualScrollerContent, .MuiDataGrid-row", min_pacing_ms=400)
 
                     target_row = None
@@ -730,7 +724,6 @@ class WorkspaceContractService(WorkspaceBaseService):
                         return {"status": "failed", "error": login_err, "orders": []}
 
                     await page.goto(f"{BASE_WORKSPACE_URL}/partner-workspace/order-management", wait_until="domcontentloaded", timeout=45000)
-                    await self._dismiss_welcome_dialog(page)
                     await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=500)
 
                     orders = []
@@ -759,7 +752,6 @@ class WorkspaceContractService(WorkspaceBaseService):
                         return {"status": "failed", "error": login_err, "contracts": []}
 
                     await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/partner-contract-po", wait_until="domcontentloaded", timeout=45000)
-                    await self._dismiss_welcome_dialog(page)
                     await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=500)
 
                     contracts = []
@@ -788,7 +780,6 @@ class WorkspaceContractService(WorkspaceBaseService):
                         return {"status": "failed", "error": login_err, "contracts": []}
 
                     await page.goto(f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard", wait_until="domcontentloaded", timeout=45000)
-                    await self._dismiss_welcome_dialog(page)
                     await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=500)
 
                     contracts = []
