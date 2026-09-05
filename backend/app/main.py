@@ -38,11 +38,12 @@ async def safe_job_wrapper(job_func, job_name: str):
         gc.collect()
 
 async def poll_workspace_long_tasks():
-    """Quét Supabase mỗi 1 phút để check các đợt tạo tài khoản đã đến hạn kiểm tra."""
+    """Quét Supabase để check các đợt tạo tài khoản đã đến hạn kiểm tra."""
     supabase = get_supabase_client()
     now_utc = datetime.now(timezone.utc)
     now_iso = now_utc.isoformat()
 
+    # Query cực nhẹ kiểm tra xem có task nào thực sự cần check không
     res = supabase.table("bot_automation_tasks")\
         .select("*, inbox_tickets(*)")\
         .eq("bot_type", "workspace_rpa")\
@@ -50,7 +51,14 @@ async def poll_workspace_long_tasks():
         .lte("payload_data->>next_check_at", now_iso)\
         .execute()
 
-    for task in (res.data or []):
+    tasks_to_process = res.data or []
+    if not tasks_to_process:
+        # Không có task nào cần xử lý -> Thoát ngay, không động chạm gì tới Chromium hay RAM!
+        return
+
+    logger.info(f"📋 Tìm thấy {len(tasks_to_process)} task Workspace đang chờ kiểm tra kết quả...")
+
+    for task in tasks_to_process:
         task_id = task["id"]
         payload = task.get("payload_data", {})
         request_id = payload.get("request_id")
@@ -126,9 +134,10 @@ async def poll_workspace_long_tasks():
                 supabase.table("inbox_tickets").update({"status": "completed"}).eq("id", task["ticket_id"]).execute()
 
         elif status == "still_processing":
-            next_60s = (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat()
-            payload["next_check_at"] = next_60s
-            new_log = f"\n[{now_vn}] [INFO] [workspace_rpa] [#{task_id[:8]}]: Request #{request_id} vẫn đang xử lý ({check_res.get('current_status')}). Sẽ kiểm tra lại sau 60s."
+            # Nếu chưa xong, chờ thêm 3 phút cho đợt quét tiếp theo
+            next_check = (datetime.now(timezone.utc) + timedelta(minutes=3)).isoformat()
+            payload["next_check_at"] = next_check
+            new_log = f"\n[{now_vn}] [INFO] [workspace_rpa] [#{task_id[:8]}]: Request #{request_id} vẫn đang xử lý ({check_res.get('current_status')}). Sẽ kiểm tra lại sau 3 phút."
             
             supabase.table("bot_automation_tasks").update({
                 "payload_data": payload,
@@ -137,93 +146,95 @@ async def poll_workspace_long_tasks():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("🔥 Đang kích hoạt APScheduler 24/7 (Chế độ So Le & Chống Tràn RAM)...")
+    logger.info("🔥 Đang kích hoạt APScheduler 24/7 (Chu kỳ giãn 10 phút & Phân bố so le chống nghẽn)...")
     
-    # Mốc thời gian xuất phát lệch pha
     base_start = datetime.now(timezone.utc)
     
-    # 1. Quét Gmail mỗi 5 phút (Khởi chạy sau 5s)
+    # 1. Quét Gmail mỗi 10 phút (HTTP API thuần, khởi chạy sau 10s)
     scheduler.add_job(
         safe_job_wrapper, 
         'interval', 
-        minutes=5, 
+        minutes=10, 
         args=[poll_unread_gmails, "Quét Gmail"], 
         id='gmail_cron',
-        next_run_time=base_start + timedelta(seconds=5),
-        misfire_grace_time=120,
+        next_run_time=base_start + timedelta(seconds=10),
+        misfire_grace_time=180,
         max_instances=1,
         coalesce=True,
         replace_existing=True
     )
     
-    # 2. Quét OS Ticket mỗi 5 phút (Khởi chạy sau 65s - Lệch 1 phút)
+    # 2. Quét Form Feedback mỗi 10 phút (HTTP API thuần, khởi chạy sau 60s)
     scheduler.add_job(
         safe_job_wrapper, 
         'interval', 
-        minutes=5, 
-        args=[poll_open_ostickets, "Quét OS Ticket"], 
-        id='osticket_cron',
-        next_run_time=base_start + timedelta(seconds=65),
-        misfire_grace_time=120,
-        max_instances=1,
-        coalesce=True,
-        replace_existing=True
-    )
-    
-    # 3. Quét Form Feedback mỗi 5 phút (Khởi chạy sau 125s - Lệch 2 phút)
-    scheduler.add_job(
-        safe_job_wrapper, 
-        'interval', 
-        minutes=5, 
+        minutes=10, 
         args=[poll_form_feedbacks, "Quét Form Feedback"], 
         id='sheet_cron',
-        next_run_time=base_start + timedelta(seconds=125),
-        misfire_grace_time=120,
+        next_run_time=base_start + timedelta(seconds=60),
+        misfire_grace_time=180,
         max_instances=1,
         coalesce=True,
         replace_existing=True
     )
 
-    # 4. Quét Task Workspace Long-Running mỗi 3 phút (Khởi chạy sau 185s - Lệch 3 phút)
+    # 3. Quét OS Ticket mỗi 10 phút (Playwright - Khởi chạy sau 2 phút / 120s)
+    # Lệch hoàn toàn so với các job Playwright khác, đảm bảo luôn có slot trống!
     scheduler.add_job(
         safe_job_wrapper, 
         'interval', 
-        minutes=3, 
+        minutes=10, 
+        args=[poll_open_ostickets, "Quét OS Ticket"], 
+        id='osticket_cron',
+        next_run_time=base_start + timedelta(seconds=120),
+        misfire_grace_time=180,
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True
+    )
+
+    # 4. Quét Task Workspace Long-Running mỗi 10 phút (Playwright - Khởi chạy sau 6 phút / 360s)
+    # Cách OS Ticket hẳn 4 phút, không bao giờ tranh chấp slot!
+    scheduler.add_job(
+        safe_job_wrapper, 
+        'interval', 
+        minutes=10, 
         args=[poll_workspace_long_tasks, "Quét Task Workspace Long-Running"], 
         id='workspace_long_tasks_cron',
-        next_run_time=base_start + timedelta(seconds=185),
-        misfire_grace_time=120,
+        next_run_time=base_start + timedelta(seconds=360),
+        misfire_grace_time=180,
         max_instances=1,
         coalesce=True,
         replace_existing=True
     )
 
-    # 5. Quét Live Uptime & Auth Matrix định kỳ mỗi 30 phút (Khởi chạy sau 245s - Lệch 4 phút)
+    # 5. Quét Live Uptime & Auth Matrix định kỳ mỗi 45 phút (Khởi chạy sau 15 phút / 900s)
     scheduler.add_job(
         safe_job_wrapper, 
         'interval', 
-        minutes=30, 
+        minutes=45, 
         args=[poll_site_uptime_cron, "Quét Site Uptime & Auth Matrix"], 
         id='site_uptime_cron',
-        next_run_time=base_start + timedelta(seconds=245),
-        misfire_grace_time=120,
+        next_run_time=base_start + timedelta(seconds=900),
+        misfire_grace_time=300,
         max_instances=1,
         coalesce=True,
         replace_existing=True
     )
     
-    # 6. Quét Workspace Distributor để update cache mỗi 45 phút (Khởi chạy sau 305s - Lệch 5 phút)
+    # 6. Quét Workspace Distributor để update cache mỗi 60 phút (Khởi chạy sau 30 phút / 1800s)
+    # Tác vụ nặng nhất được đẩy sang phút thứ 30 và chạy cách nhau 1 tiếng
     scheduler.add_job(
         safe_job_wrapper,
         "interval",
-        minutes=45,
+        minutes=60,
         args=[
             workspace_scanner_service.scan_and_cache_all_distributors, 
             "workspace_distributor_scanner_cron"
         ],
         id="distributor_cache_scanner_cron",
-        next_run_time=base_start + timedelta(seconds=305),
-        misfire_grace_time=120,
+        next_run_time=base_start + timedelta(seconds=1800),
+        misfire_grace_time=300,
         max_instances=1,
         coalesce=True,
         replace_existing=True
@@ -248,7 +259,6 @@ origins = [
     "*",
 ]
 
-# 🟢 Cấu hình chuẩn duy nhất cho CORSMiddleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
