@@ -460,20 +460,35 @@ export const AutomationStudioPage: React.FC = () => {
     const allCourses = [...workspaceCoursesList, ...lmsCoursesList];
 
     allCourses.forEach((c) => {
-      if (Array.isArray(c.git_repos)) {
-        c.git_repos.forEach((r) => {
-          if (r.repo_url && !reposMap.has(r.repo_url)) {
-            const shortName = r.repo_url.split('/').pop() || r.repo_url;
-            reposMap.set(r.repo_url, {
-              repo_url: r.repo_url,
+      let rawRepos: any[] = [];
+      const rawField: any = (c as any).git_repos;
+
+      if (Array.isArray(rawField)) {
+        rawRepos = rawField;
+      } else if (typeof rawField === 'string' && rawField.trim()) {
+        try {
+          const parsed = JSON.parse(rawField);
+          if (Array.isArray(parsed)) rawRepos = parsed;
+        } catch {
+          // Bỏ qua nếu parse JSON lỗi
+        }
+      }
+
+      rawRepos.forEach((r) => {
+        if (r && r.repo_url && typeof r.repo_url === 'string') {
+          const cleanUrl = r.repo_url.trim();
+          if (cleanUrl && !reposMap.has(cleanUrl)) {
+            const shortName = cleanUrl.split('/').pop() || cleanUrl;
+            reposMap.set(cleanUrl, {
+              repo_url: cleanUrl,
               repo_name: shortName,
               course_name: c.course_name,
               category: c.category,
               target: r.target || 'all',
             });
           }
-        });
-      }
+        }
+      });
     });
 
     return Array.from(reposMap.values());
@@ -516,7 +531,7 @@ export const AutomationStudioPage: React.FC = () => {
         const [schools, wsCats, wsCourses, lmsCats, lmsCourses] = await Promise.all([
           fetchApi<HierarchySchoolItem[]>('/workspace/hierarchy-schools').catch(() => []),
           fetchApi<string[]>('/workspace/categories').catch(() => ['SWRP', 'IR', 'ASP', 'Other']),
-          fetchApi<CourseItem[]>('/workspace/courses').catch(() => []),
+          fetchApi<CourseItem[]>('/courses/workspace').catch(() => []),
           fetchApi<string[]>('/courses/lms/categories').catch(() => []),
           fetchApi<CourseItem[]>('/courses/lms').catch(() => []),
         ]);
@@ -2870,96 +2885,101 @@ export const AutomationStudioPage: React.FC = () => {
           </div>
 
           <div className="space-y-4">
-            {/* 1. KHU VỰC CHỌN NHANH REPO TỪ KHÓA HỌC (AUTOCOMPLETE DROPDOWN) */}
+            {/* 1. KHU VỰC CHỌN REPO (URL INPUT + DROPDOWN TỰ ĐỘNG NẠP TỪ COURSES) */}
             <div className="space-y-1.5 relative" ref={gitRepoDropdownRef}>
               <div className="flex items-center justify-between text-xs">
                 <label className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                  <Search className="w-3.5 h-3.5 text-violet-600" />
-                  <span>Chọn Repository Cần Cấp Quyền: <span className="text-rose-500">*</span></span>
+                  <GitBranch className="w-3.5 h-3.5 text-violet-600" />
+                  <span>Đường Dẫn Repository Mục Tiêu: <span className="text-rose-500">*</span></span>
                 </label>
-                <span className="text-slate-400 text-[11px]">
-                  Hoặc tự dán URL trực tiếp vào ô bên dưới
-                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsGitRepoDropdownOpen(!isGitRepoDropdownOpen)}
+                  className="text-xs text-violet-600 dark:text-violet-400 font-bold hover:underline cursor-pointer flex items-center gap-1"
+                >
+                  <span>{isGitRepoDropdownOpen ? 'Đóng danh sách ✕' : `Chọn từ danh mục (${allAvailableGitRepos.length} repos) ▼`}</span>
+                </button>
               </div>
 
               <div className="relative">
                 <input
                   type="text"
                   value={gitRepoUrl}
-                  onFocus={() => setIsGitRepoDropdownOpen(true)}
-                  onChange={(e) => {
-                    setGitRepoUrl(e.target.value);
-                    setGitRepoSearchQuery(e.target.value);
-                    setIsGitRepoDropdownOpen(true);
-                  }}
-                  placeholder="Chọn từ danh sách bên dưới hoặc nhập URL: https://git.pythaverse.space/..."
+                  onChange={(e) => setGitRepoUrl(e.target.value)}
+                  placeholder="https://git.pythaverse.space/..."
                   className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 px-4 py-2.5 font-mono text-xs text-slate-900 dark:text-white focus:border-violet-500 focus:bg-white focus:outline-hidden"
                 />
-
-                <button
-                  type="button"
-                  onClick={() => setIsGitRepoDropdownOpen(!isGitRepoDropdownOpen)}
-                  className="absolute right-3 top-2.5 text-xs text-violet-600 dark:text-violet-400 font-bold hover:underline cursor-pointer"
-                >
-                  {isGitRepoDropdownOpen ? 'Đóng ✕' : 'Danh sách repos ▼'}
-                </button>
               </div>
 
               {/* Bảng Danh Sách Repos Gợi Ý (Bento Popover) */}
               {isGitRepoDropdownOpen && (
-                <div className="absolute z-30 top-full left-0 right-0 mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-72 overflow-y-auto p-2 space-y-1.5 scrollbar-thin">
-                  <div className="p-2 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
-                    <span className="font-bold text-slate-700 dark:text-slate-300">
-                      Danh Mục Repos Được Cấu Hình Sẵn ({filteredAvailableGitRepos.length}):
-                    </span>
-                    <span className="text-[10px] text-slate-400">Trích xuất từ Courses Management</span>
+                <div className="absolute z-30 top-full left-0 right-0 mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-80 overflow-hidden flex flex-col">
+                  {/* Ô tìm kiếm riêng biệt bên trong Dropdown */}
+                  <div className="p-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/50">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                      <input
+                        type="text"
+                        autoFocus
+                        value={gitRepoSearchQuery}
+                        onChange={(e) => setGitRepoSearchQuery(e.target.value)}
+                        placeholder="Gõ tên môn, category (SWRP, ASP...) hoặc tên repo để lọc..."
+                        className="w-full pl-8 pr-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white outline-none focus:border-violet-500"
+                      />
+                    </div>
                   </div>
 
-                  {filteredAvailableGitRepos.length === 0 ? (
-                    <div className="p-4 text-center text-xs text-slate-400">
-                      Không tìm thấy repo nào khớp với từ khóa tìm kiếm. Bạn có thể tự gõ link URL vào ô trên.
-                    </div>
-                  ) : (
-                    filteredAvailableGitRepos.map((repo, idx) => {
-                      const isSelected = gitRepoUrl === repo.repo_url;
-                      return (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={() => {
-                            setGitRepoUrl(repo.repo_url);
-                            setIsGitRepoDropdownOpen(false);
-                            toast.success(`Đã chọn repo: ${repo.repo_name}`);
-                          }}
-                          className={`w-full text-left p-2.5 rounded-xl text-xs flex items-center justify-between cursor-pointer transition ${isSelected
-                            ? 'bg-violet-50 dark:bg-violet-950/60 border border-violet-300 dark:border-violet-700'
-                            : 'hover:bg-slate-50 dark:hover:bg-slate-800/80 border border-transparent'
-                            }`}
-                        >
-                          <div className="space-y-0.5 min-w-0 flex-1 pr-2">
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono font-bold text-slate-900 dark:text-white truncate">
-                                🐙 {repo.repo_name}
-                              </span>
-                              <span
-                                className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${repo.target === 'teacher_only'
-                                  ? 'bg-violet-100 dark:bg-violet-900/60 text-violet-700 dark:text-violet-300'
-                                  : 'bg-sky-100 dark:bg-sky-900/60 text-sky-700 dark:text-sky-300'
-                                  }`}
-                              >
-                                {repo.target === 'teacher_only' ? 'GV (Non-editing)' : 'Cả GV & HS'}
-                              </span>
+                  {/* Danh sách cuộn */}
+                  <div className="overflow-y-auto p-2 space-y-1 scrollbar-thin max-h-60">
+                    {filteredAvailableGitRepos.length === 0 ? (
+                      <div className="p-4 text-center text-xs text-slate-400">
+                        {allAvailableGitRepos.length === 0
+                          ? 'Đang nạp dữ liệu khóa học hoặc chưa có khóa học nào được gắn Git Repo...'
+                          : 'Không tìm thấy repo nào khớp với từ khóa tìm kiếm.'}
+                      </div>
+                    ) : (
+                      filteredAvailableGitRepos.map((repo, idx) => {
+                        const isSelected = gitRepoUrl === repo.repo_url;
+                        return (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => {
+                              setGitRepoUrl(repo.repo_url);
+                              setIsGitRepoDropdownOpen(false);
+                              setGitRepoSearchQuery('');
+                              toast.success(`Đã chọn repo: ${repo.repo_name}`);
+                            }}
+                            className={`w-full text-left p-2.5 rounded-xl text-xs flex items-center justify-between cursor-pointer transition ${isSelected
+                              ? 'bg-violet-50 dark:bg-violet-950/60 border border-violet-300 dark:border-violet-700'
+                              : 'hover:bg-slate-50 dark:hover:bg-slate-800/80 border border-transparent'
+                              }`}
+                          >
+                            <div className="space-y-0.5 min-w-0 flex-1 pr-2">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono font-bold text-slate-900 dark:text-white truncate">
+                                  🐙 {repo.repo_name}
+                                </span>
+                                <span
+                                  className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${repo.target === 'teacher_only'
+                                    ? 'bg-violet-100 dark:bg-violet-900/60 text-violet-700 dark:text-violet-300'
+                                    : 'bg-sky-100 dark:bg-sky-900/60 text-sky-700 dark:text-sky-300'
+                                    }`}
+                                >
+                                  {repo.target === 'teacher_only' ? 'GV (Non-editing)' : 'Cả GV & HS'}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                                Môn: <strong className="text-slate-700 dark:text-slate-300">{repo.course_name}</strong> ({repo.category})
+                              </p>
                             </div>
-                            <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                              Môn: <strong className="text-slate-700 dark:text-slate-300">{repo.course_name}</strong> ({repo.category})
-                            </p>
-                          </div>
 
-                          {isSelected && <Check className="w-4 h-4 text-violet-600 shrink-0" />}
-                        </button>
-                      );
-                    })
-                  )}
+                            {isSelected && <Check className="w-4 h-4 text-violet-600 shrink-0" />}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
               )}
             </div>

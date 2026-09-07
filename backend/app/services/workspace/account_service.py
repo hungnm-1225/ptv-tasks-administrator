@@ -78,13 +78,15 @@ class WorkspaceAccountService(WorkspaceBaseService):
                     logger.info("🚀 Bấm nút Upload xác nhận nộp danh sách...")
                     await upload_btn.click()
 
-                    # 3. Chờ trang upload xử lý và quay về trang danh sách
+                    # Chờ 2 giây để API trường xử lý file nộp
+                    await asyncio.sleep(2.0)
+
+                    # Chờ trang tự chuyển hoặc chủ động chuyển về trang danh sách account-creation
                     try:
-                        await page.wait_for_function("() => !window.location.href.endsWith('/create')", timeout=20000)
+                        await page.wait_for_function("() => !window.location.href.endsWith('/create')", timeout=15000)
                     except Exception:
                         pass
 
-                    # Nếu vẫn còn ở trang /create, chủ động chuyển về trang danh sách account-creation
                     if page.url.rstrip("/").endswith("/create"):
                         logger.info("🔄 Điều hướng về trang danh sách Account Creation để bắt Request ID...")
                         await page.goto(
@@ -93,10 +95,17 @@ class WorkspaceAccountService(WorkspaceBaseService):
                             timeout=30000
                         )
 
-                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row, [role='row']", min_pacing_ms=1200)
+                    # 👈 CHỜ ĐÍCH DANH DÒNG DỮ LIỆU THẬT (.MuiDataGrid-row), KHÔNG CHỜ role='row' VÌ DỄ TRÚNG TIÊU ĐỀ CỘT
+                    logger.info("⏳ Đang chờ danh sách Request nạp xong từ API trường...")
+                    try:
+                        await page.wait_for_selector(".MuiDataGrid-row", state="visible", timeout=25000)
+                    except Exception:
+                        pass
+
+                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=1200)
 
                     # -------------------------------------------------------------
-                    # 🔍 BẮT REQUEST ID KIÊN CỐ (Có Retry 3 nhịp nếu DataGrid nạp chậm)
+                    # 🔍 BẮT REQUEST ID KIÊN CỐ (Có Retry 3 nhịp an toàn với asyncio)
                     # -------------------------------------------------------------
                     request_id = None
                     for capture_attempt in range(1, 4):
@@ -112,10 +121,13 @@ class WorkspaceAccountService(WorkspaceBaseService):
                             request_id = request_id.strip()
                             break
 
-                        logger.warning(f"⏳ Nhịp {capture_attempt}/3: Chưa thấy Request ID trên bảng, đợi 2s và reload lại...")
-                        await asyncio.sleep(2.0)
+                        logger.warning(f"⏳ Nhịp {capture_attempt}/3: Đang đợi bảng nạp dòng mới nhất, chờ 2.5s...")
+                        await asyncio.sleep(2.5)
                         await page.reload(wait_until="domcontentloaded")
-                        await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=1000)
+                        try:
+                            await page.wait_for_selector(".MuiDataGrid-row", state="visible", timeout=15000)
+                        except Exception:
+                            pass
 
                     if not request_id:
                         err_msg = "Không thể trích xuất Request ID từ bảng sau khi Upload file. Vui lòng kiểm tra lại giao diện School Workspace."
