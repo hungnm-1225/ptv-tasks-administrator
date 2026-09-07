@@ -70,10 +70,10 @@ class ApproveTaskRequest(BaseModel):
 async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, ticket_id: Optional[str]):
     """Thực thi Worker thật, gắn nhãn [Task #ID], ghi log GMT+7 và chống treo task 100%."""
     supabase = get_supabase_client()
-    time_str = get_vn_time_str()
+    time_str ()
     tag = format_task_tag(task_id)
     
-    log_trail = f"[{time_str}] [APPROVAL] [{bot_type}] {tag}: Approved by Admin. Dispatching worker for execution...\n"
+    log_trail = f"[{time_str}] [APPROVAL] [{bot_type}]: Approved by Admin. Dispatching worker for execution...\n"
     
     try:
         # 1. Cập nhật task sang 'running' ngay lập tức
@@ -318,7 +318,6 @@ async def create_task(payload: Dict[str, Any], background_tasks: BackgroundTasks
 @router.put("/{task_id}/approve")
 async def approve_task(task_id: str, req: ApproveTaskRequest, background_tasks: BackgroundTasks):
     supabase = get_supabase_client()
-    time_str = get_vn_time_str()
     now_iso = get_vn_iso()
     tag = format_task_tag(task_id)
     
