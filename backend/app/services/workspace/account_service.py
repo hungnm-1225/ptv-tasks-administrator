@@ -3,6 +3,7 @@ import os
 import logging
 from typing import Optional, Dict, Any
 from playwright.async_api import async_playwright
+import asyncio
 
 from app.services.workspace.base import WorkspaceBaseService, BASE_WORKSPACE_URL
 from app.core.playwright_manager import acquire_playwright_slot, wait_for_dom_and_spinners
