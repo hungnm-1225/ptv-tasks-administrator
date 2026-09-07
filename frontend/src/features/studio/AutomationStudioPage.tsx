@@ -444,7 +444,7 @@ export const AutomationStudioPage: React.FC = () => {
   // 🐙 Pythaverse Git Controls (MỚI)
   const [gitRepoUrl, setGitRepoUrl] = useState<string>('https://git.pythaverse.space/ptvswrp/SWRP11_Teacher');
   const [gitTargetRole, setGitTargetRole] = useState<'GUEST' | 'DEVELOPER' | 'ADMIN'>('GUEST');
-  const [gitUsersList, setGitUsersList] = useState<string>('hsdttemd\gvdttemd');
+  const [gitUsersList, setGitUsersList] = useState<string>('hsdttemd\ngvdttemd');
   const [isGitRepoDropdownOpen, setIsGitRepoDropdownOpen] = useState<boolean>(false);
   const [gitRepoSearchQuery, setGitRepoSearchQuery] = useState<string>('');
   const gitRepoDropdownRef = useRef<HTMLDivElement | null>(null);
