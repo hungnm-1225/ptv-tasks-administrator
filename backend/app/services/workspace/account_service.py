@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def is_status_done(status_val: Any) -> bool:
-    """Kiểm tra trạng thái hoàn thành: Hỗ trợ cả mã số '1' của WordPress lẫn chữ 'Done'."""
+    """Kiểm tra trạng thái hoàn thành: Nhận diện cả số 1, '1' lẫn chữ 'Done'."""
     s = str(status_val or "").strip().lower()
     return s in ["1", "done", "completed", "success", "approved"]
 
@@ -65,86 +65,98 @@ class WorkspaceAccountService(WorkspaceBaseService):
                     file_input = page.locator("input[type='file']").first
                     await file_input.wait_for(state="visible", timeout=15000)
                     await file_input.set_input_files(upload_file_path)
-                    logger.info(f"📄 Đã nạp file '{os.path.basename(upload_file_path)}', chờ React kích hoạt nút Upload...")
+                    logger.info(f"📄 Đã nạp file '{os.path.basename(upload_file_path)}', chờ nút Upload...")
 
                     await asyncio.sleep(1.5)
 
                     upload_btn = page.locator("button:has-text('Upload')").first
                     await upload_btn.wait_for(state="visible", timeout=15000)
 
-                    # 2. Bấm Upload và đón phản hồi từ API uploadFileAccount.php an toàn
-                    logger.info("🚀 Bấm nút Upload và gửi file lên server trường...")
-                    request_id = None
-                    try:
-                        async with page.expect_response(
-                            lambda r: "uploadFileAccount.php" in r.url and r.status == 200,
-                            timeout=35000
-                        ) as resp_info:
-                            await upload_btn.click()
-                        
-                        try:
-                            upload_resp = await resp_info.value
-                            resp_data = await upload_resp.json()
-                            if isinstance(resp_data, dict):
-                                raw_id = resp_data.get("request_id") or resp_data.get("id")
-                                if raw_id:
-                                    request_id = str(raw_id).strip()
-                                    logger.info(f"📥 Bắt được Request ID trực tiếp từ uploadFileAccount: #{request_id}")
-                        except Exception:
-                            pass
-                    except Exception as e:
-                        logger.debug(f"expect_response notice: {e}")
+                    # ---------------------------------------------------------
+                    # 🎯 TẦNG 1: LẮNG NGHE STREAMING RESPONSE (Chống Protocol Error)
+                    # ---------------------------------------------------------
+                    captured_request_id = None
 
-                    # Chờ 2s để server ghi nhận batch vào CSDL
-                    await asyncio.sleep(2.0)
+                    async def capture_upload_response(response):
+                        nonlocal captured_request_id
+                        if "uploadFileAccount.php" in response.url:
+                            try:
+                                body_data = await response.json()
+                                if isinstance(body_data, dict):
+                                    rid = body_data.get("request_id") or body_data.get("id")
+                                    if rid:
+                                        captured_request_id = str(rid).strip()
+                                        logger.info(f"🎉 [TẦNG 1 - STREAMING] Bắt được Request ID ngay khi upload: #{captured_request_id}")
+                            except Exception:
+                                pass
 
-                    # 3. Lấy school_id và truy vấn danh sách qua getListRequest.php
+                    page.on("response", capture_upload_response)
+
+                    logger.info("🚀 Bấm nút Upload xác nhận nộp file...")
+                    await upload_btn.click()
+
+                    # Chờ 3s để phản hồi mạng hoàn tất
+                    await asyncio.sleep(3.0)
+
+                    # ---------------------------------------------------------
+                    # 🎯 TẦNG 2: DÒ TÌM QUA API getListRequest.php
+                    # ---------------------------------------------------------
                     school_id = await page.evaluate("() => window.user?.school_id || 10266")
-                    logger.info(f"🏫 School ID: {school_id}. Đang kiểm tra danh sách qua getListRequest.php...")
-
                     initial_status = "0"
 
-                    # Dò tìm Request ID mới nhất qua API getListRequest.php
-                    for attempt in range(1, 4):
-                        if request_id:
-                            break
-                        try:
-                            api_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/request_approval/getListRequest.php?school_id={school_id}"
-                            api_res = await page.request.get(api_url)
-                            raw_text = await api_res.text()
-
+                    if not captured_request_id:
+                        logger.info(f"🔍 [TẦNG 2] Đang dò Request ID qua getListRequest.php (School #{school_id})...")
+                        for attempt in range(1, 4):
                             try:
-                                api_data = json.loads(raw_text)
-                                items = api_data if isinstance(api_data, list) else api_data.get("data") or api_data.get("rows") or [api_data]
-                                if items and isinstance(items, list) and len(items) > 0:
-                                    newest = items[0]
-                                    if isinstance(newest, dict):
-                                        request_id = str(newest.get("id") or newest.get("request_id") or "").strip()
-                                        initial_status = str(newest.get("status") or "")
-                            except Exception:
-                                match = re.search(r'"(?:id|request_id)"\s*:\s*"?(\d+)"?', raw_text)
+                                raw_json = await page.evaluate(f"""
+                                    fetch('/wp-content/plugins/school_workspace_v3/api/request_approval/getListRequest.php?school_id={school_id}')
+                                        .then(r => r.text())
+                                """)
+                                match = re.search(r'"(?:id|request_id)"\s*:\s*"?(\d+)"?', raw_json)
                                 if match:
-                                    request_id = match.group(1)
+                                    captured_request_id = match.group(1)
+                                    stat_match = re.search(r'"status"\s*:\s*"?([^",\s}}]+)"?', raw_json)
+                                    if stat_match:
+                                        initial_status = stat_match.group(1)
+                                    logger.info(f"🎉 [TẦNG 2 - API] Bắt được Request ID: #{captured_request_id}")
+                                    break
+                            except Exception:
+                                pass
+                            await asyncio.sleep(2.0)
 
-                            if request_id:
-                                logger.info(f"🎉 BẮT ĐƯỢC REQUEST ID CHUẨN XÁC: [ #{request_id} ] | Status Code: '{initial_status}'")
-                                break
-                        except Exception as api_err:
-                            logger.debug(f"Nhịp {attempt} notice: {api_err}")
+                    # ---------------------------------------------------------
+                    # 🎯 TẦNG 3: BẢO HIỂM TỐI CAO - ĐỌC THẲNG TỪ BẢNG GIAO DIỆN
+                    # ---------------------------------------------------------
+                    if not captured_request_id:
+                        logger.info("🔍 [TẦNG 3 - BẢO HIỂM] Mở trang danh sách đọc trực tiếp dòng đầu của bảng...")
+                        await page.goto(
+                            f"{BASE_WORKSPACE_URL}/school-workspace/account-creation",
+                            wait_until="domcontentloaded",
+                            timeout=30000
+                        )
                         await asyncio.sleep(2.0)
+                        captured_request_id = await page.evaluate("""() => {
+                            const firstRow = document.querySelector('.MuiDataGrid-row, tbody tr');
+                            if (!firstRow) return null;
+                            return firstRow.getAttribute('data-id') || firstRow.querySelector('[data-field="id"]')?.textContent?.trim() || firstRow.querySelector('td')?.textContent?.trim();
+                        }""")
+                        if captured_request_id:
+                            logger.info(f"🎉 [TẦNG 3 - DOM] Bắt được Request ID từ bảng: #{captured_request_id}")
 
-                    if not request_id:
+                    if not captured_request_id:
                         err_msg = "Không thể trích xuất Request ID từ hệ thống sau khi nộp file."
                         logger.error(f"❌ {err_msg}")
                         return {"status": "failed", "error": err_msg, "checkpoint": checkpoint}
 
+                    request_id = captured_request_id
                     checkpoint["account_batch_request_id"] = request_id
+                    logger.info(f"✅ KHẲNG ĐỊNH REQUEST ID CUỐI CÙNG: [ #{request_id} ]")
 
                     # =============================================================
-                    # 🚀 FAST-PATH: Nếu đã Done ngay từ đầu (Status = 1 hoặc Done)
+                    # 🚀 FAST-PATH: Nếu đã Done ngay từ đầu (Mã 1 hoặc Done)
                     # =============================================================
                     if is_status_done(initial_status):
-                        logger.info(f"✨ [Fast-Path Tức Thì] Request #{request_id} đã Done (Mã: {initial_status})! Đang xuất file...")
+                        logger.info(f"✨ [Fast-Path Tức Thì] Request #{request_id} đã Done! Đang xuất file...")
                         return await self.check_and_export_batch_result(credentials, request_id, download_dir)
 
                     if record_count <= 30 and request_id:
@@ -158,14 +170,13 @@ class WorkspaceAccountService(WorkspaceBaseService):
                                 if str(request_id) in raw_text:
                                     match = re.search(rf'"{request_id}".*?"status"\s*:\s*"?([^",\s}}]+)"?', raw_text, re.DOTALL)
                                     stat = match.group(1) if match else ""
-                                    # 🎯 KIỂM TRA MÃ 1 LÀ XONG NGAY!
                                     if is_status_done(stat):
-                                        logger.info(f"✨ [Fast-Path SUCCESS] Request #{request_id} đã Done (Status: {stat})! Đang xuất file...")
+                                        logger.info(f"✨ [Fast-Path SUCCESS] Request #{request_id} đã Done! Đang xuất file...")
                                         return await self.check_and_export_batch_result(credentials, request_id, download_dir)
-                            except Exception as f_err:
-                                logger.debug(f"Fast-path attempt {fast_attempt} notice: {f_err}")
+                            except Exception:
+                                pass
 
-                    # Nếu chưa xong, trả về waiting_poll để Cronjob kiểm tra
+                    # Nếu chưa xong, chuyển sang waiting_poll để Cronjob tiếp quản
                     return {
                         "status": "waiting_poll",
                         "request_id": request_id,
@@ -210,7 +221,7 @@ class WorkspaceAccountService(WorkspaceBaseService):
                         status_found = match.group(1) if match else ""
                         logger.info(f"📊 Trạng thái kiểm tra từ getListRequest cho Request #{request_id}: '{status_found}'")
                         
-                        # 🎯 NẾU CHƯA PHẢI MÃ 1 HOẶC DONE THÌ MỚI BÁO STILL_PROCESSING!
+                        # 🎯 CHỈ KHI NÀO CHƯA PHẢI MÃ 1 HOẶC DONE THÌ MỚI BÁO STILL_PROCESSING!
                         if not is_status_done(status_found):
                             return {
                                 "status": "still_processing",
@@ -220,7 +231,7 @@ class WorkspaceAccountService(WorkspaceBaseService):
                     except Exception as e:
                         logger.debug(f"API check notice: {e}")
 
-                    # 2. Khi trạng thái đã Done (hoặc mã 1): Mở trang danh sách để tải file Export
+                    # 2. Mở trang danh sách để tải file Export
                     logger.info(f"📥 Trạng thái đã Done! Mở trang Account Creation để tải file cho Request #{request_id}...")
                     await page.goto(
                         f"{BASE_WORKSPACE_URL}/school-workspace/account-creation",
@@ -229,7 +240,7 @@ class WorkspaceAccountService(WorkspaceBaseService):
                     )
                     await wait_for_dom_and_spinners(page, ".MuiDataGrid-row, .MuiInputBase-input", min_pacing_ms=800)
 
-                    # 3. Gõ Request ID vào ô Search để lọc cô lập dòng (Selector label Search chuẩn MUI)
+                    # 3. Gõ Request ID vào ô Search để lọc cô lập dòng
                     search_input = page.locator(".MuiTextField-root:has-text('Search') input, input.MuiInputBase-input, input[id*='r24']").first
                     if await search_input.count() > 0:
                         logger.info(f"🔍 Điền Request ID '#{request_id}' vào ô Search...")
