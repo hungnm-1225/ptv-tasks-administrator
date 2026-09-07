@@ -243,133 +243,123 @@ export const AutomationStudioPage: React.FC = () => {
     return () => clearInterval(timer);
   }, [liveExecutedTask]);
 
-  // Hàm đọc và kiểm tra tính hợp lệ file Excel tài khoản
+  // Hàm chuyển đổi số serial ngày của Excel (ví dụ 42370) thành chuỗi DD/MM/YYYY sạch
+  const formatExcelDateClient = (val: any): string => {
+    if (!val) return '';
+    if (typeof val === 'number') {
+      const d = new Date(Math.round((val - 25569) * 86400 * 1000));
+      const day = String(d.getUTCDate()).padStart(2, '0');
+      const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const year = d.getUTCFullYear();
+      return `${day}/${month}/${year}`;
+    }
+    if (val instanceof Date) {
+      const day = String(val.getDate()).padStart(2, '0');
+      const month = String(val.getMonth() + 1).padStart(2, '0');
+      const year = val.getFullYear();
+      return `${day}/${month}/${year}`;
+    }
+    const str = String(val).trim().split(' ')[0];
+    return str.replace(/-/g, '/');
+  };
+
   const processAndValidateAccountsFile = (file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
+        const workbook = XLSX.read(data, { type: 'array', cellDates: false });
 
-        // Đọc dữ liệu dạng mảng 2 chiều (bỏ qua các dòng trống)
-        const rawJson: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+        // 🎯 THÔNG MINH: Nếu là file COF -> Đọc từ sheet 'Student Info' và 'Teacher Info'
+        const sheetNames = workbook.SheetNames;
+        const isCOF = sheetNames.some(s => s.toLowerCase().includes('student info')) || sheetNames.some(s => s.toLowerCase() === 'cof');
 
-        if (rawJson.length < 2) {
-          toast.error('File Excel không có dữ liệu tài khoản!');
-          return;
+        let targetSheets: string[] = [];
+        if (isCOF) {
+          targetSheets = sheetNames.filter(s => s.toLowerCase().includes('student info') || s.toLowerCase().includes('teacher info'));
+        } else {
+          targetSheets = [sheetNames[0]];
         }
 
-        // Tìm dòng tiêu đề (Header row chứa 'First Name' hoặc 'Họ' hoặc 'Email')
-        let headerRowIndex = -1;
-        for (let i = 0; i < Math.min(rawJson.length, 10); i++) {
-          const rowStr = rawJson[i].map(c => String(c).toLowerCase()).join(' ');
-          if (rowStr.includes('first name') || rowStr.includes('role') || rowStr.includes('email')) {
-            headerRowIndex = i;
-            break;
-          }
-        }
-
-        if (headerRowIndex === -1) {
-          headerRowIndex = 0; // Mặc định dòng đầu
-        }
-
-        const headers = rawJson[headerRowIndex].map(h => String(h).trim().toLowerCase());
-
-        // Xác định vị trí các cột
-        const colIdx = {
-          firstName: headers.findIndex(h => h.includes('first name') || h.includes('tên')),
-          lastName: headers.findIndex(h => h.includes('last name') || h.includes('họ')),
-          mobile: headers.findIndex(h => h.includes('mobile') || h.includes('sđt') || h.includes('phone')),
-          email: headers.findIndex(h => h.includes('email') || h.includes('thư')),
-          dob: headers.findIndex(h => h.includes('birth') || h.includes('dob') || h.includes('sinh')),
-          role: headers.findIndex(h => h.includes('role') || h.includes('vai trò')),
-        };
-
-        // Nếu không khớp theo tên cột, dùng vị trí mặc định chuẩn 6 cột:
-        // Cột 0: First Name, 1: Last Name, 2: Mobile, 3: Email, 4: DOB, 5: Role
-        const fnIdx = colIdx.firstName !== -1 ? colIdx.firstName : 0;
-        const lnIdx = colIdx.lastName !== -1 ? colIdx.lastName : 1;
-        const mobIdx = colIdx.mobile !== -1 ? colIdx.mobile : 2;
-        const emIdx = colIdx.email !== -1 ? colIdx.email : 3;
-        const dobIdx = colIdx.dob !== -1 ? colIdx.dob : 4;
-        const roleIdx = colIdx.role !== -1 ? colIdx.role : 5;
-
-        // Tập hợp danh sách email để kiểm tra trùng lặp
-        const emailCounts: Record<string, number> = {};
-        const rowsToParse = rawJson.slice(headerRowIndex + 1);
-
-        rowsToParse.forEach(row => {
-          const email = String(row[emIdx] || '').trim().toLowerCase();
-          if (email) {
-            emailCounts[email] = (emailCounts[email] || 0) + 1;
-          }
-        });
-
+        const parsed: ParsedUserRow[] = [];
+        let rGlobalIdx = 1;
         let studentsCount = 0;
         let teachersCount = 0;
         let validRows = 0;
         let errorRows = 0;
-        let duplicateEmailsTotal = 0;
 
-        const parsed: ParsedUserRow[] = [];
+        targetSheets.forEach(sheetName => {
+          const worksheet = workbook.Sheets[sheetName];
+          const rawJson: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+          if (rawJson.length < 2) return;
 
-        rowsToParse.forEach((row, rIdx) => {
-          // Bỏ qua dòng trống hoàn toàn
-          if (row.every(cell => !cell || String(cell).trim() === '')) return;
-
-          const firstName = String(row[fnIdx] || '').trim();
-          const lastName = String(row[lnIdx] || '').trim();
-          const mobile = String(row[mobIdx] || '').trim();
-          const email = String(row[emIdx] || '').trim();
-          const dob = String(row[dobIdx] || '').trim();
-          const roleRaw = String(row[roleIdx] || '').trim();
-
-          const isStudent = roleRaw.toLowerCase().includes('student') || roleRaw.toLowerCase().includes('học sinh');
-          const isTeacher = !isStudent; // Mặc định các role khác (Teacher, Non-editing teacher, Staff)
-
-          if (isStudent) studentsCount++;
-          else teachersCount++;
-
-          const errors: string[] = [];
-
-          // 1. Kiểm tra trường bắt buộc chung: First Name, Last Name, DOB, Role
-          if (!firstName) errors.push('Thiếu First Name (*)');
-          if (!lastName) errors.push('Thiếu Last Name (*)');
-          if (!dob) errors.push('Thiếu Ngày sinh (*)');
-          if (!roleRaw) errors.push('Thiếu Role (*)');
-
-          // 2. Giáo viên BẮT BUỘC phải có Email
-          if (isTeacher && !email) {
-            errors.push('Giáo viên bắt buộc phải có Email (*)');
+          // Tìm dòng header
+          let headerRowIndex = -1;
+          for (let i = 0; i < Math.min(rawJson.length, 15); i++) {
+            const rowStr = rawJson[i].map(c => String(c).toLowerCase()).join(' ');
+            if (rowStr.includes('first name') || (rowStr.includes('last name') && rowStr.includes('role')) || rowStr.includes('email')) {
+              headerRowIndex = i;
+              break;
+            }
           }
+          if (headerRowIndex === -1) headerRowIndex = 0;
 
-          // 3. Kiểm tra trùng lặp Email nội bộ trong file
-          let isDuplicate = false;
-          if (email && emailCounts[email.toLowerCase()] > 1) {
-            isDuplicate = true;
-            duplicateEmailsTotal++;
-            errors.push(`Email '${email}' bị trùng lặp ${emailCounts[email.toLowerCase()]} lần trong file!`);
-          }
+          const headers = rawJson[headerRowIndex].map(h => String(h).trim().toLowerCase());
+          const fnIdx = headers.findIndex(h => h.includes('first name') || h.includes('tên'));
+          const lnIdx = headers.findIndex(h => h.includes('last name') || h.includes('họ'));
+          const mobIdx = headers.findIndex(h => h.includes('mobile') || h.includes('sđt') || h.includes('phone'));
+          const emIdx = headers.findIndex(h => h.includes('email') || h.includes('thư'));
+          const dobIdx = headers.findIndex(h => h.includes('birth') || h.includes('dob') || h.includes('sinh'));
+          const roleIdx = headers.findIndex(h => h.includes('role') || h.includes('vai trò'));
 
-          const isValid = errors.length === 0;
-          if (isValid) validRows++;
-          else errorRows++;
+          const rowsToParse = rawJson.slice(headerRowIndex + 1);
+          rowsToParse.forEach(row => {
+            if (row.every(cell => !cell || String(cell).trim() === '')) return;
 
-          parsed.push({
-            index: rIdx + 1,
-            firstName,
-            lastName,
-            mobile,
-            email,
-            dob,
-            role: roleRaw || (isStudent ? 'Student' : 'Teacher'),
-            isStudent,
-            isTeacher,
-            isValid,
-            errors,
-            isDuplicateEmail: isDuplicate
+            const firstName = String(row[fnIdx !== -1 ? fnIdx : 1] || '').trim();
+            const lastName = String(row[lnIdx !== -1 ? lnIdx : 2] || '').trim();
+            if (!firstName && !lastName) return;
+
+            const mobile = String(row[mobIdx !== -1 ? mobIdx : 3] || '').trim();
+            const email = String(row[emIdx !== -1 ? emIdx : 4] || '').trim();
+
+            // 🎯 CONVERT NGÀY SINH CHUẨN XÁC, KHÔNG CÒN BỊ SỐ 42370!
+            const dob = formatExcelDateClient(row[dobIdx !== -1 ? dobIdx : 5]);
+
+            let roleRaw = String(row[roleIdx !== -1 ? roleIdx : 6] || '').trim();
+            if (!roleRaw && sheetName.toLowerCase().includes('teacher')) roleRaw = 'Teacher';
+            if (!roleRaw && sheetName.toLowerCase().includes('student')) roleRaw = 'Student';
+
+            const isStudent = roleRaw.toLowerCase().includes('student');
+            const isTeacher = !isStudent;
+
+            if (isStudent) studentsCount++;
+            else teachersCount++;
+
+            const errors: string[] = [];
+            if (!firstName) errors.push('Thiếu First Name (*)');
+            if (!lastName) errors.push('Thiếu Last Name (*)');
+            if (!dob) errors.push('Thiếu Ngày sinh (*)');
+            if (isTeacher && !email) errors.push('Giáo viên bắt buộc phải có Email (*)');
+
+            const isValid = errors.length === 0;
+            if (isValid) validRows++;
+            else errorRows++;
+
+            parsed.push({
+              index: rGlobalIdx++,
+              firstName,
+              lastName,
+              mobile,
+              email,
+              dob,
+              role: roleRaw || (isStudent ? 'Student' : 'Teacher'),
+              isStudent,
+              isTeacher,
+              isValid,
+              errors,
+              isDuplicateEmail: false
+            });
           });
         });
 
@@ -380,20 +370,17 @@ export const AutomationStudioPage: React.FC = () => {
           teachers: teachersCount,
           validCount: validRows,
           errorCount: errorRows,
-          duplicateCount: duplicateEmailsTotal
+          duplicateCount: 0
         });
 
-        if (errorRows > 0) {
-          toast.warning(`Đã nạp ${parsed.length} tài khoản. Phát hiện ${errorRows} dòng có lỗi cần chú ý!`);
-        } else {
-          toast.success(`Đã nạp và kiểm tra thành công 100% hợp lệ: ${parsed.length} tài khoản!`);
-        }
+        toast.success(`Đã nạp thành công ${parsed.length} tài khoản (${isCOF ? 'File COF 3 Tabs' : 'File Danh sách'})!`);
       } catch (err) {
-        toast.error('Lỗi khi phân tích file Excel: ' + (err as Error).message);
+        toast.error('Lỗi khi đọc file Excel: ' + (err as Error).message);
       }
     };
     reader.readAsArrayBuffer(file);
   };
+
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 

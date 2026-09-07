@@ -297,18 +297,18 @@ async def execute_approved_bot_task(
                     justification=payload_data.get("justification")
                 )
 
-            # --- L. Tạo tài khoản hàng loạt (Tự Chuẩn Hóa Format & Ghi Ngược Cột H-I-J) ---
+            # --- L. Tạo tài khoản hàng loạt (Chuẩn Hóa Format & Tải Lên Storage Ngay) ---
             elif action == "bulk_account_creation":
                 from app.services.cof_excel_service import COFExcelService
                 from app.core.supabase import get_supabase_client
 
                 file_path = payload_data.get("upload_file_path")
                 if not file_path and payload_data.get("attachment_url"):
-                    logger.info(f"📥 {task_tag} Đang tải file tài khoản về từ Supabase Storage...")
+                    logger.info(f"📥 {task_tag} Tải file đính kèm từ Supabase Storage...")
                     file_path = await download_file_to_temp(payload_data["attachment_url"])
 
                 if not file_path:
-                    return {"status": "failed", "error": "Thiếu file Excel (.xlsx) hoặc attachment_url hợp lệ."}
+                    return {"status": "failed", "error": "Thiếu file Excel (.xlsx) hợp lệ."}
 
                 if not school_creds:
                     target_identifier = payload_data.get("school_code") or school_name
@@ -322,15 +322,15 @@ async def execute_approved_bot_task(
                 temp_dir = "/tmp/ptv_accounts"
                 os.makedirs(temp_dir, exist_ok=True)
                 
-                # 1. TỰ ĐỘNG CHUẨN HÓA FILE ĐẦU VÀO VỀ CHUẨN HÀNG 5 - HÀNG 6 CỦA TRƯỜNG
+                # 🎯 CHUẨN HÓA FILE: Đưa Header về Hàng 5, Data từ Hàng 6 (Chống mất dòng 1!)
                 normalized_file = os.path.join(temp_dir, f"STANDARDIZED_{os.path.basename(file_path)}")
                 try:
-                    ready_file, total_c = COFExcelService.normalize_input_accounts_excel(file_path, normalized_file)
-                    logger.info(f"✨ {task_tag} Đã chuẩn hóa file đầu vào: {total_c} tài khoản (Bắt đầu từ hàng 6 chuẩn của trường)")
+                    ready_file, total_c, _ = COFExcelService.normalize_input_accounts_excel(file_path, normalized_file)
+                    logger.info(f"✨ {task_tag} Đã chuẩn hóa file: Đọc đủ {total_c} tài khoản từ hàng 6!")
                 except Exception as norm_err:
                     logger.warning(f"Lỗi chuẩn hóa file: {norm_err}. Dùng file gốc...")
                     ready_file = file_path
-                    total_c = int(payload_data.get("total_count", 10))
+                    total_c = int(payload_data.get("total_count", 5))
 
                 submit_res = await workspace_playwright_service.submit_account_creation_batch(
                     credentials=school_creds,
@@ -339,7 +339,7 @@ async def execute_approved_bot_task(
                     checkpoint=checkpoint
                 )
 
-                # 2. NẾU HOÀN THÀNH (FAST-PATH): TỰ ĐỘNG TẢI LÊN STORAGE ĐỂ HIỆN NÚT TẢI FILE!
+                # 🎯 NẾU XONG NGAY (FAST-PATH): TẢI LÊN STORAGE VÀ GHI LINK ĐỂ NÚT DOWNLOAD HIỆN TRÊN VERCEL!
                 if submit_res.get("status") in ["completed", "success"]:
                     res_file = submit_res.get("result_file_path")
                     if res_file and os.path.exists(res_file):
@@ -353,7 +353,18 @@ async def execute_approved_bot_task(
                                 )
                             public_url = supabase.storage.from_("ticket-attachments").get_public_url(storage_path)
                             submit_res["result_file_url"] = public_url
-                            logger.info(f"🎉 {task_tag} Đã tải file kết quả lên Supabase Storage: {public_url}")
+                            
+                            # Cập nhật trực tiếp link tải vào bảng bot_automation_tasks
+                            if task_id:
+                                p_data = payload_data or {}
+                                p_data["result_file_url"] = public_url
+                                supabase.table("bot_automation_tasks").update({
+                                    "payload_data": p_data,
+                                    "execution_status": "success",
+                                    "current_step": "completed"
+                                }).eq("id", task_id).execute()
+
+                            logger.info(f"🎉 {task_tag} ĐÃ TẢI LÊN STORAGE: {public_url}")
                         except Exception as up_e:
                             logger.warning(f"Lỗi upload Supabase: {up_e}")
 
@@ -362,14 +373,15 @@ async def execute_approved_bot_task(
                 # Nếu chưa xong, chuyển sang waiting_poll cho Cronjob
                 req_id = submit_res.get("request_id")
                 checkpoint["account_batch_request_id"] = req_id
-                wait_seconds = max(total_c *20, 40)
+                wait_seconds = max(total_c * 15, 45)
                 next_check_time = datetime.now(timezone.utc) + timedelta(seconds=wait_seconds)
 
                 return {
                     "status": "waiting_poll",
                     "request_id": req_id,
                     "total_count": total_c,
-                    "normalized_file_path": ready_file,
+                    "upload_file_path": ready_file,
+                    "original_file_path": file_path,
                     "school_credentials": school_creds,
                     "wait_seconds": wait_seconds,
                     "next_check_at": next_check_time.isoformat(),
