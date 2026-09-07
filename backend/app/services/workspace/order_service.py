@@ -135,7 +135,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
         except Exception as e:
             logger.warning(f"⚠️ Không bắt kịp API createOrderSale.php ({e}), chuyển sang cào DataGrid DOM...")
 
-        # Fallback cào từ DOM
+        # Fallback cào từ DOM nếu chưa lấy được mã từ API
         if not contract_full_code:
             try:
                 await page.wait_for_url("**/partner-workspace/contract-po", timeout=15000)
@@ -327,7 +327,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                         if await first_row.count() > 0:
                             order_num_id = await first_row.get_attribute("data-id") or ""
                             order_code_elem = first_row.locator("[data-field='school_order_id'] span, [data-field='school_order_id'], .MuiDataGrid-cell").first
-                            order_full_code = (await order_code_elem.inner_text()).strip() if await order_code_elem.count() > 0 else (order_num_id or "")
+                            order_full_code = (await order_code_elem.inner_text()).strip() if await code_elem.count() > 0 else (order_num_id or "")
 
                     if not order_full_code and order_num_id:
                         order_full_code = f"SCH-{order_num_id}"
@@ -418,45 +418,40 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     await page.wait_for_selector("div[role='dialog']:has-text('Order Details')", state="visible", timeout=15000)
                     await page.wait_for_timeout(800)
 
-                    # 🔄 BƯỚC THẨM ĐỊNH LICENSE: Cuộn xuống phần Pool License Selection
-                    logger.info("🧐 Kiểm tra và phân bổ Pool License trong Dialog...")
                     dialog = page.locator("div[role='dialog']:has-text('Order Details')").first
                     
-                    # Tìm khối Pool License Selection bên trong dialog
+                    # Cuộn xuống khối Pool License Selection
                     pool_card = dialog.locator("div:has(h6:has-text('Pool License Selection')), div.MuiBox-root:has(label:has-text('Pool License'))").first
                     if await pool_card.count() > 0:
                         await pool_card.scroll_into_view_if_needed()
 
-                    # Quét tất cả các môn cần chọn Pool License (khối chứa "licenses needed")
-                    course_rows = dialog.locator("div:has-text('licenses needed')").filter(has=page.locator("[role='combobox'], .MuiSelect-select"))
-                    row_count = await course_rows.count()
+                    # 👉 CHUẨN XÁC: ĐỊNH VỊ TRỰC TIẾP TỪNG COMBOBOX POOL LICENSE (KHÔNG ĐẾM TRÙNG THẺ CHA)
+                    pool_dropdowns = dialog.locator("div.MuiFormControl-root:has(label:has-text('Pool License')) [role='combobox'], div.MuiFormControl-root:has(label:has-text('Pool License')) .MuiSelect-select")
+                    dropdown_count = await pool_dropdowns.count()
                     
-                    # Nếu không tìm thấy theo bộ lọc trên, fallback quét các khối chứa label Pool License
-                    if row_count == 0:
-                        course_rows = dialog.locator("div.MuiBox-root:has(label:has-text('Pool License'))")
-                        row_count = await course_rows.count()
-
-                    logger.info(f"📊 Tìm thấy {row_count} môn học cần chọn Pool License.")
+                    logger.info(f"📊 Tìm thấy chính xác {dropdown_count} môn học cần chọn Pool License.")
                     all_courses_satisfied = True
 
-                    if row_count > 0:
-                        for i in range(row_count):
-                            c_row = course_rows.nth(i)
-                            row_text = await c_row.inner_text()
+                    if dropdown_count > 0:
+                        for i in range(dropdown_count):
+                            dropdown = pool_dropdowns.nth(i)
+                            await dropdown.scroll_into_view_if_needed()
+
+                            # Trích xuất số license cần từ thẻ thông tin ngay phía trên dropdown
+                            parent_box = dropdown.locator("xpath=./ancestor::div[contains(@class, 'MuiBox-root')][1]")
+                            parent_text = await parent_box.inner_text() if await parent_box.count() > 0 else ""
                             
-                            # Trích xuất số license cần: ví dụ "(10 licenses needed)"
                             needed_qty = 1
-                            match_needed = re.search(r"(\d+)\s+licenses?\s+needed", row_text, re.IGNORECASE)
+                            match_needed = re.search(r"(\d+)\s+licenses?\s+needed", parent_text, re.IGNORECASE)
                             if match_needed:
                                 needed_qty = int(match_needed.group(1))
+                            
                             logger.info(f"📚 Môn #{i+1}: Yêu cầu {needed_qty} licenses.")
 
-                            dropdown = c_row.locator("[role='combobox'], .MuiSelect-select").first
-                            await dropdown.scroll_into_view_if_needed()
                             await dropdown.click(force=True)
                             await page.wait_for_timeout(400)
 
-                            # Quét các options trong menu bung ra
+                            # Quét các options trong menu vừa mở
                             options = page.locator("li[role='option']")
                             opt_count = await options.count()
                             
@@ -465,13 +460,12 @@ class WorkspaceOrderService(WorkspaceBaseService):
                                 opt = options.nth(o_idx)
                                 opt_text = await opt.inner_text()
                                 
-                                # Tìm chuỗi "Available: X"
                                 avail_match = re.search(r"Available:\s*(\d+)", opt_text, re.IGNORECASE)
                                 if avail_match:
                                     avail_num = int(avail_match.group(1))
                                     logger.info(f"   🔎 Option #{o_idx+1}: '{opt_text.strip()}' -> Có: {avail_num} / Cần: {needed_qty}")
                                     
-                                    # CHỈ CHỌN KHI AVAILABLE >= NEEDED_QTY
+                                    # CHỈ CHỌN KHI SỐ LƯỢNG AVAILABLE >= NEEDED
                                     if avail_num >= needed_qty:
                                         best_opt = opt
                                         logger.info(f"   🎯 ĐỦ ĐIỀU KIỆN! Chọn option: '{opt_text.strip()}'")
@@ -481,13 +475,13 @@ class WorkspaceOrderService(WorkspaceBaseService):
                                 await best_opt.click(force=True)
                                 await page.wait_for_timeout(400)
                             else:
-                                logger.warning(f"❌ Môn #{i+1}: Không có option nào có Available >= {needed_qty}! Kho Partner thiếu hụt.")
+                                logger.warning(f"❌ Môn #{i+1}: Không có option nào có Available >= {needed_qty}! Kho Partner thiếu.")
                                 all_courses_satisfied = False
                                 await page.keyboard.press("Escape")
                                 await page.wait_for_timeout(200)
-                                break  # Thiếu ít nhất 1 môn là toàn đơn không duyệt được
+                                break
 
-                    # Kiểm tra sự xuất hiện của nút Approve Order
+                    # Kiểm tra nút Approve Order
                     approve_btn = dialog.locator("button:has-text('Approve Order')").first
                     try:
                         await approve_btn.wait_for(state="visible", timeout=3000)
