@@ -97,19 +97,19 @@ class WorkspaceAccountService(WorkspaceBaseService):
         self,
         page: Page,
         request_id: str,
-        download_dir: str
+        download_dir: str,
+        standard_input_file: Optional[str] = None
     ) -> str:
         """
-        🎯 SIÊU GIẢI PHÁP THEO Ý TƯỞNG CỦA ANH HÙNG:
-        Gọi trực tiếp API exportData.php lấy JSON rồi tự xuất file Excel bằng Python.
-        Bỏ qua hoàn toàn lỗi 'No records available for export' và không cần click DOM!
+        Gọi trực tiếp API exportData.php và ghi kết quả ngược vào file chuẩn theo các cột H-I-J.
         """
+        from app.services.cof_excel_service import COFExcelService
+
         os.makedirs(download_dir, exist_ok=True)
         result_excel_path = os.path.join(download_dir, f"RESULT_{request_id}_accounts.xlsx")
 
         logger.info(f"📥 [DIRECT API] Đang truy vấn exportData.php cho Request #{request_id}...")
         try:
-            # 1. Gọi trực tiếp API exportData.php trong session của trường
             raw_records = await page.evaluate(f"""
                 async () => {{
                     const formData = new FormData();
@@ -124,55 +124,24 @@ class WorkspaceAccountService(WorkspaceBaseService):
             """)
 
             if isinstance(raw_records, list) and len(raw_records) > 0:
-                logger.info(f"✨ Bắt được {len(raw_records)} tài khoản từ exportData.php! Đang sinh file Excel kết quả...")
-                generate_excel_from_api_data(raw_records, result_excel_path)
+                logger.info(f"✨ Bắt được {len(raw_records)} tài khoản từ exportData.php! Đang ghi ngược vào file chuẩn...")
+                
+                # Nếu có file chuẩn đã upload, ghi ngược vào 3 cột H-I-J
+                if standard_input_file and os.path.exists(standard_input_file):
+                    COFExcelService.write_results_back_to_standard_accounts(
+                        standard_file_path=standard_input_file,
+                        api_user_records=raw_records,
+                        output_file_path=result_excel_path
+                    )
+                else:
+                    # Fallback tạo file mới nếu không có file gốc
+                    generate_excel_from_api_data(raw_records, result_excel_path)
+
                 return result_excel_path
-            else:
-                logger.warning(f"exportData.php trả về rỗng hoặc không phải mảng: {raw_records}")
         except Exception as api_err:
-            logger.warning(f"Lỗi khi đọc API exportData.php: {api_err}. Thử fallback click DOM...")
+            logger.warning(f"Lỗi khi đọc API exportData.php: {api_err}")
 
-        # 2. Fallback dự phòng: Thử click nút Export trên giao diện nếu API exportData.php có trục trặc
-        logger.info(f"🔄 [FALLBACK DOM] Mở trang danh sách để click nút Export thủ công...")
-        await page.goto(
-            f"{BASE_WORKSPACE_URL}/school-workspace/account-creation",
-            wait_until="domcontentloaded",
-            timeout=35000
-        )
-        await wait_for_dom_and_spinners(page, ".MuiDataGrid-row, .MuiInputBase-input", min_pacing_ms=800)
-
-        search_input = page.locator(".MuiTextField-root:has-text('Search') input, input.MuiInputBase-input, input[id*='r24']").first
-        if await search_input.count() > 0:
-            await search_input.fill(str(request_id))
-            await page.keyboard.press("Enter")
-            await asyncio.sleep(1.2)
-
-        action_btn = page.locator(
-            f".MuiDataGrid-row[data-id='{request_id}'] [data-field='actions'] button, "
-            f".MuiDataGrid-row:has-text('{request_id}') [data-field='actions'] button, "
-            f"[data-field='actions'] button, button:has(.lucide-menu)"
-        ).first
-
-        if await action_btn.count() > 0:
-            await action_btn.click()
-            await asyncio.sleep(0.6)
-
-            try:
-                async with page.expect_download(timeout=10000) as download_info:
-                    export_item = page.locator("li[role='menuitem']:has-text('Export'), li:has-text('Export')").first
-                    await export_item.click()
-
-                download = await download_info.value
-                await download.save_as(result_excel_path)
-                return result_excel_path
-            except Exception:
-                pass
-
-        if os.path.exists(result_excel_path):
-            return result_excel_path
-
-        raise RuntimeError(f"Không thể xuất file kết quả cho Request #{request_id}")
-
+        return result_excel_path
     async def submit_account_creation_batch(
         self,
         credentials: Dict[str, str],
@@ -271,7 +240,7 @@ class WorkspaceAccountService(WorkspaceBaseService):
                     # Fast-Path: Nếu đã Done -> Gọi trực tiếp exportData.php xuất Excel ngay!
                     if is_status_done(initial_status):
                         logger.info(f"✨ [Fast-Path Tức Thì] Request #{request_id} đã Done! Xuất file ngay qua API...")
-                        downloaded_path = await self._download_export_file(page, request_id, download_dir)
+                        downloaded_path = await self._download_export_file(page, request_id, download_dir, standard_input_file=upload_file_path)
                         return {
                             "status": "completed",
                             "request_id": request_id,

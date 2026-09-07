@@ -297,10 +297,10 @@ async def execute_approved_bot_task(
                     justification=payload_data.get("justification")
                 )
 
-            # --- L. Tạo tài khoản hàng loạt (Công thức 15s/Tài khoản) ---
-            # --- L. Tạo tài khoản hàng loạt (Công thức 15s/Tài khoản) ---
+            # --- L. Tạo tài khoản hàng loạt (Tự Chuẩn Hóa Format & Ghi Ngược Cột H-I-J) ---
             elif action == "bulk_account_creation":
                 from app.services.cof_excel_service import COFExcelService
+                from app.core.supabase import get_supabase_client
 
                 file_path = payload_data.get("upload_file_path")
                 if not file_path and payload_data.get("attachment_url"):
@@ -310,40 +310,27 @@ async def execute_approved_bot_task(
                 if not file_path:
                     return {"status": "failed", "error": "Thiếu file Excel (.xlsx) hoặc attachment_url hợp lệ."}
 
-                # Fallback truy vết Két Sắt qua cả school_code nếu school_name không khớp
                 if not school_creds:
                     target_identifier = payload_data.get("school_code") or school_name
-                    logger.info(f"🔍 {task_tag} Đang truy vết tài khoản trường với mã/tên: '{target_identifier}'...")
                     s_lin = workspace_lineage_service.resolve_by_school(str(target_identifier))
                     if s_lin:
                         school_creds = s_lin.get("school")
-                        partner_creds = partner_creds or s_lin.get("partner")
-                        distributor_creds = distributor_creds or s_lin.get("distributor")
 
                 if not school_creds:
-                    return {"status": "failed", "error": f"Không tìm thấy tài khoản trường '{school_name}' (Mã: {payload_data.get('school_code')}) trong Két Sắt."}
+                    return {"status": "failed", "error": f"Không tìm thấy tài khoản trường '{school_name}' trong Két Sắt."}
 
                 temp_dir = "/tmp/ptv_accounts"
                 os.makedirs(temp_dir, exist_ok=True)
                 
-                # Bóc tách file: Hỗ trợ cả file COF 3 Tabs lẫn file accounts.xlsx chuẩn 1 Tab
+                # 1. TỰ ĐỘNG CHUẨN HÓA FILE ĐẦU VÀO VỀ CHUẨN HÀNG 5 - HÀNG 6 CỦA TRƯỜNG
+                normalized_file = os.path.join(temp_dir, f"STANDARDIZED_{os.path.basename(file_path)}")
                 try:
-                    ready_file, student_c, teacher_c, total_c, is_cof, parsed_data = COFExcelService.detect_and_process_excel(file_path, temp_dir)
-                except Exception as parse_err:
-                    logger.warning(f"⚠️ {task_tag} detect_and_process_excel warning: {parse_err}. Sử dụng trực tiếp file gốc và số liệu từ Studio...")
+                    ready_file, total_c = COFExcelService.normalize_input_accounts_excel(file_path, normalized_file)
+                    logger.info(f"✨ {task_tag} Đã chuẩn hóa file đầu vào: {total_c} tài khoản (Bắt đầu từ hàng 6 chuẩn của trường)")
+                except Exception as norm_err:
+                    logger.warning(f"Lỗi chuẩn hóa file: {norm_err}. Dùng file gốc...")
                     ready_file = file_path
-                    student_c = payload_data.get("student_count", 0)
-                    teacher_c = payload_data.get("teacher_count", 0)
-                    total_c = payload_data.get("total_count", 0) or (student_c + teacher_c)
-                    is_cof = False
-
-                # Nếu detect_and_process_excel trả về 0 nhưng Studio đã đếm được thì dùng số liệu của Studio
-                if total_c == 0 and payload_data.get("total_count"):
-                    total_c = int(payload_data.get("total_count", 0))
-                    student_c = int(payload_data.get("student_count", 0))
-                    teacher_c = int(payload_data.get("teacher_count", 0))
-
-                logger.info(f"📊 {task_tag} Thống kê: {student_c} học sinh, {teacher_c} giáo viên (Tổng: {total_c}) | Trường: {school_name} | Là COF: {is_cof}")
+                    total_c = int(payload_data.get("total_count", 10))
 
                 submit_res = await workspace_playwright_service.submit_account_creation_batch(
                     credentials=school_creds,
@@ -352,33 +339,42 @@ async def execute_approved_bot_task(
                     checkpoint=checkpoint
                 )
 
-                if submit_res.get("status") == "failed":
-                    return submit_res
-
+                # 2. NẾU HOÀN THÀNH (FAST-PATH): TỰ ĐỘNG TẢI LÊN STORAGE ĐỂ HIỆN NÚT TẢI FILE!
                 if submit_res.get("status") in ["completed", "success"]:
+                    res_file = submit_res.get("result_file_path")
+                    if res_file and os.path.exists(res_file):
+                        req_id = submit_res.get("request_id", "BATCH")
+                        storage_path = f"results/RESULT_{req_id}_{os.path.basename(res_file)}"
+                        try:
+                            supabase = get_supabase_client()
+                            with open(res_file, "rb") as f_up:
+                                supabase.storage.from_("ticket-attachments").upload(
+                                    storage_path, f_up, file_options={"content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "upsert": "true"}
+                                )
+                            public_url = supabase.storage.from_("ticket-attachments").get_public_url(storage_path)
+                            submit_res["result_file_url"] = public_url
+                            logger.info(f"🎉 {task_tag} Đã tải file kết quả lên Supabase Storage: {public_url}")
+                        except Exception as up_e:
+                            logger.warning(f"Lỗi upload Supabase: {up_e}")
+
                     return submit_res
 
+                # Nếu chưa xong, chuyển sang waiting_poll cho Cronjob
                 req_id = submit_res.get("request_id")
                 checkpoint["account_batch_request_id"] = req_id
-                
-                # Thời gian nghỉ an toàn: 15s / tài khoản, tối thiểu 30s
-                wait_seconds = max(total_c * 15, 30)
+                wait_seconds = max(total_c *20, 40)
                 next_check_time = datetime.now(timezone.utc) + timedelta(seconds=wait_seconds)
-                next_check_iso = next_check_time.isoformat()
 
                 return {
                     "status": "waiting_poll",
                     "request_id": req_id,
-                    "student_count": student_c,
-                    "teacher_count": teacher_c,
                     "total_count": total_c,
-                    "is_cof_file": is_cof,
-                    "cof_file_path": file_path if is_cof else None,
+                    "normalized_file_path": ready_file,
                     "school_credentials": school_creds,
                     "wait_seconds": wait_seconds,
-                    "next_check_at": next_check_iso,
+                    "next_check_at": next_check_time.isoformat(),
                     "checkpoint": checkpoint,
-                    "message": f"Đã nộp thành công batch ({total_c} tài khoản) cho trường '{school_name}' với Mã Request #{req_id}. Hệ thống nghỉ {wait_seconds}s và sẽ tự động kiểm tra kết quả."
+                    "message": f"Đã nộp thành công batch ({total_c} tài khoản) với Mã Request #{req_id}."
                 }
 
             # --- M. Kiểm tra tiến độ & tải kết quả (Pha 2) ---

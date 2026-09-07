@@ -379,3 +379,159 @@ class COFExcelService:
         wb_orig.close()
         logger.info(f"✨ File COF hoàn thiện đã lưu tại: {output_cof_path}")
         return output_cof_path
+    @staticmethod
+    def normalize_input_accounts_excel(input_file_path: str, output_file_path: str) -> tuple[str, int]:
+        """
+        Chuẩn hóa mọi file Excel người dùng gửi về chuẩn format của School Workspace:
+        - Tiêu đề ở Hàng 2.
+        - Header nằm ở Hàng 5 (No., First Name, Last Name, Mobile, Email, DOB, Role).
+        - Dữ liệu bắt đầu từ Hàng 6 (chống mất người dùng đầu tiên).
+        """
+        from openpyxl import load_workbook, Workbook
+        from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+
+        wb_in = load_workbook(input_file_path, data_only=True)
+        ws_in = wb_in.active
+
+        header_row_idx = -1
+        col_map = {}
+
+        # 1. Quét tìm hàng header (chứa First Name hoặc Role)
+        for r_idx, row in enumerate(ws_in.iter_rows(values_only=True), 1):
+            if r_idx > 15:
+                break
+            row_vals = [str(c or '').strip().lower() for c in row]
+            row_str = " ".join(row_vals)
+            if "first name" in row_str or ("last name" in row_str and "role" in row_str):
+                header_row_idx = r_idx
+                for c_idx, val in enumerate(row_vals):
+                    if "first name" in val: col_map["first_name"] = c_idx
+                    elif "last name" in val: col_map["last_name"] = c_idx
+                    elif "mobile" in val or "phone" in val: col_map["mobile"] = c_idx
+                    elif "email" in val: col_map["email"] = c_idx
+                    elif "birth" in val or "dob" in val: col_map["dob"] = c_idx
+                    elif "role" in val: col_map["role"] = c_idx
+                break
+
+        if header_row_idx == -1:
+            header_row_idx = 3 # Mặc định dòng 3 nếu không tìm thấy
+            col_map = {"first_name": 2, "last_name": 3, "mobile": 4, "email": 5, "dob": 6, "role": 7}
+
+        # 2. Đọc toàn bộ người dùng từ dòng bên dưới header
+        extracted_users = []
+        for row in ws_in.iter_rows(min_row=header_row_idx + 1, values_only=True):
+            if not any(row):
+                continue
+            fn = str(row[col_map.get("first_name", 1)] or '').strip()
+            ln = str(row[col_map.get("last_name", 2)] or '').strip()
+            if not fn and not ln:
+                continue
+
+            mob = str(row[col_map.get("mobile", 3)] or '').strip() if "mobile" in col_map else ""
+            em = str(row[col_map.get("email", 4)] or '').strip() if "email" in col_map else ""
+            dob = str(row[col_map.get("dob", 5)] or '').strip() if "dob" in col_map else ""
+            role = str(row[col_map.get("role", 6)] or 'Student').strip() if "role" in col_map else "Student"
+
+            extracted_users.append({
+                "first_name": fn,
+                "last_name": ln,
+                "mobile": mob,
+                "email": em,
+                "dob": dob,
+                "role": role
+            })
+
+        # 3. Tạo Workbook mới theo CHUẨN ĐÚNG CỦA TRƯỜNG (Header ở hàng 5, data ở hàng 6)
+        wb_out = Workbook()
+        ws_out = wb_out.active
+        ws_out.title = "Class 7s"
+
+        # Tiêu đề ở hàng 2
+        ws_out.merge_cells("B2:G2")
+        title_cell = ws_out["B2"]
+        title_cell.value = "Account creation request form"
+        title_cell.font = Font(name="Arial", size=18, bold=True)
+        title_cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        # Header ở hàng 5
+        headers = ["No.", "First Name (*)", "Last Name (*)", "Mobile number", "Email (*)", "Date of Birth (*)", "Role (*)"]
+        for c_i, h in enumerate(headers, 1):
+            cell = ws_out.cell(row=5, column=c_i)
+            cell.value = h
+            cell.font = Font(name="Arial", size=10, bold=True)
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        # Dữ liệu từ hàng 6
+        for idx, u in enumerate(extracted_users, 1):
+            r = idx + 5
+            ws_out.cell(row=r, column=1, value=idx)
+            ws_out.cell(row=r, column=2, value=u["first_name"])
+            ws_out.cell(row=r, column=3, value=u["last_name"])
+            ws_out.cell(row=r, column=4, value=u["mobile"])
+            ws_out.cell(row=r, column=5, value=u["email"])
+            ws_out.cell(row=r, column=6, value=u["dob"])
+            ws_out.cell(row=r, column=7, value=u["role"])
+
+        wb_out.save(output_file_path)
+        return output_file_path, len(extracted_users)
+
+
+    @staticmethod
+    def write_results_back_to_standard_accounts(
+        standard_file_path: str,
+        api_user_records: list,
+        output_file_path: str
+    ) -> str:
+        """
+        Tạo 3 cột H (Username), I (Password), J (Note) ngay cạnh cột Role (G):
+        - is_create == True: Ghi Username (H), Password (I), bỏ qua Note (J).
+        - is_create == False: Bỏ qua H & I, ghi 'Tài khoản đã tồn tại' vào Note (J).
+        """
+        from openpyxl import load_workbook
+        from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+
+        wb = load_workbook(standard_file_path)
+        ws = wb.active
+
+        # 1. Thêm 3 cột H, I, J ở Hàng 5
+        ws.cell(row=5, column=8, value="Username").font = Font(name="Arial", size=10, bold=True)
+        ws.cell(row=5, column=9, value="Password").font = Font(name="Arial", size=10, bold=True)
+        ws.cell(row=5, column=10, value="Note").font = Font(name="Arial", size=10, bold=True)
+
+        for col_idx in [8, 9, 10]:
+            ws.cell(row=5, column=col_idx).alignment = Alignment(horizontal="center", vertical="center")
+
+        # 2. Tạo map đối soát từ kết quả API exportData.php
+        api_map_by_email = {}
+        api_map_by_name = {}
+        for item in api_user_records:
+            em = str(item.get("email") or '').strip().lower()
+            if em:
+                api_map_by_email[em] = item
+            fn = str(item.get("firstname") or '').strip().lower()
+            ln = str(item.get("lastname") or '').strip().lower()
+            if fn or ln:
+                api_map_by_name[f"{fn}_{ln}"] = item
+
+        # 3. Ghi kết quả từ Hàng 6
+        for r in range(6, ws.max_row + 1):
+            row_email = str(ws.cell(row=r, column=5).value or '').strip().lower()
+            row_fn = str(ws.cell(row=r, column=2).value or '').strip().lower()
+            row_ln = str(ws.cell(row=r, column=3).value or '').strip().lower()
+
+            matched = api_map_by_email.get(row_email) or api_map_by_name.get(f"{row_fn}_{row_ln}")
+
+            if matched:
+                is_create = matched.get("is_create", False)
+                if is_create:
+                    ws.cell(row=r, column=8, value=matched.get("username", ""))
+                    ws.cell(row=r, column=9, value=matched.get("password", ""))
+                    ws.cell(row=r, column=10, value="")
+                else:
+                    ws.cell(row=r, column=8, value="")
+                    ws.cell(row=r, column=9, value="")
+                    note_cell = ws.cell(row=r, column=10, value="Tài khoản đã tồn tại")
+                    note_cell.font = Font(name="Arial", size=9, italic=True, color="7F7F7F")
+
+        wb.save(output_file_path)
+        return output_file_path
