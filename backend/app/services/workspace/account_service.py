@@ -13,6 +13,12 @@ from app.core.playwright_manager import acquire_playwright_slot, wait_for_dom_an
 logger = logging.getLogger(__name__)
 
 
+def is_status_done(status_val: Any) -> bool:
+    """Kiểm tra trạng thái hoàn thành: Hỗ trợ cả mã số '1' của WordPress lẫn chữ 'Done'."""
+    s = str(status_val or "").strip().lower()
+    return s in ["1", "done", "completed", "success", "approved"]
+
+
 class WorkspaceAccountService(WorkspaceBaseService):
     """Xử lý nộp file batch tạo tài khoản học sinh/giáo viên qua Direct API Sniffer & Playwright."""
 
@@ -28,11 +34,11 @@ class WorkspaceAccountService(WorkspaceBaseService):
         checkpoint = checkpoint or {}
 
         # -------------------------------------------------------------
-        # RESUME CHECKPOINT: Nếu đã có request_id trước đó, bỏ qua upload
+        # RESUME CHECKPOINT: Nếu đã có request_id trước đó, chuyển sang kiểm tra kết quả
         # -------------------------------------------------------------
         existing_req_id = checkpoint.get("account_batch_request_id")
         if existing_req_id:
-            logger.info(f"⏩ [CHECKPOINT] Đã có sẵn Request ID #{existing_req_id} từ phiên trước. Chuyển sang kiểm tra kết quả...")
+            logger.info(f"⏩ [CHECKPOINT] Đã có sẵn Request ID #{existing_req_id}. Chuyển sang kiểm tra kết quả...")
             check_res = await self.check_and_export_batch_result(credentials, existing_req_id, download_dir)
             check_res["checkpoint"] = checkpoint
             return check_res
@@ -55,7 +61,7 @@ class WorkspaceAccountService(WorkspaceBaseService):
                     )
                     await wait_for_dom_and_spinners(page, "input[type='file']", min_pacing_ms=500)
 
-                    # 1. Nộp file vào input[type='file'] (Xử lý client local)
+                    # 1. Nộp file vào input[type='file']
                     file_input = page.locator("input[type='file']").first
                     await file_input.wait_for(state="visible", timeout=15000)
                     await file_input.set_input_files(upload_file_path)
@@ -66,8 +72,8 @@ class WorkspaceAccountService(WorkspaceBaseService):
                     upload_btn = page.locator("button:has-text('Upload')").first
                     await upload_btn.wait_for(state="visible", timeout=15000)
 
-                    # 2. Bấm Upload và ĐÓN TRỰC TIẾP RESPONSE CỦA uploadFileAccount.php (Chứa request_id)
-                    logger.info("🚀 Bấm nút Upload và đón phản hồi trực tiếp từ API uploadFileAccount.php...")
+                    # 2. Bấm Upload và đón phản hồi từ API uploadFileAccount.php an toàn
+                    logger.info("🚀 Bấm nút Upload và gửi file lên server trường...")
                     request_id = None
                     try:
                         async with page.expect_response(
@@ -76,62 +82,90 @@ class WorkspaceAccountService(WorkspaceBaseService):
                         ) as resp_info:
                             await upload_btn.click()
                         
-                        upload_resp = await resp_info.value
-                        resp_data = await upload_resp.json()
-                        logger.info(f"📥 Phản hồi JSON từ uploadFileAccount.php: {resp_data}")
-
-                        # 🎯 Tóm sống Request ID ngay tại đây!
-                        if isinstance(resp_data, dict):
-                            raw_id = resp_data.get("request_id") or resp_data.get("id")
-                            if raw_id:
-                                request_id = str(raw_id).strip()
+                        try:
+                            upload_resp = await resp_info.value
+                            resp_data = await upload_resp.json()
+                            if isinstance(resp_data, dict):
+                                raw_id = resp_data.get("request_id") or resp_data.get("id")
+                                if raw_id:
+                                    request_id = str(raw_id).strip()
+                                    logger.info(f"📥 Bắt được Request ID trực tiếp từ uploadFileAccount: #{request_id}")
+                        except Exception:
+                            pass
                     except Exception as e:
-                        logger.warning(f"Lỗi khi bắt response uploadFileAccount.php: {e}")
+                        logger.debug(f"expect_response notice: {e}")
 
-                    # Fallback dự phòng: Nếu vì lý do mạng chưa bắt được, dò nhanh qua getListRequest.php
-                    if not request_id:
-                        school_id = await page.evaluate("() => window.user?.school_id || 10266")
+                    # Chờ 2s để server ghi nhận batch vào CSDL
+                    await asyncio.sleep(2.0)
+
+                    # 3. Lấy school_id và truy vấn danh sách qua getListRequest.php
+                    school_id = await page.evaluate("() => window.user?.school_id || 10266")
+                    logger.info(f"🏫 School ID: {school_id}. Đang kiểm tra danh sách qua getListRequest.php...")
+
+                    initial_status = "0"
+
+                    # Dò tìm Request ID mới nhất qua API getListRequest.php
+                    for attempt in range(1, 4):
+                        if request_id:
+                            break
                         try:
                             api_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/request_approval/getListRequest.php?school_id={school_id}"
                             api_res = await page.request.get(api_url)
                             raw_text = await api_res.text()
-                            match = re.search(r'"(?:id|request_id)"\s*:\s*"?(\d+)"?', raw_text)
-                            if match:
-                                request_id = match.group(1)
-                        except Exception:
-                            pass
+
+                            try:
+                                api_data = json.loads(raw_text)
+                                items = api_data if isinstance(api_data, list) else api_data.get("data") or api_data.get("rows") or [api_data]
+                                if items and isinstance(items, list) and len(items) > 0:
+                                    newest = items[0]
+                                    if isinstance(newest, dict):
+                                        request_id = str(newest.get("id") or newest.get("request_id") or "").strip()
+                                        initial_status = str(newest.get("status") or "")
+                            except Exception:
+                                match = re.search(r'"(?:id|request_id)"\s*:\s*"?(\d+)"?', raw_text)
+                                if match:
+                                    request_id = match.group(1)
+
+                            if request_id:
+                                logger.info(f"🎉 BẮT ĐƯỢC REQUEST ID CHUẨN XÁC: [ #{request_id} ] | Status Code: '{initial_status}'")
+                                break
+                        except Exception as api_err:
+                            logger.debug(f"Nhịp {attempt} notice: {api_err}")
+                        await asyncio.sleep(2.0)
 
                     if not request_id:
-                        err_msg = "Không thể trích xuất Request ID từ API uploadFileAccount.php."
+                        err_msg = "Không thể trích xuất Request ID từ hệ thống sau khi nộp file."
                         logger.error(f"❌ {err_msg}")
                         return {"status": "failed", "error": err_msg, "checkpoint": checkpoint}
 
-                    logger.info(f"🎉 BẮT ĐƯỢC REQUEST ID CHUẨN XÁC 100%: [ #{request_id} ]!")
                     checkpoint["account_batch_request_id"] = request_id
 
                     # =============================================================
-                    # 🚀 FAST-PATH: Nếu batch nhỏ (<= 30 tài khoản)
+                    # 🚀 FAST-PATH: Nếu đã Done ngay từ đầu (Status = 1 hoặc Done)
                     # =============================================================
+                    if is_status_done(initial_status):
+                        logger.info(f"✨ [Fast-Path Tức Thì] Request #{request_id} đã Done (Mã: {initial_status})! Đang xuất file...")
+                        return await self.check_and_export_batch_result(credentials, request_id, download_dir)
+
                     if record_count <= 30 and request_id:
                         logger.info(f"⚡ [Fast-Path] Thăm dò nhanh trạng thái cho Request #{request_id} (tối đa 15s)...")
-                        school_id = await page.evaluate("() => window.user?.school_id || 10266")
                         for fast_attempt in range(1, 4):
                             await asyncio.sleep(4.0)
                             try:
                                 api_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/request_approval/getListRequest.php?school_id={school_id}"
                                 api_res = await page.request.get(api_url)
                                 raw_text = await api_res.text()
-                                # Kiểm tra xem request_id này đã Done chưa
-                                if f'"{request_id}"' in raw_text or str(request_id) in raw_text:
-                                    match = re.search(rf'"{request_id}".*?"status"\s*:\s*"([^"]+)"', raw_text, re.DOTALL)
-                                    stat = match.group(1).lower() if match else ""
-                                    if any(w in stat for w in ["done", "completed", "success"]):
-                                        logger.info(f"✨ [Fast-Path SUCCESS] Request #{request_id} đã Done! Đang xuất file kết quả...")
+                                if str(request_id) in raw_text:
+                                    match = re.search(rf'"{request_id}".*?"status"\s*:\s*"?([^",\s}}]+)"?', raw_text, re.DOTALL)
+                                    stat = match.group(1) if match else ""
+                                    # 🎯 KIỂM TRA MÃ 1 LÀ XONG NGAY!
+                                    if is_status_done(stat):
+                                        logger.info(f"✨ [Fast-Path SUCCESS] Request #{request_id} đã Done (Status: {stat})! Đang xuất file...")
                                         return await self.check_and_export_batch_result(credentials, request_id, download_dir)
                             except Exception as f_err:
                                 logger.debug(f"Fast-path attempt {fast_attempt} notice: {f_err}")
 
-                    # Nếu chưa xong hoặc batch lớn, chuyển sang waiting_poll cho Cronjob
+                    # Nếu chưa xong, trả về waiting_poll để Cronjob kiểm tra
                     return {
                         "status": "waiting_poll",
                         "request_id": request_id,
@@ -152,7 +186,7 @@ class WorkspaceAccountService(WorkspaceBaseService):
         request_id: str,
         download_dir: str
     ) -> Dict[str, Any]:
-        """Kiểm tra trạng thái bằng API và dùng ô Search để cô lập dòng cần Export."""
+        """Kiểm tra trạng thái bằng API (nhận diện status=1) và dùng ô Search tải file Export."""
         os.makedirs(download_dir, exist_ok=True)
         async with acquire_playwright_slot(f"Check Batch Result #{request_id}"):
             async with async_playwright() as p:
@@ -166,17 +200,18 @@ class WorkspaceAccountService(WorkspaceBaseService):
 
                     school_id = credentials.get("school_id") or "10266"
 
-                    # 1. Kiểm tra trạng thái nhanh qua API getListRequest.php
+                    # 1. Kiểm tra trạng thái qua API getListRequest.php
                     try:
                         api_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/request_approval/getListRequest.php?school_id={school_id}"
                         api_res = await page.request.get(api_url)
                         raw_text = await api_res.text()
                         
-                        match = re.search(rf'"{request_id}".*?"status"\s*:\s*"([^"]+)"', raw_text, re.DOTALL)
+                        match = re.search(rf'"{request_id}".*?"status"\s*:\s*"?([^",\s}}]+)"?', raw_text, re.DOTALL)
                         status_found = match.group(1) if match else ""
                         logger.info(f"📊 Trạng thái kiểm tra từ getListRequest cho Request #{request_id}: '{status_found}'")
                         
-                        if status_found and not any(w in status_found.lower() for w in ["done", "completed", "success"]):
+                        # 🎯 NẾU CHƯA PHẢI MÃ 1 HOẶC DONE THÌ MỚI BÁO STILL_PROCESSING!
+                        if not is_status_done(status_found):
                             return {
                                 "status": "still_processing",
                                 "current_status": status_found,
@@ -185,30 +220,30 @@ class WorkspaceAccountService(WorkspaceBaseService):
                     except Exception as e:
                         logger.debug(f"API check notice: {e}")
 
-                    # 2. Mở trang danh sách để tải file Export
-                    logger.info(f"📥 Mở trang Account Creation để tải file cho Request #{request_id}...")
+                    # 2. Khi trạng thái đã Done (hoặc mã 1): Mở trang danh sách để tải file Export
+                    logger.info(f"📥 Trạng thái đã Done! Mở trang Account Creation để tải file cho Request #{request_id}...")
                     await page.goto(
                         f"{BASE_WORKSPACE_URL}/school-workspace/account-creation",
                         wait_until="domcontentloaded",
                         timeout=35000
                     )
-                    await wait_for_dom_and_spinners(page, "input[placeholder*='Search'], input[type='text']", min_pacing_ms=800)
+                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row, .MuiInputBase-input", min_pacing_ms=800)
 
-                    # 3. Gõ Request ID vào ô Search để cô lập duy nhất 1 dòng (Theo ý tưởng của anh Hùng!)
-                    search_input = page.locator("input[placeholder*='Search'], input[id*='r24'], .MuiInputBase-input").first
+                    # 3. Gõ Request ID vào ô Search để lọc cô lập dòng (Selector label Search chuẩn MUI)
+                    search_input = page.locator(".MuiTextField-root:has-text('Search') input, input.MuiInputBase-input, input[id*='r24']").first
                     if await search_input.count() > 0:
                         logger.info(f"🔍 Điền Request ID '#{request_id}' vào ô Search...")
                         await search_input.fill(str(request_id))
                         await page.keyboard.press("Enter")
-                        await asyncio.sleep(1.0)
+                        await asyncio.sleep(1.2)
 
-                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row, [role='row']", min_pacing_ms=1000)
+                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=800)
 
-                    # 4. Bấm nút Actions (Icon 3 gạch ngang) của dòng đó
+                    # 4. Bấm nút Actions (Icon menu 3 gạch) của dòng đó
                     action_btn = page.locator(
                         f".MuiDataGrid-row[data-id='{request_id}'] [data-field='actions'] button, "
                         f".MuiDataGrid-row:has-text('{request_id}') [data-field='actions'] button, "
-                        f"[data-field='actions'] button"
+                        f"[data-field='actions'] button, button:has(.lucide-menu)"
                     ).first
 
                     if await action_btn.count() == 0:
@@ -231,7 +266,7 @@ class WorkspaceAccountService(WorkspaceBaseService):
                     download_file_path = os.path.join(download_dir, f"RESULT_{request_id}_{download.suggested_filename}")
                     await download.save_as(download_file_path)
 
-                    logger.info(f"✨ TẢI FILE THÀNH CÔNG: {download_file_path}")
+                    logger.info(f"✨ TẢI FILE KẾT QUẢ THÀNH CÔNG: {download_file_path}")
 
                     return {
                         "status": "completed",
