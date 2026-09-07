@@ -32,6 +32,8 @@ import {
   AlertTriangle,
   AlertCircle,
   FileCheck2,
+  Download,
+  Clock
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { fetchApi } from '../../lib/api';
@@ -196,6 +198,49 @@ export const AutomationStudioPage: React.FC = () => {
     errorCount: number;
     duplicateCount: number;
   }>({ total: 0, students: 0, teachers: 0, validCount: 0, errorCount: 0, duplicateCount: 0 });
+  // --- STATE THEO DÕI TIẾN TRÌNH & ĐÓN FILE KẾT QUẢ TẠI CHỖ ---
+  const [liveExecutedTask, setLiveExecutedTask] = useState<{
+    id: string;
+    status: string;
+    resultUrl?: string;
+    logs?: string;
+    request_id?: string;
+  } | null>(null);
+
+  // Polling theo dõi trạng thái tác vụ vừa kích hoạt từ Studio
+  useEffect(() => {
+    if (!liveExecutedTask?.id || liveExecutedTask.status === 'success' || liveExecutedTask.status === 'completed' || liveExecutedTask.status === 'failed') {
+      return;
+    }
+
+    const timer = setInterval(async () => {
+      try {
+        const freshTasks = await fetchApi<any[]>('/tasks');
+        if (freshTasks) {
+          const current = freshTasks.find((t) => t.id === liveExecutedTask.id);
+          if (current) {
+            const execStatus = current.execution_status;
+            const resUrl = current.payload_data?.result_file_url;
+            setLiveExecutedTask({
+              id: current.id,
+              status: execStatus,
+              resultUrl: resUrl,
+              logs: current.execution_logs,
+              request_id: current.payload_data?.request_id,
+            });
+
+            if (execStatus === 'success' || execStatus === 'completed') {
+              toast.success('🎉 Tác vụ đã hoàn tất! File kết quả đã sẵn sàng để tải về!');
+            }
+          }
+        }
+      } catch (e) {
+        console.debug('Polling live task notice:', e);
+      }
+    }, 5000); // Quét mỗi 5 giây
+
+    return () => clearInterval(timer);
+  }, [liveExecutedTask]);
 
   // Hàm đọc và kiểm tra tính hợp lệ file Excel tài khoản
   const processAndValidateAccountsFile = (file: File) => {
@@ -1033,7 +1078,7 @@ export const AutomationStudioPage: React.FC = () => {
         finalPayloadData.attachment_url = publicUrlData.publicUrl;
       }
 
-      await fetchApi('/tasks', {
+      const createdTask = await fetchApi<any>('/tasks', {
         method: 'POST',
         body: JSON.stringify({
           ticket_id: null,
@@ -1043,6 +1088,29 @@ export const AutomationStudioPage: React.FC = () => {
           approval_status: 'approved',
         }),
       });
+
+      // Lưu lại thông tin task để hiển thị widget tiến trình đón file ngay tại chỗ
+      if (createdTask?.id) {
+        setLiveExecutedTask({
+          id: createdTask.id,
+          status: createdTask.execution_status || 'queued',
+          resultUrl: createdTask.payload_data?.result_file_url,
+          request_id: createdTask.payload_data?.request_id,
+        });
+      }
+
+      setIsConfirmModalOpen(false);
+
+      toast.success(
+        <div className="space-y-1">
+          <div className="font-bold flex items-center gap-1.5 text-emerald-500">
+            <CheckCircle2 className="w-4 h-4" />
+            <span>Đã kích hoạt Worker tự động hóa!</span>
+          </div>
+          <div className="text-xs text-slate-500">Tác vụ đang được thực thi dưới nền. Bạn có thể theo dõi tiến trình ngay bên dưới.</div>
+        </div>,
+        { duration: 5000 }
+      );
 
       setIsConfirmModalOpen(false);
 
@@ -2158,6 +2226,77 @@ export const AutomationStudioPage: React.FC = () => {
                       </table>
                     </div>
                   </div>
+                </div>
+              )}
+              {/* 4. WIDGET TIẾN TRÌNH THỰC THI & ĐÓN FILE KẾT QUẢ TRỰC TIẾP TẠI CHỖ */}
+              {liveExecutedTask && (
+                <div className="rounded-2xl border-2 border-indigo-200 dark:border-indigo-900 bg-gradient-to-br from-indigo-50/80 via-white to-purple-50/80 dark:from-slate-900 dark:via-slate-900 dark:to-indigo-950/40 p-5 shadow-md space-y-4 animate-in fade-in duration-200">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-indigo-100 dark:border-slate-800 pb-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-2 rounded-xl bg-indigo-600 text-white shadow-xs">
+                        <Zap className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                          Tiến Trình Tạo Tài Khoản Thời Gian Thực
+                        </h4>
+                        <span className="font-mono text-[11px] text-indigo-600 dark:text-indigo-400 font-bold">
+                          Mã Tác Vụ: #{liveExecutedTask.id.slice(0, 8)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {liveExecutedTask.status === 'success' || liveExecutedTask.status === 'completed' ? (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-xs font-bold">
+                          <CheckCircle2 className="w-3.5 h-3.5" /> HOÀN THÀNH XUẤT SẮC
+                        </span>
+                      ) : liveExecutedTask.status === 'failed' ? (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 text-xs font-bold">
+                          <AlertCircle className="w-3.5 h-3.5" /> GẶP SỰ CỐ
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 text-xs font-bold">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          {liveExecutedTask.status === 'waiting_poll'
+                            ? `Đang chờ hệ thống trường (${liveExecutedTask.request_id ? `#REQ-${liveExecutedTask.request_id}` : 'Polling'})`
+                            : 'Worker đang thực thi...'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Khi có file kết quả: Nút bấm to đùng hiện ra ngay tại đây! */}
+                  {liveExecutedTask.resultUrl ? (
+                    <div className="p-4 rounded-xl bg-emerald-100/70 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                      <div className="space-y-0.5">
+                        <p className="text-xs font-bold text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
+                          <FileCheck2 className="w-4 h-4 text-emerald-600" />
+                          <span>File kết quả tài khoản đã tạo xong thành công!</span>
+                        </p>
+                        <p className="text-[11px] text-emerald-700 dark:text-emerald-300/80">
+                          Bao gồm tài khoản, mật khẩu định danh và nhóm lớp đã được phân bổ.
+                        </p>
+                      </div>
+
+                      <a
+                        href={liveExecutedTask.resultUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-sm flex items-center justify-center gap-2 transition hover:scale-[1.02] cursor-pointer"
+                      >
+                        <Download className="w-4 h-4" />
+                        <span>TẢI FILE KẾT QUẢ (.XLSX) VỀ MÁY</span>
+                      </a>
+                    </div>
+                  ) : (
+                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-indigo-500 animate-pulse" />
+                      <span>
+                        Hệ thống đang tự động xử lý. File kết quả sẽ hiển thị ngay tại đây khi quá trình tạo hoàn tất!
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

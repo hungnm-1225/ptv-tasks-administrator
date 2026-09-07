@@ -915,6 +915,22 @@ export const TaskManagementPage: React.FC = () => {
                   )}
                 </div>
 
+                {/* 📥 Nút Tải File Nhanh Nằm Bên Trong Từng Thẻ Bento */}
+                {payload.result_file_url && (
+                  <div className="pt-1">
+                    <a
+                      href={payload.result_file_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Tải File Kết Quả (.xlsx)</span>
+                    </a>
+                  </div>
+                )}
+
                 <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
                   <span className="font-mono text-[11px] text-slate-400">
                     {formatVNDateTime(task.executed_at || task.created_at)}
@@ -954,6 +970,7 @@ export const TaskManagementPage: React.FC = () => {
             );
           })}
         </div>
+
       )}
 
       {/* ========================================================================= */}
