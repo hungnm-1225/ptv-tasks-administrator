@@ -52,20 +52,40 @@ class WorkspaceAccountService(WorkspaceBaseService):
                     )
                     await wait_for_dom_and_spinners(page, "input[type='file']", min_pacing_ms=500)
 
-                    file_input = page.locator("input[type='file']")
+                    # 1. Nạp file Excel vào input[type='file']
+                    file_input = page.locator("input[type='file']").first
+                    await file_input.wait_for(state="visible", timeout=15000)
                     await file_input.set_input_files(upload_file_path)
-                    await page.wait_for_timeout(800)
+                    logger.info(f"📄 Đã nạp file '{os.path.basename(upload_file_path)}' vào trình duyệt, chờ React kích hoạt nút Upload...")
+                    
+                    # Chờ 1 giây để React MUI phân tích file và gỡ bỏ trạng thái disabled của nút Upload
+                    await page.wait_for_timeout(1000)
 
-                    upload_btn = page.locator("//button[normalize-space()='Upload'], button:has-text('Upload')").first
-                    await upload_btn.wait_for(state="visible", timeout=10000)
-                    await upload_btn.click()
+                    # 2. Selector chuẩn Playwright CSS (Không dùng XPath lai gây SyntaxError)
+                    upload_btn = page.locator("button:has-text('Upload')").first
+                    await upload_btn.wait_for(state="visible", timeout=15000)
 
+                    # Chờ nút Upload hết bị disabled (không còn Mui-disabled)
                     try:
-                        await page.wait_for_function("() => !window.location.href.includes('/create')", timeout=30000)
+                        await page.wait_for_function(
+                            "() => { const b = Array.from(document.querySelectorAll('button')).find(el => el.textContent.trim() === 'Upload'); return b && !b.disabled && !b.classList.contains('Mui-disabled'); }",
+                            timeout=8000
+                        )
                     except Exception:
                         pass
 
-                    if "account-creation" not in page.url:
+                    logger.info("🚀 Bấm nút Upload xác nhận nộp danh sách...")
+                    await upload_btn.click()
+
+                    # 3. Chờ trang upload xử lý và quay về trang danh sách
+                    try:
+                        await page.wait_for_function("() => !window.location.href.endsWith('/create')", timeout=20000)
+                    except Exception:
+                        pass
+
+                    # Nếu vẫn còn ở trang /create, chủ động chuyển về trang danh sách account-creation
+                    if page.url.rstrip("/").endswith("/create"):
+                        logger.info("🔄 Điều hướng về trang danh sách Account Creation để bắt Request ID...")
                         await page.goto(
                             f"{BASE_WORKSPACE_URL}/school-workspace/account-creation",
                             wait_until="domcontentloaded",
@@ -132,7 +152,7 @@ class WorkspaceAccountService(WorkspaceBaseService):
                                         await page.wait_for_timeout(400)
 
                                         async with page.expect_download(timeout=30000) as download_info:
-                                            export_item = page.locator("text=Export, li:has-text('Export')").first
+                                            export_item = page.locator("li:has-text('Export'), [role='menuitem']:has-text('Export'), div:has-text('Export')").first
                                             await export_item.click()
 
                                         download = await download_info.value
@@ -207,7 +227,7 @@ class WorkspaceAccountService(WorkspaceBaseService):
                         await page.wait_for_timeout(600)
 
                         async with page.expect_download(timeout=30000) as download_info:
-                            export_item = page.locator("text=Export, li:has-text('Export')").first
+                            export_item = page.locator("li:has-text('Export'), [role='menuitem']:has-text('Export'), div:has-text('Export')").first
                             await export_item.click()
 
                         download = await download_info.value
