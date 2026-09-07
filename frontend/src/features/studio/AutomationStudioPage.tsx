@@ -29,7 +29,11 @@ import {
   Info,
   ClipboardCheck,
   GitBranch,
+  AlertTriangle,
+  AlertCircle,
+  FileCheck2,
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { fetchApi } from '../../lib/api';
 import { BotType } from '../../types';
 import { toast } from 'sonner';
@@ -167,6 +171,183 @@ export const AutomationStudioPage: React.FC = () => {
 
   // File Upload
   const [uploadedAccountsFile, setUploadedAccountsFile] = useState<File | null>(null);
+  // --- STATE DÀNH RIÊNG CHO BÓC TÁCH & VALIDATE EXCEL TẠO TÀI KHOẢN ---
+  interface ParsedUserRow {
+    index: number;
+    firstName: string;
+    lastName: string;
+    mobile: string;
+    email: string;
+    dob: string;
+    role: string;
+    isStudent: boolean;
+    isTeacher: boolean;
+    isValid: boolean;
+    errors: string[];
+    isDuplicateEmail: boolean;
+  }
+
+  const [parsedAccountRows, setParsedAccountRows] = useState<ParsedUserRow[]>([]);
+  const [accountValidationStats, setAccountValidationStats] = useState<{
+    total: number;
+    students: number;
+    teachers: number;
+    validCount: number;
+    errorCount: number;
+    duplicateCount: number;
+  }>({ total: 0, students: 0, teachers: 0, validCount: 0, errorCount: 0, duplicateCount: 0 });
+
+  // Hàm đọc và kiểm tra tính hợp lệ file Excel tài khoản
+  const processAndValidateAccountsFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+
+        // Đọc dữ liệu dạng mảng 2 chiều (bỏ qua các dòng trống)
+        const rawJson: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+
+        if (rawJson.length < 2) {
+          toast.error('File Excel không có dữ liệu tài khoản!');
+          return;
+        }
+
+        // Tìm dòng tiêu đề (Header row chứa 'First Name' hoặc 'Họ' hoặc 'Email')
+        let headerRowIndex = -1;
+        for (let i = 0; i < Math.min(rawJson.length, 10); i++) {
+          const rowStr = rawJson[i].map(c => String(c).toLowerCase()).join(' ');
+          if (rowStr.includes('first name') || rowStr.includes('role') || rowStr.includes('email')) {
+            headerRowIndex = i;
+            break;
+          }
+        }
+
+        if (headerRowIndex === -1) {
+          headerRowIndex = 0; // Mặc định dòng đầu
+        }
+
+        const headers = rawJson[headerRowIndex].map(h => String(h).trim().toLowerCase());
+
+        // Xác định vị trí các cột
+        const colIdx = {
+          firstName: headers.findIndex(h => h.includes('first name') || h.includes('tên')),
+          lastName: headers.findIndex(h => h.includes('last name') || h.includes('họ')),
+          mobile: headers.findIndex(h => h.includes('mobile') || h.includes('sđt') || h.includes('phone')),
+          email: headers.findIndex(h => h.includes('email') || h.includes('thư')),
+          dob: headers.findIndex(h => h.includes('birth') || h.includes('dob') || h.includes('sinh')),
+          role: headers.findIndex(h => h.includes('role') || h.includes('vai trò')),
+        };
+
+        // Nếu không khớp theo tên cột, dùng vị trí mặc định chuẩn 6 cột:
+        // Cột 0: First Name, 1: Last Name, 2: Mobile, 3: Email, 4: DOB, 5: Role
+        const fnIdx = colIdx.firstName !== -1 ? colIdx.firstName : 0;
+        const lnIdx = colIdx.lastName !== -1 ? colIdx.lastName : 1;
+        const mobIdx = colIdx.mobile !== -1 ? colIdx.mobile : 2;
+        const emIdx = colIdx.email !== -1 ? colIdx.email : 3;
+        const dobIdx = colIdx.dob !== -1 ? colIdx.dob : 4;
+        const roleIdx = colIdx.role !== -1 ? colIdx.role : 5;
+
+        // Tập hợp danh sách email để kiểm tra trùng lặp
+        const emailCounts: Record<string, number> = {};
+        const rowsToParse = rawJson.slice(headerRowIndex + 1);
+
+        rowsToParse.forEach(row => {
+          const email = String(row[emIdx] || '').trim().toLowerCase();
+          if (email) {
+            emailCounts[email] = (emailCounts[email] || 0) + 1;
+          }
+        });
+
+        let studentsCount = 0;
+        let teachersCount = 0;
+        let validRows = 0;
+        let errorRows = 0;
+        let duplicateEmailsTotal = 0;
+
+        const parsed: ParsedUserRow[] = [];
+
+        rowsToParse.forEach((row, rIdx) => {
+          // Bỏ qua dòng trống hoàn toàn
+          if (row.every(cell => !cell || String(cell).trim() === '')) return;
+
+          const firstName = String(row[fnIdx] || '').trim();
+          const lastName = String(row[lnIdx] || '').trim();
+          const mobile = String(row[mobIdx] || '').trim();
+          const email = String(row[emIdx] || '').trim();
+          const dob = String(row[dobIdx] || '').trim();
+          const roleRaw = String(row[roleIdx] || '').trim();
+
+          const isStudent = roleRaw.toLowerCase().includes('student') || roleRaw.toLowerCase().includes('học sinh');
+          const isTeacher = !isStudent; // Mặc định các role khác (Teacher, Non-editing teacher, Staff)
+
+          if (isStudent) studentsCount++;
+          else teachersCount++;
+
+          const errors: string[] = [];
+
+          // 1. Kiểm tra trường bắt buộc chung: First Name, Last Name, DOB, Role
+          if (!firstName) errors.push('Thiếu First Name (*)');
+          if (!lastName) errors.push('Thiếu Last Name (*)');
+          if (!dob) errors.push('Thiếu Ngày sinh (*)');
+          if (!roleRaw) errors.push('Thiếu Role (*)');
+
+          // 2. Giáo viên BẮT BUỘC phải có Email
+          if (isTeacher && !email) {
+            errors.push('Giáo viên bắt buộc phải có Email (*)');
+          }
+
+          // 3. Kiểm tra trùng lặp Email nội bộ trong file
+          let isDuplicate = false;
+          if (email && emailCounts[email.toLowerCase()] > 1) {
+            isDuplicate = true;
+            duplicateEmailsTotal++;
+            errors.push(`Email '${email}' bị trùng lặp ${emailCounts[email.toLowerCase()]} lần trong file!`);
+          }
+
+          const isValid = errors.length === 0;
+          if (isValid) validRows++;
+          else errorRows++;
+
+          parsed.push({
+            index: rIdx + 1,
+            firstName,
+            lastName,
+            mobile,
+            email,
+            dob,
+            role: roleRaw || (isStudent ? 'Student' : 'Teacher'),
+            isStudent,
+            isTeacher,
+            isValid,
+            errors,
+            isDuplicateEmail: isDuplicate
+          });
+        });
+
+        setParsedAccountRows(parsed);
+        setAccountValidationStats({
+          total: parsed.length,
+          students: studentsCount,
+          teachers: teachersCount,
+          validCount: validRows,
+          errorCount: errorRows,
+          duplicateCount: duplicateEmailsTotal
+        });
+
+        if (errorRows > 0) {
+          toast.warning(`Đã nạp ${parsed.length} tài khoản. Phát hiện ${errorRows} dòng có lỗi cần chú ý!`);
+        } else {
+          toast.success(`Đã nạp và kiểm tra thành công 100% hợp lệ: ${parsed.length} tài khoản!`);
+        }
+      } catch (err) {
+        toast.error('Lỗi khi phân tích file Excel: ' + (err as Error).message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -641,20 +822,29 @@ export const AutomationStudioPage: React.FC = () => {
           return;
         }
 
+        // Bổ sung đầy đủ phả hệ và thống kê từ bảng kiểm tra hợp lệ
         payload = {
           ...payload,
           action: 'bulk_account_creation',
           school_name: selectedSchool.school_name,
           school_code: selectedSchool.school_code,
+          partner_name: selectedSchool.partner_name,
+          distributor_name: selectedSchool.distributor_name,
           filename: uploadedAccountsFile.name,
           file_size_kb: Math.round(uploadedAccountsFile.size / 1024),
+          total_count: accountValidationStats.total || parsedAccountRows.length,
+          student_count: accountValidationStats.students,
+          teacher_count: accountValidationStats.teachers,
+          has_validation_errors: accountValidationStats.errorCount > 0,
         };
 
-        summary.actionTitle = 'Tạo Tài Khoản Hàng Loạt Từ File Excel (Hybrid Fast-Check)';
+        summary.actionTitle = `Tạo Hàng Loạt ${accountValidationStats.total || parsedAccountRows.length} Tài Khoản (${accountValidationStats.students} HS, ${accountValidationStats.teachers} GV)`;
         summary.targetEntity = selectedSchool.school_name;
         summary.detailsList = [
           `File tải lên: ${uploadedAccountsFile.name} (${Math.round(uploadedAccountsFile.size / 1024)} KB)`,
           `Trường thụ hưởng: ${selectedSchool.school_name} (Mã: ${selectedSchool.school_code})`,
+          `Tuyến phả hệ: ${selectedSchool.partner_name} ➔ ${selectedSchool.distributor_name}`,
+          `Trạng thái kiểm tra file: ${accountValidationStats.validCount} hợp lệ, ${accountValidationStats.errorCount} cần chú ý`,
         ];
       } else if (workspaceMainCategory === 'lms_enroll') {
         actualBotType = 'lms_playwright';
@@ -1690,22 +1880,102 @@ export const AutomationStudioPage: React.FC = () => {
             </div>
           )}
 
-          {/* WORKFLOW 3: TẠO TÀI KHOẢN */}
+          {/* WORKFLOW 3: TẠO TÀI KHOẢN (ĐÃ TỐI ƯU CHỌN TRƯỜNG & VALIDATE CLIENT-SIDE) */}
           {workspaceMainCategory === 'bulk_accounts' && (
             <div className="space-y-5 pt-2">
+              {/* 1. Ô CHỌN TRƯỜNG HỌC THỤ HƯỞNG (480 TRƯỜNG PHẢ HỆ) */}
+              <div className="space-y-1.5 relative" ref={entityDropdownRef}>
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Building2 className="h-4 w-4 text-indigo-600" />
+                    <span>Trường Học Thụ Hưởng Tài Khoản: <span className="text-rose-500">* (Bắt buộc)</span></span>
+                  </span>
+                  {selectedSchool && (
+                    <span className="text-xs text-indigo-600 dark:text-indigo-400 font-bold font-mono">
+                      Mã Trường: {selectedSchool.school_code}
+                    </span>
+                  )}
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={entitySearchQuery}
+                    onFocus={() => setIsEntityDropdownOpen(true)}
+                    onChange={(e) => {
+                      setEntitySearchQuery(e.target.value);
+                      setIsEntityDropdownOpen(true);
+                    }}
+                    placeholder="Gõ tên trường hoặc mã trường để chọn (VD: Vinschool, FPT, Master...)"
+                    className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 px-4 py-2.5 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-hidden transition"
+                  />
+                  <Search className="absolute right-3 top-2.5 h-4 w-4 text-slate-400" />
+                </div>
+
+                {isEntityDropdownOpen && (
+                  <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-60 overflow-y-auto p-1.5 space-y-1">
+                    {schoolsList
+                      .filter((s) => s.school_name.toLowerCase().includes(entitySearchQuery.toLowerCase()) || s.school_code.toLowerCase().includes(entitySearchQuery.toLowerCase()))
+                      .slice(0, 30)
+                      .map((s) => (
+                        <button
+                          key={s.school_code}
+                          type="button"
+                          onClick={() => {
+                            setSelectedSchool(s);
+                            setSelectedPartner({ name: s.partner_name, code: s.partner_code });
+                            setSelectedDistributor({ name: s.distributor_name, code: s.distributor_code });
+                            setEntitySearchQuery(s.school_name);
+                            setIsEntityDropdownOpen(false);
+                            toast.success(`Đã chọn trường: ${s.school_name}`);
+                          }}
+                          className="w-full text-left p-3 rounded-xl text-xs hover:bg-indigo-50 dark:hover:bg-slate-800 flex items-center justify-between cursor-pointer transition"
+                        >
+                          <div>
+                            <div className="font-bold text-slate-900 dark:text-white">{s.school_name}</div>
+                            <div className="text-[11px] text-slate-400 font-mono">
+                              Mã: {s.school_code} | Tuyến: {s.partner_name} ➔ {s.distributor_name}
+                            </div>
+                          </div>
+                          {selectedSchool?.school_code === s.school_code && (
+                            <Check className="w-4 h-4 text-indigo-600" />
+                          )}
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+
+              {/* 2. KHU VỰC TẢI FILE EXCEL */}
               <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-5 space-y-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
-                    <Users className="h-5 w-5" />
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
+                      <Users className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-bold text-slate-900 dark:text-white">
+                        Nộp File Excel Danh Sách Học Sinh / Giáo Viên
+                      </h3>
+                      <p className="text-[11px] text-slate-500">
+                        Hỗ trợ file định dạng chuẩn 6-7 cột (.xlsx, .xls)
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-xs font-bold text-slate-900 dark:text-white">
-                      Nộp File Excel Tạo Tài Khoản Hàng Loạt
-                    </h3>
-                    <p className="text-[11px] text-indigo-600 dark:text-indigo-400">
-                      Trường áp dụng: {selectedSchool?.school_name || 'Vui lòng chọn trường ở ô trên'}
-                    </p>
-                  </div>
+
+                  {uploadedAccountsFile && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUploadedAccountsFile(null);
+                        setParsedAccountRows([]);
+                        if (fileInputRef.current) fileInputRef.current.value = '';
+                      }}
+                      className="text-xs text-rose-500 hover:text-rose-700 flex items-center gap-1 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Xóa file</span>
+                    </button>
+                  )}
                 </div>
 
                 <input
@@ -1716,7 +1986,7 @@ export const AutomationStudioPage: React.FC = () => {
                     const file = e.target.files?.[0];
                     if (file) {
                       setUploadedAccountsFile(file);
-                      toast.success(`Đã chọn file: ${file.name} (${Math.round(file.size / 1024)} KB)`);
+                      processAndValidateAccountsFile(file);
                     }
                   }}
                   className="hidden"
@@ -1734,17 +2004,17 @@ export const AutomationStudioPage: React.FC = () => {
                     if (e.dataTransfer.files?.[0]) {
                       const file = e.dataTransfer.files[0];
                       setUploadedAccountsFile(file);
-                      toast.success(`Đã nhận file: ${file.name}`);
+                      processAndValidateAccountsFile(file);
                     }
                   }}
                   onClick={() => fileInputRef.current?.click()}
-                  className={`flex flex-col items-center justify-center rounded-2xl border-2 border-dashed p-8 text-center transition-all cursor-pointer ${isDragging
+                  className={`flex flex-col items-center justify-center rounded-2xl border-2 border-dashed p-6 text-center transition-all cursor-pointer ${isDragging
                     ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/30'
                     : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900/80 hover:border-indigo-400'
                     }`}
                 >
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-600 mb-3">
-                    <Upload className="h-6 w-6" />
+                  <div className="flex h-11 w-11 items-center justify-center rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-600 mb-2.5">
+                    <Upload className="h-5 w-5" />
                   </div>
 
                   {uploadedAccountsFile ? (
@@ -1752,22 +2022,144 @@ export const AutomationStudioPage: React.FC = () => {
                       <p className="text-xs font-bold text-slate-900 dark:text-white">
                         {uploadedAccountsFile.name} ({Math.round(uploadedAccountsFile.size / 1024)} KB)
                       </p>
-                      <p className="text-[11px] text-emerald-600 font-semibold">
-                        Đã nạp file thành công. Sẵn sàng tạo tài khoản!
+                      <p className="text-[11px] text-emerald-600 font-semibold flex items-center justify-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Đã phân tích xong nội dung file! Nhấp để đổi file khác</span>
                       </p>
                     </div>
                   ) : (
                     <div>
                       <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                        Bấm hoặc kéo thả file Excel (.xlsx, .csv) vào đây
+                        Bấm hoặc kéo thả file Excel (.xlsx) vào đây
                       </p>
                       <p className="mt-1 text-[11px] text-slate-400">
-                        File mẫu chuẩn gồm 7 cột thông tin học sinh và giáo viên.
+                        Chuẩn cột: First Name (*) | Last Name (*) | Mobile (Opt) | Email (*) | DOB (*) | Role (*)
                       </p>
                     </div>
                   )}
                 </div>
               </div>
+
+              {/* 3. BẢNG THỐNG KÊ & PREVIEW NỘI DUNG EXCEL */}
+              {parsedAccountRows.length > 0 && (
+                <div className="space-y-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs">
+                  {/* Stats Cards mini */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">Tổng Tài Khoản</p>
+                      <p className="text-lg font-mono font-extrabold text-slate-900 dark:text-white">
+                        {accountValidationStats.total}
+                      </p>
+                      <p className="text-[10px] text-slate-500">
+                        👨‍🎓 {accountValidationStats.students} HS | 🧑‍🏫 {accountValidationStats.teachers} GV
+                      </p>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/40">
+                      <p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase">Hợp Lệ</p>
+                      <p className="text-lg font-mono font-extrabold text-emerald-600 dark:text-emerald-400">
+                        {accountValidationStats.validCount}
+                      </p>
+                      <p className="text-[10px] text-emerald-600/80">Sẵn sàng tạo</p>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-rose-50/70 dark:bg-rose-950/30 border border-rose-100 dark:border-rose-900/40">
+                      <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase">Thiếu Thông Tin</p>
+                      <p className="text-lg font-mono font-extrabold text-rose-600 dark:text-rose-400">
+                        {accountValidationStats.errorCount}
+                      </p>
+                      <p className="text-[10px] text-rose-500">Cần bổ sung</p>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-100 dark:border-amber-900/40">
+                      <p className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase">Trùng Lặp Email</p>
+                      <p className="text-lg font-mono font-extrabold text-amber-600 dark:text-amber-400">
+                        {accountValidationStats.duplicateCount}
+                      </p>
+                      <p className="text-[10px] text-amber-600">Trong file</p>
+                    </div>
+                  </div>
+
+                  {/* Bảng Preview cuộn */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
+                      <span>XEM TRƯỚC DANH SÁCH TÀI KHOẢN ({parsedAccountRows.length} DÒNG):</span>
+                      <span className="text-[11px] text-slate-400 font-normal">
+                        *Học sinh được phép bỏ trống email. Giáo viên bắt buộc có email.
+                      </span>
+                    </div>
+
+                    <div className="max-h-72 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-800 scrollbar-thin">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-50 dark:bg-slate-800/80 text-[10px] font-bold uppercase text-slate-500 sticky top-0 z-10">
+                          <tr>
+                            <th className="p-2.5 text-center w-10">#</th>
+                            <th className="p-2.5">Họ & Tên</th>
+                            <th className="p-2.5">Email</th>
+                            <th className="p-2.5">Ngày Sinh</th>
+                            <th className="p-2.5">Vai Trò</th>
+                            <th className="p-2.5">Trạng Thái</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-[11px]">
+                          {parsedAccountRows.map((row) => (
+                            <tr
+                              key={row.index}
+                              className={`transition-colors ${!row.isValid
+                                ? 'bg-rose-50/60 dark:bg-rose-950/20 hover:bg-rose-100/50'
+                                : row.isDuplicateEmail
+                                  ? 'bg-amber-50/50 dark:bg-amber-950/20 hover:bg-amber-100/50'
+                                  : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                                }`}
+                            >
+                              <td className="p-2.5 text-center text-slate-400">{row.index}</td>
+                              <td className="p-2.5 font-sans font-semibold text-slate-900 dark:text-white">
+                                {row.lastName} {row.firstName}
+                              </td>
+                              <td className="p-2.5">
+                                {row.email ? (
+                                  <span className={row.isDuplicateEmail ? 'text-amber-600 font-bold' : 'text-slate-600 dark:text-slate-300'}>
+                                    {row.email}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 italic font-sans text-[10px]">
+                                    (Tự sinh email định danh)
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-2.5 text-slate-600 dark:text-slate-300">{row.dob || '—'}</td>
+                              <td className="p-2.5">
+                                <span
+                                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold font-sans ${row.isStudent
+                                    ? 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300'
+                                    : 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300'
+                                    }`}
+                                >
+                                  {row.role}
+                                </span>
+                              </td>
+                              <td className="p-2.5">
+                                {row.isValid ? (
+                                  <span className="inline-flex items-center gap-1 text-emerald-600 font-bold font-sans text-[10px]">
+                                    <CheckCircle2 className="w-3.5 h-3.5" /> Hợp lệ
+                                  </span>
+                                ) : (
+                                  <span
+                                    className="inline-flex items-center gap-1 text-rose-600 font-bold font-sans text-[10px]"
+                                    title={row.errors.join(' | ')}
+                                  >
+                                    <AlertCircle className="w-3.5 h-3.5" /> {row.errors[0]}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

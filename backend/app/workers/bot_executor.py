@@ -298,6 +298,7 @@ async def execute_approved_bot_task(
                 )
 
             # --- L. Tạo tài khoản hàng loạt (Công thức 15s/Tài khoản) ---
+            # --- L. Tạo tài khoản hàng loạt (Công thức 15s/Tài khoản) ---
             elif action == "bulk_account_creation":
                 from app.services.cof_excel_service import COFExcelService
 
@@ -309,14 +310,40 @@ async def execute_approved_bot_task(
                 if not file_path:
                     return {"status": "failed", "error": "Thiếu file Excel (.xlsx) hoặc attachment_url hợp lệ."}
 
+                # Fallback truy vết Két Sắt qua cả school_code nếu school_name không khớp
                 if not school_creds:
-                    return {"status": "failed", "error": f"Không tìm thấy tài khoản trường '{school_name}' trong Két Sắt."}
+                    target_identifier = payload_data.get("school_code") or school_name
+                    logger.info(f"🔍 {task_tag} Đang truy vết tài khoản trường với mã/tên: '{target_identifier}'...")
+                    s_lin = workspace_lineage_service.resolve_by_school(str(target_identifier))
+                    if s_lin:
+                        school_creds = s_lin.get("school")
+                        partner_creds = partner_creds or s_lin.get("partner")
+                        distributor_creds = distributor_creds or s_lin.get("distributor")
+
+                if not school_creds:
+                    return {"status": "failed", "error": f"Không tìm thấy tài khoản trường '{school_name}' (Mã: {payload_data.get('school_code')}) trong Két Sắt."}
 
                 temp_dir = "/tmp/ptv_accounts"
                 os.makedirs(temp_dir, exist_ok=True)
-                ready_file, student_c, teacher_c, total_c, is_cof, parsed_data = COFExcelService.detect_and_process_excel(file_path, temp_dir)
+                
+                # Bóc tách file: Hỗ trợ cả file COF 3 Tabs lẫn file accounts.xlsx chuẩn 1 Tab
+                try:
+                    ready_file, student_c, teacher_c, total_c, is_cof, parsed_data = COFExcelService.detect_and_process_excel(file_path, temp_dir)
+                except Exception as parse_err:
+                    logger.warning(f"⚠️ {task_tag} detect_and_process_excel warning: {parse_err}. Sử dụng trực tiếp file gốc và số liệu từ Studio...")
+                    ready_file = file_path
+                    student_c = payload_data.get("student_count", 0)
+                    teacher_c = payload_data.get("teacher_count", 0)
+                    total_c = payload_data.get("total_count", 0) or (student_c + teacher_c)
+                    is_cof = False
 
-                logger.info(f"📊 {task_tag} Thống kê: {student_c} học sinh, {teacher_c} giáo viên (Tổng: {total_c}) | Là COF: {is_cof}")
+                # Nếu detect_and_process_excel trả về 0 nhưng Studio đã đếm được thì dùng số liệu của Studio
+                if total_c == 0 and payload_data.get("total_count"):
+                    total_c = int(payload_data.get("total_count", 0))
+                    student_c = int(payload_data.get("student_count", 0))
+                    teacher_c = int(payload_data.get("teacher_count", 0))
+
+                logger.info(f"📊 {task_tag} Thống kê: {student_c} học sinh, {teacher_c} giáo viên (Tổng: {total_c}) | Trường: {school_name} | Là COF: {is_cof}")
 
                 submit_res = await workspace_playwright_service.submit_account_creation_batch(
                     credentials=school_creds,
@@ -333,6 +360,8 @@ async def execute_approved_bot_task(
 
                 req_id = submit_res.get("request_id")
                 checkpoint["account_batch_request_id"] = req_id
+                
+                # Thời gian nghỉ an toàn: 15s / tài khoản, tối thiểu 30s
                 wait_seconds = max(total_c * 15, 30)
                 next_check_time = datetime.now(timezone.utc) + timedelta(seconds=wait_seconds)
                 next_check_iso = next_check_time.isoformat()
@@ -345,10 +374,11 @@ async def execute_approved_bot_task(
                     "total_count": total_c,
                     "is_cof_file": is_cof,
                     "cof_file_path": file_path if is_cof else None,
+                    "school_credentials": school_creds,
                     "wait_seconds": wait_seconds,
                     "next_check_at": next_check_iso,
                     "checkpoint": checkpoint,
-                    "message": f"Đã nộp thành công file batch ({total_c} tài khoản) với Mã Request #{req_id}. Hệ thống nghỉ {wait_seconds}s (15s/TK) và sẽ tự động quay lại kiểm tra kết quả."
+                    "message": f"Đã nộp thành công batch ({total_c} tài khoản) cho trường '{school_name}' với Mã Request #{req_id}. Hệ thống nghỉ {wait_seconds}s và sẽ tự động kiểm tra kết quả."
                 }
 
             # --- M. Kiểm tra tiến độ & tải kết quả (Pha 2) ---

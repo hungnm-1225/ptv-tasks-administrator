@@ -72,19 +72,37 @@ class WorkspaceAccountService(WorkspaceBaseService):
                             timeout=30000
                         )
 
-                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row, [role='row']", min_pacing_ms=1000)
+                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row, [role='row']", min_pacing_ms=1200)
 
-                    first_row = page.locator(".MuiDataGrid-row").first
-                    request_id = await first_row.get_attribute("data-id")
-                    
+                    # -------------------------------------------------------------
+                    # 🔍 BẮT REQUEST ID KIÊN CỐ (Có Retry 3 nhịp nếu DataGrid nạp chậm)
+                    # -------------------------------------------------------------
+                    request_id = None
+                    for capture_attempt in range(1, 4):
+                        first_row = page.locator(".MuiDataGrid-row").first
+                        if await first_row.count() > 0:
+                            request_id = await first_row.get_attribute("data-id")
+                            if not request_id:
+                                id_cell = first_row.locator("[data-field='id'] .MuiDataGrid-cellContent, [data-field='id']").first
+                                if await id_cell.count() > 0:
+                                    request_id = (await id_cell.inner_text()).strip()
+
+                        if request_id and request_id.strip():
+                            request_id = request_id.strip()
+                            break
+
+                        logger.warning(f"⏳ Nhịp {capture_attempt}/3: Chưa thấy Request ID trên bảng, đợi 2s và reload lại...")
+                        await asyncio.sleep(2.0)
+                        await page.reload(wait_until="domcontentloaded")
+                        await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=1000)
+
                     if not request_id:
-                        id_cell = first_row.locator("[data-field='id'] .MuiDataGrid-cellContent").first
-                        if await id_cell.count() > 0:
-                            request_id = (await id_cell.inner_text()).strip()
+                        err_msg = "Không thể trích xuất Request ID từ bảng sau khi Upload file. Vui lòng kiểm tra lại giao diện School Workspace."
+                        logger.error(f"❌ {err_msg}")
+                        return {"status": "failed", "error": err_msg, "checkpoint": checkpoint}
 
-                    logger.info(f"🎉 BẮT ĐƯỢC REQUEST ID: [ #{request_id} ] (Dự kiến: {record_count * 10}s)")
-                    if request_id:
-                        checkpoint["account_batch_request_id"] = request_id
+                    logger.info(f"🎉 BẮT ĐƯỢC REQUEST ID CHUẨN XÁC: [ #{request_id} ] (Dự kiến xử lý: {record_count * 15}s)")
+                    checkpoint["account_batch_request_id"] = request_id
 
                     # =============================================================
                     # 🚀 FAST-PATH: Kiểm tra động (Dynamic Polling) nếu batch <= 30 tài khoản
