@@ -13,12 +13,11 @@ from app.core.gemini import process_ticket_with_ai
 
 logger = logging.getLogger(__name__)
 
-# Cache Client toàn cục chống ngốn RAM khi khởi tạo Discovery lặp lại
 _GMAIL_SERVICE = None
 _GMAIL_CREDS = None
 
 def get_gmail_service():
-    """Khởi tạo & Tái sử dụng Gmail API Client bằng Refresh Token (Singleton Memory-Safe)"""
+    """Khởi tạo & Tái sử dụng Gmail API Client bằng Refresh Token (Singleton)"""
     global _GMAIL_SERVICE, _GMAIL_CREDS
 
     client_id = os.getenv("GMAIL_CLIENT_ID") or os.getenv("GOOGLE_CLIENT_ID")
@@ -51,8 +50,54 @@ def get_gmail_service():
         logger.error(f"❌ Lỗi khởi tạo Gmail Service: {e}")
         return None
 
+def extract_gmail_body(payload: dict) -> str:
+    """Giải mã toàn bộ nội dung thư (Plain text hoặc HTML) từ Gmail API payload thay vì lấy snippet."""
+    body_text = ""
+
+    def extract_parts_recursive(parts):
+        nonlocal body_text
+        plain_texts = []
+        html_texts = []
+
+        for part in parts:
+            mime = part.get("mimeType", "").lower()
+            body = part.get("body", {})
+            data = body.get("data")
+
+            if "parts" in part:
+                extract_parts_recursive(part["parts"])
+
+            if data:
+                try:
+                    decoded = base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
+                    if mime == "text/plain":
+                        plain_texts.append(decoded)
+                    elif mime == "text/html":
+                        html_texts.append(decoded)
+                except Exception as ex:
+                    logger.warning(f"Lỗi decode MIME part: {ex}")
+
+        if plain_texts:
+            body_text = "\n".join(plain_texts)
+        elif html_texts and not body_text:
+            body_text = "\n".join(html_texts)
+
+    # 1. Nếu payload có body data đơn lẻ trực tiếp
+    if "data" in payload.get("body", {}):
+        try:
+            data = payload["body"]["data"]
+            body_text = base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
+        except Exception as ex:
+            logger.warning(f"Lỗi decode direct body: {ex}")
+
+    # 2. Nếu payload là multipart
+    if not body_text and "parts" in payload:
+        extract_parts_recursive(payload["parts"])
+
+    return body_text.strip()
+
 def mark_email_as_read(msg_id: str):
-    """Gỡ nhãn UNREAD của 1 email trên Gmail để tránh bị quét lại lặp đi lặp lại"""
+    """Gỡ nhãn UNREAD của 1 email trên Gmail"""
     try:
         service = get_gmail_service()
         if service:
@@ -61,12 +106,12 @@ def mark_email_as_read(msg_id: str):
                 id=msg_id,
                 body={'removeLabelIds': ['UNREAD']}
             ).execute()
-            logger.info(f"🏷️ Đã gỡ nhãn UNREAD cho email [{msg_id}] trên Gmail.")
+            logger.info(f"🏷️ Đã gỡ nhãn UNREAD cho email [{msg_id}].")
     except Exception as e:
-        logger.warning(f"⚠️ Không thể gỡ nhãn UNREAD cho email [{msg_id}]: {e}")
+        logger.warning(f"⚠️ Không thể gỡ nhãn UNREAD cho [{msg_id}]: {e}")
 
 def mark_emails_as_read_batch(msg_ids: list):
-    """Gỡ nhãn UNREAD cho hàng loạt email trong 1 request duy nhất (Tiết kiệm 99% CPU/RAM)"""
+    """Gỡ nhãn UNREAD hàng loạt trong 1 request duy nhất"""
     if not msg_ids:
         return
     try:
@@ -74,17 +119,14 @@ def mark_emails_as_read_batch(msg_ids: list):
         if service:
             service.users().messages().batchModify(
                 userId='me',
-                body={
-                    'ids': msg_ids,
-                    'removeLabelIds': ['UNREAD']
-                }
+                body={'ids': msg_ids, 'removeLabelIds': ['UNREAD']}
             ).execute()
-            logger.info(f"🏷️ Đã gỡ nhãn UNREAD hàng loạt cho {len(msg_ids)} email trên Gmail!")
+            logger.info(f"🏷️ Đã gỡ nhãn UNREAD hàng loạt cho {len(msg_ids)} email.")
     except Exception as e:
-        logger.warning(f"⚠️ Không thể batch gỡ nhãn UNREAD: {e}")
+        logger.warning(f"⚠️ Lỗi batch gỡ nhãn UNREAD: {e}")
 
 def process_gmail_attachments(service, msg_id, payload):
-    """Tải tệp đính kèm từ Gmail & Upload lên Supabase Storage Bucket 'ticket-attachments'"""
+    """Tải tệp đính kèm và upload lên Supabase Storage"""
     attachments = []
     
     def extract_parts_recursive(parts):
@@ -94,9 +136,7 @@ def process_gmail_attachments(service, msg_id, payload):
             att_id = body.get('attachmentId')
             file_size = body.get('size', 0)
 
-            # Bỏ qua các file đính kèm quá lớn (>15MB) để bảo vệ ngưỡng 512MB RAM Render
             if file_size > 15 * 1024 * 1024:
-                logger.warning(f"⚠️ Tệp [{filename}] vượt quá 15MB, bỏ qua để chống tràn RAM Render.")
                 continue
 
             if filename and att_id:
@@ -120,12 +160,10 @@ def process_gmail_attachments(service, msg_id, payload):
 
                     public_url = supabase.storage.from_("ticket-attachments").get_public_url(storage_path)
                     attachments.append({"filename": filename, "url": public_url})
-                    logger.info(f"📎 Đã upload tệp đính kèm [{filename}] lên Supabase Storage!")
+                    logger.info(f"📎 Upload tệp đính kèm [{filename}] thành công!")
 
-                    # Giải phóng ngay biến nhị phân
                     del file_bytes
                     del att
-
                 except Exception as e:
                     logger.error(f"⚠️ Lỗi upload attachment [{filename}]: {e}")
 
@@ -138,19 +176,14 @@ def process_gmail_attachments(service, msg_id, payload):
     return attachments
 
 async def poll_unread_gmails():
-    """Hàm Cronjob chính: Quét hòm thư Gmail tối ưu RAM - Batch Query & Batch Mark Read"""
+    """Cronjob quét hòm thư: Lấy trọn vẹn Body thư, không bị cắt ngắn"""
     logger.info("📧 Đang kết nối Gmail API quét Hòm Thư Đến...")
     try:
         service = get_gmail_service()
         if not service:
             return
 
-        # Chỉ quét tối đa 20 thư chưa đọc mới nhất để kiểm soát tải
-        results = service.users().messages().list(
-            userId='me', 
-            q='is:unread label:INBOX',
-            maxResults=20
-        ).execute()
+        results = service.users().messages().list(userId='me', q='is:unread label:INBOX', maxResults=20).execute()
         messages = results.get('messages', [])
 
         if not messages:
@@ -158,35 +191,23 @@ async def poll_unread_gmails():
             return
 
         msg_ids = [m['id'] for m in messages]
-        logger.info(f"📧 Phát hiện {len(msg_ids)} email có nhãn unread trong Gmail. Đang kiểm tra Supabase...")
         supabase = get_supabase_client()
 
-        # BƯỚC ĐỘT PHÁ 1: Batch query 1 lần duy nhất thay vì N+1 query lặp
-        existing_res = supabase.table("inbox_tickets")\
-            .select("source_id")\
-            .eq("source", "gmail")\
-            .in_("source_id", msg_ids)\
-            .execute()
-
+        existing_res = supabase.table("inbox_tickets").select("source_id").eq("source", "gmail").in_("source_id", msg_ids).execute()
         existing_ids = {row["source_id"] for row in (existing_res.data or [])}
 
-        # BƯỚC ĐỘT PHÁ 2: Gỡ nhãn UNREAD ngay cho các email ĐÃ TỒN TẠI để lần sau Gmail KHÔNG trả về nữa!
         stale_ids = [mid for mid in msg_ids if mid in existing_ids]
         if stale_ids:
-            logger.info(f"🧹 Tìm thấy {len(stale_ids)} email cũ đã tồn tại trong DB, đang dọn nhãn UNREAD trên Gmail...")
             mark_emails_as_read_batch(stale_ids)
 
-        # Lọc ra danh sách email thực sự mới cần nạp vào DB
         new_msg_summaries = [m for m in messages if m['id'] not in existing_ids]
         if not new_msg_summaries:
-            logger.info("✅ Tất cả email đều đã được đồng bộ từ trước. Hoàn tất chu kỳ quét!")
             return
 
-        logger.info(f"✨ Bắt đầu nạp {len(new_msg_summaries)} email MỚI TINH vào hệ thống...")
+        logger.info(f"✨ Bắt đầu nạp {len(new_msg_summaries)} email MỚI TINH...")
 
         for msg_summary in new_msg_summaries:
             msg_id = msg_summary['id']
-
             msg = service.users().messages().get(userId='me', id=msg_id, format='full').execute()
             payload = msg.get('payload', {})
             headers = payload.get('headers', [])
@@ -210,7 +231,10 @@ async def poll_unread_gmails():
                 dt = datetime.fromtimestamp(int(internal_date_ms) / 1000.0, tz=timezone.utc)
                 created_at_iso = dt.isoformat()
 
-            snippet = msg.get('snippet', '')
+            # 🎯 ĐỘT PHÁ: Trích xuất toàn bộ nội dung thư dài gốc thay vì dùng snippet
+            full_body_content = extract_gmail_body(payload)
+            final_content = full_body_content if full_body_content else msg.get('snippet', '')
+
             attachments = process_gmail_attachments(service, msg_id, payload)
 
             new_ticket = {
@@ -219,7 +243,7 @@ async def poll_unread_gmails():
                 "sender_email": sender,
                 "submitter_name": sender.split('<')[0].replace('"', '').strip() if '<' in sender else sender,
                 "subject": subject,
-                "raw_content": snippet,
+                "raw_content": final_content,
                 "ticket_timestamp": date_str,
                 "status": "pending",
                 "attachments": attachments
@@ -231,16 +255,13 @@ async def poll_unread_gmails():
 
             if res.data:
                 ticket_db_id = res.data[0]["id"]
-                logger.info(f"✅ Đã nạp Email mới vào Supabase: [{subject}] (Gửi lúc: {date_str})")
+                logger.info(f"✅ Đã nạp Email mới vào Supabase: [{subject}] (Độ dài text: {len(final_content)} ký tự)")
                 mark_email_as_read(msg_id)
-                
-                # Gọi AI Triage
                 try:
                     await process_ticket_with_ai(ticket_db_id)
                 except Exception as ai_err:
                     logger.error(f"⚠️ Lỗi AI Triage vé {ticket_db_id}: {ai_err}")
 
-            # Thu hồi rác sau mỗi email
             del msg
             del payload
 
