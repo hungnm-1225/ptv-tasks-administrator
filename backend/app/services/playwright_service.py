@@ -155,73 +155,92 @@ class PlaywrightLMSService:
 
     async def _apply_keyword_filter(self, page: Page, email: str) -> None:
         """
-        Thao tác chuẩn hóa bộ lọc Keyword 2 nhịp (Chuẩn hóa theo file test):
-        - Nhịp 1: Chọn Keywords -> Gõ email vào ô Type... -> Nhấn Enter sinh Tag Pill.
-        - Nhịp 2: Bấm Apply filters -> Chờ AJAX Moodle nạp lại bảng.
-        - Triệt tiêu hoàn toàn lỗi 'Element is outside of the viewport'.
+        Thao tác chuẩn hóa bộ lọc Keyword 2 nhịp (Chuẩn hóa 100% theo file test thực nghiệm):
+        - Nhịp 1: Reset nếu cần -> Chọn Keywords -> Chờ ô Type... -> Gõ email & Enter tạo Tag Pill.
+        - Nhịp 2: Bấm Apply filters -> Chờ bảng nạp lại dữ liệu (3.5s).
+        - Kháng hoàn toàn lỗi Timeout và lệch event trên Cloud Render.
         """
         try:
-            # 1. Reset filter cũ nếu có
-            reset_btn = page.locator("button[data-filteraction='reset']:has-text('Clear filters')").first
-            if await reset_btn.count() > 0 and await reset_btn.is_visible():
-                await reset_btn.click(force=True)
-                try:
-                    await page.locator("div.loading-icon, .overlay-icon").wait_for(state="hidden", timeout=3000)
-                except Exception:
-                    pass
+            logger.info(f"🔍 Bắt đầu lọc Keyword cho email: {email}...")
 
-            # 2. Đảm bảo chọn filter type là Keyword
+            # 1. Kiểm tra xem dropdown Type đã là 'keywords' chưa
             type_select = page.locator("select[data-filterfield='type']").first
-            if await type_select.count() > 0 and await type_select.is_enabled():
-                await type_select.select_option(value="keywords")
-            
-            # Ép Moodle JS kích hoạt render trường value
-            await page.evaluate("""() => {
-                const sel = document.querySelector("select[data-filterfield='type']");
-                if (sel) {
-                    sel.value = 'keywords';
-                    if (window.jQuery) {
-                        window.jQuery(sel).trigger('change');
-                    } else {
-                        sel.dispatchEvent(new Event('change', { bubbles: true }));
-                    }
-                }
-            }""")
+            need_clear = True
+            if await type_select.count() > 0 and await type_select.is_visible():
+                curr_val = await type_select.input_value()
+                # Nếu đang là rỗng (chữ Select như trên ảnh) thì không cần bấm Clear filters nữa
+                if curr_val == "" or curr_val == "keywords":
+                    need_clear = False
 
-            # 3. Nhịp 1: Chờ ô Type... xuất hiện thực tế, scroll vào view và gõ email + Enter
-            kw_input = page.locator("div[data-filterregion='value'] input[placeholder='Type...'], div[data-filter-type='keywords'] input, div[data-filterregion='value'] input").first
-            await kw_input.wait_for(state="visible", timeout=10000)
+            # Reset filter cũ nếu đang có filter khác
+            if need_clear:
+                reset_btn = page.locator("button[data-filteraction='reset']:has-text('Clear filters')").first
+                if await reset_btn.count() > 0 and await reset_btn.is_visible():
+                    logger.info("🧹 Bấm Clear filters cũ và chờ 1.2s...")
+                    await reset_btn.click(force=True)
+                    await page.wait_for_timeout(1200)
+
+            # 2. Đảm bảo chọn filter type là 'keywords' (Chuẩn theo file test)
+            type_select = page.locator("select[data-filterfield='type']").first
+            await type_select.wait_for(state="visible", timeout=10000)
+            
+            curr_type = await type_select.input_value()
+            if curr_type != "keywords":
+                logger.info("🎯 Chọn điều kiện lọc: [Keyword]...")
+                await type_select.select_option(value="keywords")
+                # Đợi Moodle render AJAX ô input value (rất quan trọng trên Render)
+                await page.wait_for_timeout(800)
+
+            # 3. [Nhịp 1]: Chờ ô Type... xuất hiện, gõ email và bấm Enter để sinh Tag Pill
+            kw_input = page.locator(
+                "div[data-filterregion='value'] input[placeholder='Type...'], "
+                "div[data-filter-type='keywords'] input, "
+                "div[data-filterregion='value'] .form-autocomplete-input, "
+                "div[data-filterregion='value'] input"
+            ).first
+
+            await kw_input.wait_for(state="visible", timeout=15000)
             await kw_input.scroll_into_view_if_needed()
             await kw_input.click(force=True)
             await kw_input.fill("")
             await kw_input.fill(email)
+            logger.info(f"⌨️ [Nhịp 1] Đã điền '{email}', bấm Enter tạo Tag Pill...")
             await kw_input.press("Enter")
 
-            # Chờ Tag Pill xuất hiện trong khung selection
-            tag_badge = page.locator("div[data-filterregion='value'] .form-autocomplete-selection span.badge, div[data-filterregion='value'] span.badge").filter(has_text=email).first
+            # Đợi thẻ Tag Pill xuất hiện trong khung selection
+            tag_badge = page.locator(
+                "div[data-filterregion='value'] .form-autocomplete-selection span.badge, "
+                "div[data-filterregion='value'] .form-autocomplete-selection [data-value], "
+                "div[data-filterregion='value'] span.badge"
+            ).first
             try:
-                await tag_badge.wait_for(state="visible", timeout=5000)
+                await tag_badge.wait_for(state="visible", timeout=6000)
+                logger.info("🏷️ Tag Pill email đã xuất hiện thành công!")
+            except Exception:
+                logger.warning("⚠️ Không thấy Tag Pill, tiếp tục thử Apply filters...")
+            
+            await page.wait_for_timeout(500)
+
+            # 4. [Nhịp 2]: Bấm nút 'Apply filters'
+            apply_btn = page.locator(
+                "button[data-filteraction='apply']:has-text('Apply filters'), "
+                "button[data-filteraction='apply']"
+            ).first
+            logger.info("🚀 [Nhịp 2] Bấm nút 'Apply filters'...")
+            await apply_btn.scroll_into_view_if_needed()
+            await apply_btn.click(force=True)
+
+            # Đợi bảng nạp lại dữ liệu (chờ 3.5s cho an toàn mạng Cloud Render y hệt file test)
+            logger.info("⏳ Chờ Moodle cập nhật lại bảng danh sách học viên (3.5s)...")
+            await page.wait_for_timeout(3500)
+
+            # Dọn spinner nếu còn sót
+            try:
+                await page.locator("div.loading-icon, .overlay-icon, .MuiCircularProgress-root").wait_for(state="hidden", timeout=4000)
             except Exception:
                 pass
 
-            # 4. Nhịp 2: Bấm Apply filters và bắt Response AJAX cập nhật bảng
-            apply_btn = page.locator("button[data-filteraction='apply']:has-text('Apply filters'), button[data-filteraction='apply']").first
-            if await apply_btn.count() > 0:
-                await apply_btn.scroll_into_view_if_needed()
-                try:
-                    async with page.expect_response(
-                        lambda r: "service.php" in r.url and r.status == 200,
-                        timeout=12000
-                    ):
-                        await apply_btn.click(force=True)
-                except Exception:
-                    await apply_btn.click(force=True)
-
-            # Chờ bảng nạp xong
-            try:
-                await page.locator("div.loading-icon, .MuiCircularProgress-root, .overlay-icon").wait_for(state="hidden", timeout=6000)
-            except Exception:
-                pass
+            logger.info("✅ Áp dụng bộ lọc Keyword hoàn tất!")
 
         except Exception as e:
             logger.warning(f"⚠️ Cảnh báo áp dụng bộ lọc Keyword: {e}. Tiếp tục quét bảng...")

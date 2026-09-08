@@ -413,7 +413,7 @@ export const AutomationStudioPage: React.FC = () => {
 
   const [lmsRoleMode, setLmsRoleMode] = useState<'same_role' | 'multi_role'>('same_role');
   const [lmsSingleRole, setLmsSingleRole] = useState<'student' | 'non_editing_teacher' | 'manager'>('non_editing_teacher');
-  const [lmsBulkSingleEmails, setLmsBulkSingleEmails] = useState<string>('jason.caldino@globalschools.com');
+  const [lmsBulkSingleEmails, setLmsBulkSingleEmails] = useState<string>('');
   const [lmsStudentEmails, setLmsStudentEmails] = useState<string>('');
   const [lmsTeacherEmails, setLmsTeacherEmails] = useState<string>('');
   const [lmsManagerEmails, setLmsManagerEmails] = useState<string>('');
