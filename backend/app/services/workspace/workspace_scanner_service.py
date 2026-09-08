@@ -1,4 +1,5 @@
 # backend/app/services/workspace/workspace_scanner_service.py
+import re
 import logging
 import asyncio
 import gc
@@ -23,8 +24,32 @@ def _is_terminal(status: Optional[str]) -> bool:
     return status.strip().lower() in TERMINAL_STATUSES
 
 
+def _extract_numeric_id(item: Dict[str, Any], code_key: str = "order_code") -> int:
+    """
+    Trích xuất ID số nguyên để so sánh chính xác tuyệt đối:
+    1. Ưu tiên trường 'id' hoặc 'order_id' số nguyên nếu có.
+    2. Nếu không, trích xuất dãy số cuối cùng trong mã code (VD: 'DST-20260904-573' -> 573).
+    """
+    raw_id = item.get("id") or item.get("order_id")
+    if raw_id is not None and str(raw_id).isdigit():
+        return int(raw_id)
+    
+    code = str(item.get(code_key) or "")
+    match = re.findall(r"\d+", code)
+    if match:
+        return int(match[-1])
+    return 0
+
+
+def _get_latest_item_from_list(items: List[Dict[str, Any]], code_key: str = "order_code") -> Optional[Dict[str, Any]]:
+    """Tìm bản ghi mới nhất thực sự trong mảng API (chống việc mảng bị sắp xếp ASC cũ -> mới)."""
+    if not items:
+        return None
+    return max(items, key=lambda x: _extract_numeric_id(x, code_key))
+
+
 def _batch_upsert(table_name: str, records: List[Dict[str, Any]], on_conflict: str, chunk_size: int = 50):
-    """Helper ghi dữ liệu lên Supabase theo từng Batch 50 bản ghi để tối ưu tốc độ."""
+    """Helper ghi dữ liệu lên Supabase theo từng Batch 50 bản ghi."""
     if not records:
         return
     supabase = get_supabase_client()
@@ -40,10 +65,10 @@ class WorkspaceScannerService(WorkspaceBaseService):
     """
     Service quét tự động và đồng bộ siêu tốc dữ liệu của 5 Master Distributors:
     Áp dụng thuật toán Smart Delta Sync:
-    - So sánh Latest Remote ID với Latest DB ID.
-    - Bỏ qua hoàn toàn các bản ghi ở Terminal State (Approved/Completed/Rejected).
-    - Chỉ kiểm tra và cập nhật status cho các bản ghi Pending/Awaiting.
-    - Chỉ bóc tách chi tiết khóa học cho School Order mới hoặc Order Pending bị thiếu dữ liệu.
+    - Tìm ID lớn nhất thực sự từ API (không bị lừa bởi thứ tự tăng dần/giảm dần).
+    - So sánh với DB: Nếu mã mới nhất đã có trong DB -> Tuyệt đối không nạp mới.
+    - Chỉ cập nhật Status cho các bản ghi đang Pending/Awaiting nếu có thay đổi.
+    - Bỏ qua hoàn toàn các bản ghi đã Approved/Completed/Rejected.
     """
 
     async def get_all_distributor_credentials(self) -> List[Dict[str, Any]]:
@@ -79,66 +104,49 @@ class WorkspaceScannerService(WorkspaceBaseService):
             return []
 
     def _get_db_distributor_state(self, dist_code: str):
-        """
-        Đọc nhanh trạng thái hiện tại từ DB Supabase cho Distributor:
-        - Latest Contract Code (DST & PRT)
-        - Danh sách Contract Codes đang Pending
-        - Latest Order Code
-        - Danh sách Order Codes đang Pending kèm trạng thái và cờ đã có courses_data chưa
-        """
+        """Đọc nhanh toàn bộ mã code hiện có và danh sách Pending trong DB để đối chiếu 0.1ms."""
         supabase = get_supabase_client()
         
-        # 1. Lấy trạng thái Contracts
+        # 1. Đọc Contracts hiện có của Dist này
         c_res = supabase.table("workspace_contracts_cache")\
             .select("contract_code, contract_type, status")\
             .eq("distributor_code", dist_code)\
-            .order("created_at", desc=True)\
-            .limit(500)\
             .execute()
         contracts_data = c_res.data or []
 
-        latest_dst_code = next((c["contract_code"] for c in contracts_data if c.get("contract_type") == "DST"), None)
-        latest_prt_code = next((c["contract_code"] for c in contracts_data if c.get("contract_type") == "PRT"), None)
-        pending_contracts_map = {
-            c["contract_code"]: c.get("status") 
+        all_known_contract_codes: Set[str] = {c["contract_code"] for c in contracts_data if c.get("contract_code")}
+        pending_contracts_map: Dict[str, str] = {
+            c["contract_code"]: c.get("status", "") 
             for c in contracts_data 
             if not _is_terminal(c.get("status"))
         }
 
-        # 2. Lấy trạng thái Orders
+        # 2. Đọc Orders hiện có của Dist này
         o_res = supabase.table("workspace_orders_cache")\
             .select("order_code, status, courses_data")\
             .eq("distributor_code", dist_code)\
-            .order("created_at", desc=True)\
-            .limit(500)\
             .execute()
         orders_data = o_res.data or []
 
-        latest_order_code = orders_data[0]["order_code"] if orders_data else None
-        pending_orders_map = {
+        all_known_order_codes: Set[str] = {o["order_code"] for o in orders_data if o.get("order_code")}
+        pending_orders_map: Dict[str, Dict[str, Any]] = {
             o["order_code"]: {
-                "status": o.get("status"),
+                "status": o.get("status", ""),
                 "has_courses": bool(o.get("courses_data") and len(o["courses_data"]) > 0)
             }
             for o in orders_data
             if not _is_terminal(o.get("status"))
         }
-        all_known_order_codes = {o["order_code"] for o in orders_data}
 
         return {
-            "latest_dst_code": latest_dst_code,
-            "latest_prt_code": latest_prt_code,
+            "all_known_contract_codes": all_known_contract_codes,
             "pending_contracts_map": pending_contracts_map,
-            "latest_order_code": latest_order_code,
+            "all_known_order_codes": all_known_order_codes,
             "pending_orders_map": pending_orders_map,
-            "all_known_order_codes": all_known_order_codes
         }
 
     async def scan_and_cache_all_distributors(self) -> Dict[str, Any]:
-        """
-        Khởi chạy 1 phiên Chromium trong Làn nền (lane='cron'), cào siêu tốc 5 Distributor
-        với thuật toán Delta Sync thông minh rồi NHẢ SLOT NGAY LẬP TỨC.
-        """
+        """Khởi chạy phiên quét Chromium Làn nền (lane='cron') với Smart Delta Sync chuẩn xác."""
         distributors = await self.get_all_distributor_credentials()
         if not distributors:
             return {"status": "error", "message": "Không tìm thấy tài khoản Distributor nào trong két sắt."}
@@ -156,10 +164,9 @@ class WorkspaceScannerService(WorkspaceBaseService):
                             dist_name = dist.get("distributor_name", "Unknown")
                             logger.info(f"🚀 Bắt đầu quét thông minh (Smart Delta Sync): [{dist_name}] ({dist_code})")
 
-                            # Lấy snapshot hiện tại từ Supabase để so sánh
+                            # Lấy snapshot hiện tại từ Supabase
                             db_state = self._get_db_distributor_state(dist_code)
 
-                            # Đăng nhập Distributor
                             is_ok, login_err = await self.login_role(page, dist["username"], dist["password"], "Distributor")
                             if not is_ok:
                                 logger.warning(f"⚠️ Không thể đăng nhập Distributor {dist_name}: {login_err}")
@@ -189,32 +196,33 @@ class WorkspaceScannerService(WorkspaceBaseService):
 
                                 dst_list = dst_res.get("data", []) if isinstance(dst_res, dict) else []
                                 if dst_list:
-                                    remote_latest_dst = dst_list[0].get("order_code")
-                                    db_latest_dst = db_state["latest_dst_code"]
-
-                                    # Kiểm tra xem có Contract mới không
-                                    has_new_dst = (remote_latest_dst != db_latest_dst)
-                                    logger.info(f"  👉 DST Contracts: Remote Latest='{remote_latest_dst}' | DB Latest='{db_latest_dst}' -> {'CÓ MỚI' if has_new_dst else 'TRÙNG KHỚP'}")
+                                    # Tìm bản ghi mới nhất THỰC SỰ (so sánh theo numeric ID)
+                                    latest_dst_item = _get_latest_item_from_list(dst_list, code_key="order_code")
+                                    latest_dst_code = latest_dst_item.get("order_code") if latest_dst_item else None
+                                    
+                                    # Kiểm tra xem mã mới nhất đã có trong DB chưa
+                                    is_latest_in_db = latest_dst_code in db_state["all_known_contract_codes"]
+                                    logger.info(f"  👉 DST Contracts: Remote Newest='{latest_dst_code}' (ID:{latest_dst_item.get('id')}) | In DB: {is_latest_in_db} -> {'TRÙNG KHỚP (Chỉ check pending)' if is_latest_in_db else 'CÓ MỚI'}")
 
                                     for c in dst_list:
                                         contract_code = c.get("order_code")
                                         if not contract_code:
                                             continue
 
-                                        current_remote_status = str(c.get("status", "Pending")).capitalize()
+                                        current_status = str(c.get("status", "Pending")).capitalize()
+                                        is_known = contract_code in db_state["all_known_contract_codes"]
+                                        is_pending_in_db = contract_code in db_state["pending_contracts_map"]
 
-                                        # Kịch bản 1: Không có contract mới và contract này đã có trong DB
-                                        if not has_new_dst and contract_code not in db_state["pending_contracts_map"]:
-                                            # Đã ở trạng thái terminal trong DB -> Bỏ qua tuyệt đối
+                                        # Nếu không có mới và contract đã có trong DB nhưng KHÔNG pending -> Bỏ qua ngay lập tức!
+                                        if is_latest_in_db and is_known and not is_pending_in_db:
                                             continue
 
-                                        # Kịch bản 2: Contract đang pending trong DB, chỉ cập nhật nếu status thay đổi
-                                        if contract_code in db_state["pending_contracts_map"]:
+                                        # Nếu là pending trong DB -> Chỉ cập nhật nếu status thay đổi
+                                        if is_pending_in_db:
                                             old_status = db_state["pending_contracts_map"][contract_code]
-                                            if old_status and old_status.lower() == current_remote_status.lower():
-                                                continue  # Status không đổi, bỏ qua
+                                            if old_status and old_status.lower() == current_status.lower():
+                                                continue  # Status không đổi, bỏ qua!
 
-                                        # Bóc tách courses để lưu (vì API Contract trả sẵn detail)
                                         courses_data = []
                                         for it in (c.get("items", []) or []):
                                             if it.get("type") == "course":
@@ -232,7 +240,7 @@ class WorkspaceScannerService(WorkspaceBaseService):
                                             "sender_name": dist_name,
                                             "receiver_name": "Sales Admin",
                                             "distributor_code": dist_code,
-                                            "status": current_remote_status,
+                                            "status": current_status,
                                             "contract_date": str(c.get("order_date") or c.get("created_at", "")).split("T")[0],
                                             "courses_data": courses_data,
                                             "raw_payload": c,
@@ -257,11 +265,11 @@ class WorkspaceScannerService(WorkspaceBaseService):
 
                                 prt_list = prt_res.get("data", []) if isinstance(prt_res, dict) else []
                                 if prt_list:
-                                    remote_latest_prt = prt_list[0].get("order_code")
-                                    db_latest_prt = db_state["latest_prt_code"]
+                                    latest_prt_item = _get_latest_item_from_list(prt_list, code_key="order_code")
+                                    latest_prt_code = latest_prt_item.get("order_code") if latest_prt_item else None
 
-                                    has_new_prt = (remote_latest_prt != db_latest_prt)
-                                    logger.info(f"  👉 PRT Contracts: Remote Latest='{remote_latest_prt}' | DB Latest='{db_latest_prt}' -> {'CÓ MỚI' if has_new_prt else 'TRÙNG KHỚP'}")
+                                    is_latest_prt_in_db = latest_prt_code in db_state["all_known_contract_codes"]
+                                    logger.info(f"  👉 PRT Contracts: Remote Newest='{latest_prt_code}' (ID:{latest_prt_item.get('id')}) | In DB: {is_latest_prt_in_db} -> {'TRÙNG KHỚP (Chỉ check pending)' if is_latest_prt_in_db else 'CÓ MỚI'}")
 
                                     for p_item in prt_list:
                                         contract_code = p_item.get("order_code")
@@ -270,11 +278,13 @@ class WorkspaceScannerService(WorkspaceBaseService):
 
                                         raw_status = str(p_item.get("status", "pending"))
                                         formatted_status = "Pending" if "pending" in raw_status.lower() else raw_status.capitalize()
+                                        is_known = contract_code in db_state["all_known_contract_codes"]
+                                        is_pending_in_db = contract_code in db_state["pending_contracts_map"]
 
-                                        if not has_new_prt and contract_code not in db_state["pending_contracts_map"]:
+                                        if is_latest_prt_in_db and is_known and not is_pending_in_db:
                                             continue
 
-                                        if contract_code in db_state["pending_contracts_map"]:
+                                        if is_pending_in_db:
                                             old_status = db_state["pending_contracts_map"][contract_code]
                                             if old_status and old_status.lower() == formatted_status.lower():
                                                 continue
@@ -320,51 +330,49 @@ class WorkspaceScannerService(WorkspaceBaseService):
 
                                 sch_list = sch_res.get("data", []) if isinstance(sch_res, dict) else []
                                 if sch_list:
-                                    first_valid_sch = next((s for s in sch_list if not (s.get("type_show") == "contest" and not s.get("school_name"))), None)
-                                    remote_latest_order = None
-                                    if first_valid_sch:
-                                        num_id = first_valid_sch.get("id") or first_valid_sch.get("order_id")
-                                        remote_latest_order = first_valid_sch.get("school_order_id") or first_valid_sch.get("partner_order_id") or f"SCH-{num_id}"
+                                    valid_sch_list = [s for s in sch_list if not (s.get("type_show") == "contest" and not s.get("school_name"))]
+                                    latest_sch_item = _get_latest_item_from_list(valid_sch_list, code_key="order_id")
+                                    
+                                    latest_sch_code = None
+                                    if latest_sch_item:
+                                        num_id = latest_sch_item.get("id") or latest_sch_item.get("order_id")
+                                        latest_sch_code = latest_sch_item.get("school_order_id") or latest_sch_item.get("partner_order_id") or f"SCH-{num_id}"
 
-                                    db_latest_order = db_state["latest_order_code"]
-                                    has_new_order = (remote_latest_order != db_latest_order)
-                                    logger.info(f"  👉 School Orders: Remote Latest='{remote_latest_order}' | DB Latest='{db_latest_order}' -> {'CÓ MỚI' if has_new_order else 'TRÙNG KHỚP'}")
+                                    is_latest_order_in_db = latest_sch_code in db_state["all_known_order_codes"] if latest_sch_code else False
+                                    logger.info(f"  👉 School Orders: Remote Newest='{latest_sch_code}' (ID:{latest_sch_item.get('id') if latest_sch_item else 'N/A'}) | In DB: {is_latest_order_in_db} -> {'TRÙNG KHỚP (Chỉ check pending)' if is_latest_order_in_db else 'CÓ MỚI'}")
 
-                                    for sch in sch_list:
-                                        if sch.get("type_show") == "contest" and not sch.get("school_name"):
-                                            continue
-
+                                    for sch in valid_sch_list:
                                         numeric_order_id = sch.get("id") or sch.get("order_id")
                                         order_code = sch.get("school_order_id") or sch.get("partner_order_id") or f"SCH-{numeric_order_id}"
                                         status_name = sch.get("status_name") or "Awaiting Partner"
 
-                                        is_new_order = (order_code not in db_state["all_known_order_codes"])
-                                        is_pending_in_db = (order_code in db_state["pending_orders_map"])
+                                        is_known = order_code in db_state["all_known_order_codes"]
+                                        is_pending_in_db = order_code in db_state["pending_orders_map"]
 
-                                        # Kịch bản 1: Không có order mới và order này đã nằm trong DB ở trạng thái đóng băng
-                                        if not has_new_order and not is_pending_in_db and not is_new_order:
+                                        # Nếu bản ghi mới nhất đã có trong DB và order này đã có trong DB không pending -> BỎ QUA NGAY
+                                        if is_latest_order_in_db and is_known and not is_pending_in_db:
                                             continue
 
-                                        # Kịch bản 2: Đã có trong DB và đang pending -> kiểm tra xem có cần update không
+                                        # Kiểm tra xem có cần fetch detail không
                                         need_detail_fetch = False
                                         if is_pending_in_db:
                                             pending_info = db_state["pending_orders_map"][order_code]
                                             old_status = pending_info["status"]
                                             has_courses = pending_info["has_courses"]
 
-                                            # Nếu status không đổi và đã có chi tiết courses thì bỏ qua
+                                            # Status không đổi và đã có chi tiết môn học -> Bỏ qua!
                                             if old_status and old_status.lower() == status_name.lower() and has_courses:
                                                 continue
                                             
-                                            # Nếu status vẫn pending nhưng bị thiếu courses_data thì fetch bổ sung
+                                            # Đang pending mà thiếu courses_data -> Fetch bù
                                             if not has_courses and ("awaiting" in status_name.lower() or "pending" in status_name.lower()):
                                                 need_detail_fetch = True
                                         
-                                        # Kịch bản 3: Order mới tinh chưa có trong DB
-                                        if is_new_order and ("awaiting" in status_name.lower() or "pending" in status_name.lower()):
+                                        # Nếu là Order mới tinh chưa từng có trong DB
+                                        if not is_known and ("awaiting" in status_name.lower() or "pending" in status_name.lower()):
                                             need_detail_fetch = True
 
-                                        # Chỉ gọi API chi tiết getOrderDetail.php khi thực sự cần thiết
+                                        # Chỉ gọi API chi tiết khi thực sự cần thiết
                                         courses_data = []
                                         if need_detail_fetch and numeric_order_id:
                                             try:
@@ -403,7 +411,6 @@ class WorkspaceScannerService(WorkspaceBaseService):
                                             "raw_payload": sch,
                                             "last_synced_at": "now()"
                                         }
-                                        # Nếu có lấy được courses_data thì ghi nhận, nếu không giữ nguyên
                                         if courses_data:
                                             order_record["courses_data"] = courses_data
 
@@ -423,15 +430,13 @@ class WorkspaceScannerService(WorkspaceBaseService):
         except Exception as e_slot:
             logger.warning(f"⚠️ Quá trình xin slot Playwright kết thúc: {e_slot}")
 
-        # =========================================================================
-        # 🚀 GHI SUPABASE THEO BATCH (CHỈ GHI CÁC RECORD THỰC SỰ THAY ĐỔI)
-        # =========================================================================
+        # Ghi Supabase chỉ khi có bản ghi thay đổi
         if contracts_to_upsert or orders_to_upsert:
             logger.info(f"💾 Cập nhật Supabase: {len(contracts_to_upsert)} Contracts & {len(orders_to_upsert)} Orders có thay đổi...")
             _batch_upsert("workspace_contracts_cache", contracts_to_upsert, on_conflict="contract_code")
             _batch_upsert("workspace_orders_cache", orders_to_upsert, on_conflict="order_code")
         else:
-            logger.info("✨ Không có thay đổi mới nào cần cập nhật vào Supabase (Dữ liệu đã tối ưu đồng bộ)!")
+            logger.info("✨ Tất cả dữ liệu đã đồng bộ hoàn hảo! Không có bản ghi nào cần cập nhật.")
 
         logger.info(f"🏆 ĐỒNG BỘ 5 DISTRIBUTORS HOÀN TẤT!")
         return {
