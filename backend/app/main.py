@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+import inspect
 
 # Import Services
 from app.services.gmail_service import poll_unread_gmails
@@ -28,10 +29,14 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
 
 async def safe_job_wrapper(job_func, job_name: str):
-    """Bọc các hàm quét để bẫy lỗi, không làm sập ứng dụng và tự dọn dẹp RAM."""
+    """Bọc các hàm quét an toàn: hỗ trợ cả sync/async, bẫy lỗi và dọn RAM triệt để."""
     try:
         logger.info(f"🔄 [Cron Job Started] {job_name}")
-        await job_func()
+        if inspect.iscoroutinefunction(job_func):
+            await job_func()
+        else:
+            job_func()
+        logger.info(f"✔️ [Cron Job Finished] {job_name}")
     except Exception as e:
         logger.error(f"❌ [Cron Job Error] {job_name}: {str(e)}")
     finally:
@@ -146,84 +151,81 @@ async def poll_workspace_long_tasks():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("🔥 Đang kích hoạt APScheduler 24/7 (Chu kỳ giãn 10 phút & Phân bố so le chống nghẽn)...")
+    logger.info("🔥 Đang kích hoạt APScheduler (Lịch trình giãn cách chống nghẽn Render 512MB RAM)...")
     
     base_start = datetime.now(timezone.utc)
     
-    # 1. Quét Gmail mỗi 10 phút (HTTP API thuần, khởi chạy sau 10s)
+    # 1. Quét Gmail mỗi 10 phút (HTTP API thuần, chạy sau 15s)
     scheduler.add_job(
         safe_job_wrapper, 
         'interval', 
         minutes=10, 
         args=[poll_unread_gmails, "Quét Gmail"], 
         id='gmail_cron',
-        next_run_time=base_start + timedelta(seconds=10),
+        next_run_time=base_start + timedelta(seconds=15),
         misfire_grace_time=180,
         max_instances=1,
         coalesce=True,
         replace_existing=True
     )
     
-    # 2. Quét Form Feedback mỗi 10 phút (HTTP API thuần, khởi chạy sau 60s)
+    # 2. Quét Form Feedback mỗi 15 phút (HTTP API thuần, chạy sau 90s)
     scheduler.add_job(
         safe_job_wrapper, 
         'interval', 
-        minutes=10, 
+        minutes=15, 
         args=[poll_form_feedbacks, "Quét Form Feedback"], 
         id='sheet_cron',
-        next_run_time=base_start + timedelta(seconds=60),
+        next_run_time=base_start + timedelta(seconds=90),
         misfire_grace_time=180,
         max_instances=1,
         coalesce=True,
         replace_existing=True
     )
 
-    # 3. Quét OS Ticket mỗi 10 phút (Playwright - Khởi chạy sau 2 phút / 120s)
-    # Lệch hoàn toàn so với các job Playwright khác, đảm bảo luôn có slot trống!
-    scheduler.add_job(
-        safe_job_wrapper, 
-        'interval', 
-        minutes=10, 
-        args=[poll_open_ostickets, "Quét OS Ticket"], 
-        id='osticket_cron',
-        next_run_time=base_start + timedelta(seconds=120),
-        misfire_grace_time=180,
-        max_instances=1,
-        coalesce=True,
-        replace_existing=True
-    )
-
-    # 4. Quét Task Workspace Long-Running mỗi 10 phút (Playwright - Khởi chạy sau 6 phút / 360s)
-    # Cách OS Ticket hẳn 4 phút, không bao giờ tranh chấp slot!
+    # 3. Quét Task Workspace Long-Running mỗi 10 phút (Playwright - Chạy ở phút thứ 3 / 180s)
     scheduler.add_job(
         safe_job_wrapper, 
         'interval', 
         minutes=10, 
         args=[poll_workspace_long_tasks, "Quét Task Workspace Long-Running"], 
         id='workspace_long_tasks_cron',
-        next_run_time=base_start + timedelta(seconds=360),
+        next_run_time=base_start + timedelta(seconds=180),
         misfire_grace_time=180,
         max_instances=1,
         coalesce=True,
         replace_existing=True
     )
 
-    # 5. Quét Live Uptime & Auth Matrix định kỳ mỗi 45 phút (Khởi chạy sau 15 phút / 900s)
+    # 4. Quét OS Ticket mỗi 15 phút (Playwright - Giãn sang phút thứ 7 / 420s để không đụng độ Workspace Task)
     scheduler.add_job(
         safe_job_wrapper, 
         'interval', 
-        minutes=45, 
+        minutes=15, 
+        args=[poll_open_ostickets, "Quét OS Ticket"], 
+        id='osticket_cron',
+        next_run_time=base_start + timedelta(seconds=420),
+        misfire_grace_time=180,
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True
+    )
+
+    # 5. Quét Live Uptime & Auth Matrix định kỳ mỗi 60 phút (Chạy sau 20 phút / 1200s)
+    scheduler.add_job(
+        safe_job_wrapper, 
+        'interval', 
+        minutes=60, 
         args=[poll_site_uptime_cron, "Quét Site Uptime & Auth Matrix"], 
         id='site_uptime_cron',
-        next_run_time=base_start + timedelta(seconds=900),
+        next_run_time=base_start + timedelta(seconds=1200),
         misfire_grace_time=300,
         max_instances=1,
         coalesce=True,
         replace_existing=True
     )
     
-    # 6. Quét Workspace Distributor để update cache mỗi 60 phút (Khởi chạy sau 30 phút / 1800s)
-    # Tác vụ nặng nhất được đẩy sang phút thứ 30 và chạy cách nhau 1 tiếng
+    # 6. Quét Workspace Distributor Cache mỗi 60 phút (Chạy sau 40 phút / 2400s)
     scheduler.add_job(
         safe_job_wrapper,
         "interval",
@@ -233,7 +235,7 @@ async def lifespan(app: FastAPI):
             "workspace_distributor_scanner_cron"
         ],
         id="distributor_cache_scanner_cron",
-        next_run_time=base_start + timedelta(seconds=1800),
+        next_run_time=base_start + timedelta(seconds=2400),
         misfire_grace_time=300,
         max_instances=1,
         coalesce=True,
@@ -245,6 +247,7 @@ async def lifespan(app: FastAPI):
     
     logger.info("🛑 Tắt APScheduler...")
     scheduler.shutdown()
+
 
 app = FastAPI(
     title="Pythaverse Central Admin API",

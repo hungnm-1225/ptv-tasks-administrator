@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 GLOBAL_PLAYWRIGHT_SEMAPHORE = asyncio.Semaphore(1)
 
 
+class CronSlotYieldException(Exception):
+    """Exception nội bộ báo hiệu Cron chủ động nhường slot an toàn."""
+    pass
+
+
 @asynccontextmanager
 async def acquire_playwright_slot(
     task_name: str = "Playwright Task", 
@@ -29,29 +34,36 @@ async def acquire_playwright_slot(
     - Sử dụng 1 Global Lock duy nhất để bảo vệ trần 512MB RAM của Render.
     - lane='admin': Ưu tiên tối đa cho Quản trị viên duyệt tác vụ hoặc dispatch từ Studio (Timeout 300s).
     - lane='cron': Tác vụ cào dữ liệu định kỳ (osTicket, Long-Task, Scanner).
-      Timeout nâng lên 120s để kiên nhẫn chờ slot, CHẤM DỨT tình trạng bỏ đói (starvation) OS Ticket.
+      Nếu quá hạn 120s, tự động nhường slot êm dịu (graceful yield), KHÔNG làm văng lỗi đỏ ASGI.
     """
     is_admin = (lane.lower() == "admin")
     lane_tag = "👑 [VIP ADMIN LANE]" if is_admin else "⚙️ [BACKGROUND CRON LANE]"
-    
-    # Nâng thời gian kiên nhẫn chờ của cronjob lên 120s thay vì 45s ngắn ngủi
     actual_timeout = timeout if is_admin else min(timeout, 120.0)
 
     logger.info(f"⏳ {lane_tag} Đang xin slot thực thi Playwright cho: '{task_name}'...")
     acquired = False
+    yielded_slot = False
+
     try:
         try:
             await asyncio.wait_for(GLOBAL_PLAYWRIGHT_SEMAPHORE.acquire(), timeout=actual_timeout)
             acquired = True
             logger.info(f"🟢 {lane_tag} Đã nhận slot! Bắt đầu thực thi: '{task_name}'")
-            yield
         except asyncio.TimeoutError:
             if is_admin:
                 logger.error(f"❌ {lane_tag} Quá thời gian chờ slot ({actual_timeout}s) cho: '{task_name}'")
                 raise TimeoutError(f"Hệ thống đang bận xử lý tác vụ khác. Hết thời gian chờ ({actual_timeout}s).")
             else:
-                logger.warning(f"⚠️ {lane_tag} Slot đang bận quá {actual_timeout}s, tự động nhường cho: '{task_name}' để bảo toàn tài nguyên.")
-                raise TimeoutError(f"Cronjob '{task_name}' nhường slot cho chu kỳ quét kế tiếp.")
+                logger.warning(f"⚠️ {lane_tag} Slot đang bận quá {actual_timeout}s. Tự động nhường slot cho '{task_name}' để bảo toàn tài nguyên Render.")
+                yielded_slot = True
+                raise CronSlotYieldException()
+
+        # Chỉ yield cho tác vụ chạy nếu đã thực sự nhận slot
+        yield
+
+    except CronSlotYieldException:
+        # Nuốt ngoại lệ nhường slot êm dịu, không để văng lên ASGI application
+        return
     finally:
         if acquired:
             GLOBAL_PLAYWRIGHT_SEMAPHORE.release()

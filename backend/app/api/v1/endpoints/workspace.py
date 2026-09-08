@@ -222,13 +222,22 @@ async def get_cached_pending_contracts(
     }
     
 
+async def _run_sync_and_invalidate():
+    """Chạy sync ngầm và invalidate RAM cache ngay sau khi hoàn tất."""
+    await workspace_scanner_service.scan_and_cache_all_distributors()
+    # Xóa cache RAM để client query lại sẽ lấy dữ liệu mới nhất
+    ws_cache.invalidate("all_cached_pending_orders")
+    ws_cache.invalidate("all_cached_pending_contracts_PRT")
+    ws_cache.invalidate("all_cached_pending_contracts_DST")
+
+
 @router.post("/sync-cache-now")
 async def trigger_distributor_cache_sync(background_tasks: BackgroundTasks):
-    """Kích hoạt tác vụ quét lại 5 Distributor chạy ngầm ngay lập tức."""
-    background_tasks.add_task(workspace_scanner_service.scan_and_cache_all_distributors)
+    """Kích hoạt tác vụ quét lại 5 Distributor chạy ngầm an toàn tuyệt đối."""
+    background_tasks.add_task(_run_sync_and_invalidate)
     return {
         "status": "queued",
-        "message": "Đã kích hoạt quét và cập nhật Cache 5 Distributor trong nền an toàn!"
+        "message": "Đã kích hoạt quét thông minh (Smart Delta Sync) 5 Distributor trong nền an toàn!"
     }
 
 

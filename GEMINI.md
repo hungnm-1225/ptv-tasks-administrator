@@ -53,13 +53,15 @@ Gói dịch vụ được tách nhỏ thành 8 module chuyên biệt kế thừa
 - **Unenrol:** Tìm kiếm chính xác qua Keyword Filter và click icon thùng rác 🗑️ xác nhận gỡ người dùng khỏi khóa học.
 - **Auto Group Creation:** Tự động tạo Group và phân nhóm học viên tại `/group/index.php?id=...`.
 
-### 2.4. Quy Trình Bóc Tách COF (Curriculum Order Form)
+### 2.4. Quy Trình Bóc Tách COF (Curriculum Order Form) & File Tài Khoản Chuẩn
 - **Tab 1 (`Curriculum Order Form` / `COF`):** Bóc tách `School Name`, `Country`, danh sách môn học, License, Start/End Date.
 - **Tab 2 (`Student Information`):** Bóc tách họ tên, email, ngày sinh (`DOB`), nhóm lớp (`class_group`). Chỉ tạo tài khoản cho học sinh chưa có Username và `Account Exist != 'yes'`.
-- **Tab 3 (`Teacher Information`):** Bóc tách họ tên, email giáo viên, môn học phân công (`course_assign`).
-- **Chuẩn Hóa Ngày Sinh (DOB):** Bắt buộc chuyển đổi về định dạng `D/M/YYYY` (ví dụ: `1/1/1990` hoặc `15/8/2012`), loại bỏ giờ phút và các dị biệt format.
-- **Sinh File Accounts:** Sinh file `accounts.xlsx` 7 cột bắt đầu từ dòng 6 (`No.`, `First Name (*)`, `Last Name (*)`, `Mobile number (Optional)`, `Email (*)`, `Date of Birth (*)`, `Role (*)`).
-- **Ghi Ngược Kết Quả:** Đọc file kết quả `RESULT_accounts.xlsx`, map User/Pass vào cột 12-13, Group LMS vào cột 14, highlight nền màu cam nhạt (`#FCE4D6`) và chữ in đậm đỏ (`#C00000`).
+- **Tab 3 (`Teacher Information`):** Bóc tách họ tên, email giáo viên, môn học phân công (`course_assign`). Chỉ tạo tài khoản cho giáo viên chưa có Username.
+- **Chuẩn Hóa Ngày Sinh (DOB):** Bắt buộc chuyển đổi về định dạng `D/M/YYYY` (ví dụ: `1/1/1990` hoặc `15/8/2012`), loại bỏ giờ phút và các dị biệt format qua `_format_date_dob()`.
+- **Bộ Điều Phối Thông Minh (`detect_and_process_excel`):** Nhận diện tự động: Nếu là file COF 3 Tabs -> Tách riêng học sinh/GV chưa tạo đem đi nộp; Nếu là file 1 Tab -> Chuẩn hóa tiêu đề Hàng 2, Header Hàng 5, Dữ liệu từ Hàng 6 (`normalize_input_accounts_excel`).
+- **Ghi Ngược Kết Quả:**
+  - *File COF 3 Tabs (`write_results_back_to_cof`):* Đọc kết quả, map User/Pass vào Cột 12-13, Group LMS vào Cột 14, highlight nền cam nhạt (`#FCE4D6`) và chữ in đậm đỏ (`#C00000`) chỉ cho những tài khoản mới tạo.
+  - *File Chuẩn 1 Tab (`write_results_back_to_standard_accounts`):* Giữ nguyên 7 cột A-G, thêm 3 cột ở cuối: H (Username), I (Password), J (Note: 'Tài khoản đã tồn tại').
 
 ### 2.5. Quy Trình Két Sắt & Phả Hệ Tổ Chức (Hierarchy & Vault)
 - **Bảng `workspace_organizations`:** Lưu cây quan hệ 3 cấp (`distributor` ➔ `partner` ➔ `school`) qua `parent_id`.
