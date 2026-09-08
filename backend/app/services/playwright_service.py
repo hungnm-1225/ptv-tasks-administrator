@@ -620,17 +620,20 @@ class PlaywrightLMSService:
                                     })
 
                         # ------------------------------------------------------
-                        # BƯỚC 3: TẠO GROUP & PHÂN NHÓM (CHO KHÓA HỌC HIỆN TẠI)
+                        # BƯỚC 3: CHECK GROUP THÔNG MINH & PHÂN NHÓM HỌC VIÊN
                         # ------------------------------------------------------
                         if group_name and all_valid_emails_for_group:
-                            logger.info(f"🏷️ Bắt đầu tiến trình tạo Group & phân nhóm: [{group_name}] cho khóa {course_id}...")
+                            logger.info(f"🏷️ Bắt đầu tiến trình kiểm tra Group: [{group_name}] cho khóa {course_id}...")
                             groups_url = f"{MOODLE_BASE_URL}/group/index.php?id={course_id}"
                             await page.goto(groups_url, wait_until="domcontentloaded", timeout=45000)
                             await wait_for_dom_and_spinners(page, "select#groups, #page-content", min_pacing_ms=300)
 
-                            group_option = page.locator(f"select#groups option:has-text('{group_name}')").first
-                            if await group_option.count() == 0:
-                                logger.info(f"➕ Tạo Group mới: [{group_name}]...")
+                            # 1. Tìm xem Group đã tồn tại trong select#groups chưa
+                            group_option = page.locator("select#groups option").filter(has_text=group_name).first
+                            has_existing_group = (await group_option.count() > 0)
+
+                            if not has_existing_group:
+                                logger.info(f"➕ Group [{group_name}] chưa tồn tại. Đang tạo mới...")
                                 create_group_btn = page.locator("input#showcreateorphangroupform, input[value='Create group']").first
                                 if await create_group_btn.count() > 0:
                                     await create_group_btn.click(force=True)
@@ -638,25 +641,40 @@ class PlaywrightLMSService:
                                     await name_input.wait_for(state="visible", timeout=10000)
                                     await name_input.fill(group_name)
                                     await page.click("input#id_submitbutton, input[value='Save changes']", force=True)
-                                    await wait_for_dom_and_spinners(page, "select#groups", min_pacing_ms=300)
+                                    await wait_for_dom_and_spinners(page, "select#groups", min_pacing_ms=400)
+                                    logger.info(f"🎉 Đã tạo mới Group: [{group_name}]!")
 
-                            group_option = page.locator(f"select#groups option:has-text('{group_name}')").first
+                            # 2. Định vị lại Group trong danh sách
+                            group_option = page.locator("select#groups option").filter(has_text=group_name).first
                             if await group_option.count() > 0:
-                                await group_option.click(force=True)
+                                # Lấy value ID của option (VD: '12625')
+                                opt_val = await group_option.get_attribute("value")
+                                
+                                # Chọn Group và dispatch event để Moodle gỡ thuộc tính disabled của nút Add/remove users
+                                await page.evaluate(f"""(val) => {{
+                                    const sel = document.querySelector("select#groups");
+                                    if (sel) {{
+                                        sel.value = val;
+                                        sel.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                    }}
+                                }}""", opt_val)
+                                await page.wait_for_timeout(500)
 
+                                # 3. Bấm nút 'Add/remove users'
                                 add_members_btn = page.locator("input#showaddmembersform, input[value='Add/remove users']").first
-                                if await add_members_btn.count() > 0 and await add_members_btn.is_enabled():
+                                await add_members_btn.wait_for(state="visible", timeout=10000)
+
+                                if await add_members_btn.is_enabled():
                                     await add_members_btn.click(force=True)
                                     search_potential = page.locator("input#addselect_searchtext").first
                                     await search_potential.wait_for(state="visible", timeout=15000)
 
+                                    added_count = 0
                                     for u_email in all_valid_emails_for_group:
                                         await search_potential.click(force=True)
+                                        await search_potential.fill("")
                                         await search_potential.fill(u_email)
-                                        try:
-                                            await page.locator("select#addselect").wait_for(state="visible", timeout=3000)
-                                        except Exception:
-                                            pass
+                                        await page.wait_for_timeout(600)
 
                                         potential_opt = page.locator("select#addselect option").filter(has_text=u_email).first
                                         if await potential_opt.count() > 0:
@@ -665,14 +683,19 @@ class PlaywrightLMSService:
                                             if await add_btn.count() > 0:
                                                 await add_btn.click(force=True)
                                                 course_results["group_members_added"].append(u_email)
+                                                added_count += 1
                                                 logger.info(f"✅ Đã thêm vào Group [{group_name}]: {u_email}")
 
+                                    # Bấm quay lại trang Groups
                                     back_btn = page.locator("input[name='cancel'][value='Back to groups']").first
                                     if await back_btn.count() > 0:
                                         await back_btn.click(force=True)
                                         await wait_for_dom_and_spinners(page, "select#groups", min_pacing_ms=300)
 
                                     course_results["group_created"] = group_name
+                                    logger.info(f"🏁 Đã hoàn tất phân nhóm {added_count} học viên vào [{group_name}]!")
+                                else:
+                                    logger.warning(f"⚠️ Nút 'Add/remove users' chưa được mở khóa cho Group [{group_name}].")
 
                     batch_course_results.append(course_results)
 
@@ -748,70 +771,92 @@ class PlaywrightLMSService:
                     await browser.close()
                     gc.collect()
 
-    async def unenrol_users_pipeline(self, course_id: str, emails: List[str]) -> Dict[str, Any]:
-        """Xóa danh sách User khỏi khóa học (Unenrol 🗑️)."""
-        async with acquire_playwright_slot(f"Moodle Unenrol Users ({len(emails)} emails)"):
-            clean_emails = self._sanitize_emails(emails)
-            if not clean_emails:
-                return {"status": "failed", "error": "Danh sách email rỗng."}
+    async def unenrol_users_pipeline(self, payload_or_course_id: Any, emails: Optional[List[str]] = None) -> Dict[str, Any]:
+        """
+        Hủy ghi danh học viên khỏi 1 hoặc NHIỀU KHÓA HỌC (Unenrol 🗑️):
+        - Hỗ trợ truyền dict payload từ Automation Studio hoặc gọi độc lập course_id + emails.
+        - Áp dụng bộ lọc Keyword 2 nhịp chuẩn xác để tìm đúng dòng học viên.
+        """
+        if isinstance(payload_or_course_id, dict):
+            raw_courses = payload_or_course_id.get("courses", [])
+            if not raw_courses and payload_or_course_id.get("course_id"):
+                raw_courses = [{"course_id": str(payload_or_course_id.get("course_id"))}]
+            clean_emails = self._sanitize_emails(payload_or_course_id.get("emails", payload_or_course_id.get("student_emails", [])))
+        else:
+            raw_courses = [{"course_id": str(payload_or_course_id)}]
+            clean_emails = self._sanitize_emails(emails or [])
 
-            results = {"unenrolled": [], "not_found": []}
+        if not clean_emails:
+            return {"status": "failed", "error": "Danh sách email cần hủy ghi danh rỗng."}
 
+        if not raw_courses:
+            return {"status": "failed", "error": "Không có khóa học nào được chỉ định để hủy ghi danh."}
+
+        async with acquire_playwright_slot(f"Moodle Unenrol Users ({len(clean_emails)} emails)"):
             async with async_playwright() as p:
                 browser: Browser = await p.chromium.launch(headless=self.headless, args=LOW_RAM_CHROMIUM_ARGS)
-                context = await browser.new_context(viewport={"width": 1280, "height": 800})
+                context = await browser.new_context(
+                    viewport={"width": 1280, "height": 800},
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                )
                 await setup_low_ram_routes(context)
                 page = await context.new_page()
 
                 try:
                     if not await self._login_moodle_sso(page):
-                        return {"status": "failed", "error": "Đăng nhập thất bại"}
+                        return {"status": "failed", "error": "Không thể đăng nhập vào hệ thống Moodle PLearn."}
 
-                    participants_url = f"{MOODLE_BASE_URL}/user/index.php?id={course_id}"
-                    await page.goto(participants_url, wait_until="domcontentloaded", timeout=45000)
-                    await wait_for_dom_and_spinners(page, "#page-content, table#participants", min_pacing_ms=300)
+                    all_courses_results = []
 
-                    for email in clean_emails:
-                        await self._apply_keyword_filter(page, email)
+                    for c_info in raw_courses:
+                        c_id = str(c_info.get("course_id", "")).strip()
+                        participants_url = f"{MOODLE_BASE_URL}/user/index.php?id={c_id}"
+                        logger.info(f"🗑️ Bắt đầu hủy ghi danh trên khóa #{c_id}...")
 
-                        user_row = page.locator("table#participants tbody tr").filter(
-                            has=page.locator("td.cell.c2, td.c2", has_text=email)
-                        ).first
+                        await page.goto(participants_url, wait_until="domcontentloaded", timeout=45000)
+                        await wait_for_dom_and_spinners(page, "#page-content, table#participants", min_pacing_ms=300)
 
-                        if await user_row.count() > 0:
-                            trash_btn = user_row.locator("a.unenrollink, a[data-action='unenrol'], i.edw-icon-Delete-Course").first
-                            if await trash_btn.count() > 0:
-                                await trash_btn.click(force=True)
-                                
-                                modal = page.locator("div.modal.show:has-text('Unenrol')").first
-                                await modal.wait_for(state="visible", timeout=10000)
+                        c_res = {"course_id": c_id, "unenrolled": [], "not_found": []}
 
-                                confirm_btn = modal.locator(".modal-footer button[data-action='save'], button:has-text('Unenrol')").first
-                                try:
-                                    async with page.expect_response(lambda r: "service.php" in r.url and r.status == 200, timeout=10000):
+                        for email in clean_emails:
+                            # 🎯 DÙNG CHUNG BỘ LỌC KEYWORD 2 NHỊP ĐÃ ĐƯỢC CHUẨN HÓA
+                            await self._apply_keyword_filter(page, email)
+
+                            user_row = page.locator("table#participants tbody tr").filter(
+                                has=page.locator("td.cell.c2, td.c2", has_text=email)
+                            ).first
+
+                            if await user_row.count() > 0:
+                                trash_btn = user_row.locator("a.unenrollink, a[data-action='unenrol'], i.edw-icon-Delete-Course").first
+                                if await trash_btn.count() > 0:
+                                    await trash_btn.scroll_into_view_if_needed()
+                                    await trash_btn.click(force=True)
+
+                                    modal = page.locator("div.modal.show:has-text('Unenrol')").first
+                                    await modal.wait_for(state="visible", timeout=10000)
+
+                                    confirm_btn = modal.locator(".modal-footer button[data-action='save'], button:has-text('Unenrol')").first
+                                    try:
                                         await confirm_btn.click(force=True)
-                                except Exception:
-                                    await confirm_btn.click(force=True)
-                                
-                                try:
-                                    await modal.wait_for(state="hidden", timeout=8000)
-                                except Exception:
-                                    pass
-                                    
-                                results["unenrolled"].append(email)
-                                logger.info(f"🗑️ Đã xóa user khỏi khóa: {email}")
-                        else:
-                            results["not_found"].append(email)
+                                        await modal.wait_for(state="hidden", timeout=8000)
+                                    except Exception:
+                                        await self._close_modal_safely(page, modal)
 
-                    total = len(clean_emails)
-                    success_len = len(results["unenrolled"])
-                    status = "success" if success_len == total else ("partial_success" if success_len > 0 else "failed")
+                                    c_res["unenrolled"].append(email)
+                                    logger.info(f"🗑️ Đã xóa học viên khỏi khóa #{c_id}: {email}")
+                            else:
+                                c_res["not_found"].append(email)
+                                logger.warning(f"⚠️ Không tìm thấy học viên để xóa: {email}")
 
+                        all_courses_results.append(c_res)
+
+                    total_unenrolled = sum(len(r["unenrolled"]) for r in all_courses_results)
                     return {
-                        "status": status,
-                        "message": f"Đã xóa {success_len}/{total} tài khoản.",
-                        "details": results
+                        "status": "success" if total_unenrolled > 0 else "failed",
+                        "message": f"Đã xử lý hủy ghi danh cho {total_unenrolled} lượt người dùng.",
+                        "details": all_courses_results
                     }
+
                 finally:
                     await browser.close()
                     gc.collect()

@@ -121,7 +121,7 @@ export const AutomationStudioPage: React.FC = () => {
   // 4 Mục chính của Workspace RPA
   const [workspaceMainCategory, setWorkspaceMainCategory] = useState<
     'approve' | 'create_and_approve' | 'bulk_accounts' | 'lms_enroll'
-  >('lms_enroll');
+  >('approve');
 
   // Phân luồng con trong mục "1. Phê Duyệt"
   const [approveSubFlow, setApproveSubFlow] = useState<
@@ -410,6 +410,10 @@ export const AutomationStudioPage: React.FC = () => {
       group_name: '',
     },
   ]);
+
+
+  const [lmsActionType, setLmsActionType] = useState<'enroll' | 'unenrol'>('enroll');
+  const [lmsUnenrolEmails, setLmsUnenrolEmails] = useState<string>('');
 
   const [lmsRoleMode, setLmsRoleMode] = useState<'same_role' | 'multi_role'>('same_role');
   const [lmsSingleRole, setLmsSingleRole] = useState<'student' | 'non_editing_teacher' | 'manager'>('non_editing_teacher');
@@ -946,59 +950,93 @@ export const AutomationStudioPage: React.FC = () => {
         ];
       } else if (workspaceMainCategory === 'lms_enroll') {
         actualBotType = 'lms_playwright';
-        let studentsList: string[] = [];
-        let teachersList: string[] = [];
-        let managersList: string[] = [];
-
-        if (lmsRoleMode === 'same_role') {
-          const bulkEmails = lmsBulkSingleEmails.split('\n').map((e) => e.trim()).filter((e) => e.length > 0);
-          if (lmsSingleRole === 'student') studentsList = bulkEmails;
-          else if (lmsSingleRole === 'non_editing_teacher') teachersList = bulkEmails;
-          else if (lmsSingleRole === 'manager') managersList = bulkEmails;
-        } else {
-          studentsList = lmsStudentEmails.split('\n').map((e) => e.trim()).filter((e) => e.length > 0);
-          teachersList = lmsTeacherEmails.split('\n').map((e) => e.trim()).filter((e) => e.length > 0);
-          managersList = lmsManagerEmails.split('\n').map((e) => e.trim()).filter((e) => e.length > 0);
-        }
-
-        const totalEmails = studentsList.length + teachersList.length + managersList.length;
-        if (totalEmails === 0) {
-          toast.error('Vui lòng nhập ít nhất một email cần ghi danh vào LMS!');
-          return;
-        }
 
         if (lmsSelectedCourses.length === 0) {
           toast.error('Vui lòng chọn ít nhất 1 khóa học LMS!');
           return;
         }
 
-        payload = {
-          action: 'direct_moodle_lms_enroll',
-          platform: 'learn.pythaverse.space',
-          courses: lmsSelectedCourses.map((c) => ({
-            category: c.category,
-            course_id: c.course_id,
-            course_name: c.course_name,
-            start_date: c.start_date,
-            end_date: c.end_date,
-            group_name: (c.group_name || '').trim() || undefined,
-          })),
-          role_mode: lmsRoleMode,
-          student_emails: studentsList,
-          teacher_emails: teachersList,
-          manager_emails: managersList,
-          auto_renew_existing: true,
-          auto_update_roles: true,
-        };
+        if (lmsActionType === 'unenrol') {
+          // 👉 HÀNH ĐỘNG HỦY GHI DANH (UNENROL)
+          const unenrolList = lmsUnenrolEmails
+            .split(/[\n,;]+/)
+            .map((e) => e.trim())
+            .filter((e) => e.length > 0);
 
-        summary.engineName = '🎓 PLearn Moodle LMS Batch Direct Enroller';
-        summary.actionTitle = `Ghi Danh & Đổi Quyền Cho ${lmsSelectedCourses.length} Khóa Học (Single-Session)`;
-        summary.targetEntity = `${lmsSelectedCourses.length} Khóa học (${lmsSelectedCourses.map((c) => c.course_name).join(', ')})`;
-        summary.detailsList = [
-          `Tổng số tài khoản: ${totalEmails} người dùng`,
-          `Số lượng môn học thực thi: ${lmsSelectedCourses.length} môn (Không cần logout)`,
-          `Tự động cập nhật Role & Gia hạn: Có kích hoạt`,
-        ];
+          if (unenrolList.length === 0) {
+            toast.error('Vui lòng nhập ít nhất 1 email cần hủy ghi danh khỏi khóa học!');
+            return;
+          }
+
+          payload = {
+            action: 'unenrol_users_pipeline',
+            platform: 'learn.pythaverse.space',
+            courses: lmsSelectedCourses.map((c) => ({
+              course_id: c.course_id,
+              course_name: c.course_name,
+            })),
+            emails: unenrolList,
+          };
+
+          summary.engineName = '🗑️ PLearn Moodle LMS Batch Unenroller';
+          summary.actionTitle = `Hủy Ghi Danh ${unenrolList.length} Học Viên Khỏi ${lmsSelectedCourses.length} Khóa Học`;
+          summary.targetEntity = `${lmsSelectedCourses.length} Khóa học (${lmsSelectedCourses.map((c) => c.course_name).join(', ')})`;
+          summary.detailsList = [
+            `Số lượng học viên cần xóa: ${unenrolList.length} tài khoản`,
+            `Danh sách khóa học áp dụng: ${lmsSelectedCourses.map((c) => `#${c.course_id}`).join(', ')}`,
+            `Hành động: Xóa vĩnh viễn quyền truy cập khóa học (Unenrol 🗑️)`,
+          ];
+        } else {
+          // 👉 HÀNH ĐỘNG GHI DANH MỚI & GIA HẠN (ENROL)
+          let studentsList: string[] = [];
+          let teachersList: string[] = [];
+          let managersList: string[] = [];
+
+          if (lmsRoleMode === 'same_role') {
+            const bulkEmails = lmsBulkSingleEmails.split('\n').map((e) => e.trim()).filter((e) => e.length > 0);
+            if (lmsSingleRole === 'student') studentsList = bulkEmails;
+            else if (lmsSingleRole === 'non_editing_teacher') teachersList = bulkEmails;
+            else if (lmsSingleRole === 'manager') managersList = bulkEmails;
+          } else {
+            studentsList = lmsStudentEmails.split('\n').map((e) => e.trim()).filter((e) => e.length > 0);
+            teachersList = lmsTeacherEmails.split('\n').map((e) => e.trim()).filter((e) => e.length > 0);
+            managersList = lmsManagerEmails.split('\n').map((e) => e.trim()).filter((e) => e.length > 0);
+          }
+
+          const totalEmails = studentsList.length + teachersList.length + managersList.length;
+          if (totalEmails === 0) {
+            toast.error('Vui lòng nhập ít nhất một email cần ghi danh vào LMS!');
+            return;
+          }
+
+          payload = {
+            action: 'direct_moodle_lms_enroll',
+            platform: 'learn.pythaverse.space',
+            courses: lmsSelectedCourses.map((c) => ({
+              category: c.category,
+              course_id: c.course_id,
+              course_name: c.course_name,
+              start_date: c.start_date,
+              end_date: c.end_date,
+              group_name: (c.group_name || '').trim() || undefined,
+            })),
+            role_mode: lmsRoleMode,
+            student_emails: studentsList,
+            teacher_emails: teachersList,
+            manager_emails: managersList,
+            auto_renew_existing: true,
+            auto_update_roles: true,
+          };
+
+          summary.engineName = '🎓 PLearn Moodle LMS Batch Direct Enroller';
+          summary.actionTitle = `Ghi Danh & Đổi Quyền Cho ${lmsSelectedCourses.length} Khóa Học (Single-Session)`;
+          summary.targetEntity = `${lmsSelectedCourses.length} Khóa học (${lmsSelectedCourses.map((c) => c.course_name).join(', ')})`;
+          summary.detailsList = [
+            `Tổng số tài khoản: ${totalEmails} người dùng`,
+            `Số lượng môn học thực thi: ${lmsSelectedCourses.length} môn (Không cần logout)`,
+            `Tự động cập nhật Role & Gia hạn: Có kích hoạt`,
+          ];
+        }
       }
     } else if (selectedBotType === 'git_collaborator') {
       // 🐙 THÊM THÀNH VIÊN VÀO REPOSITORY GIT (GITBUCKET)
@@ -1104,7 +1142,6 @@ export const AutomationStudioPage: React.FC = () => {
       summary,
     });
     setIsConfirmModalOpen(true);
-    toast.info('Đã mở bảng xác nhận thông số thực thi!');
   };
 
   const handleConfirmExecute = async () => {
@@ -2355,25 +2392,62 @@ export const AutomationStudioPage: React.FC = () => {
             </div>
           )}
 
-          {/* WORKFLOW 4: GHI DANH LMS */}
+          {/* WORKFLOW 4: GHI DANH LMS (HỖ TRỢ CẢ ENROL & UNENROL) */}
           {workspaceMainCategory === 'lms_enroll' && (
             <div className="space-y-5 pt-2">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-2xl border border-emerald-200/70 dark:border-emerald-900/40 bg-emerald-50/40 dark:bg-emerald-950/20 p-4">
+              {/* Thanh Chuyển Đổi Chế Độ: Ghi Danh vs Hủy Ghi Danh */}
+              <div className="grid grid-cols-2 gap-2 p-1.5 rounded-2xl bg-slate-100 dark:bg-slate-800/80">
+                <button
+                  type="button"
+                  onClick={() => setLmsActionType('enroll')}
+                  className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all cursor-pointer ${lmsActionType === 'enroll'
+                    ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                >
+                  <GraduationCap className="w-4 h-4" />
+                  <span>1. Ghi Danh & Gia Hạn Khóa Học</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setLmsActionType('unenrol')}
+                  className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all cursor-pointer ${lmsActionType === 'unenrol'
+                    ? 'bg-white dark:bg-slate-900 text-rose-600 dark:text-rose-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>2. Hủy Ghi Danh (Unenrol 🗑️)</span>
+                </button>
+              </div>
+
+              <div className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-2xl border p-4 ${lmsActionType === 'enroll'
+                ? 'border-emerald-200/70 dark:border-emerald-900/40 bg-emerald-50/40 dark:bg-emerald-950/20'
+                : 'border-rose-200/70 dark:border-rose-900/40 bg-rose-50/40 dark:bg-rose-950/20'
+                }`}>
                 <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400">
-                    <GraduationCap className="h-5 w-5" />
+                  <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${lmsActionType === 'enroll'
+                    ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400'
+                    : 'bg-rose-100 dark:bg-rose-950 text-rose-600 dark:text-rose-400'
+                    }`}>
+                    {lmsActionType === 'enroll' ? <GraduationCap className="h-5 w-5" /> : <Trash2 className="h-5 w-5" />}
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
                       <h3 className="text-xs font-bold text-slate-900 dark:text-white">
-                        Ghi Danh & Đổi Quyền Khóa Học PLearn LMS (Single Session)
+                        {lmsActionType === 'enroll'
+                          ? 'Ghi Danh & Đổi Quyền Khóa Học PLearn LMS (Single Session)'
+                          : 'Hủy Ghi Danh Học Viên Khỏi Khóa Học PLearn LMS'}
                       </h3>
-                      <span className="rounded-full bg-emerald-100 dark:bg-emerald-900/60 px-2 py-0.5 font-mono text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
+                      <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 font-mono text-[10px] font-bold text-slate-600 dark:text-slate-300">
                         learn.pythaverse.space
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                      Thực hiện ghi danh đồng loạt nhiều khóa học trong cùng 1 lần đăng nhập mà không cần logout.
+                      {lmsActionType === 'enroll'
+                        ? 'Thực hiện ghi danh đồng loạt nhiều khóa học trong cùng 1 lần đăng nhập.'
+                        : 'Lọc tìm và gỡ bỏ hoàn toàn quyền truy cập của danh sách học viên khỏi các khóa học đã chọn.'}
                     </p>
                   </div>
                 </div>
@@ -2381,17 +2455,20 @@ export const AutomationStudioPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleAddLmsCourseRow}
-                  className="flex items-center gap-1.5 rounded-xl border border-emerald-300 dark:border-emerald-800 bg-white dark:bg-slate-900 px-3.5 py-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-300 shadow-2xs hover:bg-emerald-50 transition cursor-pointer self-start sm:self-auto"
+                  className={`flex items-center gap-1.5 rounded-xl border bg-white dark:bg-slate-900 px-3.5 py-1.5 text-xs font-bold shadow-2xs transition cursor-pointer self-start sm:self-auto ${lmsActionType === 'enroll'
+                    ? 'border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50'
+                    : 'border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 hover:bg-rose-50'
+                    }`}
                 >
                   <Plus className="h-3.5 w-3.5" />
                   <span>Thêm Khóa Học LMS</span>
                 </button>
               </div>
 
-              {/* Danh sách các khóa học LMS cần ghi danh */}
+              {/* Danh sách các khóa học LMS cần thực thi */}
               <div className="space-y-3.5">
                 <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200 px-1">
-                  <span>DANH SÁCH KHÓA HỌC LMS THỰC THI ({lmsSelectedCourses.length} KHÓA):</span>
+                  <span>DANH SÁCH KHÓA HỌC LMS ÁP DỤNG ({lmsSelectedCourses.length} KHÓA):</span>
                   <span className="text-[11px] text-slate-400 font-normal">Tất cả khóa sẽ được duyệt tuần tự trong 1 phiên Playwright</span>
                 </div>
 
@@ -2404,7 +2481,8 @@ export const AutomationStudioPage: React.FC = () => {
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-bold text-white font-mono">
+                          <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white font-mono ${lmsActionType === 'enroll' ? 'bg-emerald-600' : 'bg-rose-600'
+                            }`}>
                             #{idx + 1}
                           </span>
                           <span className="text-xs font-extrabold text-slate-900 dark:text-white">
@@ -2426,7 +2504,7 @@ export const AutomationStudioPage: React.FC = () => {
 
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                         <div>
-                          <label className="text-[10px] font-bold uppercase text-slate-500">Phân loại ({lmsCategoriesList.length} Cats):</label>
+                          <label className="text-[10px] font-bold uppercase text-slate-500">Phân loại:</label>
                           <select
                             value={lmsItem.category}
                             onChange={(e) => {
@@ -2482,183 +2560,211 @@ export const AutomationStudioPage: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                        <div>
-                          <label className="text-[10px] font-bold uppercase text-slate-500 flex items-center gap-1">
-                            <Calendar className="w-3 h-3 text-indigo-500" />
-                            <span>Ngày bắt đầu:</span>
-                          </label>
-                          <input
-                            type="text"
-                            value={lmsItem.start_date}
-                            placeholder="dd-mm-yyyy"
-                            onChange={(e) => {
-                              const updated = [...lmsSelectedCourses];
-                              updated[idx].start_date = e.target.value;
-                              setLmsSelectedCourses(updated);
-                            }}
-                            className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-1.5 font-mono text-xs text-slate-900 dark:text-white"
-                          />
-                        </div>
+                      {/* Các trường Ngày tháng & Group CHỈ HIỂN THỊ khi ở chế độ ENROL */}
+                      {lmsActionType === 'enroll' && (
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                          <div>
+                            <label className="text-[10px] font-bold uppercase text-slate-500 flex items-center gap-1">
+                              <Calendar className="w-3 h-3 text-indigo-500" />
+                              <span>Ngày bắt đầu:</span>
+                            </label>
+                            <input
+                              type="text"
+                              value={lmsItem.start_date}
+                              placeholder="dd-mm-yyyy"
+                              onChange={(e) => {
+                                const updated = [...lmsSelectedCourses];
+                                updated[idx].start_date = e.target.value;
+                                setLmsSelectedCourses(updated);
+                              }}
+                              className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-1.5 font-mono text-xs text-slate-900 dark:text-white"
+                            />
+                          </div>
 
-                        <div>
-                          <label className="text-[10px] font-bold uppercase text-slate-500 flex items-center gap-1">
-                            <Calendar className="w-3 h-3 text-emerald-500" />
-                            <span>Ngày hết hạn (Mặc định 1 năm):</span>
-                          </label>
-                          <input
-                            type="text"
-                            value={lmsItem.end_date}
-                            placeholder="dd-mm-yyyy"
-                            onChange={(e) => {
-                              const updated = [...lmsSelectedCourses];
-                              updated[idx].end_date = e.target.value;
-                              setLmsSelectedCourses(updated);
-                            }}
-                            className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-1.5 font-mono text-xs text-slate-900 dark:text-white"
-                          />
-                        </div>
+                          <div>
+                            <label className="text-[10px] font-bold uppercase text-slate-500 flex items-center gap-1">
+                              <Calendar className="w-3 h-3 text-emerald-500" />
+                              <span>Ngày hết hạn (Mặc định 1 năm):</span>
+                            </label>
+                            <input
+                              type="text"
+                              value={lmsItem.end_date}
+                              placeholder="dd-mm-yyyy"
+                              onChange={(e) => {
+                                const updated = [...lmsSelectedCourses];
+                                updated[idx].end_date = e.target.value;
+                                setLmsSelectedCourses(updated);
+                              }}
+                              className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-1.5 font-mono text-xs text-slate-900 dark:text-white"
+                            />
+                          </div>
 
-                        <div>
-                          <label className="text-[10px] font-bold uppercase text-slate-500 flex items-center gap-1">
-                            <Users className="w-3 h-3 text-amber-500" />
-                            <span>Tên Group (Tùy chọn):</span>
-                          </label>
-                          <input
-                            type="text"
-                            value={lmsItem.group_name}
-                            placeholder="VD: DEMO_TEACHER_2026"
-                            onChange={(e) => {
-                              const updated = [...lmsSelectedCourses];
-                              updated[idx].group_name = e.target.value;
-                              setLmsSelectedCourses(updated);
-                            }}
-                            className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-1.5 font-mono text-xs text-slate-900 dark:text-white"
-                          />
+                          <div>
+                            <label className="text-[10px] font-bold uppercase text-slate-500 flex items-center gap-1">
+                              <Users className="w-3 h-3 text-amber-500" />
+                              <span>Tên Group (Tự động check tồn tại):</span>
+                            </label>
+                            <input
+                              type="text"
+                              value={lmsItem.group_name}
+                              placeholder="VD: DEMO_TEACHER_2026"
+                              onChange={(e) => {
+                                const updated = [...lmsSelectedCourses];
+                                updated[idx].group_name = e.target.value;
+                                setLmsSelectedCourses(updated);
+                              }}
+                              className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-1.5 font-mono text-xs text-slate-900 dark:text-white"
+                            />
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   );
                 })}
               </div>
 
-              {/* Role Assignment Mode */}
-              <div className="space-y-3 pt-2">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200">
-                    <UserCheck className="h-4 w-4 text-indigo-600" />
-                    <span>Phương Thức Gán Vai Trò:</span>
+              {/* NỘI DUNG NHẬP EMAIL: PHÂN BIỆT RÕ GIỮA ENROL VÀ UNENROL */}
+              {lmsActionType === 'unenrol' ? (
+                <div className="rounded-2xl border border-rose-200/80 dark:border-rose-900/40 bg-rose-50/30 dark:bg-rose-950/20 p-4 space-y-2.5">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
+                    <span className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400">
+                      <Trash2 className="w-4 h-4" />
+                      <span>DANH SÁCH EMAIL CẦN HỦY GHI DANH (MỖI DÒNG 1 EMAIL):</span>
+                    </span>
+                    <span className="font-mono text-rose-600 dark:text-rose-400">
+                      {lmsUnenrolEmails.split(/[\n,;]+/).filter((x) => x.trim().length > 0).length} tài khoản
+                    </span>
                   </div>
-
-                  <div className="flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1">
-                    <button
-                      type="button"
-                      onClick={() => setLmsRoleMode('multi_role')}
-                      className={`rounded-lg px-3 py-1 text-xs font-semibold transition-all cursor-pointer ${lmsRoleMode === 'multi_role'
-                        ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                        : 'text-slate-600 dark:text-slate-400'
-                        }`}
-                    >
-                      Phân Chia 3 Vai Trò
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setLmsRoleMode('same_role')}
-                      className={`rounded-lg px-3 py-1 text-xs font-semibold transition-all cursor-pointer ${lmsRoleMode === 'same_role'
-                        ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                        : 'text-slate-600 dark:text-slate-400'
-                        }`}
-                    >
-                      Cùng Một Vai Trò
-                    </button>
-                  </div>
+                  <textarea
+                    rows={5}
+                    value={lmsUnenrolEmails}
+                    onChange={(e) => setLmsUnenrolEmails(e.target.value)}
+                    placeholder="student1@pythaverse.space&#10;teacher1@pythaverse.space"
+                    className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 font-mono text-xs text-slate-900 dark:text-white focus:border-rose-500 focus:outline-hidden leading-relaxed"
+                  />
+                  <p className="text-[11px] text-slate-400">
+                    💡 Bot sẽ sử dụng bộ lọc Keyword 2 nhịp để tìm chính xác học viên và xác nhận Unenrol trên từng khóa học được chọn.
+                  </p>
                 </div>
-
-                {lmsRoleMode === 'multi_role' ? (
-                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
-                    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-3.5 space-y-2">
-                      <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
-                        <span>🎓 Học Viên (Student):</span>
-                        <span className="font-mono text-indigo-600">
-                          {lmsStudentEmails.split('\n').filter((x) => x.trim().length > 0).length}
-                        </span>
-                      </div>
-                      <textarea
-                        rows={4}
-                        value={lmsStudentEmails}
-                        onChange={(e) => setLmsStudentEmails(e.target.value)}
-                        placeholder="student1@pythaverse.space&#10;student2@pythaverse.space"
-                        className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2.5 font-mono text-[11px] text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
-                      />
+              ) : (
+                /* Role Assignment Mode cũ của Ghi danh */
+                <div className="space-y-3 pt-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200">
+                      <UserCheck className="h-4 w-4 text-indigo-600" />
+                      <span>Phương Thức Gán Vai Trò:</span>
                     </div>
 
-                    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-3.5 space-y-2">
-                      <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
-                        <span>🧑‍🏫 Giáo Viên (Non-editing Teacher):</span>
-                        <span className="font-mono text-amber-600">
-                          {lmsTeacherEmails.split('\n').filter((x) => x.trim().length > 0).length}
-                        </span>
-                      </div>
-                      <textarea
-                        rows={4}
-                        value={lmsTeacherEmails}
-                        onChange={(e) => setLmsTeacherEmails(e.target.value)}
-                        placeholder="teacher1@pythaverse.space&#10;teacher2@pythaverse.space"
-                        className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2.5 font-mono text-[11px] text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
-                      />
-                    </div>
-
-                    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-3.5 space-y-2">
-                      <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
-                        <span>🛡️ Quản Lý (Manager):</span>
-                        <span className="font-mono text-emerald-600">
-                          {lmsManagerEmails.split('\n').filter((x) => x.trim().length > 0).length}
-                        </span>
-                      </div>
-                      <textarea
-                        rows={4}
-                        value={lmsManagerEmails}
-                        onChange={(e) => setLmsManagerEmails(e.target.value)}
-                        placeholder="manager1@pythaverse.space"
-                        className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2.5 font-mono text-[11px] text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-4 space-y-3">
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold uppercase text-slate-600 dark:text-slate-400">
-                        Chọn vai trò áp dụng:
-                      </label>
-                      <select
-                        value={lmsSingleRole}
-                        onChange={(e) => setLmsSingleRole(e.target.value as any)}
-                        className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3.5 py-2 text-xs text-slate-900 dark:text-white cursor-pointer"
+                    <div className="flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1">
+                      <button
+                        type="button"
+                        onClick={() => setLmsRoleMode('multi_role')}
+                        className={`rounded-lg px-3 py-1 text-xs font-semibold transition-all cursor-pointer ${lmsRoleMode === 'multi_role'
+                          ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400'
+                          }`}
                       >
-                        <option value="student">🎓 Học Viên (Student)</option>
-                        <option value="non_editing_teacher">🧑‍🏫 Giáo Viên (Non-editing Teacher)</option>
-                        <option value="manager">🛡️ Quản Lý (Manager)</option>
-                      </select>
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-300">
-                        <span>DANH SÁCH EMAIL (MỖI DÒNG 1 EMAIL):</span>
-                        <span className="font-mono text-[11px] text-indigo-600">
-                          {lmsBulkSingleEmails.split('\n').filter((x) => x.trim().length > 0).length} emails
-                        </span>
-                      </div>
-                      <textarea
-                        rows={4}
-                        value={lmsBulkSingleEmails}
-                        onChange={(e) => setLmsBulkSingleEmails(e.target.value)}
-                        placeholder="user1@pythaverse.space&#10;user2@pythaverse.space"
-                        className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2.5 font-mono text-xs text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
-                      />
+                        Phân Chia 3 Vai Trò
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLmsRoleMode('same_role')}
+                        className={`rounded-lg px-3 py-1 text-xs font-semibold transition-all cursor-pointer ${lmsRoleMode === 'same_role'
+                          ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400'
+                          }`}
+                      >
+                        Cùng Một Vai Trò
+                      </button>
                     </div>
                   </div>
-                )}
-              </div>
+
+                  {lmsRoleMode === 'multi_role' ? (
+                    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
+                      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-3.5 space-y-2">
+                        <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
+                          <span>🎓 Học Viên (Student):</span>
+                          <span className="font-mono text-indigo-600">
+                            {lmsStudentEmails.split('\n').filter((x) => x.trim().length > 0).length}
+                          </span>
+                        </div>
+                        <textarea
+                          rows={4}
+                          value={lmsStudentEmails}
+                          onChange={(e) => setLmsStudentEmails(e.target.value)}
+                          placeholder="student1@pythaverse.space&#10;student2@pythaverse.space"
+                          className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2.5 font-mono text-[11px] text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
+                        />
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-3.5 space-y-2">
+                        <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
+                          <span>🧑‍🏫 Giáo Viên (Non-editing Teacher):</span>
+                          <span className="font-mono text-amber-600">
+                            {lmsTeacherEmails.split('\n').filter((x) => x.trim().length > 0).length}
+                          </span>
+                        </div>
+                        <textarea
+                          rows={4}
+                          value={lmsTeacherEmails}
+                          onChange={(e) => setLmsTeacherEmails(e.target.value)}
+                          placeholder="teacher1@pythaverse.space&#10;teacher2@pythaverse.space"
+                          className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2.5 font-mono text-[11px] text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
+                        />
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-3.5 space-y-2">
+                        <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
+                          <span>🛡️ Quản Lý (Manager):</span>
+                          <span className="font-mono text-emerald-600">
+                            {lmsManagerEmails.split('\n').filter((x) => x.trim().length > 0).length}
+                          </span>
+                        </div>
+                        <textarea
+                          rows={4}
+                          value={lmsManagerEmails}
+                          onChange={(e) => setLmsManagerEmails(e.target.value)}
+                          placeholder="manager1@pythaverse.space"
+                          className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2.5 font-mono text-[11px] text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-4 space-y-3">
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold uppercase text-slate-600 dark:text-slate-400">
+                          Chọn vai trò áp dụng:
+                        </label>
+                        <select
+                          value={lmsSingleRole}
+                          onChange={(e) => setLmsSingleRole(e.target.value as any)}
+                          className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3.5 py-2 text-xs text-slate-900 dark:text-white cursor-pointer"
+                        >
+                          <option value="student">🎓 Học Viên (Student)</option>
+                          <option value="non_editing_teacher">🧑‍🏫 Giáo Viên (Non-editing Teacher)</option>
+                          <option value="manager">🛡️ Quản Lý (Manager)</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-300">
+                          <span>DANH SÁCH EMAIL (MỖI DÒNG 1 EMAIL):</span>
+                          <span className="font-mono text-[11px] text-indigo-600">
+                            {lmsBulkSingleEmails.split('\n').filter((x) => x.trim().length > 0).length} emails
+                          </span>
+                        </div>
+                        <textarea
+                          rows={4}
+                          value={lmsBulkSingleEmails}
+                          onChange={(e) => setLmsBulkSingleEmails(e.target.value)}
+                          placeholder="user1@pythaverse.space&#10;user2@pythaverse.space"
+                          className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2.5 font-mono text-xs text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -2862,9 +2968,6 @@ export const AutomationStudioPage: React.FC = () => {
               <span>Phân Quyền Kho Mã Nguồn Pythaverse Git (GitBucket):</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="rounded-full bg-violet-50 dark:bg-violet-950/70 border border-violet-200/60 dark:border-violet-800 px-2.5 py-0.5 text-[10px] font-bold text-violet-700 dark:text-violet-300">
-                {allAvailableGitRepos.length} Repos từ Khóa Học
-              </span>
               <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-mono text-slate-500">
                 git.pythaverse.space
               </span>
@@ -2876,7 +2979,6 @@ export const AutomationStudioPage: React.FC = () => {
             <div className="space-y-1.5 relative" ref={gitRepoDropdownRef}>
               <div className="flex items-center justify-between text-xs">
                 <label className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                  <GitBranch className="w-3.5 h-3.5 text-violet-600" />
                   <span>Đường Dẫn Repository Mục Tiêu: <span className="text-rose-500">*</span></span>
                 </label>
                 <button
