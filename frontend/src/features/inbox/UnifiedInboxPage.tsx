@@ -1,7 +1,8 @@
+// frontend/src/features/inbox/UnifiedInboxPage.tsx
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import {
   Sparkles,
   ArrowRight,
@@ -49,8 +50,12 @@ import {
   GitPullRequest,
   RefreshCw,
   ClipboardCheck,
-  Info
+  Info,
+  GitBranch,
+  AlertCircle,
+  Upload
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { fetchApi } from '../../lib/api';
 import { InboxTicket, BotType } from '../../types';
 import { toast } from 'sonner';
@@ -73,6 +78,7 @@ interface CourseItem {
   category: string;
   course_name: string;
   lms_url: string;
+  git_repos?: { repo_url: string; target: 'teacher_only' | 'all' }[];
 }
 
 interface OrderCourseSelection {
@@ -83,6 +89,15 @@ interface OrderCourseSelection {
   licenses: number;
   start_date: string;
   end_date: string;
+}
+
+interface LmsCourseSelectionItem {
+  category: string;
+  course_id: number;
+  course_name: string;
+  start_date: string;
+  end_date: string;
+  group_name: string;
 }
 
 interface ScrapedPendingItem {
@@ -106,6 +121,21 @@ interface ScrapedPendingItem {
   status?: string;
   notes?: string;
   courses_data?: any[];
+}
+
+interface ParsedUserRow {
+  index: number;
+  firstName: string;
+  lastName: string;
+  mobile: string;
+  email: string;
+  dob: string;
+  role: string;
+  isStudent: boolean;
+  isTeacher: boolean;
+  isValid: boolean;
+  errors: string[];
+  isDuplicateEmail: boolean;
 }
 
 const stripHtmlTags = (htmlString: string | null | undefined): string => {
@@ -177,14 +207,29 @@ export const UnifiedInboxPage: React.FC = () => {
   const [previewFile, setPreviewFile] = useState<{ filename: string; url: string } | null>(null);
 
   // =========================================================================
-  // 🚀 STATE STUDIO PRO MODAL
+  // 🚀 STATE STUDIO PRO MODAL (ĐỒNG BỘ HOÀN TOÀN VỚI AUTOMATION STUDIO)
   // =========================================================================
   const [taskModalTicket, setTaskModalTicket] = useState<InboxTicket | null>(null);
-  const [selectedBotType, setSelectedBotType] = useState<'workspace_rpa' | 'keycloak_api' | 'feedback_doc_triage'>('workspace_rpa');
 
-  const [workspaceMainCategory, setWorkspaceMainCategory] = useState<'approve' | 'create_and_approve' | 'bulk_accounts' | 'lms_enroll'>('create_and_approve');
-  const [approveSubFlow, setApproveSubFlow] = useState<'approve_school_order' | 'approve_partner_contract' | 'admin_approve_contract'>('approve_school_order');
-  const [createApproveSubFlow, setCreateApproveSubFlow] = useState<'end_to_end' | 'partner_create_chain' | 'distributor_create_chain'>('end_to_end');
+  // 4 Cỗ Máy Tự Động Hóa Chính
+  const [selectedBotType, setSelectedBotType] = useState<
+    'workspace_rpa' | 'keycloak_api' | 'git_collaborator' | 'feedback_doc_triage'
+  >('workspace_rpa');
+
+  // 4 Mục chính của Workspace RPA
+  const [workspaceMainCategory, setWorkspaceMainCategory] = useState<
+    'approve' | 'create_and_approve' | 'bulk_accounts' | 'lms_enroll'
+  >('create_and_approve');
+
+  // Phân luồng con trong mục "1. Phê Duyệt"
+  const [approveSubFlow, setApproveSubFlow] = useState<
+    'approve_school_order' | 'approve_partner_contract' | 'admin_approve_contract'
+  >('approve_school_order');
+
+  // Phân luồng con trong mục "2. Tạo & Duyệt"
+  const [createApproveSubFlow, setCreateApproveSubFlow] = useState<
+    'end_to_end' | 'partner_create_chain' | 'distributor_create_chain'
+  >('end_to_end');
 
   const [contactInfo, setContactInfo] = useState<string>('Admin Automation Hub (operation@pythaverse.space)');
   const [additionalNotes, setAdditionalNotes] = useState<string>('Pythaverse Auto-Pipeline Managed');
@@ -192,7 +237,9 @@ export const UnifiedInboxPage: React.FC = () => {
   const [universalSearchQuery, setUniversalSearchQuery] = useState<string>('');
   const [selectedItemCode, setSelectedItemCode] = useState<string>('');
   const [selectedCachedItem, setSelectedCachedItem] = useState<ScrapedPendingItem | null>(null);
-  const [adminJustification, setAdminJustification] = useState<string>('Afiq requests and approves the requests, Hung QA processes the contract via Automation Hub');
+  const [adminJustification, setAdminJustification] = useState<string>(
+    'Afiq requests and approves the requests, Hung QA processes the contract via Automation Hub'
+  );
   const [scrapedPendingList, setScrapedPendingList] = useState<ScrapedPendingItem[]>([]);
   const [isScrapingLive, setIsScrapingLive] = useState<boolean>(false);
   const [parsedOrderCourses, setParsedOrderCourses] = useState<any[]>([]);
@@ -204,10 +251,6 @@ export const UnifiedInboxPage: React.FC = () => {
 
   const [lmsCategoriesList, setLmsCategoriesList] = useState<string[]>([]);
   const [lmsCoursesList, setLmsCoursesList] = useState<CourseItem[]>([]);
-  const [lmsCourseCategory, setLmsCourseCategory] = useState<string>('');
-  const [lmsCourseId, setLmsCourseId] = useState<number>(0);
-  const [lmsCourseName, setLmsCourseName] = useState<string>('');
-  const [lmsGroupName, setLmsGroupName] = useState<string>('');
 
   const [selectedSchool, setSelectedSchool] = useState<HierarchySchoolItem | null>(null);
   const [selectedPartner, setSelectedPartner] = useState<{ name: string; code: string } | null>(null);
@@ -217,8 +260,18 @@ export const UnifiedInboxPage: React.FC = () => {
   const [isEntityDropdownOpen, setIsEntityDropdownOpen] = useState<boolean>(false);
   const entityDropdownRef = useRef<HTMLDivElement | null>(null);
 
+  // File Upload & Validate Excel
   const [uploadedAccountsFile, setUploadedAccountsFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [parsedAccountRows, setParsedAccountRows] = useState<ParsedUserRow[]>([]);
+  const [accountValidationStats, setAccountValidationStats] = useState<{
+    total: number;
+    students: number;
+    teachers: number;
+    validCount: number;
+    errorCount: number;
+    duplicateCount: number;
+  }>({ total: 0, students: 0, teachers: 0, validCount: 0, errorCount: 0, duplicateCount: 0 });
 
   const getFormattedDate = (d: Date) => {
     const day = String(d.getDate()).padStart(2, '0');
@@ -235,14 +288,23 @@ export const UnifiedInboxPage: React.FC = () => {
   const [selectedCourses, setSelectedCourses] = useState<OrderCourseSelection[]>([]);
 
   // LMS Enroll
-  const [lmsStartDate, setLmsStartDate] = useState<string>(getFormattedDate(today));
-  const [lmsEndDate, setLmsEndDate] = useState<string>(getFormattedDate(nextYear));
-  const [lmsRoleMode, setLmsRoleMode] = useState<'same_role' | 'multi_role'>('multi_role');
+  const [lmsActionType, setLmsActionType] = useState<'enroll' | 'unenrol'>('enroll');
+  const [lmsUnenrolEmails, setLmsUnenrolEmails] = useState<string>('');
+  const [lmsSelectedCourses, setLmsSelectedCourses] = useState<LmsCourseSelectionItem[]>([]);
+  const [lmsRoleMode, setLmsRoleMode] = useState<'same_role' | 'multi_role'>('same_role');
   const [lmsSingleRole, setLmsSingleRole] = useState<'student' | 'non_editing_teacher' | 'manager'>('student');
   const [lmsBulkSingleEmails, setLmsBulkSingleEmails] = useState<string>('');
   const [lmsStudentEmails, setLmsStudentEmails] = useState<string>('');
   const [lmsTeacherEmails, setLmsTeacherEmails] = useState<string>('');
   const [lmsManagerEmails, setLmsManagerEmails] = useState<string>('');
+
+  // 🐙 Pythaverse Git Controls
+  const [gitRepoUrl, setGitRepoUrl] = useState<string>('https://git.pythaverse.space/ptvswrp/SWRP11_Teacher');
+  const [gitTargetRole, setGitTargetRole] = useState<'GUEST' | 'DEVELOPER' | 'ADMIN'>('GUEST');
+  const [gitUsersList, setGitUsersList] = useState<string>('');
+  const [isGitRepoDropdownOpen, setIsGitRepoDropdownOpen] = useState<boolean>(false);
+  const [gitRepoSearchQuery, setGitRepoSearchQuery] = useState<string>('');
+  const gitRepoDropdownRef = useRef<HTMLDivElement | null>(null);
 
   // Keycloak
   const [kcTargetEmail, setKcTargetEmail] = useState<string>('');
@@ -257,7 +319,10 @@ export const UnifiedInboxPage: React.FC = () => {
   // Feedback Doc
   const [docUrl, setDocUrl] = useState<string>('');
   const [assigneeEmail, setAssigneeEmail] = useState<string>('hung.nguyenmanh@dtt.vn');
-  const [feedbackCommentContent, setFeedbackCommentContent] = useState<string>('Kính gửi anh/chị, em xin phép chuyển thông tin phản hồi này để team kỹ thuật rà soát và hỗ trợ giải quyết.');
+  const [feedbackCommentContent, setFeedbackCommentContent] = useState<string>(
+    'Kính gửi anh/chị, em xin phép chuyển thông tin phản hồi này để team kỹ thuật rà soát và hỗ trợ giải quyết.'
+  );
+  const [isGeneratingDocComment, setIsGeneratingDocComment] = useState<boolean>(false);
 
   const [creatingTask, setCreatingTask] = useState<boolean>(false);
   const [runningImmediate, setRunningImmediate] = useState<boolean>(false);
@@ -270,16 +335,11 @@ export const UnifiedInboxPage: React.FC = () => {
 
   // Nạp danh sách tickets trực tiếp từ API
   const loadTickets = useCallback(async (forceSpinner = false) => {
-    if (forceSpinner) {
-      setLoading(true);
-    }
-
+    if (forceSpinner) setLoading(true);
     try {
       const endpoint = `/tickets?sort=desc`;
       const data = await fetchApi<InboxTicket[]>(endpoint);
-      if (data) {
-        setTickets(data);
-      }
+      if (data) setTickets(data);
     } catch (err) {
       toast.error('Không thể tải danh sách ticket: ' + (err as Error).message);
     } finally {
@@ -294,32 +354,30 @@ export const UnifiedInboxPage: React.FC = () => {
         const [schools, wsCats, wsCourses, lmsCats, lmsCourses] = await Promise.all([
           fetchApi<HierarchySchoolItem[]>('/workspace/hierarchy-schools').catch(() => []),
           fetchApi<string[]>('/workspace/categories').catch(() => ['SWRP', 'IR', 'ASP', 'Other']),
-          fetchApi<CourseItem[]>('/workspace/courses').catch(() => []),
+          fetchApi<CourseItem[]>('/courses/workspace').catch(() => []),
           fetchApi<string[]>('/courses/lms/categories').catch(() => []),
           fetchApi<CourseItem[]>('/courses/lms').catch(() => []),
         ]);
 
-        if (schools) {
-          setSchoolsList(schools);
-        }
-        if (wsCats && wsCats.length > 0) {
-          setWorkspaceCategoriesList(wsCats);
-        }
-        if (wsCourses) {
-          setWorkspaceCoursesList(wsCourses);
-        }
-        if (lmsCats && lmsCats.length > 0) {
-          setLmsCategoriesList(lmsCats);
-          setLmsCourseCategory(lmsCats[0]);
-        }
+        if (schools) setSchoolsList(schools);
+        if (wsCats && wsCats.length > 0) setWorkspaceCategoriesList(wsCats);
+        if (wsCourses) setWorkspaceCoursesList(wsCourses);
+        if (lmsCats && lmsCats.length > 0) setLmsCategoriesList(lmsCats);
         if (lmsCourses && lmsCourses.length > 0) {
           setLmsCoursesList(lmsCourses);
           const firstCat = lmsCats && lmsCats.length > 0 ? lmsCats[0] : lmsCourses[0].category;
           const matchFirst = lmsCourses.filter((c) => c.category === firstCat);
           const activeFirst = matchFirst.length > 0 ? matchFirst[0] : lmsCourses[0];
-          setLmsCourseId(activeFirst.course_id);
-          setLmsCourseName(activeFirst.course_name);
-          setLmsCourseCategory(activeFirst.category);
+          setLmsSelectedCourses([
+            {
+              category: activeFirst.category,
+              course_id: activeFirst.course_id,
+              course_name: activeFirst.course_name,
+              start_date: getFormattedDate(today),
+              end_date: getFormattedDate(nextYear),
+              group_name: '',
+            },
+          ]);
         }
       } catch (e) {
         console.warn('Lỗi nạp metadata ngầm:', e);
@@ -335,11 +393,69 @@ export const UnifiedInboxPage: React.FC = () => {
       if (entityDropdownRef.current && !entityDropdownRef.current.contains(event.target as Node)) {
         setIsEntityDropdownOpen(false);
       }
+      if (gitRepoDropdownRef.current && !gitRepoDropdownRef.current.contains(event.target as Node)) {
+        setIsGitRepoDropdownOpen(false);
+      }
       setActiveCategoryDropdown(null);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Tổng hợp kho Repos Git từ danh mục khóa học
+  const allAvailableGitRepos = useMemo(() => {
+    const reposMap = new Map<string, {
+      repo_url: string;
+      repo_name: string;
+      course_name: string;
+      category: string;
+      target: 'teacher_only' | 'all';
+    }>();
+
+    const allCourses = [...workspaceCoursesList, ...lmsCoursesList];
+    allCourses.forEach((c) => {
+      let rawRepos: any[] = [];
+      const rawField: any = (c as any).git_repos;
+      if (Array.isArray(rawField)) {
+        rawRepos = rawField;
+      } else if (typeof rawField === 'string' && rawField.trim()) {
+        try {
+          const parsed = JSON.parse(rawField);
+          if (Array.isArray(parsed)) rawRepos = parsed;
+        } catch { }
+      }
+
+      rawRepos.forEach((r) => {
+        if (r && r.repo_url && typeof r.repo_url === 'string') {
+          const cleanUrl = r.repo_url.trim();
+          if (cleanUrl && !reposMap.has(cleanUrl)) {
+            const shortName = cleanUrl.split('/').pop() || cleanUrl;
+            reposMap.set(cleanUrl, {
+              repo_url: cleanUrl,
+              repo_name: shortName,
+              course_name: c.course_name,
+              category: c.category,
+              target: r.target || 'all',
+            });
+          }
+        }
+      });
+    });
+
+    return Array.from(reposMap.values());
+  }, [workspaceCoursesList, lmsCoursesList]);
+
+  const filteredAvailableGitRepos = useMemo(() => {
+    const q = gitRepoSearchQuery.trim().toLowerCase();
+    if (!q) return allAvailableGitRepos;
+    return allAvailableGitRepos.filter(
+      (r) =>
+        r.repo_name.toLowerCase().includes(q) ||
+        r.repo_url.toLowerCase().includes(q) ||
+        r.course_name.toLowerCase().includes(q) ||
+        r.category.toLowerCase().includes(q)
+    );
+  }, [allAvailableGitRepos, gitRepoSearchQuery]);
 
   // Nạp danh sách đơn hàng Cache khi chọn tab Approve
   const handleFetchCachedList = async () => {
@@ -438,14 +554,14 @@ export const UnifiedInboxPage: React.FC = () => {
 
   const handleCategoryChange = async (ticketId: string, newCategory: string) => {
     const prevTickets = [...tickets];
-    const updated = tickets.map(t => t.id === ticketId ? { ...t, category: newCategory as any } : t);
+    const updated = tickets.map((t) => (t.id === ticketId ? { ...t, category: newCategory as any } : t));
     setTickets(updated);
     toast.success(`Đã cập nhật phân loại thành [${newCategory.toUpperCase()}]`);
 
     try {
       await fetchApi(`/tickets/${ticketId}/category`, {
         method: 'PUT',
-        body: JSON.stringify({ category: newCategory })
+        body: JSON.stringify({ category: newCategory }),
       });
     } catch (err) {
       setTickets(prevTickets);
@@ -457,8 +573,8 @@ export const UnifiedInboxPage: React.FC = () => {
     setActionLoading(ticketId);
     const prevTickets = [...tickets];
     const updated = selectedStatus === 'all'
-      ? tickets.filter(t => t.id !== ticketId)
-      : tickets.map(t => t.id === ticketId ? { ...t, status: 'dismissed' as any } : t);
+      ? tickets.filter((t) => t.id !== ticketId)
+      : tickets.map((t) => (t.id === ticketId ? { ...t, status: 'dismissed' as any } : t));
 
     setTickets(updated);
     toast.success('Đã chuyển ticket vào mục Đã Bỏ Qua');
@@ -476,7 +592,7 @@ export const UnifiedInboxPage: React.FC = () => {
   const handleRestoreTask = async (ticketId: string) => {
     setActionLoading(ticketId);
     const prevTickets = [...tickets];
-    const updated = tickets.map(t => t.id === ticketId ? { ...t, status: 'pending' as any } : t);
+    const updated = tickets.map((t) => (t.id === ticketId ? { ...t, status: 'pending' as any } : t));
     setTickets(updated);
     toast.success('Đã khôi phục ticket về Hòm Thư');
 
@@ -493,7 +609,7 @@ export const UnifiedInboxPage: React.FC = () => {
   const handleCompleteTask = async (ticketId: string) => {
     setActionLoading(ticketId);
     const prevTickets = [...tickets];
-    const updated = tickets.map(t => t.id === ticketId ? { ...t, status: 'completed' as any } : t);
+    const updated = tickets.map((t) => (t.id === ticketId ? { ...t, status: 'completed' as any } : t));
     setTickets(updated);
     toast.success('Đã đánh dấu hoàn thành ticket!');
 
@@ -507,24 +623,163 @@ export const UnifiedInboxPage: React.FC = () => {
     }
   };
 
+  // Convert số serial ngày của Excel thành DD/MM/YYYY chuẩn
+  const formatExcelDateClient = (val: any): string => {
+    if (!val) return '';
+    if (typeof val === 'number') {
+      const d = new Date(Math.round((val - 25569) * 86400 * 1000));
+      const day = String(d.getUTCDate()).padStart(2, '0');
+      const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const year = d.getUTCFullYear();
+      return `${day}/${month}/${year}`;
+    }
+    if (val instanceof Date) {
+      const day = String(val.getDate()).padStart(2, '0');
+      const month = String(val.getMonth() + 1).padStart(2, '0');
+      const year = val.getFullYear();
+      return `${day}/${month}/${year}`;
+    }
+    const str = String(val).trim().split(' ')[0];
+    return str.replace(/-/g, '/');
+  };
+
+  const processAndValidateAccountsFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array', cellDates: false });
+        const sheetNames = workbook.SheetNames;
+        const isCOF = sheetNames.some((s) => s.toLowerCase().includes('student info')) || sheetNames.some((s) => s.toLowerCase() === 'cof');
+
+        let targetSheets: string[] = [];
+        if (isCOF) {
+          targetSheets = sheetNames.filter((s) => s.toLowerCase().includes('student info') || s.toLowerCase().includes('teacher info'));
+        } else {
+          targetSheets = [sheetNames[0]];
+        }
+
+        const parsed: ParsedUserRow[] = [];
+        let rGlobalIdx = 1;
+        let studentsCount = 0;
+        let teachersCount = 0;
+        let validRows = 0;
+        let errorRows = 0;
+
+        targetSheets.forEach((sheetName) => {
+          const worksheet = workbook.Sheets[sheetName];
+          const rawJson: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+          if (rawJson.length < 2) return;
+
+          let headerRowIndex = -1;
+          for (let i = 0; i < Math.min(rawJson.length, 15); i++) {
+            const rowStr = rawJson[i].map((c) => String(c).toLowerCase()).join(' ');
+            if (rowStr.includes('first name') || (rowStr.includes('last name') && rowStr.includes('role')) || rowStr.includes('email')) {
+              headerRowIndex = i;
+              break;
+            }
+          }
+          if (headerRowIndex === -1) headerRowIndex = 0;
+
+          const headers = rawJson[headerRowIndex].map((h) => String(h).trim().toLowerCase());
+          const fnIdx = headers.findIndex((h) => h.includes('first name') || h.includes('tên'));
+          const lnIdx = headers.findIndex((h) => h.includes('last name') || h.includes('họ'));
+          const mobIdx = headers.findIndex((h) => h.includes('mobile') || h.includes('sđt') || h.includes('phone'));
+          const emIdx = headers.findIndex((h) => h.includes('email') || h.includes('thư'));
+          const dobIdx = headers.findIndex((h) => h.includes('birth') || h.includes('dob') || h.includes('sinh'));
+          const roleIdx = headers.findIndex((h) => h.includes('role') || h.includes('vai trò'));
+
+          const rowsToParse = rawJson.slice(headerRowIndex + 1);
+          rowsToParse.forEach((row) => {
+            if (row.every((cell) => !cell || String(cell).trim() === '')) return;
+
+            const firstName = String(row[fnIdx !== -1 ? fnIdx : 1] || '').trim();
+            const lastName = String(row[lnIdx !== -1 ? lnIdx : 2] || '').trim();
+            if (!firstName && !lastName) return;
+
+            const mobile = String(row[mobIdx !== -1 ? mobIdx : 3] || '').trim();
+            const email = String(row[emIdx !== -1 ? emIdx : 4] || '').trim();
+            const dob = formatExcelDateClient(row[dobIdx !== -1 ? dobIdx : 5]);
+
+            let roleRaw = String(row[roleIdx !== -1 ? roleIdx : 6] || '').trim();
+            if (!roleRaw && sheetName.toLowerCase().includes('teacher')) roleRaw = 'Teacher';
+            if (!roleRaw && sheetName.toLowerCase().includes('student')) roleRaw = 'Student';
+
+            const isStudent = roleRaw.toLowerCase().includes('student');
+            const isTeacher = !isStudent;
+
+            if (isStudent) studentsCount++;
+            else teachersCount++;
+
+            const errors: string[] = [];
+            if (!firstName) errors.push('Thiếu First Name (*)');
+            if (!lastName) errors.push('Thiếu Last Name (*)');
+            if (!dob) errors.push('Thiếu Ngày sinh (*)');
+            if (isTeacher && !email) errors.push('Giáo viên bắt buộc có Email (*)');
+
+            const isValid = errors.length === 0;
+            if (isValid) validRows++;
+            else errorRows++;
+
+            parsed.push({
+              index: rGlobalIdx++,
+              firstName,
+              lastName,
+              mobile,
+              email,
+              dob,
+              role: roleRaw || (isStudent ? 'Student' : 'Teacher'),
+              isStudent,
+              isTeacher,
+              isValid,
+              errors,
+              isDuplicateEmail: false,
+            });
+          });
+        });
+
+        setParsedAccountRows(parsed);
+        setAccountValidationStats({
+          total: parsed.length,
+          students: studentsCount,
+          teachers: teachersCount,
+          validCount: validRows,
+          errorCount: errorRows,
+          duplicateCount: 0,
+        });
+
+        toast.success(`Đã nạp thành công ${parsed.length} tài khoản (${isCOF ? 'File COF 3 Tabs' : 'File Danh sách'})!`);
+      } catch (err) {
+        toast.error('Lỗi khi đọc file Excel: ' + (err as Error).message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
   // =========================================================================
-  // ⚡ AUTO-PREFILL THÔNG MINH TỪ REQUEST VÀO MODAL STUDIO
+  // ⚡ SIÊU NĂNG LỰC: AUTO-PREFILL THÔNG MINH TỪ METADATA DO AI CHUẨN BỊ
   // =========================================================================
   const handleOpenTaskModal = (ticket: InboxTicket) => {
     setTaskModalTicket(ticket);
     setViewMode('form');
 
-    const fullText = `${ticket.subject || ''} ${ticket.raw_content || ''} ${ticket.submitter_name || ''} ${ticket.metadata?.school_name || ''}`.toLowerCase();
+    const meta = ticket.metadata || {};
+    const suggestedTask = meta.suggested_bot_task || {};
+    const excelSummary = meta.excel_summary || null;
+    const cofCourses = meta.cof_courses || excelSummary?.courses || [];
 
-    // 1. Tự động nhận diện trường học từ phả hệ
-    const matchedSchool =
-      schoolsList.find(
-        (s) =>
-          fullText.includes(s.school_name.toLowerCase()) ||
-          (s.school_code && fullText.includes(s.school_code.toLowerCase()))
-      ) ||
-      schoolsList[0] ||
-      null;
+    const fullText = `${ticket.subject || ''} ${ticket.raw_content || ''} ${ticket.submitter_name || ''} ${meta.school_name || ''}`.toLowerCase();
+
+    // 1. Phân giải trường học thụ hưởng (Ưu tiên từ metadata AI phát hiện)
+    const targetSchoolName = meta.school_name || excelSummary?.school_name || suggestedTask.payload?.school_name || '';
+    let matchedSchool: HierarchySchoolItem | null = null;
+
+    if (targetSchoolName) {
+      matchedSchool = schoolsList.find((s) => s.school_name.toLowerCase().includes(targetSchoolName.toLowerCase())) || null;
+    }
+    if (!matchedSchool) {
+      matchedSchool = schoolsList.find((s) => fullText.includes(s.school_name.toLowerCase()) || (s.school_code && fullText.includes(s.school_code.toLowerCase()))) || schoolsList[0] || null;
+    }
 
     setSelectedSchool(matchedSchool);
     if (matchedSchool) {
@@ -533,23 +788,26 @@ export const UnifiedInboxPage: React.FC = () => {
       setSelectedDistributor({ name: matchedSchool.distributor_name, code: matchedSchool.distributor_code || 'DST' });
     }
 
-    setKcTargetEmail(ticket.sender_email);
-    setDocUrl(ticket.doc_url || '');
-    setAssigneeEmail(ticket.assigned_email || 'hung.nguyenmanh@dtt.vn');
-
-    // 2. Điền thông tin COF nếu backend đã parse sẵn trong metadata
-    if (ticket.metadata?.cof_courses && ticket.metadata.cof_courses.length > 0) {
-      setSelectedCourses(ticket.metadata.cof_courses);
+    // 2. Điền thông tin khóa học COF nếu Backend đã bóc tách sẵn
+    if (cofCourses.length > 0) {
+      setSelectedCourses(
+        cofCourses.map((c: any) => ({
+          category: c.category || 'SWRP',
+          course_id: c.course_id || 654,
+          course_name: c.course_name || c.name,
+          lms_url: c.lms_url || `https://learn.pythaverse.space/course/view.php?id=${c.course_id || 654}`,
+          licenses: c.licenses || c.quantity || 50,
+          start_date: c.start_date || getFormattedDate(today),
+          end_date: c.end_date || getFormattedDate(nextYear),
+        }))
+      );
     } else {
-      const defaultCourse =
-        workspaceCoursesList.find((c) => c.category === 'SWRP') ||
-        workspaceCoursesList[0] || {
-          course_id: 654,
-          category: 'SWRP',
-          course_name: 'SWRP 9: LEANBOT Programming Applications with IoT [V2] (EN)',
-          lms_url: 'https://learn.pythaverse.space/course/view.php?id=654',
-        };
-
+      const defaultCourse = workspaceCoursesList.find((c) => c.category === 'SWRP') || workspaceCoursesList[0] || {
+        course_id: 654,
+        category: 'SWRP',
+        course_name: 'SWRP 9: LEANBOT Programming Applications with IoT [V2] (EN)',
+        lms_url: 'https://learn.pythaverse.space/course/view.php?id=654',
+      };
       setSelectedCourses([
         {
           category: defaultCourse.category,
@@ -563,35 +821,55 @@ export const UnifiedInboxPage: React.FC = () => {
       ]);
     }
 
-    // 3. Phân loại Cỗ máy theo phân loại AI Triage
-    let botType: 'workspace_rpa' | 'keycloak_api' | 'feedback_doc_triage' = 'workspace_rpa';
+    // 3. Phân loại Cỗ máy theo đề xuất AI (suggested_bot_type) hoặc Category
+    let botType: 'workspace_rpa' | 'keycloak_api' | 'git_collaborator' | 'feedback_doc_triage' = 'workspace_rpa';
     let mainCat: 'approve' | 'create_and_approve' | 'bulk_accounts' | 'lms_enroll' = 'create_and_approve';
 
-    if (ticket.category === 'account_keycloak') {
-      botType = 'keycloak_api';
-      setKcEnableResetPass(true);
-    } else if (ticket.category === 'lms_enroll') {
-      botType = 'workspace_rpa';
-      mainCat = 'lms_enroll';
-      const emailMatches = ticket.raw_content?.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [];
-      const cleanEmails = Array.from(new Set(emailMatches.filter(e => !e.includes('pythaverse.space') && !e.includes('dtt.vn'))));
-      if (cleanEmails.length > 0) {
-        setLmsStudentEmails(cleanEmails.join('\n'));
-      }
-    } else if (ticket.category === 'license') {
-      botType = 'workspace_rpa';
-      const hasExcelAttach = ticket.attachments?.some((a: any) => a.filename?.endsWith('.xlsx') || a.filename?.endsWith('.xls'));
-      if (hasExcelAttach) {
-        mainCat = 'create_and_approve';
+    if (suggestedTask.bot_type) {
+      if (suggestedTask.bot_type === 'lms_playwright') {
+        botType = 'workspace_rpa';
+        mainCat = 'lms_enroll';
       } else {
-        mainCat = 'approve';
+        botType = suggestedTask.bot_type;
       }
-    } else if (ticket.source === 'google_form') {
-      botType = 'feedback_doc_triage';
+
+      if (suggestedTask.action === 'bulk_account_creation') mainCat = 'bulk_accounts';
+      else if (suggestedTask.action === 'pipeline_end_to_end') mainCat = 'create_and_approve';
+      else if (suggestedTask.action?.includes('approve')) mainCat = 'approve';
+    } else {
+      // Fallback nếu ticket cũ chưa có suggested_bot_task
+      if (ticket.category === 'account_keycloak') {
+        botType = 'keycloak_api';
+      } else if (ticket.category === 'lms_enroll') {
+        botType = 'workspace_rpa';
+        mainCat = 'lms_enroll';
+      } else if (ticket.category === 'license') {
+        botType = 'workspace_rpa';
+        const hasExcel = ticket.attachments?.some((a: any) => a.filename?.endsWith('.xlsx') || a.filename?.endsWith('.xls'));
+        mainCat = hasExcel ? 'bulk_accounts' : 'create_and_approve';
+      } else if (ticket.source === 'google_form') {
+        botType = 'feedback_doc_triage';
+      }
     }
 
     setSelectedBotType(botType);
     setWorkspaceMainCategory(mainCat);
+
+    // Điền tham số người dùng & tài liệu
+    setKcTargetEmail(ticket.sender_email);
+    setDocUrl(ticket.doc_url || '');
+    setAssigneeEmail(ticket.assigned_email || 'hung.nguyenmanh@dtt.vn');
+
+    // Tự trích xuất email học viên nếu có
+    const emailMatches = ticket.raw_content?.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [];
+    const cleanEmails = Array.from(new Set(emailMatches.filter((e) => !e.includes('pythaverse.space') && !e.includes('dtt.vn'))));
+    if (cleanEmails.length > 0) {
+      setLmsBulkSingleEmails(cleanEmails.join('\n'));
+      setLmsStudentEmails(cleanEmails.join('\n'));
+      setGitUsersList(cleanEmails.join('\n'));
+    }
+
+    toast.success('✨ AI đã tự động điền sẵn thông số điều phối dựa trên phân tích Ticket!');
   };
 
   // ⚡ TỰ ĐỘNG TÍNH TOÁN PAYLOAD JSON ĐỒNG BỘ
@@ -703,42 +981,66 @@ export const UnifiedInboxPage: React.FC = () => {
           school_code: selectedSchool?.school_code,
           attachment_url: firstAttachmentUrl,
           filename: uploadedAccountsFile?.name || taskModalTicket?.attachments?.[0]?.filename || 'accounts.xlsx',
+          total_count: accountValidationStats.total || parsedAccountRows.length,
+          student_count: accountValidationStats.students,
+          teacher_count: accountValidationStats.teachers,
         };
       } else if (workspaceMainCategory === 'lms_enroll') {
-        let studentsList: string[] = [];
-        let teachersList: string[] = [];
-        let managersList: string[] = [];
-
-        if (lmsRoleMode === 'same_role') {
-          const bulkEmails = lmsBulkSingleEmails.split('\n').map((e) => e.trim()).filter((e) => e.length > 0);
-          if (lmsSingleRole === 'student') studentsList = bulkEmails;
-          else if (lmsSingleRole === 'non_editing_teacher') teachersList = bulkEmails;
-          else if (lmsSingleRole === 'manager') managersList = bulkEmails;
+        if (lmsActionType === 'unenrol') {
+          const unenrolList = lmsUnenrolEmails.split(/[\n,;]+/).map((e) => e.trim()).filter((e) => e.length > 0);
+          payload = {
+            action: 'unenrol_users_pipeline',
+            platform: 'learn.pythaverse.space',
+            courses: lmsSelectedCourses.map((c) => ({ course_id: c.course_id, course_name: c.course_name })),
+            emails: unenrolList,
+          };
         } else {
-          studentsList = lmsStudentEmails.split('\n').map((e) => e.trim()).filter((e) => e.length > 0);
-          teachersList = lmsTeacherEmails.split('\n').map((e) => e.trim()).filter((e) => e.length > 0);
-          managersList = lmsManagerEmails.split('\n').map((e) => e.trim()).filter((e) => e.length > 0);
-        }
+          let studentsList: string[] = [];
+          let teachersList: string[] = [];
+          let managersList: string[] = [];
 
-        payload = {
-          action: 'direct_moodle_lms_enroll',
-          platform: 'learn.pythaverse.space',
-          course_id: lmsCourseId,
-          course_name: lmsCourseName,
-          category: lmsCourseCategory,
-          start_date: lmsStartDate,
-          end_date: lmsEndDate,
-          group_name: lmsGroupName.trim() || undefined,
-          role_mode: lmsRoleMode,
-          student_emails: studentsList,
-          teacher_emails: teachersList,
-          manager_emails: managersList,
-          auto_renew_existing: true,
-        };
+          if (lmsRoleMode === 'same_role') {
+            const bulkEmails = lmsBulkSingleEmails.split('\n').map((e) => e.trim()).filter((e) => e.length > 0);
+            if (lmsSingleRole === 'student') studentsList = bulkEmails;
+            else if (lmsSingleRole === 'non_editing_teacher') teachersList = bulkEmails;
+            else if (lmsSingleRole === 'manager') managersList = bulkEmails;
+          } else {
+            studentsList = lmsStudentEmails.split('\n').map((e) => e.trim()).filter((e) => e.length > 0);
+            teachersList = lmsTeacherEmails.split('\n').map((e) => e.trim()).filter((e) => e.length > 0);
+            managersList = lmsManagerEmails.split('\n').map((e) => e.trim()).filter((e) => e.length > 0);
+          }
+
+          payload = {
+            action: 'direct_moodle_lms_enroll',
+            platform: 'learn.pythaverse.space',
+            courses: lmsSelectedCourses.map((c) => ({
+              category: c.category,
+              course_id: c.course_id,
+              course_name: c.course_name,
+              start_date: c.start_date,
+              end_date: c.end_date,
+              group_name: (c.group_name || '').trim() || undefined,
+            })),
+            role_mode: lmsRoleMode,
+            student_emails: studentsList,
+            teacher_emails: teachersList,
+            manager_emails: managersList,
+            auto_renew_existing: true,
+          };
+        }
       }
+    } else if (selectedBotType === 'git_collaborator') {
+      const usersArr = gitUsersList.split(/[\n,;]+/).map((u) => u.trim()).filter((u) => u.length > 0);
+      payload = {
+        action: 'add_repo_collaborators',
+        repo_url: gitRepoUrl.trim(),
+        role: gitTargetRole,
+        users: usersArr,
+      };
     } else if (selectedBotType === 'keycloak_api') {
+      const rawEmails = kcTargetEmail.split(/[\n,;]+/).map((e) => e.trim()).filter((e) => e.length > 0);
       const actions: string[] = [];
-      const conf: Record<string, any> = { target_email: kcTargetEmail, ticket_id: tId };
+      const conf: Record<string, any> = { target_email: rawEmails[0] || '', identifiers: rawEmails };
 
       if (kcEnableResetPass) {
         actions.push('reset_password');
@@ -783,18 +1085,20 @@ export const UnifiedInboxPage: React.FC = () => {
     additionalNotes,
     selectedCourses,
     uploadedAccountsFile,
-    lmsCourseId,
-    lmsCourseName,
-    lmsCourseCategory,
-    lmsStartDate,
-    lmsEndDate,
-    lmsGroupName,
+    accountValidationStats,
+    parsedAccountRows,
+    lmsActionType,
+    lmsUnenrolEmails,
+    lmsSelectedCourses,
     lmsRoleMode,
     lmsSingleRole,
     lmsBulkSingleEmails,
     lmsStudentEmails,
     lmsTeacherEmails,
     lmsManagerEmails,
+    gitRepoUrl,
+    gitTargetRole,
+    gitUsersList,
     kcTargetEmail,
     kcEnableResetPass,
     kcTempPass,
@@ -813,14 +1117,12 @@ export const UnifiedInboxPage: React.FC = () => {
   }, [computedPayload]);
 
   const handleAddCourseRow = () => {
-    const defaultCourse =
-      workspaceCoursesList.find((c) => c.category === 'SWRP') ||
-      workspaceCoursesList[0] || {
-        course_id: 654,
-        category: 'SWRP',
-        course_name: 'SWRP 9: LEANBOT Programming Applications with IoT [V2] (EN)',
-        lms_url: 'https://learn.pythaverse.space/course/view.php?id=654',
-      };
+    const defaultCourse = workspaceCoursesList.find((c) => c.category === 'SWRP') || workspaceCoursesList[0] || {
+      course_id: 654,
+      category: 'SWRP',
+      course_name: 'SWRP 9: LEANBOT Programming Applications with IoT [V2] (EN)',
+      lms_url: 'https://learn.pythaverse.space/course/view.php?id=654',
+    };
 
     setSelectedCourses([
       ...selectedCourses,
@@ -844,6 +1146,36 @@ export const UnifiedInboxPage: React.FC = () => {
     setSelectedCourses(selectedCourses.filter((_, idx) => idx !== index));
   };
 
+  const handleAddLmsCourseRow = () => {
+    const defaultCat = lmsCategoriesList[0] || (lmsCoursesList[0] ? lmsCoursesList[0].category : 'TRAINING COURSES');
+    const matchCourses = lmsCoursesList.filter((c) => c.category === defaultCat);
+    const firstCourse = matchCourses[0] || lmsCoursesList[0] || {
+      course_id: 735,
+      category: defaultCat,
+      course_name: 'Foundation of IoT and AI with Robotics and Arduino',
+    };
+
+    setLmsSelectedCourses([
+      ...lmsSelectedCourses,
+      {
+        category: firstCourse.category,
+        course_id: firstCourse.course_id,
+        course_name: firstCourse.course_name,
+        start_date: getFormattedDate(today),
+        end_date: getFormattedDate(nextYear),
+        group_name: '',
+      },
+    ]);
+  };
+
+  const handleRemoveLmsCourseRow = (index: number) => {
+    if (lmsSelectedCourses.length <= 1) {
+      toast.error('Cần ít nhất 1 khóa học LMS!');
+      return;
+    }
+    setLmsSelectedCourses(lmsSelectedCourses.filter((_, idx) => idx !== index));
+  };
+
   const handleAutoExtractCof = async () => {
     if (!taskModalTicket) return;
     setExtractingCof(true);
@@ -853,9 +1185,7 @@ export const UnifiedInboxPage: React.FC = () => {
         body: JSON.stringify({ cof_text: taskModalTicket.raw_content || taskModalTicket.subject }),
       });
 
-      const matchedSch =
-        schoolsList.find((s) => s.school_name.toLowerCase().includes(res.school_name?.toLowerCase() || '')) ||
-        selectedSchool;
+      const matchedSch = schoolsList.find((s) => s.school_name.toLowerCase().includes(res.school_name?.toLowerCase() || '')) || selectedSchool;
 
       if (matchedSch) {
         setSelectedSchool(matchedSch);
@@ -874,7 +1204,6 @@ export const UnifiedInboxPage: React.FC = () => {
     }
   };
 
-  // ⚡ HÀM GỬI TÁC VỤ (HỖ TRỢ CẢ "ĐƯA VÀO HÀNG ĐỢI" VÀ "CHẠY NGAY 1-CLICK")
   const handleSubmitBotTask = async (runImmediately: boolean) => {
     if (!taskModalTicket) return;
 
@@ -890,7 +1219,7 @@ export const UnifiedInboxPage: React.FC = () => {
     else setCreatingTask(true);
 
     try {
-      let actualBotType: BotType | 'lms_playwright' = selectedBotType;
+      let actualBotType: BotType | 'lms_playwright' | 'git_collaborator' = selectedBotType;
       if (selectedBotType === 'workspace_rpa' && workspaceMainCategory === 'lms_enroll') {
         actualBotType = 'lms_playwright';
       }
@@ -898,17 +1227,11 @@ export const UnifiedInboxPage: React.FC = () => {
       if (workspaceMainCategory === 'bulk_accounts' && uploadedAccountsFile) {
         toast.info('Đang tải file Excel lên hệ thống lưu trữ...');
         const cleanFileName = `inbox_accounts/${Date.now()}_${uploadedAccountsFile.name.replace(/\s+/g, '_')}`;
-
-        const { error: uploadErr } = await supabase.storage
-          .from('ticket-attachments')
-          .upload(cleanFileName, uploadedAccountsFile, { upsert: true });
+        const { error: uploadErr } = await supabase.storage.from('ticket-attachments').upload(cleanFileName, uploadedAccountsFile, { upsert: true });
 
         if (uploadErr) throw new Error(`Lỗi upload file: ${uploadErr.message}`);
 
-        const { data: publicUrlData } = supabase.storage
-          .from('ticket-attachments')
-          .getPublicUrl(cleanFileName);
-
+        const { data: publicUrlData } = supabase.storage.from('ticket-attachments').getPublicUrl(cleanFileName);
         (finalPayloadData as any).attachment_url = publicUrlData.publicUrl;
       }
 
@@ -1058,9 +1381,7 @@ export const UnifiedInboxPage: React.FC = () => {
             onClick={(e) => e.stopPropagation()}
             className="absolute left-0 mt-1.5 w-48 bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100"
           >
-            <div className="px-3 py-1 text-[10px] uppercase font-bold text-slate-400">
-              Đổi Phân Loại
-            </div>
+            <div className="px-3 py-1 text-[10px] uppercase font-bold text-slate-400">Đổi Phân Loại</div>
             {[
               { id: 'bug', label: '🐛 System Bugs' },
               { id: 'account_keycloak', label: '🔑 Keycloak/Account' },
@@ -1074,9 +1395,7 @@ export const UnifiedInboxPage: React.FC = () => {
                   handleCategoryChange(ticketId, opt.id);
                   setActiveCategoryDropdown(null);
                 }}
-                className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer ${category === opt.id
-                  ? 'font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-950/30'
-                  : 'text-slate-700 dark:text-slate-300'
+                className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer ${category === opt.id ? 'font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-950/30' : 'text-slate-700 dark:text-slate-300'
                   }`}
               >
                 <span>{opt.label}</span>
@@ -1090,10 +1409,7 @@ export const UnifiedInboxPage: React.FC = () => {
   };
 
   return (
-    <div
-      className="space-y-6 max-w-7xl mx-auto pb-16"
-      onClick={() => setActiveCategoryDropdown(null)}
-    >
+    <div className="space-y-6 max-w-7xl mx-auto pb-16" onClick={() => setActiveCategoryDropdown(null)}>
       {/* 1. Header Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -1106,65 +1422,41 @@ export const UnifiedInboxPage: React.FC = () => {
             </span>
           </div>
           <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 max-w-3xl leading-relaxed">
-            Hợp nhất yêu cầu từ Gmail Workspace, Google Form và OS Ticket với sự hỗ trợ từ Gemini AI Triage.
+            Hợp nhất yêu cầu từ Gmail Workspace, Google Form và OS Ticket với sự hỗ trợ từ Gemini AI Triage & Tiền Xử Lý Tự Động.
           </p>
         </div>
       </div>
 
       {/* 2. Bento Metric Summary Tiles */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div
-          className="bg-blue-50 dark:bg-blue-950/40 rounded-[2rem] p-5 border border-blue-100 dark:border-blue-900/50 flex flex-col justify-between shadow-xs hover:-translate-y-0.5 transition-transform duration-200"
-        >
-          <span className="text-xs font-bold text-blue-500 uppercase tracking-widest">
-            Tổng số yêu cầu
-          </span>
+        <div className="bg-blue-50 dark:bg-blue-950/40 rounded-[2rem] p-5 border border-blue-100 dark:border-blue-900/50 flex flex-col justify-between shadow-xs hover:-translate-y-0.5 transition-transform duration-200">
+          <span className="text-xs font-bold text-blue-500 uppercase tracking-widest">Tổng số yêu cầu</span>
           <div className="mt-3">
-            <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white font-mono">
-              {stats.total}
-            </div>
+            <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white font-mono">{stats.total}</div>
             <div className="text-xs text-blue-400 font-medium">100% feed đồng bộ</div>
           </div>
         </div>
 
-        <div
-          className="bg-amber-50 dark:bg-amber-950/40 rounded-[2rem] p-5 border border-amber-100 dark:border-amber-900/50 flex flex-col justify-between shadow-xs hover:-translate-y-0.5 transition-transform duration-200"
-        >
-          <span className="text-xs font-bold text-amber-600 dark:text-amber-400 uppercase tracking-widest">
-            Chờ xử lý
-          </span>
+        <div className="bg-amber-50 dark:bg-amber-950/40 rounded-[2rem] p-5 border border-amber-100 dark:border-amber-900/50 flex flex-col justify-between shadow-xs hover:-translate-y-0.5 transition-transform duration-200">
+          <span className="text-xs font-bold text-amber-600 dark:text-amber-400 uppercase tracking-widest">Chờ xử lý</span>
           <div className="mt-3">
-            <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white font-mono">
-              {stats.pending}
-            </div>
+            <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white font-mono">{stats.pending}</div>
             <div className="text-xs text-amber-500 font-medium">Cần thực thi ngay</div>
           </div>
         </div>
 
-        <div
-          className="bg-purple-50 dark:bg-purple-950/40 rounded-[2rem] p-5 border border-purple-100 dark:border-purple-900/50 flex flex-col justify-between shadow-xs hover:-translate-y-0.5 transition-transform duration-200"
-        >
-          <span className="text-xs font-bold text-purple-500 uppercase tracking-widest">
-            Đang xử lý
-          </span>
+        <div className="bg-purple-50 dark:bg-purple-950/40 rounded-[2rem] p-5 border border-purple-100 dark:border-purple-900/50 flex flex-col justify-between shadow-xs hover:-translate-y-0.5 transition-transform duration-200">
+          <span className="text-xs font-bold text-purple-500 uppercase tracking-widest">Đang xử lý</span>
           <div className="mt-3">
-            <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white font-mono">
-              {stats.processing}
-            </div>
+            <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white font-mono">{stats.processing}</div>
             <div className="text-xs text-purple-400 font-medium">Đang chạy qua Bot/Worker</div>
           </div>
         </div>
 
-        <div
-          className="bg-emerald-50 dark:bg-emerald-950/40 rounded-[2rem] p-5 border border-emerald-100 dark:border-emerald-900/50 flex flex-col justify-between shadow-xs hover:-translate-y-0.5 transition-transform duration-200"
-        >
-          <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">
-            Đã giải quyết
-          </span>
+        <div className="bg-emerald-50 dark:bg-emerald-950/40 rounded-[2rem] p-5 border border-emerald-100 dark:border-emerald-900/50 flex flex-col justify-between shadow-xs hover:-translate-y-0.5 transition-transform duration-200">
+          <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">Đã giải quyết</span>
           <div className="mt-3">
-            <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white font-mono">
-              {stats.resolved}
-            </div>
+            <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white font-mono">{stats.resolved}</div>
             <div className="text-xs text-emerald-500 font-medium">Hoàn tất quy trình</div>
           </div>
         </div>
@@ -1268,10 +1560,7 @@ export const UnifiedInboxPage: React.FC = () => {
       {loading && tickets.length === 0 ? (
         <div className="space-y-4 animate-pulse">
           {[1, 2, 3].map((idx) => (
-            <div
-              key={idx}
-              className="p-6 sm:p-7 rounded-[2.5rem] bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 space-y-4 shadow-xs"
-            >
+            <div key={idx} className="p-6 sm:p-7 rounded-[2.5rem] bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 space-y-4 shadow-xs">
               <div className="h-6 w-3/4 bg-slate-200 dark:bg-slate-800 rounded-lg" />
               <div className="h-20 w-full bg-slate-100 dark:bg-slate-800/40 rounded-2xl" />
             </div>
@@ -1282,13 +1571,8 @@ export const UnifiedInboxPage: React.FC = () => {
           <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-slate-800 flex items-center justify-center mx-auto mb-3 text-indigo-500">
             <Inbox className="w-6 h-6" />
           </div>
-          <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">
-            Không tìm thấy yêu cầu nào phù hợp
-          </h3>
-          <button
-            onClick={resetFilters}
-            className="mt-4 px-4 py-2 text-xs font-semibold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shadow-sm cursor-pointer"
-          >
+          <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">Không tìm thấy yêu cầu nào phù hợp</h3>
+          <button onClick={resetFilters} className="mt-4 px-4 py-2 text-xs font-semibold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shadow-sm cursor-pointer">
             Đặt lại bộ lọc
           </button>
         </div>
@@ -1302,6 +1586,7 @@ export const UnifiedInboxPage: React.FC = () => {
             const isCompleted = ticket.status === 'completed';
             const cleanRawContent = stripHtmlTags(ticket.raw_content);
             const displayTime = formatDateTime(ticket.created_at || ticket.ticket_timestamp);
+            const excelMeta = ticket.metadata?.excel_summary;
 
             return (
               <div
@@ -1363,13 +1648,7 @@ export const UnifiedInboxPage: React.FC = () => {
                           onClick={() => setPreviewFile(file)}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-50 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-indigo-200 hover:bg-indigo-50/40 transition-all shadow-2xs group cursor-pointer"
                         >
-                          {isImage ? (
-                            <ImageIcon className="w-3.5 h-3.5 text-emerald-500" />
-                          ) : isExcel ? (
-                            <FileSpreadsheetIcon className="w-3.5 h-3.5 text-emerald-600" />
-                          ) : (
-                            <Paperclip className="w-3.5 h-3.5 text-indigo-500" />
-                          )}
+                          {isImage ? <ImageIcon className="w-3.5 h-3.5 text-emerald-500" /> : isExcel ? <FileSpreadsheetIcon className="w-3.5 h-3.5 text-emerald-600" /> : <Paperclip className="w-3.5 h-3.5 text-indigo-500" />}
                           <span className="truncate max-w-[200px]">{file.filename}</span>
                           <Eye className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 ml-0.5 transition-colors" />
                         </button>
@@ -1378,15 +1657,23 @@ export const UnifiedInboxPage: React.FC = () => {
                   </div>
                 )}
 
-                {/* Gemini AI Summary Box */}
+                {/* Gemini AI Summary & Auto-prefilled Banner */}
                 <div className="p-5 sm:p-6 rounded-[2rem] bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40 space-y-3 shadow-xs">
-                  <div className="flex items-center gap-2">
-                    <div className="p-1 rounded-lg bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300">
-                      <Sparkles className="w-4 h-4" />
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1 rounded-lg bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300">
+                        <Sparkles className="w-4 h-4" />
+                      </div>
+                      <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                        Tóm tắt & Đề xuất tự động từ Gemini AI
+                      </span>
                     </div>
-                    <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
-                      Tóm tắt & Đề xuất tự động từ Gemini AI
-                    </span>
+
+                    {excelMeta?.is_cof && (
+                      <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900 text-[10px] font-mono font-bold text-emerald-800 dark:text-emerald-200">
+                        Đã bóc tách COF ({excelMeta.courses?.length || 0} môn)
+                      </span>
+                    )}
                   </div>
 
                   <div className="p-3.5 rounded-2xl bg-white/80 dark:bg-slate-900/80 border border-emerald-100/70 dark:border-emerald-900/30 text-xs shadow-xs space-y-1">
@@ -1400,9 +1687,7 @@ export const UnifiedInboxPage: React.FC = () => {
                 <div className="pt-1">
                   <button
                     type="button"
-                    onClick={() =>
-                      setExpandedContent((prev) => ({ ...prev, [ticket.id]: !prev[ticket.id] }))
-                    }
+                    onClick={() => setExpandedContent((prev) => ({ ...prev, [ticket.id]: !prev[ticket.id] }))}
                     className="flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors cursor-pointer"
                   >
                     <FileCode className="w-3.5 h-3.5" />
@@ -1472,10 +1757,10 @@ export const UnifiedInboxPage: React.FC = () => {
 
                         <button
                           onClick={() => handleOpenTaskModal(ticket)}
-                          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shadow-sm cursor-pointer"
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-extrabold bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:brightness-110 transition shadow-md cursor-pointer"
                         >
-                          <Bot className="w-3.5 h-3.5" />
-                          <span>Tạo Tác Vụ Bot</span>
+                          <Zap className="w-3.5 h-3.5 text-amber-300" />
+                          <span>Tạo Tác Vụ Bot (AI Đã Sẵn Sàng)</span>
                           <ArrowRight className="w-3.5 h-3.5" />
                         </button>
                       </>
@@ -1489,25 +1774,25 @@ export const UnifiedInboxPage: React.FC = () => {
       )}
 
       {/* ========================================================================= */}
-      {/* 🚀 STUDIO PRO MODAL (DÙNG REACT PORTAL ĐƯA THẲNG VÀO BODY) */}
+      {/* 🚀 STUDIO PRO MODAL (BENTO ENTERPRISE - ĐỒNG BỘ 100% VỚI STUDIO) */}
       {/* ========================================================================= */}
-      {taskModalTicket && createPortal(
+      {taskModalTicket && typeof document !== 'undefined' && createPortal(
         <div
           onClick={(e) => { if (e.target === e.currentTarget) setTaskModalTicket(null); }}
           className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
         >
           <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 15 }}
+            initial={{ opacity: 0, scale: 0.96, y: 15 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 15 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
+            exit={{ opacity: 0, scale: 0.96, y: 15 }}
+            transition={{ duration: 0.2 }}
             onClick={(e) => e.stopPropagation()}
             className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-full sm:max-w-4xl lg:max-w-5xl xl:max-w-6xl shadow-2xl overflow-hidden p-6 sm:p-8 max-h-[92vh] flex flex-col my-auto"
           >
             {/* Header Modal */}
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 flex-wrap gap-2 shrink-0">
               <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-indigo-600 text-white rounded-2xl shadow-md">
+                <div className="p-2.5 bg-indigo-600 text-white rounded-2xl shadow-md shadow-indigo-500/20">
                   <Zap className="w-5 h-5" />
                 </div>
                 <div>
@@ -1515,12 +1800,12 @@ export const UnifiedInboxPage: React.FC = () => {
                     <h3 className="text-base font-extrabold text-slate-900 dark:text-white tracking-tight">
                       Automation Studio Pro (Điều Phối Cho Request)
                     </h3>
-                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 font-bold uppercase">
-                      Auto Pre-filled
+                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 font-bold uppercase ring-1 ring-emerald-300/40">
+                      ⚡ AI Auto-Prefilled
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Dữ liệu đã được tự động điền dựa trên phân tích Request #{taskModalTicket.source_id || taskModalTicket.id.slice(0, 8)}.
+                    Dữ liệu đã được bóc tách và điền sẵn dựa trên phân tích Request #{taskModalTicket.source_id || taskModalTicket.id.slice(0, 8)}.
                   </p>
                 </div>
               </div>
@@ -1530,9 +1815,7 @@ export const UnifiedInboxPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setViewMode('form')}
-                    className={`px-3 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 ${viewMode === 'form'
-                      ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 font-bold shadow-2xs'
-                      : 'text-slate-500'
+                    className={`px-3 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 ${viewMode === 'form' ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 font-bold shadow-2xs' : 'text-slate-500'
                       }`}
                   >
                     <SlidersHorizontal className="w-3.5 h-3.5" />
@@ -1541,9 +1824,7 @@ export const UnifiedInboxPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setViewMode('json')}
-                    className={`px-3 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 ${viewMode === 'json'
-                      ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 font-bold shadow-2xs'
-                      : 'text-slate-500'
+                    className={`px-3 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 ${viewMode === 'json' ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 font-bold shadow-2xs' : 'text-slate-500'
                       }`}
                   >
                     <Code2 className="w-3.5 h-3.5" />
@@ -1565,20 +1846,19 @@ export const UnifiedInboxPage: React.FC = () => {
             <div className="flex-1 overflow-y-auto space-y-5 pr-1 py-3">
               {viewMode === 'form' ? (
                 <>
-                  {/* BƯỚC 1: CHỌN CỖ MÁY BOT */}
+                  {/* BƯỚC 1: CHỌN CỖ MÁY BOT (4 ENGINES) */}
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px] font-extrabold">
-                        1
-                      </span>
-                      <span>Chọn Cỗ Máy Tự Động Hóa:</span>
+                      <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px] font-extrabold">1</span>
+                      <span>Chọn Cỗ Máy Tự Động Hóa (AI đã đề xuất):</span>
                     </label>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                       {[
-                        { id: 'workspace_rpa', label: 'Workspace & LMS', icon: Building2, desc: 'Đơn Hàng, Hợp Đồng & LMS' },
-                        { id: 'keycloak_api', label: 'Keycloak IDP', icon: KeyRound, desc: 'Quản Trị Người Dùng' },
-                        { id: 'feedback_doc_triage', label: 'Feedback Sheet', icon: FileText, desc: 'Ghi Chú & Tag Doc Tự Động' },
+                        { id: 'workspace_rpa', label: 'Workspace & LMS', icon: Building2, desc: 'License, User & Moodle' },
+                        { id: 'keycloak_api', label: 'Keycloak IDP', icon: KeyRound, desc: 'Mật Khẩu & Danh Tính' },
+                        { id: 'git_collaborator', label: 'Pythaverse Git', icon: GitBranch, desc: 'Thêm Vào Repository' },
+                        { id: 'feedback_doc_triage', label: 'Feedback Sheet', icon: FileText, desc: 'Ghi Chú & Tag Doc' },
                       ].map((tab) => {
                         const Icon = tab.icon;
                         const isSel = selectedBotType === tab.id;
@@ -1588,7 +1868,7 @@ export const UnifiedInboxPage: React.FC = () => {
                             type="button"
                             onClick={() => setSelectedBotType(tab.id as any)}
                             className={`flex flex-col items-start gap-1 p-3.5 rounded-2xl border text-left transition cursor-pointer ${isSel
-                              ? 'bg-indigo-600 text-white border-transparent shadow-md'
+                              ? 'bg-indigo-600 text-white border-transparent shadow-md ring-2 ring-indigo-500/30'
                               : 'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100'
                               }`}
                           >
@@ -1606,10 +1886,8 @@ export const UnifiedInboxPage: React.FC = () => {
                     <div className="space-y-4 p-5 rounded-2xl bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/40">
                       <div className="flex items-center justify-between flex-wrap gap-2">
                         <label className="text-xs font-bold text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5">
-                          <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px] font-extrabold">
-                            2
-                          </span>
-                          <span>Chọn Phân Luồng Nghiệp Vụ Cốt Lõi:</span>
+                          <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px] font-extrabold">2</span>
+                          <span>Phân Luồng Nghiệp Vụ Workspace:</span>
                         </label>
 
                         <button
@@ -1623,7 +1901,7 @@ export const UnifiedInboxPage: React.FC = () => {
                         </button>
                       </div>
 
-                      {/* 4 Tabs Nghiệp vụ như Studio */}
+                      {/* 4 Tabs Nghiệp vụ */}
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-100 dark:bg-slate-800 p-1.5 rounded-2xl text-xs font-medium">
                         {[
                           { id: 'approve', label: '1. Phê Duyệt', icon: ClipboardCheck },
@@ -1640,9 +1918,7 @@ export const UnifiedInboxPage: React.FC = () => {
                                 setWorkspaceMainCategory(mTab.id as any);
                                 setParsedOrderCourses([]);
                               }}
-                              className={`py-2.5 px-2 rounded-xl text-center transition-all cursor-pointer flex items-center justify-center gap-1.5 text-xs ${isCur
-                                ? 'bg-white dark:bg-slate-900 font-bold text-indigo-600 dark:text-indigo-400 shadow-2xs'
-                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                              className={`py-2.5 px-2 rounded-xl text-center transition-all cursor-pointer flex items-center justify-center gap-1.5 text-xs ${isCur ? 'bg-white dark:bg-slate-900 font-bold text-indigo-600 dark:text-indigo-400 shadow-2xs' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
                                 }`}
                             >
                               <span>{mTab.label}</span>
@@ -1651,7 +1927,7 @@ export const UnifiedInboxPage: React.FC = () => {
                         })}
                       </div>
 
-                      {/* LUỒNG 1: PHÊ DUYỆT ĐƠN HÀNG/HỢP ĐỒNG */}
+                      {/* LUỒNG 1: PHÊ DUYỆT */}
                       {workspaceMainCategory === 'approve' && (
                         <div className="space-y-4 pt-1">
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -1668,9 +1944,7 @@ export const UnifiedInboxPage: React.FC = () => {
                                   setSelectedItemCode('');
                                   setSelectedCachedItem(null);
                                 }}
-                                className={`rounded-xl border p-3 text-left transition cursor-pointer ${approveSubFlow === sub.id
-                                  ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40'
-                                  : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
+                                className={`rounded-xl border p-3 text-left transition cursor-pointer ${approveSubFlow === sub.id ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40' : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
                                   }`}
                               >
                                 <p className="text-xs font-bold text-slate-800 dark:text-slate-200">{sub.label}</p>
@@ -1709,7 +1983,8 @@ export const UnifiedInboxPage: React.FC = () => {
                                       setSelectedCachedItem(item);
                                       if (item.courses_data) setParsedOrderCourses(item.courses_data);
                                     }}
-                                    className={`p-2.5 rounded-xl border text-xs cursor-pointer transition ${isSel ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40' : 'border-slate-100 dark:border-slate-800'}`}
+                                    className={`p-2.5 rounded-xl border text-xs cursor-pointer transition ${isSel ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40' : 'border-slate-100 dark:border-slate-800'
+                                      }`}
                                   >
                                     <div className="flex justify-between font-bold">
                                       <span>{code}</span>
@@ -1732,12 +2007,10 @@ export const UnifiedInboxPage: React.FC = () => {
                             <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center justify-between">
                               <span className="flex items-center gap-1.5">
                                 <Building2 className="w-3.5 h-3.5 text-indigo-600" />
-                                <span>Trường Học Áp Dụng (Phả hệ 480 trường):</span>
+                                <span>Trường Học Áp Dụng (Trong 480 trường phả hệ):</span>
                               </span>
                               {selectedSchool && (
-                                <span className="text-xs text-indigo-600 font-bold font-mono">
-                                  {selectedSchool.school_code}
-                                </span>
+                                <span className="text-xs text-indigo-600 font-bold font-mono">{selectedSchool.school_code}</span>
                               )}
                             </label>
 
@@ -1812,18 +2085,11 @@ export const UnifiedInboxPage: React.FC = () => {
                             {selectedCourses.map((cRow, idx) => {
                               const filteredCourses = workspaceCoursesList.filter((c) => c.category === cRow.category);
                               return (
-                                <div
-                                  key={idx}
-                                  className="p-3.5 bg-white dark:bg-slate-900 rounded-2xl border border-indigo-100 dark:border-slate-800 space-y-2 shadow-2xs"
-                                >
+                                <div key={idx} className="p-3.5 bg-white dark:bg-slate-900 rounded-2xl border border-indigo-100 dark:border-slate-800 space-y-2 shadow-2xs">
                                   <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
                                     <span>Khóa học #{idx + 1}</span>
                                     {selectedCourses.length > 1 && (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleRemoveCourseRow(idx)}
-                                        className="text-rose-500 hover:text-rose-700 p-0.5 rounded cursor-pointer"
-                                      >
+                                      <button type="button" onClick={() => handleRemoveCourseRow(idx)} className="text-rose-500 hover:text-rose-700 p-0.5 rounded cursor-pointer">
                                         <Trash2 className="w-3.5 h-3.5" />
                                       </button>
                                     )}
@@ -1934,9 +2200,9 @@ export const UnifiedInboxPage: React.FC = () => {
                         </div>
                       )}
 
-                      {/* LUỒNG 3: TẠO TÀI KHOẢN BATCH */}
+                      {/* LUỒNG 3: TẠO TÀI KHOẢN (BẢNG PREVIEW & VALIDATE TÀI KHOẢN Y HỆT STUDIO) */}
                       {workspaceMainCategory === 'bulk_accounts' && (
-                        <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-indigo-100 dark:border-slate-800 space-y-3 shadow-2xs">
+                        <div className="space-y-4">
                           <input
                             type="file"
                             ref={fileInputRef}
@@ -1945,7 +2211,7 @@ export const UnifiedInboxPage: React.FC = () => {
                               const file = e.target.files?.[0];
                               if (file) {
                                 setUploadedAccountsFile(file);
-                                toast.success(`Đã chọn file: ${file.name}`);
+                                processAndValidateAccountsFile(file);
                               }
                             }}
                             className="hidden"
@@ -1955,68 +2221,172 @@ export const UnifiedInboxPage: React.FC = () => {
                             onClick={() => fileInputRef.current?.click()}
                             className="border-2 border-dashed border-indigo-200 dark:border-slate-700 hover:border-indigo-500 rounded-2xl p-6 text-center cursor-pointer transition bg-slate-50 dark:bg-slate-800/40 flex flex-col items-center justify-center gap-1.5"
                           >
-                            <UploadCloud className="w-6 h-6 text-indigo-600" />
+                            <UploadCloud className="w-7 h-7 text-indigo-600" />
                             {uploadedAccountsFile ? (
                               <span className="font-bold text-xs text-indigo-600">
-                                📎 {uploadedAccountsFile.name} ({Math.round(uploadedAccountsFile.size / 1024)} KB)
+                                📎 {uploadedAccountsFile.name} ({Math.round(uploadedAccountsFile.size / 1024)} KB) - Nhấp để đổi file khác
                               </span>
                             ) : taskModalTicket.attachments?.length ? (
                               <span className="text-xs text-indigo-600 font-semibold">
-                                Sẽ dùng file từ Ticket: {taskModalTicket.attachments[0].filename} (Bấm để đổi)
+                                Dùng file từ Ticket: {taskModalTicket.attachments[0].filename} (Bấm để tải file mới)
                               </span>
                             ) : (
-                              <span className="text-xs text-slate-400">
-                                Bấm hoặc kéo thả file Excel vào đây
-                              </span>
+                              <span className="text-xs text-slate-400">Bấm hoặc kéo thả file Excel (.xlsx) vào đây</span>
                             )}
                           </div>
+
+                          {/* Preview Bảng Tài Khoản nếu đã parse */}
+                          {parsedAccountRows.length > 0 && (
+                            <div className="space-y-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-xs">
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800">
+                                  <p className="text-[10px] text-slate-400 font-bold uppercase">Tổng</p>
+                                  <p className="text-base font-bold font-mono">{accountValidationStats.total}</p>
+                                  <p className="text-[10px] text-slate-500">{accountValidationStats.students} HS | {accountValidationStats.teachers} GV</p>
+                                </div>
+                                <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900">
+                                  <p className="text-[10px] text-emerald-600 font-bold uppercase">Hợp lệ</p>
+                                  <p className="text-base font-bold font-mono text-emerald-600">{accountValidationStats.validCount}</p>
+                                </div>
+                                <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-100 dark:border-rose-900">
+                                  <p className="text-[10px] text-rose-600 font-bold uppercase">Thiếu tin</p>
+                                  <p className="text-base font-bold font-mono text-rose-600">{accountValidationStats.errorCount}</p>
+                                </div>
+                                <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-100 dark:border-amber-900">
+                                  <p className="text-[10px] text-amber-600 font-bold uppercase">Trùng email</p>
+                                  <p className="text-base font-bold font-mono text-amber-600">{accountValidationStats.duplicateCount}</p>
+                                </div>
+                              </div>
+
+                              <div className="max-h-52 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                                <table className="w-full text-left text-[11px] font-mono">
+                                  <thead className="bg-slate-50 dark:bg-slate-800/80 sticky top-0 uppercase text-[9px] text-slate-500 font-bold">
+                                    <tr>
+                                      <th className="p-2 text-center w-8">#</th>
+                                      <th className="p-2">Họ & Tên</th>
+                                      <th className="p-2">Email</th>
+                                      <th className="p-2">Ngày Sinh</th>
+                                      <th className="p-2">Vai Trò</th>
+                                      <th className="p-2">Trạng Thái</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                    {parsedAccountRows.slice(0, 50).map((row) => (
+                                      <tr key={row.index} className={!row.isValid ? 'bg-rose-50/50' : 'hover:bg-slate-50'}>
+                                        <td className="p-2 text-center text-slate-400">{row.index}</td>
+                                        <td className="p-2 font-semibold text-slate-900 dark:text-white font-sans">{row.lastName} {row.firstName}</td>
+                                        <td className="p-2">{row.email || '—'}</td>
+                                        <td className="p-2">{row.dob}</td>
+                                        <td className="p-2">{row.role}</td>
+                                        <td className="p-2">{row.isValid ? <span className="text-emerald-600 font-bold">✓ OK</span> : <span className="text-rose-500 font-bold">{row.errors[0]}</span>}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
 
-                      {/* LUỒNG 4: GHI DANH LMS */}
+                      {/* LUỒNG 4: GHI DANH LMS (HỖ TRỢ CẢ ENROL & UNENROL) */}
                       {workspaceMainCategory === 'lms_enroll' && (
-                        <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-emerald-200 dark:border-emerald-900/50 space-y-3 shadow-2xs">
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            <div>
-                              <label className="text-[10px] font-bold text-slate-500 uppercase">Khóa học LMS:</label>
-                              <select
-                                value={lmsCourseId}
-                                onChange={(e) => {
-                                  const cId = parseInt(e.target.value);
-                                  setLmsCourseId(cId);
-                                  const target = lmsCoursesList.find((c) => c.course_id === cId);
-                                  if (target) setLmsCourseName(target.course_name);
-                                }}
-                                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-semibold truncate"
-                              >
-                                {lmsCoursesList.map((c) => (
-                                  <option key={c.course_id} value={c.course_id}>
-                                    {c.course_name} (ID: {c.course_id})
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                            <div>
-                              <label className="text-[10px] font-bold text-slate-500 uppercase">Tên Nhóm / Group:</label>
-                              <input
-                                type="text"
-                                value={lmsGroupName}
-                                onChange={(e) => setLmsGroupName(e.target.value)}
-                                placeholder="VD: CLASS_2026"
-                                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs"
-                              />
-                            </div>
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-2 gap-2 p-1.5 rounded-2xl bg-slate-100 dark:bg-slate-800">
+                            <button
+                              type="button"
+                              onClick={() => setLmsActionType('enroll')}
+                              className={`py-2 px-3 rounded-xl text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${lmsActionType === 'enroll' ? 'bg-white dark:bg-slate-900 text-emerald-600 shadow-2xs' : 'text-slate-500'
+                                }`}
+                            >
+                              <GraduationCap className="w-4 h-4" />
+                              <span>1. Ghi Danh & Gia Hạn</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setLmsActionType('unenrol')}
+                              className={`py-2 px-3 rounded-xl text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${lmsActionType === 'unenrol' ? 'bg-white dark:bg-slate-900 text-rose-600 shadow-2xs' : 'text-slate-500'
+                                }`}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                              <span>2. Hủy Ghi Danh</span>
+                            </button>
                           </div>
 
+                          {/* Danh sách khóa học LMS */}
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                                Danh Sách Khóa Học LMS ({lmsSelectedCourses.length} khóa):
+                              </label>
+                              <button
+                                type="button"
+                                onClick={handleAddLmsCourseRow}
+                                className="flex items-center gap-1 px-3 py-1 bg-white dark:bg-slate-900 text-xs font-bold border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xs hover:bg-slate-50"
+                              >
+                                <Plus className="w-3.5 h-3.5" /> Thêm Môn LMS
+                              </button>
+                            </div>
+
+                            {lmsSelectedCourses.map((lItem, idx) => (
+                              <div key={idx} className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
+                                <div className="flex justify-between items-center text-xs font-bold">
+                                  <span>#{idx + 1} {lItem.course_name}</span>
+                                  {lmsSelectedCourses.length > 1 && (
+                                    <button type="button" onClick={() => handleRemoveLmsCourseRow(idx)} className="text-rose-500">
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                                  <select
+                                    value={lItem.course_id}
+                                    onChange={(e) => {
+                                      const cId = parseInt(e.target.value);
+                                      const target = lmsCoursesList.find((c) => c.course_id === cId);
+                                      if (target) {
+                                        const updated = [...lmsSelectedCourses];
+                                        updated[idx].course_id = target.course_id;
+                                        updated[idx].course_name = target.course_name;
+                                        setLmsSelectedCourses(updated);
+                                      }
+                                    }}
+                                    className="p-1.5 rounded-lg border bg-slate-50 dark:bg-slate-800 truncate"
+                                  >
+                                    {lmsCoursesList.map((c) => (
+                                      <option key={c.course_id} value={c.course_id}>{c.course_name} (ID: {c.course_id})</option>
+                                    ))}
+                                  </select>
+
+                                  {lmsActionType === 'enroll' && (
+                                    <input
+                                      type="text"
+                                      value={lItem.group_name}
+                                      onChange={(e) => {
+                                        const updated = [...lmsSelectedCourses];
+                                        updated[idx].group_name = e.target.value;
+                                        setLmsSelectedCourses(updated);
+                                      }}
+                                      placeholder="Tên Group lớp (VD: CLASS_2026)"
+                                      className="p-1.5 rounded-lg border bg-slate-50 dark:bg-slate-800"
+                                    />
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Danh sách email */}
                           <div className="space-y-1">
-                            <label className="text-[11px] font-bold text-sky-700 dark:text-sky-300">
-                              🎓 Danh Sách Email Học Viên (Mỗi dòng 1 email):
+                            <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                              {lmsActionType === 'enroll' ? 'Danh Sách Email Học Viên Cần Ghi Danh:' : 'Danh Sách Email Cần Hủy Ghi Danh:'}
                             </label>
                             <textarea
                               rows={4}
-                              value={lmsStudentEmails}
-                              onChange={(e) => setLmsStudentEmails(e.target.value)}
-                              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono outline-none"
+                              value={lmsActionType === 'enroll' ? lmsBulkSingleEmails : lmsUnenrolEmails}
+                              onChange={(e) => lmsActionType === 'enroll' ? setLmsBulkSingleEmails(e.target.value) : setLmsUnenrolEmails(e.target.value)}
+                              placeholder="user1@pythaverse.space&#10;user2@pythaverse.space"
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-2.5 text-xs font-mono"
                             />
                           </div>
                         </div>
@@ -2028,9 +2398,7 @@ export const UnifiedInboxPage: React.FC = () => {
                   {selectedBotType === 'keycloak_api' && (
                     <div className="space-y-3 p-5 rounded-2xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-800/40">
                       <div className="space-y-1">
-                        <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                          Email Cần Xử Lý:
-                        </label>
+                        <label className="text-xs font-bold text-slate-800 dark:text-slate-200">Email/Username Cần Can Thiệp:</label>
                         <input
                           type="text"
                           value={kcTargetEmail}
@@ -2040,7 +2408,7 @@ export const UnifiedInboxPage: React.FC = () => {
                       </div>
 
                       <div className="p-3 rounded-xl border bg-white dark:bg-slate-900 border-amber-300 dark:border-amber-700 flex items-center justify-between">
-                        <span className="text-xs font-bold">1. Đổi Mật Khẩu Tạm Thời</span>
+                        <span className="text-xs font-bold">1. Đặt Lại Mật Khẩu Tạm Thời:</span>
                         <input
                           type="text"
                           value={kcTempPass}
@@ -2051,7 +2419,83 @@ export const UnifiedInboxPage: React.FC = () => {
                     </div>
                   )}
 
-                  {/* BƯỚC 2C: FEEDBACK SHEET */}
+                  {/* BƯỚC 2C: PYTHAVERSE GIT (ENGINE MỚI TOANH) */}
+                  {selectedBotType === 'git_collaborator' && (
+                    <div className="space-y-4 p-5 rounded-2xl bg-violet-50/60 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-900/40">
+                      <div className="space-y-1 relative" ref={gitRepoDropdownRef}>
+                        <div className="flex justify-between items-center text-xs">
+                          <label className="font-bold text-slate-800 dark:text-slate-200">Đường Dẫn Repository Git Mục Tiêu:</label>
+                          <button
+                            type="button"
+                            onClick={() => setIsGitRepoDropdownOpen(!isGitRepoDropdownOpen)}
+                            className="text-violet-600 font-bold hover:underline cursor-pointer"
+                          >
+                            {isGitRepoDropdownOpen ? 'Đóng danh sách ✕' : `Chọn từ danh mục (${allAvailableGitRepos.length} repos) ▼`}
+                          </button>
+                        </div>
+
+                        <input
+                          type="text"
+                          value={gitRepoUrl}
+                          onChange={(e) => setGitRepoUrl(e.target.value)}
+                          placeholder="https://git.pythaverse.space/..."
+                          className="w-full bg-white dark:bg-slate-900 border border-violet-300 dark:border-violet-700 rounded-xl p-2.5 text-xs font-mono"
+                        />
+
+                        {isGitRepoDropdownOpen && (
+                          <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-60 overflow-y-auto p-2 space-y-1">
+                            {filteredAvailableGitRepos.map((r, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => {
+                                  setGitRepoUrl(r.repo_url);
+                                  setIsGitRepoDropdownOpen(false);
+                                }}
+                                className="w-full text-left p-2 rounded-xl text-xs hover:bg-violet-50 dark:hover:bg-slate-800 flex justify-between"
+                              >
+                                <div>
+                                  <span className="font-bold text-slate-900 dark:text-white">🐙 {r.repo_name}</span>
+                                  <p className="text-[10px] text-slate-400">Môn: {r.course_name} ({r.category})</p>
+                                </div>
+                                {gitRepoUrl === r.repo_url && <Check className="w-4 h-4 text-violet-600" />}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-800 dark:text-slate-200">Chọn Vai Trò (Role):</label>
+                        <div className="grid grid-cols-3 gap-2 text-xs">
+                          {['GUEST', 'DEVELOPER', 'ADMIN'].map((r) => (
+                            <button
+                              key={r}
+                              type="button"
+                              onClick={() => setGitTargetRole(r as any)}
+                              className={`p-2.5 rounded-xl border text-center font-bold transition cursor-pointer ${gitTargetRole === r ? 'border-violet-600 bg-violet-600 text-white' : 'border-slate-200 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200'
+                                }`}
+                            >
+                              {r}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-800 dark:text-slate-200">Danh Sách Username / Email (Mỗi dòng 1 tài khoản):</label>
+                        <textarea
+                          rows={3}
+                          value={gitUsersList}
+                          onChange={(e) => setGitUsersList(e.target.value)}
+                          placeholder="hsdttemd&#10;gvdttemd@pythaverse.net"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-2 text-xs font-mono"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* BƯỚC 2D: FEEDBACK SHEET */}
                   {selectedBotType === 'feedback_doc_triage' && (
                     <div className="space-y-3 p-5 rounded-2xl bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40">
                       <div className="space-y-1">
@@ -2133,9 +2577,9 @@ export const UnifiedInboxPage: React.FC = () => {
       )}
 
       {/* ========================================================================= */}
-      {/* 🖼️ MODAL XEM TRƯỚC FILE ĐÍNH KÈM (ATTACHMENT PREVIEW) */}
+      {/* 🖼️ MODAL XEM TRƯỚC FILE ĐÍNH KÈM */}
       {/* ========================================================================= */}
-      {previewFile && createPortal(
+      {previewFile && typeof document !== 'undefined' && createPortal(
         <div
           onClick={() => setPreviewFile(null)}
           className="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4"
@@ -2147,31 +2591,20 @@ export const UnifiedInboxPage: React.FC = () => {
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Paperclip className="w-4 h-4 text-indigo-600" />
-                <span className="text-xs font-bold truncate max-w-[400px] text-slate-800 dark:text-slate-200">
-                  {previewFile.filename}
-                </span>
+                <span className="text-xs font-bold truncate max-w-[400px] text-slate-800 dark:text-slate-200">{previewFile.filename}</span>
               </div>
-              <button
-                onClick={() => setPreviewFile(null)}
-                className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-              >
+              <button onClick={() => setPreviewFile(null)} className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             <div className="flex items-center justify-center min-h-[250px] max-h-[60vh] overflow-auto bg-slate-50 dark:bg-slate-800/40 rounded-2xl p-4">
               {previewFile.filename.match(/\.(png|jpe?g|webp|gif)$/i) ? (
-                <img
-                  src={previewFile.url}
-                  alt={previewFile.filename}
-                  className="max-h-[55vh] object-contain rounded-xl shadow-sm"
-                />
+                <img src={previewFile.url} alt={previewFile.filename} className="max-h-[55vh] object-contain rounded-xl shadow-sm" />
               ) : (
                 <div className="text-center space-y-3">
                   <FileSpreadsheetIcon className="w-12 h-12 text-emerald-600 mx-auto" />
-                  <p className="text-xs text-slate-500">
-                    File tài liệu hoặc bảng tính không thể hiển thị trực tiếp.
-                  </p>
+                  <p className="text-xs text-slate-500">File tài liệu hoặc bảng tính không thể hiển thị trực tiếp.</p>
                   <a
                     href={previewFile.url}
                     target="_blank"
@@ -2196,10 +2629,7 @@ export const UnifiedInboxPage: React.FC = () => {
                 <ExternalLink className="w-3.5 h-3.5" />
                 <span>Mở trong Tab Mới</span>
               </a>
-              <button
-                onClick={() => setPreviewFile(null)}
-                className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 transition"
-              >
+              <button onClick={() => setPreviewFile(null)} className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 transition">
                 Đóng
               </button>
             </div>

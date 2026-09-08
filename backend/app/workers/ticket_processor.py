@@ -1,27 +1,22 @@
+# backend/app/workers/ticket_processor.py
 import logging
 from typing import Dict, Any
-from app.core.gemini import gemini_engine
+from app.core.gemini import gemini_engine, process_ticket_with_ai
 
 logger = logging.getLogger(__name__)
 
-
 async def process_incoming_ticket(ticket_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Ingest raw ticket, trigger Gemini AI triage, and extract suggested bot task."""
-    raw_content = ticket_data.get("raw_content", "")
-    subject = ticket_data.get("subject", "")
+    """Cầu nối chuẩn tiếp nhận vé mới, kích hoạt AI Triage & bóc tách cấu trúc bot task."""
+    ticket_id = ticket_data.get("id")
+    if not ticket_id:
+        logger.warning("⚠️ Không có ticket_id trong ticket_data!")
+        return {}
 
-    # 1. AI Triage with Gemini engine
-    ai_result = await gemini_engine.triage_ticket(raw_content, subject)
-
-    # 2. Extract suggested task if applicable
-    bot_type = ai_result.get("suggested_bot_type")
-    payload = ai_result.get("suggested_payload", {})
-
-    logger.info(f"Ticket triaged by Gemini: Category={ai_result.get('category')}, Bot={bot_type}")
-
-    return {
-        "triage_result": ai_result,
-        "bot_type": bot_type,
-        "payload": payload,
-    }
-
+    try:
+        # Kích hoạt bộ máy tiền xử lý hoàn chỉnh (bao gồm cả bóc tách file & sinh suggested_payload)
+        ai_result = await process_ticket_with_ai(ticket_id)
+        logger.info(f"✨ Ticket #{ticket_id} đã được tiền xử lý tự động thành công!")
+        return ai_result or {}
+    except Exception as e:
+        logger.error(f"❌ Lỗi khi process_incoming_ticket #{ticket_id}: {e}")
+        return {}

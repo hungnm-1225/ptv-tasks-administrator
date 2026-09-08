@@ -2418,7 +2418,7 @@ export const AutomationStudioPage: React.FC = () => {
                     }`}
                 >
                   <Trash2 className="w-4 h-4" />
-                  <span>2. Hủy Ghi Danh (Unenrol 🗑️)</span>
+                  <span>2. Hủy Ghi Danh</span>
                 </button>
               </div>
 
@@ -2437,18 +2437,13 @@ export const AutomationStudioPage: React.FC = () => {
                     <div className="flex items-center gap-2">
                       <h3 className="text-xs font-bold text-slate-900 dark:text-white">
                         {lmsActionType === 'enroll'
-                          ? 'Ghi Danh & Đổi Quyền Khóa Học PLearn LMS (Single Session)'
+                          ? 'Ghi Danh & Đổi Quyền Khóa Học PLearn LMS'
                           : 'Hủy Ghi Danh Học Viên Khỏi Khóa Học PLearn LMS'}
                       </h3>
                       <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 font-mono text-[10px] font-bold text-slate-600 dark:text-slate-300">
                         learn.pythaverse.space
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                      {lmsActionType === 'enroll'
-                        ? 'Thực hiện ghi danh đồng loạt nhiều khóa học trong cùng 1 lần đăng nhập.'
-                        : 'Lọc tìm và gỡ bỏ hoàn toàn quyền truy cập của danh sách học viên khỏi các khóa học đã chọn.'}
-                    </p>
                   </div>
                 </div>
 
@@ -2469,7 +2464,6 @@ export const AutomationStudioPage: React.FC = () => {
               <div className="space-y-3.5">
                 <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200 px-1">
                   <span>DANH SÁCH KHÓA HỌC LMS ÁP DỤNG ({lmsSelectedCourses.length} KHÓA):</span>
-                  <span className="text-[11px] text-slate-400 font-normal">Tất cả khóa sẽ được duyệt tuần tự trong 1 phiên Playwright</span>
                 </div>
 
                 {lmsSelectedCourses.map((lmsItem, idx) => {
@@ -2642,9 +2636,6 @@ export const AutomationStudioPage: React.FC = () => {
                     placeholder="student1@pythaverse.space&#10;teacher1@pythaverse.space"
                     className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 font-mono text-xs text-slate-900 dark:text-white focus:border-rose-500 focus:outline-hidden leading-relaxed"
                   />
-                  <p className="text-[11px] text-slate-400">
-                    💡 Bot sẽ sử dụng bộ lọc Keyword 2 nhịp để tìm chính xác học viên và xác nhận Unenrol trên từng khóa học được chọn.
-                  </p>
                 </div>
               ) : (
                 /* Role Assignment Mode cũ của Ghi danh */
