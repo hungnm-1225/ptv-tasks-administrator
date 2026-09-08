@@ -39,7 +39,7 @@ import {
   Download,
   KeyRound,
   ShieldCheck,
-  UserX,
+  UserCheck,
   Zap,
   SlidersHorizontal,
   FileCheck,
@@ -206,27 +206,21 @@ export const UnifiedInboxPage: React.FC = () => {
   const [expandedContent, setExpandedContent] = useState<Record<string, boolean>>({});
   const [previewFile, setPreviewFile] = useState<{ filename: string; url: string } | null>(null);
 
-  // =========================================================================
-  // 🚀 STATE STUDIO PRO MODAL (ĐỒNG BỘ HOÀN TOÀN VỚI AUTOMATION STUDIO)
-  // =========================================================================
+  // State Modal Studio Pro
   const [taskModalTicket, setTaskModalTicket] = useState<InboxTicket | null>(null);
 
-  // 4 Cỗ Máy Tự Động Hóa Chính
   const [selectedBotType, setSelectedBotType] = useState<
     'workspace_rpa' | 'keycloak_api' | 'git_collaborator' | 'feedback_doc_triage'
   >('workspace_rpa');
 
-  // 4 Mục chính của Workspace RPA
   const [workspaceMainCategory, setWorkspaceMainCategory] = useState<
     'approve' | 'create_and_approve' | 'bulk_accounts' | 'lms_enroll'
   >('create_and_approve');
 
-  // Phân luồng con trong mục "1. Phê Duyệt"
   const [approveSubFlow, setApproveSubFlow] = useState<
     'approve_school_order' | 'approve_partner_contract' | 'admin_approve_contract'
   >('approve_school_order');
 
-  // Phân luồng con trong mục "2. Tạo & Duyệt"
   const [createApproveSubFlow, setCreateApproveSubFlow] = useState<
     'end_to_end' | 'partner_create_chain' | 'distributor_create_chain'
   >('end_to_end');
@@ -298,7 +292,7 @@ export const UnifiedInboxPage: React.FC = () => {
   const [lmsTeacherEmails, setLmsTeacherEmails] = useState<string>('');
   const [lmsManagerEmails, setLmsManagerEmails] = useState<string>('');
 
-  // 🐙 Pythaverse Git Controls
+  // Pythaverse Git Controls
   const [gitRepoUrl, setGitRepoUrl] = useState<string>('https://git.pythaverse.space/ptvswrp/SWRP11_Teacher');
   const [gitTargetRole, setGitTargetRole] = useState<'GUEST' | 'DEVELOPER' | 'ADMIN'>('GUEST');
   const [gitUsersList, setGitUsersList] = useState<string>('');
@@ -306,7 +300,7 @@ export const UnifiedInboxPage: React.FC = () => {
   const [gitRepoSearchQuery, setGitRepoSearchQuery] = useState<string>('');
   const gitRepoDropdownRef = useRef<HTMLDivElement | null>(null);
 
-  // Keycloak
+  // Keycloak Controls ĐẦY ĐỦ NHƯ STUDIO
   const [kcTargetEmail, setKcTargetEmail] = useState<string>('');
   const [kcEnableResetPass, setKcEnableResetPass] = useState<boolean>(true);
   const [kcTempPass, setKcTempPass] = useState<string>('Ptv@2026');
@@ -333,7 +327,6 @@ export const UnifiedInboxPage: React.FC = () => {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const SPREADSHEET_ID = '1rZgFBD2PuZWL1jvQefcYZztCQvo99Lhx0GATTKvj1Go';
 
-  // Nạp danh sách tickets trực tiếp từ API
   const loadTickets = useCallback(async (forceSpinner = false) => {
     if (forceSpinner) setLoading(true);
     try {
@@ -347,7 +340,6 @@ export const UnifiedInboxPage: React.FC = () => {
     }
   }, []);
 
-  // Nạp metadata ngầm trực tiếp từ API
   useEffect(() => {
     const loadAllMetadata = async () => {
       try {
@@ -387,7 +379,6 @@ export const UnifiedInboxPage: React.FC = () => {
     loadTickets();
   }, [loadTickets]);
 
-  // Click outside listener
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (entityDropdownRef.current && !entityDropdownRef.current.contains(event.target as Node)) {
@@ -402,7 +393,6 @@ export const UnifiedInboxPage: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Tổng hợp kho Repos Git từ danh mục khóa học
   const allAvailableGitRepos = useMemo(() => {
     const reposMap = new Map<string, {
       repo_url: string;
@@ -457,7 +447,6 @@ export const UnifiedInboxPage: React.FC = () => {
     );
   }, [allAvailableGitRepos, gitRepoSearchQuery]);
 
-  // Nạp danh sách đơn hàng Cache khi chọn tab Approve
   const handleFetchCachedList = async () => {
     setIsScrapingLive(true);
     try {
@@ -623,7 +612,6 @@ export const UnifiedInboxPage: React.FC = () => {
     }
   };
 
-  // Convert số serial ngày của Excel thành DD/MM/YYYY chuẩn
   const formatExcelDateClient = (val: any): string => {
     if (!val) return '';
     if (typeof val === 'number') {
@@ -757,7 +745,7 @@ export const UnifiedInboxPage: React.FC = () => {
   };
 
   // =========================================================================
-  // ⚡ SIÊU NĂNG LỰC: AUTO-PREFILL THÔNG MINH TỪ METADATA DO AI CHUẨN BỊ
+  // ⚡ SIÊU NĂNG LỰC PRE-FILL: BẮT ĐÚNG EMAIL HỌC SINH & ĐỒNG BỘ FORM
   // =========================================================================
   const handleOpenTaskModal = (ticket: InboxTicket) => {
     setTaskModalTicket(ticket);
@@ -770,7 +758,7 @@ export const UnifiedInboxPage: React.FC = () => {
 
     const fullText = `${ticket.subject || ''} ${ticket.raw_content || ''} ${ticket.submitter_name || ''} ${meta.school_name || ''}`.toLowerCase();
 
-    // 1. Phân giải trường học thụ hưởng (Ưu tiên từ metadata AI phát hiện)
+    // 1. Phân giải trường học thụ hưởng
     const targetSchoolName = meta.school_name || excelSummary?.school_name || suggestedTask.payload?.school_name || '';
     let matchedSchool: HierarchySchoolItem | null = null;
 
@@ -821,7 +809,7 @@ export const UnifiedInboxPage: React.FC = () => {
       ]);
     }
 
-    // 3. Phân loại Cỗ máy theo đề xuất AI (suggested_bot_type) hoặc Category
+    // 3. Phân loại Cỗ máy
     let botType: 'workspace_rpa' | 'keycloak_api' | 'git_collaborator' | 'feedback_doc_triage' = 'workspace_rpa';
     let mainCat: 'approve' | 'create_and_approve' | 'bulk_accounts' | 'lms_enroll' = 'create_and_approve';
 
@@ -837,7 +825,6 @@ export const UnifiedInboxPage: React.FC = () => {
       else if (suggestedTask.action === 'pipeline_end_to_end') mainCat = 'create_and_approve';
       else if (suggestedTask.action?.includes('approve')) mainCat = 'approve';
     } else {
-      // Fallback nếu ticket cũ chưa có suggested_bot_task
       if (ticket.category === 'account_keycloak') {
         botType = 'keycloak_api';
       } else if (ticket.category === 'lms_enroll') {
@@ -855,24 +842,32 @@ export const UnifiedInboxPage: React.FC = () => {
     setSelectedBotType(botType);
     setWorkspaceMainCategory(mainCat);
 
-    // Điền tham số người dùng & tài liệu
-    setKcTargetEmail(ticket.sender_email);
+    // 🎯 SỬA LỖI BẮT ĐÚNG EMAIL HỌC SINH: ƯU TIÊN TARGET EMAIL TỪ AI VÀ NỘI DUNG TICKET!
+    const senderEmail = (ticket.sender_email || '').toLowerCase().trim();
+    const rawMatches = ticket.raw_content?.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [];
+
+    // Lọc ra các email có trong nội dung mà KHÔNG PHẢI là email người gửi
+    const contentEmails = Array.from(new Set(rawMatches.map(e => e.toLowerCase().trim()))).filter(
+      (e) => e !== senderEmail && !e.includes('pythaverse.space') && !e.includes('dtt.vn')
+    );
+
+    // Ưu tiên 1: Target email do Gemini AI bóc tách
+    // Ưu tiên 2: Email tìm thấy trong nội dung tin nhắn
+    // Ưu tiên 3: Mới fallback về sender email
+    const resolvedTargetEmail = meta.target_email || suggestedTask.payload?.target_email || (contentEmails.length > 0 ? contentEmails[0] : ticket.sender_email);
+
+    setKcTargetEmail(resolvedTargetEmail);
     setDocUrl(ticket.doc_url || '');
     setAssigneeEmail(ticket.assigned_email || 'hung.nguyenmanh@dtt.vn');
 
-    // Tự trích xuất email học viên nếu có
-    const emailMatches = ticket.raw_content?.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [];
-    const cleanEmails = Array.from(new Set(emailMatches.filter((e) => !e.includes('pythaverse.space') && !e.includes('dtt.vn'))));
-    if (cleanEmails.length > 0) {
-      setLmsBulkSingleEmails(cleanEmails.join('\n'));
-      setLmsStudentEmails(cleanEmails.join('\n'));
-      setGitUsersList(cleanEmails.join('\n'));
-    }
+    const emailListToUse = contentEmails.length > 0 ? contentEmails : [resolvedTargetEmail];
+    setLmsBulkSingleEmails(emailListToUse.join('\n'));
+    setLmsStudentEmails(emailListToUse.join('\n'));
+    setGitUsersList(emailListToUse.join('\n'));
 
-    toast.success('✨ AI đã tự động điền sẵn thông số điều phối dựa trên phân tích Ticket!');
+    toast.success(`✨ AI đã điền sẵn thông số cho tài khoản [${resolvedTargetEmail}]!`);
   };
 
-  // ⚡ TỰ ĐỘNG TÍNH TOÁN PAYLOAD JSON ĐỒNG BỘ
   const computedPayload = useMemo(() => {
     const tId = taskModalTicket?.id || null;
     const firstAttachmentUrl = taskModalTicket?.attachments?.[0]?.url || '';
@@ -1249,13 +1244,13 @@ export const UnifiedInboxPage: React.FC = () => {
       if (runImmediately) {
         toast.success(
           <div className="space-y-1">
-            <div className="font-bold flex items-center gap-1.5 text-emerald-400">
+            <div className="font-bold flex items-center gap-1.5 text-emerald-500">
               <CheckCircle2 className="w-4 h-4" />
               <span>Đã kích hoạt Worker chạy ngay!</span>
             </div>
             <button
               onClick={() => navigate('/bots')}
-              className="text-indigo-400 hover:underline text-xs font-semibold cursor-pointer block mt-1 transition"
+              className="text-indigo-600 hover:underline text-xs font-semibold cursor-pointer block mt-1 transition"
             >
               Mở Bot Command Center xem Live Terminal ➔
             </button>
@@ -1265,13 +1260,13 @@ export const UnifiedInboxPage: React.FC = () => {
       } else {
         toast.success(
           <div className="space-y-1">
-            <div className="font-bold flex items-center gap-1.5 text-emerald-400">
+            <div className="font-bold flex items-center gap-1.5 text-emerald-500">
               <CheckCircle2 className="w-4 h-4" />
               <span>Đã đưa tác vụ vào Hàng Đợi Phê Duyệt!</span>
             </div>
             <button
               onClick={() => navigate('/tasks')}
-              className="text-indigo-600 dark:text-indigo-400 hover:underline text-xs font-semibold cursor-pointer block mt-1 transition"
+              className="text-indigo-600 hover:underline text-xs font-semibold cursor-pointer block mt-1 transition"
             >
               Chuyển đến Task & Approval Hub để duyệt ➔
             </button>
@@ -1294,25 +1289,25 @@ export const UnifiedInboxPage: React.FC = () => {
     switch (source) {
       case 'gmail':
         return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-rose-50 text-rose-800 dark:bg-rose-950/50 dark:text-rose-300 border border-rose-200 dark:border-rose-800 shadow-2xs">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300 border border-rose-200 dark:border-rose-800 shadow-2xs">
             <Mail className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" /> GMAIL
           </span>
         );
       case 'google_form':
         return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-purple-50 text-purple-800 dark:bg-purple-950/50 dark:text-purple-300 border border-purple-200 dark:border-purple-800 shadow-2xs">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300 border border-purple-200 dark:border-purple-800 shadow-2xs">
             <FileText className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" /> FORM
           </span>
         );
       case 'osticket':
         return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200 dark:border-amber-800 shadow-2xs">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200 dark:border-amber-800 shadow-2xs">
             <Ticket className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" /> OS TICKET
           </span>
         );
       default:
         return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
             {source.toUpperCase()}
           </span>
         );
@@ -1323,26 +1318,26 @@ export const UnifiedInboxPage: React.FC = () => {
     switch (status) {
       case 'completed':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 shadow-2xs">
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 shadow-2xs">
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> ĐÃ XỬ LÝ
           </span>
         );
       case 'processing':
       case 'waiting_poll':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-sky-50 text-sky-800 dark:bg-sky-950/50 dark:text-sky-300 border border-sky-200 dark:border-sky-800 shadow-2xs">
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-sky-50 text-sky-800 dark:bg-sky-950/50 dark:text-sky-300 border border-sky-200 dark:border-sky-800 shadow-2xs">
             <RefreshCw className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400 animate-spin" /> ĐANG XỬ LÝ
           </span>
         );
       case 'dismissed':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
             <XCircle className="w-3.5 h-3.5 text-slate-500" /> ĐÃ BỎ QUA
           </span>
         );
       default:
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200 dark:border-amber-800 shadow-2xs">
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200 dark:border-amber-800 shadow-2xs">
             <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" /> CHỜ XỬ LÝ
           </span>
         );
@@ -1369,7 +1364,7 @@ export const UnifiedInboxPage: React.FC = () => {
             e.stopPropagation();
             setActiveCategoryDropdown(isDropdownOpen ? null : ticketId);
           }}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors shadow-2xs cursor-pointer"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 transition-colors shadow-2xs cursor-pointer"
         >
           <Tag className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
           <span>{catLabel.toUpperCase()}</span>
@@ -1410,7 +1405,7 @@ export const UnifiedInboxPage: React.FC = () => {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-16" onClick={() => setActiveCategoryDropdown(null)}>
-      {/* 1. Header Bar */}
+      {/* Header Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
@@ -1427,43 +1422,43 @@ export const UnifiedInboxPage: React.FC = () => {
         </div>
       </div>
 
-      {/* 2. Bento Metric Summary Tiles */}
+      {/* 4 Bento Pastel Stats Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="bg-blue-50 dark:bg-blue-950/40 rounded-[2rem] p-5 border border-blue-100 dark:border-blue-900/50 flex flex-col justify-between shadow-xs hover:-translate-y-0.5 transition-transform duration-200">
-          <span className="text-xs font-bold text-blue-500 uppercase tracking-widest">Tổng số yêu cầu</span>
+          <span className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest">Tổng số yêu cầu</span>
           <div className="mt-3">
             <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white font-mono">{stats.total}</div>
-            <div className="text-xs text-blue-400 font-medium">100% feed đồng bộ</div>
+            <div className="text-xs text-blue-500 font-medium">100% feed đồng bộ</div>
           </div>
         </div>
 
         <div className="bg-amber-50 dark:bg-amber-950/40 rounded-[2rem] p-5 border border-amber-100 dark:border-amber-900/50 flex flex-col justify-between shadow-xs hover:-translate-y-0.5 transition-transform duration-200">
-          <span className="text-xs font-bold text-amber-600 dark:text-amber-400 uppercase tracking-widest">Chờ xử lý</span>
+          <span className="text-xs font-bold text-amber-700 dark:text-amber-400 uppercase tracking-widest">Chờ xử lý</span>
           <div className="mt-3">
             <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white font-mono">{stats.pending}</div>
-            <div className="text-xs text-amber-500 font-medium">Cần thực thi ngay</div>
+            <div className="text-xs text-amber-600 font-medium">Cần thực thi ngay</div>
           </div>
         </div>
 
         <div className="bg-purple-50 dark:bg-purple-950/40 rounded-[2rem] p-5 border border-purple-100 dark:border-purple-900/50 flex flex-col justify-between shadow-xs hover:-translate-y-0.5 transition-transform duration-200">
-          <span className="text-xs font-bold text-purple-500 uppercase tracking-widest">Đang xử lý</span>
+          <span className="text-xs font-bold text-purple-600 dark:text-purple-400 uppercase tracking-widest">Đang xử lý</span>
           <div className="mt-3">
             <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white font-mono">{stats.processing}</div>
-            <div className="text-xs text-purple-400 font-medium">Đang chạy qua Bot/Worker</div>
+            <div className="text-xs text-purple-500 font-medium">Đang chạy qua Bot/Worker</div>
           </div>
         </div>
 
         <div className="bg-emerald-50 dark:bg-emerald-950/40 rounded-[2rem] p-5 border border-emerald-100 dark:border-emerald-900/50 flex flex-col justify-between shadow-xs hover:-translate-y-0.5 transition-transform duration-200">
-          <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">Đã giải quyết</span>
+          <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-widest">Đã giải quyết</span>
           <div className="mt-3">
             <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white font-mono">{stats.resolved}</div>
-            <div className="text-xs text-emerald-500 font-medium">Hoàn tất quy trình</div>
+            <div className="text-xs text-emerald-600 font-medium">Hoàn tất quy trình</div>
           </div>
         </div>
       </div>
 
-      {/* 3. Bento Search & Filter Control Bar */}
-      <div className="p-5 sm:p-6 rounded-[2rem] bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+      {/* Bento Search & Filter Control Bar */}
+      <div className="p-5 sm:p-6 rounded-[2rem] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
         <div className="relative">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input
@@ -1472,7 +1467,7 @@ export const UnifiedInboxPage: React.FC = () => {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Tìm nhanh theo tiêu đề, người gửi, tóm tắt AI, mã ID, nội dung, trường học..."
-            className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all shadow-2xs"
+            className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition shadow-2xs"
           />
           {searchQuery && (
             <button
@@ -1489,12 +1484,12 @@ export const UnifiedInboxPage: React.FC = () => {
 
         <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-slate-100 dark:border-slate-800">
           <div className="flex flex-wrap items-center gap-2.5">
-            <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 shadow-2xs">
-              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">Nguồn:</span>
+            <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-2.5 py-1.5 shadow-2xs">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 whitespace-nowrap">Nguồn:</span>
               <select
                 value={selectedSource}
                 onChange={(e) => setSelectedSource(e.target.value)}
-                className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
+                className="bg-transparent text-xs font-bold text-slate-900 dark:text-white outline-none cursor-pointer"
               >
                 <option value="all" className="bg-white dark:bg-slate-900">Tất cả Nguồn</option>
                 <option value="gmail" className="bg-white dark:bg-slate-900">✉️ Gmail</option>
@@ -1503,12 +1498,12 @@ export const UnifiedInboxPage: React.FC = () => {
               </select>
             </div>
 
-            <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 shadow-2xs">
-              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">Phân loại:</span>
+            <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-2.5 py-1.5 shadow-2xs">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 whitespace-nowrap">Phân loại:</span>
               <select
                 value={selectedCategory}
                 onChange={(e) => setSelectedCategory(e.target.value)}
-                className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
+                className="bg-transparent text-xs font-bold text-slate-900 dark:text-white outline-none cursor-pointer"
               >
                 <option value="all" className="bg-white dark:bg-slate-900">Tất cả Category</option>
                 <option value="bug" className="bg-white dark:bg-slate-900">🐛 System Bugs</option>
@@ -1519,12 +1514,12 @@ export const UnifiedInboxPage: React.FC = () => {
               </select>
             </div>
 
-            <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 shadow-2xs">
-              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">Trạng thái:</span>
+            <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-2.5 py-1.5 shadow-2xs">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 whitespace-nowrap">Trạng thái:</span>
               <select
                 value={selectedStatus}
                 onChange={(e) => setSelectedStatus(e.target.value)}
-                className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
+                className="bg-transparent text-xs font-bold text-slate-900 dark:text-white outline-none cursor-pointer"
               >
                 <option value="all" className="bg-white dark:bg-slate-900">Tất cả trạng thái</option>
                 <option value="pending" className="bg-white dark:bg-slate-900">⏳ Chờ xử lý</option>
@@ -1538,7 +1533,7 @@ export const UnifiedInboxPage: React.FC = () => {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'))}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 transition cursor-pointer"
             >
               <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
               <span>{sortOrder === 'desc' ? 'Mới nhất ➔ Cũ nhất' : 'Cũ nhất ➔ Mới nhất'}</span>
@@ -1547,7 +1542,7 @@ export const UnifiedInboxPage: React.FC = () => {
             {(searchQuery || selectedSource !== 'all' || selectedCategory !== 'all' || selectedStatus !== 'all') && (
               <button
                 onClick={resetFilters}
-                className="px-2.5 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-xs font-medium hover:bg-rose-100 transition-colors cursor-pointer"
+                className="px-2.5 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-xs font-bold hover:bg-rose-100 transition cursor-pointer"
               >
                 Xóa lọc
               </button>
@@ -1556,23 +1551,23 @@ export const UnifiedInboxPage: React.FC = () => {
         </div>
       </div>
 
-      {/* 4. Danh Sách Ticket */}
+      {/* Danh Sách Ticket */}
       {loading && tickets.length === 0 ? (
         <div className="space-y-4 animate-pulse">
           {[1, 2, 3].map((idx) => (
-            <div key={idx} className="p-6 sm:p-7 rounded-[2.5rem] bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 space-y-4 shadow-xs">
+            <div key={idx} className="p-6 sm:p-7 rounded-[2.5rem] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4 shadow-xs">
               <div className="h-6 w-3/4 bg-slate-200 dark:bg-slate-800 rounded-lg" />
               <div className="h-20 w-full bg-slate-100 dark:bg-slate-800/40 rounded-2xl" />
             </div>
           ))}
         </div>
       ) : filteredTickets.length === 0 ? (
-        <div className="p-12 text-center rounded-[2.5rem] bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+        <div className="p-12 text-center rounded-[2.5rem] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
           <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-slate-800 flex items-center justify-center mx-auto mb-3 text-indigo-500">
             <Inbox className="w-6 h-6" />
           </div>
           <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">Không tìm thấy yêu cầu nào phù hợp</h3>
-          <button onClick={resetFilters} className="mt-4 px-4 py-2 text-xs font-semibold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shadow-sm cursor-pointer">
+          <button onClick={resetFilters} className="mt-4 px-4 py-2 text-xs font-bold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 transition shadow-sm cursor-pointer">
             Đặt lại bộ lọc
           </button>
         </div>
@@ -1592,7 +1587,7 @@ export const UnifiedInboxPage: React.FC = () => {
               <div
                 key={ticket.id}
                 id={`ticket-card-${ticket.id}`}
-                className="p-6 sm:p-7 rounded-[2.5rem] bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs hover:shadow-md transition-all duration-200 space-y-4"
+                className="p-6 sm:p-7 rounded-[2.5rem] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs hover:shadow-md transition duration-200 space-y-4"
               >
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex flex-wrap items-center gap-2">
@@ -1601,7 +1596,7 @@ export const UnifiedInboxPage: React.FC = () => {
                     {getCategoryBadge(ticket.category || 'other', ticket.id)}
 
                     <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 pl-1">
-                      <span className="font-semibold text-slate-800 dark:text-slate-200 truncate max-w-[200px]">
+                      <span className="font-bold text-slate-900 dark:text-slate-200 truncate max-w-[200px]">
                         {ticket.submitter_name || ticket.sender_email}
                       </span>
                       <span>•</span>
@@ -1616,7 +1611,7 @@ export const UnifiedInboxPage: React.FC = () => {
                     href={directUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/50 border border-sky-200 dark:border-sky-800 hover:bg-sky-100 transition-colors shadow-2xs"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/50 border border-sky-200 dark:border-sky-800 hover:bg-sky-100 transition shadow-2xs"
                   >
                     <span>Mở trang gốc</span>
                     <ExternalLink className="w-3.5 h-3.5" />
@@ -1628,7 +1623,7 @@ export const UnifiedInboxPage: React.FC = () => {
                     {ticket.subject || 'Không có tiêu đề'}
                   </h2>
                   {ticket.metadata?.school_name && (
-                    <p className="text-xs font-medium text-indigo-600 dark:text-indigo-400 mt-0.5 flex items-center gap-1">
+                    <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400 mt-0.5 flex items-center gap-1">
                       <Building2 className="w-3.5 h-3.5" />
                       <span>{ticket.metadata.school_name}</span>
                     </p>
@@ -1646,11 +1641,11 @@ export const UnifiedInboxPage: React.FC = () => {
                           key={idx}
                           type="button"
                           onClick={() => setPreviewFile(file)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-50 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-indigo-200 hover:bg-indigo-50/40 transition-all shadow-2xs group cursor-pointer"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:border-indigo-300 transition shadow-2xs group cursor-pointer"
                         >
                           {isImage ? <ImageIcon className="w-3.5 h-3.5 text-emerald-500" /> : isExcel ? <FileSpreadsheetIcon className="w-3.5 h-3.5 text-emerald-600" /> : <Paperclip className="w-3.5 h-3.5 text-indigo-500" />}
                           <span className="truncate max-w-[200px]">{file.filename}</span>
-                          <Eye className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 ml-0.5 transition-colors" />
+                          <Eye className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 ml-0.5 transition" />
                         </button>
                       );
                     })}
@@ -1658,13 +1653,13 @@ export const UnifiedInboxPage: React.FC = () => {
                 )}
 
                 {/* Gemini AI Summary & Auto-prefilled Banner */}
-                <div className="p-5 sm:p-6 rounded-[2rem] bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40 space-y-3 shadow-xs">
+                <div className="p-5 sm:p-6 rounded-[2rem] bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/40 space-y-3 shadow-xs">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <div className="p-1 rounded-lg bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300">
+                      <div className="p-1.5 rounded-lg bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300">
                         <Sparkles className="w-4 h-4" />
                       </div>
-                      <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                      <span className="text-xs font-extrabold text-emerald-900 dark:text-emerald-200 uppercase tracking-wider">
                         Tóm tắt & Đề xuất tự động từ Gemini AI
                       </span>
                     </div>
@@ -1676,8 +1671,8 @@ export const UnifiedInboxPage: React.FC = () => {
                     )}
                   </div>
 
-                  <div className="p-3.5 rounded-2xl bg-white/80 dark:bg-slate-900/80 border border-emerald-100/70 dark:border-emerald-900/30 text-xs shadow-xs space-y-1">
-                    <p className="text-slate-700 dark:text-slate-300 font-normal leading-relaxed whitespace-pre-line">
+                  <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-100 dark:border-emerald-900/30 text-xs shadow-xs">
+                    <p className="text-slate-800 dark:text-slate-200 font-medium leading-relaxed whitespace-pre-line">
                       {ticket.ai_summary || 'Hệ thống đã nhận thông tin và đang chờ Gemini AI phân tích...'}
                     </p>
                   </div>
@@ -1688,7 +1683,7 @@ export const UnifiedInboxPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setExpandedContent((prev) => ({ ...prev, [ticket.id]: !prev[ticket.id] }))}
-                    className="flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors cursor-pointer"
+                    className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition cursor-pointer"
                   >
                     <FileCode className="w-3.5 h-3.5" />
                     <span>{isExpanded ? 'Thu gọn nội dung gốc' : 'Xem nội dung gốc'}</span>
@@ -1696,7 +1691,7 @@ export const UnifiedInboxPage: React.FC = () => {
                   </button>
 
                   {isExpanded && (
-                    <div className="mt-2.5 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 font-mono whitespace-pre-wrap leading-relaxed shadow-inner max-h-72 overflow-y-auto">
+                    <div className="mt-2.5 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-800 dark:text-slate-200 whitespace-pre-wrap leading-relaxed shadow-inner max-h-72 overflow-y-auto">
                       {cleanRawContent || '(Không có nội dung văn bản gốc)'}
                     </div>
                   )}
@@ -1704,7 +1699,7 @@ export const UnifiedInboxPage: React.FC = () => {
 
                 {/* Action Buttons */}
                 <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
-                  <div className="text-[11px] font-mono text-slate-400">
+                  <div className="text-[11px] font-mono text-slate-400 font-bold">
                     Mã tham chiếu: #{ticket.source_id || ticket.id.slice(0, 8)}
                   </div>
 
@@ -1713,7 +1708,7 @@ export const UnifiedInboxPage: React.FC = () => {
                       <button
                         onClick={() => handleRestoreTask(ticket.id)}
                         disabled={actionLoading === ticket.id}
-                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 transition-colors shadow-2xs cursor-pointer"
+                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 transition shadow-2xs cursor-pointer"
                       >
                         {actionLoading === ticket.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
                         <span>Khôi phục Hòm Thư</span>
@@ -1722,7 +1717,7 @@ export const UnifiedInboxPage: React.FC = () => {
                       <button
                         onClick={() => handleRestoreTask(ticket.id)}
                         disabled={actionLoading === ticket.id}
-                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 transition-colors shadow-2xs cursor-pointer"
+                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 transition shadow-2xs cursor-pointer"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
                         <span>Mở lại Ticket</span>
@@ -1732,7 +1727,7 @@ export const UnifiedInboxPage: React.FC = () => {
                         <button
                           onClick={() => handleDismissTask(ticket.id)}
                           disabled={actionLoading === ticket.id}
-                          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-300 border border-rose-100 dark:border-rose-900 hover:bg-rose-100 transition-colors shadow-2xs cursor-pointer"
+                          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-300 border border-rose-200 dark:border-rose-900 hover:bg-rose-100 transition shadow-2xs cursor-pointer"
                         >
                           {actionLoading === ticket.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
                           <span>Bỏ qua</span>
@@ -1741,7 +1736,7 @@ export const UnifiedInboxPage: React.FC = () => {
                         <button
                           onClick={() => handleCompleteTask(ticket.id)}
                           disabled={actionLoading === ticket.id}
-                          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-100 dark:border-emerald-900 hover:bg-emerald-100 transition-colors shadow-2xs cursor-pointer"
+                          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900 hover:bg-emerald-100 transition shadow-2xs cursor-pointer"
                         >
                           {actionLoading === ticket.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCheck className="w-3.5 h-3.5" />}
                           <span>Hoàn thành</span>
@@ -1749,7 +1744,7 @@ export const UnifiedInboxPage: React.FC = () => {
 
                         <button
                           onClick={() => navigate('/github', { state: { ticket } })}
-                          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-900 text-white dark:bg-slate-800 dark:text-slate-100 hover:bg-slate-800 transition-colors shadow-2xs cursor-pointer"
+                          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-900 text-white dark:bg-slate-800 dark:text-slate-100 hover:bg-slate-800 transition shadow-2xs cursor-pointer"
                         >
                           <GitPullRequest className="w-3.5 h-3.5" />
                           <span>Tạo Issue GitHub</span>
@@ -1774,7 +1769,7 @@ export const UnifiedInboxPage: React.FC = () => {
       )}
 
       {/* ========================================================================= */}
-      {/* 🚀 STUDIO PRO MODAL (BENTO ENTERPRISE - ĐỒNG BỘ 100% VỚI STUDIO) */}
+      {/* 🚀 STUDIO PRO MODAL (BENTO HIGH-CONTRAST - ĐẦY ĐỦ 100% NHƯ STUDIO) */}
       {/* ========================================================================= */}
       {taskModalTicket && typeof document !== 'undefined' && createPortal(
         <div
@@ -1787,10 +1782,10 @@ export const UnifiedInboxPage: React.FC = () => {
             exit={{ opacity: 0, scale: 0.96, y: 15 }}
             transition={{ duration: 0.2 }}
             onClick={(e) => e.stopPropagation()}
-            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-full sm:max-w-4xl lg:max-w-5xl xl:max-w-6xl shadow-2xl overflow-hidden p-6 sm:p-8 max-h-[92vh] flex flex-col my-auto"
+            className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-3xl w-full max-w-full sm:max-w-4xl lg:max-w-5xl xl:max-w-6xl shadow-2xl overflow-hidden p-6 sm:p-8 max-h-[92vh] flex flex-col my-auto"
           >
             {/* Header Modal */}
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 flex-wrap gap-2 shrink-0">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800 flex-wrap gap-2 shrink-0">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 bg-indigo-600 text-white rounded-2xl shadow-md shadow-indigo-500/20">
                   <Zap className="w-5 h-5" />
@@ -1800,12 +1795,12 @@ export const UnifiedInboxPage: React.FC = () => {
                     <h3 className="text-base font-extrabold text-slate-900 dark:text-white tracking-tight">
                       Automation Studio Pro (Điều Phối Cho Request)
                     </h3>
-                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 font-bold uppercase ring-1 ring-emerald-300/40">
+                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 font-extrabold uppercase ring-1 ring-emerald-300/40">
                       ⚡ AI Auto-Prefilled
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Dữ liệu đã được bóc tách và điền sẵn dựa trên phân tích Request #{taskModalTicket.source_id || taskModalTicket.id.slice(0, 8)}.
+                  <p className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                    Dữ liệu đã được bóc tách tự động cho Request #{taskModalTicket.source_id || taskModalTicket.id.slice(0, 8)}.
                   </p>
                 </div>
               </div>
@@ -1815,7 +1810,7 @@ export const UnifiedInboxPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setViewMode('form')}
-                    className={`px-3 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 ${viewMode === 'form' ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 font-bold shadow-2xs' : 'text-slate-500'
+                    className={`px-3 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 ${viewMode === 'form' ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 font-bold shadow-2xs' : 'text-slate-600'
                       }`}
                   >
                     <SlidersHorizontal className="w-3.5 h-3.5" />
@@ -1824,7 +1819,7 @@ export const UnifiedInboxPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setViewMode('json')}
-                    className={`px-3 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 ${viewMode === 'json' ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 font-bold shadow-2xs' : 'text-slate-500'
+                    className={`px-3 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 ${viewMode === 'json' ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 font-bold shadow-2xs' : 'text-slate-600'
                       }`}
                   >
                     <Code2 className="w-3.5 h-3.5" />
@@ -1835,7 +1830,7 @@ export const UnifiedInboxPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setTaskModalTicket(null)}
-                  className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                  className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -1848,9 +1843,9 @@ export const UnifiedInboxPage: React.FC = () => {
                 <>
                   {/* BƯỚC 1: CHỌN CỖ MÁY BOT (4 ENGINES) */}
                   <div className="space-y-2">
-                    <label className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                    <label className="text-xs font-bold text-slate-900 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
                       <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px] font-extrabold">1</span>
-                      <span>Chọn Cỗ Máy Tự Động Hóa (AI đã đề xuất):</span>
+                      <span>Chọn Cỗ Máy Tự Động Hóa:</span>
                     </label>
 
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
@@ -1869,12 +1864,12 @@ export const UnifiedInboxPage: React.FC = () => {
                             onClick={() => setSelectedBotType(tab.id as any)}
                             className={`flex flex-col items-start gap-1 p-3.5 rounded-2xl border text-left transition cursor-pointer ${isSel
                               ? 'bg-indigo-600 text-white border-transparent shadow-md ring-2 ring-indigo-500/30'
-                              : 'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100'
+                              : 'bg-slate-50 dark:bg-slate-800/80 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 hover:bg-slate-100'
                               }`}
                           >
                             <Icon className={`w-4 h-4 ${isSel ? 'text-white' : 'text-indigo-600 dark:text-indigo-400'}`} />
                             <span className="text-xs font-bold mt-1">{tab.label}</span>
-                            <span className={`text-[10px] ${isSel ? 'text-indigo-200' : 'text-slate-400'}`}>{tab.desc}</span>
+                            <span className={`text-[10px] font-medium ${isSel ? 'text-indigo-200' : 'text-slate-500'}`}>{tab.desc}</span>
                           </button>
                         );
                       })}
@@ -1883,9 +1878,9 @@ export const UnifiedInboxPage: React.FC = () => {
 
                   {/* BƯỚC 2A: WORKSPACE & LMS */}
                   {selectedBotType === 'workspace_rpa' && (
-                    <div className="space-y-4 p-5 rounded-2xl bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/40">
+                    <div className="space-y-4 p-5 rounded-2xl bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-900/40">
                       <div className="flex items-center justify-between flex-wrap gap-2">
-                        <label className="text-xs font-bold text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5">
+                        <label className="text-xs font-bold text-indigo-800 dark:text-indigo-300 flex items-center gap-1.5">
                           <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px] font-extrabold">2</span>
                           <span>Phân Luồng Nghiệp Vụ Workspace:</span>
                         </label>
@@ -1894,15 +1889,14 @@ export const UnifiedInboxPage: React.FC = () => {
                           type="button"
                           onClick={handleAutoExtractCof}
                           disabled={extractingCof}
-                          className="flex items-center gap-1.5 px-3 py-1 bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 text-xs font-semibold rounded-xl transition cursor-pointer shadow-2xs hover:bg-indigo-50"
+                          className="flex items-center gap-1.5 px-3 py-1 bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-800 text-xs font-bold rounded-xl transition cursor-pointer shadow-2xs hover:bg-indigo-50"
                         >
                           {extractingCof ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
                           <span>AI Tái Bóc Tách File COF</span>
                         </button>
                       </div>
 
-                      {/* 4 Tabs Nghiệp vụ */}
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-100 dark:bg-slate-800 p-1.5 rounded-2xl text-xs font-medium">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-200/80 dark:bg-slate-800 p-1.5 rounded-2xl text-xs font-semibold">
                         {[
                           { id: 'approve', label: '1. Phê Duyệt', icon: ClipboardCheck },
                           { id: 'create_and_approve', label: '2. Tạo & Duyệt', icon: Zap },
@@ -1918,7 +1912,7 @@ export const UnifiedInboxPage: React.FC = () => {
                                 setWorkspaceMainCategory(mTab.id as any);
                                 setParsedOrderCourses([]);
                               }}
-                              className={`py-2.5 px-2 rounded-xl text-center transition-all cursor-pointer flex items-center justify-center gap-1.5 text-xs ${isCur ? 'bg-white dark:bg-slate-900 font-bold text-indigo-600 dark:text-indigo-400 shadow-2xs' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                              className={`py-2.5 px-2 rounded-xl text-center transition cursor-pointer flex items-center justify-center gap-1.5 text-xs ${isCur ? 'bg-white dark:bg-slate-900 font-bold text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-700 dark:text-slate-400 hover:text-slate-900'
                                 }`}
                             >
                               <span>{mTab.label}</span>
@@ -1944,11 +1938,11 @@ export const UnifiedInboxPage: React.FC = () => {
                                   setSelectedItemCode('');
                                   setSelectedCachedItem(null);
                                 }}
-                                className={`rounded-xl border p-3 text-left transition cursor-pointer ${approveSubFlow === sub.id ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40' : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
+                                className={`rounded-xl border p-3 text-left transition cursor-pointer ${approveSubFlow === sub.id ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 ring-1 ring-indigo-500' : 'border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900'
                                   }`}
                               >
-                                <p className="text-xs font-bold text-slate-800 dark:text-slate-200">{sub.label}</p>
-                                <p className="text-[10px] text-slate-400">{sub.desc}</p>
+                                <p className="text-xs font-bold text-slate-900 dark:text-slate-200">{sub.label}</p>
+                                <p className="text-[10px] text-slate-500 dark:text-slate-400">{sub.desc}</p>
                               </button>
                             ))}
                           </div>
@@ -1959,18 +1953,18 @@ export const UnifiedInboxPage: React.FC = () => {
                               value={universalSearchQuery}
                               onChange={(e) => setUniversalSearchQuery(e.target.value)}
                               placeholder="Tìm kiếm mã đơn / tên trường trong danh sách..."
-                              className="w-full pl-3 pr-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs"
+                              className="w-full pl-3 pr-3 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 text-xs font-semibold text-slate-900 dark:text-white outline-none"
                             />
                           </div>
 
-                          <div className="max-h-48 overflow-y-auto space-y-1.5 border border-slate-200 dark:border-slate-800 rounded-xl p-2 bg-white dark:bg-slate-900">
+                          <div className="max-h-48 overflow-y-auto space-y-1.5 border border-slate-300 dark:border-slate-800 rounded-xl p-2 bg-white dark:bg-slate-900">
                             {isScrapingLive ? (
-                              <div className="p-4 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                              <div className="p-4 text-center text-xs text-slate-500 flex items-center justify-center gap-2 font-medium">
                                 <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
                                 <span>Đang nạp danh sách cache...</span>
                               </div>
                             ) : scrapedPendingList.length === 0 ? (
-                              <div className="p-4 text-center text-xs text-slate-400">Không có mục nào trong danh sách cache.</div>
+                              <div className="p-4 text-center text-xs text-slate-500 font-medium">Không có mục nào trong danh sách cache.</div>
                             ) : (
                               scrapedPendingList.map((item, idx) => {
                                 const code = item.order_code || item.contract_code || `ITEM-${idx}`;
@@ -1983,14 +1977,14 @@ export const UnifiedInboxPage: React.FC = () => {
                                       setSelectedCachedItem(item);
                                       if (item.courses_data) setParsedOrderCourses(item.courses_data);
                                     }}
-                                    className={`p-2.5 rounded-xl border text-xs cursor-pointer transition ${isSel ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40' : 'border-slate-100 dark:border-slate-800'
+                                    className={`p-2.5 rounded-xl border text-xs cursor-pointer transition ${isSel ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40' : 'border-slate-200 dark:border-slate-800'
                                       }`}
                                   >
-                                    <div className="flex justify-between font-bold">
+                                    <div className="flex justify-between font-bold text-slate-900 dark:text-white">
                                       <span>{code}</span>
-                                      <span className="text-[10px] text-amber-600">{item.status || 'Pending'}</span>
+                                      <span className="text-[10px] text-amber-700">{item.status || 'Pending'}</span>
                                     </div>
-                                    <div className="text-[11px] text-slate-500">{item.school_name || item.sender_name}</div>
+                                    <div className="text-[11px] text-slate-600 dark:text-slate-400">{item.school_name || item.sender_name}</div>
                                   </div>
                                 );
                               })
@@ -2002,9 +1996,8 @@ export const UnifiedInboxPage: React.FC = () => {
                       {/* LUỒNG 2: TẠO MỚI & DUYỆT TRỌN GÓI */}
                       {workspaceMainCategory === 'create_and_approve' && (
                         <div className="space-y-4">
-                          {/* Trường học áp dụng */}
                           <div className="space-y-1.5 relative" ref={entityDropdownRef}>
-                            <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center justify-between">
+                            <label className="text-xs font-bold text-slate-900 dark:text-slate-200 flex items-center justify-between">
                               <span className="flex items-center gap-1.5">
                                 <Building2 className="w-3.5 h-3.5 text-indigo-600" />
                                 <span>Trường Học Áp Dụng (Trong 480 trường phả hệ):</span>
@@ -2023,11 +2016,11 @@ export const UnifiedInboxPage: React.FC = () => {
                                 setIsEntityDropdownOpen(true);
                               }}
                               placeholder="Tra cứu trong 480 trường..."
-                              className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs text-slate-900 dark:text-white outline-none"
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs font-bold text-slate-900 dark:text-white outline-none"
                             />
 
                             {isEntityDropdownOpen && (
-                              <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-56 overflow-y-auto p-1.5 space-y-1">
+                              <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-2xl shadow-xl max-h-56 overflow-y-auto p-1.5 space-y-1">
                                 {schoolsList
                                   .filter((s) => s.school_name.toLowerCase().includes(entitySearchQuery.toLowerCase()) || s.school_code.toLowerCase().includes(entitySearchQuery.toLowerCase()))
                                   .slice(0, 30)
@@ -2045,8 +2038,8 @@ export const UnifiedInboxPage: React.FC = () => {
                                       className="w-full text-left p-2.5 rounded-xl text-xs hover:bg-indigo-50 dark:hover:bg-slate-800 flex items-center justify-between cursor-pointer"
                                     >
                                       <div>
-                                        <div className="font-bold text-slate-800 dark:text-slate-200">{s.school_name}</div>
-                                        <div className="text-[11px] text-slate-400 font-mono">
+                                        <div className="font-bold text-slate-900 dark:text-slate-200">{s.school_name}</div>
+                                        <div className="text-[11px] text-slate-500 font-mono">
                                           Mã: {s.school_code} | Tuyến: {s.partner_name} ➔ {s.distributor_name}
                                         </div>
                                       </div>
@@ -2057,7 +2050,7 @@ export const UnifiedInboxPage: React.FC = () => {
                             )}
 
                             {selectedSchool && (
-                              <div className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-slate-800 text-[11px] font-mono text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 shadow-2xs">
+                              <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-slate-800 text-[11px] font-mono font-bold text-indigo-700 dark:text-indigo-400 flex items-center gap-1.5 shadow-2xs">
                                 <Layers className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
                                 <span>{selectedSchool.full_lineage}</span>
                               </div>
@@ -2067,7 +2060,7 @@ export const UnifiedInboxPage: React.FC = () => {
                           {/* Danh Sách Khóa Học */}
                           <div className="space-y-3 pt-1">
                             <div className="flex items-center justify-between">
-                              <label className="text-xs font-bold text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5">
+                              <label className="text-xs font-bold text-indigo-800 dark:text-indigo-300 flex items-center gap-1.5">
                                 <BookOpen className="w-4 h-4 text-indigo-600" />
                                 <span>Danh Sách Khóa Học ({selectedCourses.length} Môn):</span>
                               </label>
@@ -2075,7 +2068,7 @@ export const UnifiedInboxPage: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={handleAddCourseRow}
-                                className="flex items-center gap-1 text-xs px-3 py-1 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-xl font-bold hover:bg-indigo-100 cursor-pointer shadow-2xs transition"
+                                className="flex items-center gap-1 text-xs px-3 py-1 bg-indigo-100 dark:bg-indigo-950/50 text-indigo-800 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-800 rounded-xl font-bold hover:bg-indigo-200 cursor-pointer shadow-2xs transition"
                               >
                                 <Plus className="w-3.5 h-3.5" />
                                 <span>Thêm Khóa Học</span>
@@ -2085,11 +2078,11 @@ export const UnifiedInboxPage: React.FC = () => {
                             {selectedCourses.map((cRow, idx) => {
                               const filteredCourses = workspaceCoursesList.filter((c) => c.category === cRow.category);
                               return (
-                                <div key={idx} className="p-3.5 bg-white dark:bg-slate-900 rounded-2xl border border-indigo-100 dark:border-slate-800 space-y-2 shadow-2xs">
-                                  <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
+                                <div key={idx} className="p-3.5 bg-white dark:bg-slate-900 rounded-2xl border border-indigo-200 dark:border-slate-800 space-y-2 shadow-2xs">
+                                  <div className="flex items-center justify-between text-xs font-bold text-slate-900 dark:text-slate-200">
                                     <span>Khóa học #{idx + 1}</span>
                                     {selectedCourses.length > 1 && (
-                                      <button type="button" onClick={() => handleRemoveCourseRow(idx)} className="text-rose-500 hover:text-rose-700 p-0.5 rounded cursor-pointer">
+                                      <button type="button" onClick={() => handleRemoveCourseRow(idx)} className="text-rose-600 hover:text-rose-800 p-0.5 rounded cursor-pointer">
                                         <Trash2 className="w-3.5 h-3.5" />
                                       </button>
                                     )}
@@ -2097,7 +2090,7 @@ export const UnifiedInboxPage: React.FC = () => {
 
                                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                     <div>
-                                      <label className="text-[10px] font-bold text-slate-500 uppercase">Phân loại:</label>
+                                      <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase">Phân loại:</label>
                                       <select
                                         value={cRow.category}
                                         onChange={(e) => {
@@ -2114,7 +2107,7 @@ export const UnifiedInboxPage: React.FC = () => {
                                           };
                                           setSelectedCourses(updated);
                                         }}
-                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-semibold"
+                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs font-bold text-slate-900 dark:text-white"
                                       >
                                         {workspaceCategoriesList.map((cat) => (
                                           <option key={cat} value={cat}>{cat}</option>
@@ -2123,7 +2116,7 @@ export const UnifiedInboxPage: React.FC = () => {
                                     </div>
 
                                     <div className="sm:col-span-2">
-                                      <label className="text-[10px] font-bold text-slate-500 uppercase">Chọn khóa học:</label>
+                                      <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase">Chọn khóa học:</label>
                                       <select
                                         value={cRow.course_id}
                                         onChange={(e) => {
@@ -2140,7 +2133,7 @@ export const UnifiedInboxPage: React.FC = () => {
                                             setSelectedCourses(updated);
                                           }
                                         }}
-                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-semibold truncate"
+                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs font-bold text-slate-900 dark:text-white truncate"
                                       >
                                         {filteredCourses.map((c) => (
                                           <option key={c.course_id} value={c.course_id}>
@@ -2153,7 +2146,7 @@ export const UnifiedInboxPage: React.FC = () => {
 
                                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                     <div>
-                                      <label className="text-[10px] font-bold text-slate-500 uppercase">Licenses:</label>
+                                      <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase">Licenses:</label>
                                       <input
                                         type="number"
                                         value={cRow.licenses}
@@ -2163,11 +2156,11 @@ export const UnifiedInboxPage: React.FC = () => {
                                           updated[idx].licenses = parseInt(e.target.value) || 1;
                                           setSelectedCourses(updated);
                                         }}
-                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-bold"
+                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs font-mono font-bold text-slate-900 dark:text-white"
                                       />
                                     </div>
                                     <div>
-                                      <label className="text-[10px] font-bold text-slate-500 uppercase">Start Date:</label>
+                                      <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase">Start Date:</label>
                                       <input
                                         type="text"
                                         value={cRow.start_date}
@@ -2176,11 +2169,11 @@ export const UnifiedInboxPage: React.FC = () => {
                                           updated[idx].start_date = e.target.value;
                                           setSelectedCourses(updated);
                                         }}
-                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-mono"
+                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs font-mono font-bold text-slate-900 dark:text-white"
                                       />
                                     </div>
                                     <div>
-                                      <label className="text-[10px] font-bold text-slate-500 uppercase">End Date:</label>
+                                      <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase">End Date:</label>
                                       <input
                                         type="text"
                                         value={cRow.end_date}
@@ -2189,7 +2182,7 @@ export const UnifiedInboxPage: React.FC = () => {
                                           updated[idx].end_date = e.target.value;
                                           setSelectedCourses(updated);
                                         }}
-                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-mono"
+                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs font-mono font-bold text-slate-900 dark:text-white"
                                       />
                                     </div>
                                   </div>
@@ -2200,9 +2193,60 @@ export const UnifiedInboxPage: React.FC = () => {
                         </div>
                       )}
 
-                      {/* LUỒNG 3: TẠO TÀI KHOẢN (BẢNG PREVIEW & VALIDATE TÀI KHOẢN Y HỆT STUDIO) */}
+                      {/* LUỒNG 3: TẠO TÀI KHOẢN (ĐÃ BỔ SUNG Ô CHỌN TRƯỜNG PHẢ HỆ VÀ PREVIEW CHUẨN) */}
                       {workspaceMainCategory === 'bulk_accounts' && (
                         <div className="space-y-4">
+                          {/* Ô chọn trường học thụ hưởng (480 trường) */}
+                          <div className="space-y-1.5 relative" ref={entityDropdownRef}>
+                            <label className="text-xs font-bold text-slate-900 dark:text-slate-200 flex items-center justify-between">
+                              <span className="flex items-center gap-1.5">
+                                <Building2 className="w-4 h-4 text-indigo-600" />
+                                <span>Trường Học Thụ Hưởng Tài Khoản: <span className="text-rose-500">*</span></span>
+                              </span>
+                              {selectedSchool && (
+                                <span className="text-xs text-indigo-600 font-mono font-bold">Mã: {selectedSchool.school_code}</span>
+                              )}
+                            </label>
+                            <input
+                              type="text"
+                              value={entitySearchQuery}
+                              onFocus={() => setIsEntityDropdownOpen(true)}
+                              onChange={(e) => {
+                                setEntitySearchQuery(e.target.value);
+                                setIsEntityDropdownOpen(true);
+                              }}
+                              placeholder="Tra cứu tên hoặc mã trường học..."
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs font-bold text-slate-900 dark:text-white outline-none"
+                            />
+                            {isEntityDropdownOpen && (
+                              <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-2xl shadow-xl max-h-56 overflow-y-auto p-1.5 space-y-1">
+                                {schoolsList
+                                  .filter((s) => s.school_name.toLowerCase().includes(entitySearchQuery.toLowerCase()) || s.school_code.toLowerCase().includes(entitySearchQuery.toLowerCase()))
+                                  .slice(0, 30)
+                                  .map((s) => (
+                                    <button
+                                      key={s.school_code}
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedSchool(s);
+                                        setSelectedPartner({ name: s.partner_name, code: s.partner_code || 'PAR' });
+                                        setSelectedDistributor({ name: s.distributor_name, code: s.distributor_code || 'DST' });
+                                        setEntitySearchQuery(s.school_name);
+                                        setIsEntityDropdownOpen(false);
+                                      }}
+                                      className="w-full text-left p-2.5 rounded-xl text-xs hover:bg-indigo-50 dark:hover:bg-slate-800 flex items-center justify-between cursor-pointer"
+                                    >
+                                      <div>
+                                        <div className="font-bold text-slate-900 dark:text-slate-200">{s.school_name}</div>
+                                        <div className="text-[11px] text-slate-500 font-mono">Mã: {s.school_code} | Tuyến: {s.partner_name} ➔ {s.distributor_name}</div>
+                                      </div>
+                                      {selectedSchool?.school_code === s.school_code && <Check className="w-4 h-4 text-indigo-600" />}
+                                    </button>
+                                  ))}
+                              </div>
+                            )}
+                          </div>
+
                           <input
                             type="file"
                             ref={fileInputRef}
@@ -2219,48 +2263,48 @@ export const UnifiedInboxPage: React.FC = () => {
 
                           <div
                             onClick={() => fileInputRef.current?.click()}
-                            className="border-2 border-dashed border-indigo-200 dark:border-slate-700 hover:border-indigo-500 rounded-2xl p-6 text-center cursor-pointer transition bg-slate-50 dark:bg-slate-800/40 flex flex-col items-center justify-center gap-1.5"
+                            className="border-2 border-dashed border-indigo-300 dark:border-slate-700 hover:border-indigo-500 rounded-2xl p-6 text-center cursor-pointer transition bg-slate-50 dark:bg-slate-800/40 flex flex-col items-center justify-center gap-1.5"
                           >
                             <UploadCloud className="w-7 h-7 text-indigo-600" />
                             {uploadedAccountsFile ? (
-                              <span className="font-bold text-xs text-indigo-600">
+                              <span className="font-bold text-xs text-indigo-700 dark:text-indigo-400">
                                 📎 {uploadedAccountsFile.name} ({Math.round(uploadedAccountsFile.size / 1024)} KB) - Nhấp để đổi file khác
                               </span>
                             ) : taskModalTicket.attachments?.length ? (
-                              <span className="text-xs text-indigo-600 font-semibold">
+                              <span className="text-xs text-indigo-700 dark:text-indigo-400 font-bold">
                                 Dùng file từ Ticket: {taskModalTicket.attachments[0].filename} (Bấm để tải file mới)
                               </span>
                             ) : (
-                              <span className="text-xs text-slate-400">Bấm hoặc kéo thả file Excel (.xlsx) vào đây</span>
+                              <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Bấm hoặc kéo thả file Excel (.xlsx) vào đây</span>
                             )}
                           </div>
 
-                          {/* Preview Bảng Tài Khoản nếu đã parse */}
+                          {/* Preview Bảng Tài Khoản */}
                           {parsedAccountRows.length > 0 && (
-                            <div className="space-y-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-xs">
+                            <div className="space-y-3 rounded-2xl border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-xs">
                               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                                <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800">
-                                  <p className="text-[10px] text-slate-400 font-bold uppercase">Tổng</p>
-                                  <p className="text-base font-bold font-mono">{accountValidationStats.total}</p>
+                                <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-800">
+                                  <p className="text-[10px] text-slate-500 font-bold uppercase">Tổng</p>
+                                  <p className="text-base font-bold font-mono text-slate-900 dark:text-white">{accountValidationStats.total}</p>
                                   <p className="text-[10px] text-slate-500">{accountValidationStats.students} HS | {accountValidationStats.teachers} GV</p>
                                 </div>
-                                <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900">
-                                  <p className="text-[10px] text-emerald-600 font-bold uppercase">Hợp lệ</p>
-                                  <p className="text-base font-bold font-mono text-emerald-600">{accountValidationStats.validCount}</p>
+                                <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900">
+                                  <p className="text-[10px] text-emerald-700 font-bold uppercase">Hợp lệ</p>
+                                  <p className="text-base font-bold font-mono text-emerald-700">{accountValidationStats.validCount}</p>
                                 </div>
-                                <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-100 dark:border-rose-900">
-                                  <p className="text-[10px] text-rose-600 font-bold uppercase">Thiếu tin</p>
-                                  <p className="text-base font-bold font-mono text-rose-600">{accountValidationStats.errorCount}</p>
+                                <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900">
+                                  <p className="text-[10px] text-rose-700 font-bold uppercase">Thiếu tin</p>
+                                  <p className="text-base font-bold font-mono text-rose-700">{accountValidationStats.errorCount}</p>
                                 </div>
-                                <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-100 dark:border-amber-900">
-                                  <p className="text-[10px] text-amber-600 font-bold uppercase">Trùng email</p>
-                                  <p className="text-base font-bold font-mono text-amber-600">{accountValidationStats.duplicateCount}</p>
+                                <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900">
+                                  <p className="text-[10px] text-amber-700 font-bold uppercase">Trùng email</p>
+                                  <p className="text-base font-bold font-mono text-amber-700">{accountValidationStats.duplicateCount}</p>
                                 </div>
                               </div>
 
-                              <div className="max-h-52 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                              <div className="max-h-52 overflow-y-auto rounded-xl border border-slate-300 dark:border-slate-800">
                                 <table className="w-full text-left text-[11px] font-mono">
-                                  <thead className="bg-slate-50 dark:bg-slate-800/80 sticky top-0 uppercase text-[9px] text-slate-500 font-bold">
+                                  <thead className="bg-slate-100 dark:bg-slate-800/80 sticky top-0 uppercase text-[9px] text-slate-600 font-bold">
                                     <tr>
                                       <th className="p-2 text-center w-8">#</th>
                                       <th className="p-2">Họ & Tên</th>
@@ -2270,15 +2314,15 @@ export const UnifiedInboxPage: React.FC = () => {
                                       <th className="p-2">Trạng Thái</th>
                                     </tr>
                                   </thead>
-                                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                                     {parsedAccountRows.slice(0, 50).map((row) => (
                                       <tr key={row.index} className={!row.isValid ? 'bg-rose-50/50' : 'hover:bg-slate-50'}>
-                                        <td className="p-2 text-center text-slate-400">{row.index}</td>
-                                        <td className="p-2 font-semibold text-slate-900 dark:text-white font-sans">{row.lastName} {row.firstName}</td>
-                                        <td className="p-2">{row.email || '—'}</td>
-                                        <td className="p-2">{row.dob}</td>
-                                        <td className="p-2">{row.role}</td>
-                                        <td className="p-2">{row.isValid ? <span className="text-emerald-600 font-bold">✓ OK</span> : <span className="text-rose-500 font-bold">{row.errors[0]}</span>}</td>
+                                        <td className="p-2 text-center text-slate-500 font-bold">{row.index}</td>
+                                        <td className="p-2 font-bold text-slate-900 dark:text-white font-sans">{row.lastName} {row.firstName}</td>
+                                        <td className="p-2 font-semibold text-slate-800 dark:text-slate-300">{row.email || '—'}</td>
+                                        <td className="p-2 font-bold text-slate-800 dark:text-slate-300">{row.dob}</td>
+                                        <td className="p-2 font-bold">{row.role}</td>
+                                        <td className="p-2">{row.isValid ? <span className="text-emerald-700 font-bold">✓ OK</span> : <span className="text-rose-600 font-bold">{row.errors[0]}</span>}</td>
                                       </tr>
                                     ))}
                                   </tbody>
@@ -2289,14 +2333,14 @@ export const UnifiedInboxPage: React.FC = () => {
                         </div>
                       )}
 
-                      {/* LUỒNG 4: GHI DANH LMS (HỖ TRỢ CẢ ENROL & UNENROL) */}
+                      {/* LUỒNG 4: GHI DANH LMS (HỖ TRỢ CẢ ENROL & UNENROL VỚI MÀU CHỮ NÉT CĂNG) */}
                       {workspaceMainCategory === 'lms_enroll' && (
                         <div className="space-y-4">
-                          <div className="grid grid-cols-2 gap-2 p-1.5 rounded-2xl bg-slate-100 dark:bg-slate-800">
+                          <div className="grid grid-cols-2 gap-2 p-1.5 rounded-2xl bg-slate-200/80 dark:bg-slate-800">
                             <button
                               type="button"
                               onClick={() => setLmsActionType('enroll')}
-                              className={`py-2 px-3 rounded-xl text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${lmsActionType === 'enroll' ? 'bg-white dark:bg-slate-900 text-emerald-600 shadow-2xs' : 'text-slate-500'
+                              className={`py-2 px-3 rounded-xl text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${lmsActionType === 'enroll' ? 'bg-white dark:bg-slate-900 text-emerald-700 shadow-sm' : 'text-slate-600'
                                 }`}
                             >
                               <GraduationCap className="w-4 h-4" />
@@ -2305,7 +2349,7 @@ export const UnifiedInboxPage: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => setLmsActionType('unenrol')}
-                              className={`py-2 px-3 rounded-xl text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${lmsActionType === 'unenrol' ? 'bg-white dark:bg-slate-900 text-rose-600 shadow-2xs' : 'text-slate-500'
+                              className={`py-2 px-3 rounded-xl text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${lmsActionType === 'unenrol' ? 'bg-white dark:bg-slate-900 text-rose-700 shadow-sm' : 'text-slate-600'
                                 }`}
                             >
                               <Trash2 className="w-4 h-4" />
@@ -2313,27 +2357,26 @@ export const UnifiedInboxPage: React.FC = () => {
                             </button>
                           </div>
 
-                          {/* Danh sách khóa học LMS */}
                           <div className="space-y-2">
                             <div className="flex items-center justify-between">
-                              <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                              <label className="text-xs font-bold text-slate-900 dark:text-slate-200">
                                 Danh Sách Khóa Học LMS ({lmsSelectedCourses.length} khóa):
                               </label>
                               <button
                                 type="button"
                                 onClick={handleAddLmsCourseRow}
-                                className="flex items-center gap-1 px-3 py-1 bg-white dark:bg-slate-900 text-xs font-bold border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xs hover:bg-slate-50"
+                                className="flex items-center gap-1 px-3 py-1 bg-white dark:bg-slate-900 text-xs font-bold border border-slate-300 dark:border-slate-800 rounded-xl shadow-2xs hover:bg-slate-50 text-slate-800 dark:text-slate-200"
                               >
                                 <Plus className="w-3.5 h-3.5" /> Thêm Môn LMS
                               </button>
                             </div>
 
                             {lmsSelectedCourses.map((lItem, idx) => (
-                              <div key={idx} className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
-                                <div className="flex justify-between items-center text-xs font-bold">
+                              <div key={idx} className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-300 dark:border-slate-800 space-y-2 shadow-2xs">
+                                <div className="flex justify-between items-center text-xs font-bold text-slate-900 dark:text-white">
                                   <span>#{idx + 1} {lItem.course_name}</span>
                                   {lmsSelectedCourses.length > 1 && (
-                                    <button type="button" onClick={() => handleRemoveLmsCourseRow(idx)} className="text-rose-500">
+                                    <button type="button" onClick={() => handleRemoveLmsCourseRow(idx)} className="text-rose-600">
                                       <Trash2 className="w-3.5 h-3.5" />
                                     </button>
                                   )}
@@ -2351,7 +2394,7 @@ export const UnifiedInboxPage: React.FC = () => {
                                         setLmsSelectedCourses(updated);
                                       }
                                     }}
-                                    className="p-1.5 rounded-lg border bg-slate-50 dark:bg-slate-800 truncate"
+                                    className="p-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-bold truncate"
                                   >
                                     {lmsCoursesList.map((c) => (
                                       <option key={c.course_id} value={c.course_id}>{c.course_name} (ID: {c.course_id})</option>
@@ -2368,7 +2411,7 @@ export const UnifiedInboxPage: React.FC = () => {
                                         setLmsSelectedCourses(updated);
                                       }}
                                       placeholder="Tên Group lớp (VD: CLASS_2026)"
-                                      className="p-1.5 rounded-lg border bg-slate-50 dark:bg-slate-800"
+                                      className="p-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-bold"
                                     />
                                   )}
                                 </div>
@@ -2376,9 +2419,8 @@ export const UnifiedInboxPage: React.FC = () => {
                             ))}
                           </div>
 
-                          {/* Danh sách email */}
                           <div className="space-y-1">
-                            <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                            <label className="text-xs font-bold text-slate-900 dark:text-slate-200">
                               {lmsActionType === 'enroll' ? 'Danh Sách Email Học Viên Cần Ghi Danh:' : 'Danh Sách Email Cần Hủy Ghi Danh:'}
                             </label>
                             <textarea
@@ -2386,7 +2428,7 @@ export const UnifiedInboxPage: React.FC = () => {
                               value={lmsActionType === 'enroll' ? lmsBulkSingleEmails : lmsUnenrolEmails}
                               onChange={(e) => lmsActionType === 'enroll' ? setLmsBulkSingleEmails(e.target.value) : setLmsUnenrolEmails(e.target.value)}
                               placeholder="user1@pythaverse.space&#10;user2@pythaverse.space"
-                              className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-2.5 text-xs font-mono"
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl p-2.5 text-xs font-mono font-bold text-slate-900 dark:text-white"
                             />
                           </div>
                         </div>
@@ -2394,41 +2436,173 @@ export const UnifiedInboxPage: React.FC = () => {
                     </div>
                   )}
 
-                  {/* BƯỚC 2B: KEYCLOAK IDENTITY */}
+                  {/* BƯỚC 2B: KEYCLOAK IDENTITY (ĐẦY ĐỦ 3 CÔNG TẮC & ĐIỀN ĐÚNG EMAIL HỌC SINH) */}
                   {selectedBotType === 'keycloak_api' && (
-                    <div className="space-y-3 p-5 rounded-2xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-800/40">
+                    <div className="space-y-4 p-5 rounded-2xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-800/40">
                       <div className="space-y-1">
-                        <label className="text-xs font-bold text-slate-800 dark:text-slate-200">Email/Username Cần Can Thiệp:</label>
+                        <div className="flex justify-between items-center text-xs">
+                          <label className="font-extrabold text-slate-900 dark:text-slate-200">Email/Username Cần Can Thiệp:</label>
+                          <span className="text-amber-800 dark:text-amber-400 font-bold">*Đã chọn đúng tài khoản học sinh</span>
+                        </div>
                         <input
                           type="text"
                           value={kcTargetEmail}
                           onChange={(e) => setKcTargetEmail(e.target.value)}
-                          className="w-full bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 rounded-xl p-2.5 text-xs font-bold outline-none"
+                          className="w-full bg-white dark:bg-slate-900 border border-amber-400 dark:border-amber-700 rounded-xl p-2.5 text-xs font-bold text-slate-900 dark:text-white outline-none shadow-2xs"
                         />
                       </div>
 
-                      <div className="p-3 rounded-xl border bg-white dark:bg-slate-900 border-amber-300 dark:border-amber-700 flex items-center justify-between">
-                        <span className="text-xs font-bold">1. Đặt Lại Mật Khẩu Tạm Thời:</span>
-                        <input
-                          type="text"
-                          value={kcTempPass}
-                          onChange={(e) => setKcTempPass(e.target.value)}
-                          className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-1 text-xs font-mono font-bold w-36 text-center"
-                        />
+                      {/* 1. Đặt Lại Mật Khẩu Tạm Thời */}
+                      <div className="rounded-2xl border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-950 text-amber-700">
+                              <KeyRound className="h-4 w-4" />
+                            </div>
+                            <div>
+                              <h4 className="text-xs font-bold text-slate-900 dark:text-white">1. Đặt Lại Mật Khẩu Tạm Thời</h4>
+                              <p className="text-[11px] text-slate-500 font-medium">Gán mật khẩu khởi tạo an toàn</p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setKcEnableResetPass(!kcEnableResetPass)}
+                            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${kcEnableResetPass ? 'bg-amber-500' : 'bg-slate-300'
+                              }`}
+                          >
+                            <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition duration-200 ${kcEnableResetPass ? 'translate-x-5' : 'translate-x-0'
+                              }`} />
+                          </button>
+                        </div>
+
+                        {kcEnableResetPass && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+                            <div>
+                              <label className="text-[10px] font-bold uppercase text-slate-600">Mật khẩu mới:</label>
+                              <input
+                                type="text"
+                                value={kcTempPass}
+                                onChange={(e) => setKcTempPass(e.target.value)}
+                                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 font-mono text-xs font-bold text-slate-900 dark:text-white"
+                              />
+                            </div>
+                            <div className="flex items-end pb-1.5">
+                              <label className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={kcForceChange}
+                                  onChange={(e) => setKcForceChange(e.target.checked)}
+                                  className="h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
+                                />
+                                <span>Bắt buộc đổi khi đăng nhập</span>
+                              </label>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 2. Xác Thực Email */}
+                      <div className="rounded-2xl border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-950 text-emerald-700">
+                              <ShieldCheck className="h-4 w-4" />
+                            </div>
+                            <div>
+                              <h4 className="text-xs font-bold text-slate-900 dark:text-white">2. Xác Thực Email</h4>
+                              <p className="text-[11px] text-slate-500 font-medium">Gỡ lỗi tài khoản chưa verify email</p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setKcEnableVerify(!kcEnableVerify)}
+                            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${kcEnableVerify ? 'bg-emerald-500' : 'bg-slate-300'
+                              }`}
+                          >
+                            <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition duration-200 ${kcEnableVerify ? 'translate-x-5' : 'translate-x-0'
+                              }`} />
+                          </button>
+                        </div>
+
+                        {kcEnableVerify && (
+                          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                            <button
+                              type="button"
+                              onClick={() => setKcVerifyAction('verify')}
+                              className={`rounded-xl py-2 text-xs font-bold cursor-pointer transition ${kcVerifyAction === 'verify' ? 'border border-emerald-500 bg-emerald-100 text-emerald-800' : 'border border-slate-300 text-slate-600'
+                                }`}
+                            >
+                              ✓ Đã Xác Thực
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setKcVerifyAction('unverify')}
+                              className={`rounded-xl py-2 text-xs font-bold cursor-pointer transition ${kcVerifyAction === 'unverify' ? 'border border-rose-500 bg-rose-100 text-rose-800' : 'border border-slate-300 text-slate-600'
+                                }`}
+                            >
+                              ✗ Gỡ Xác Thực
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 3. Trạng Thái Hoạt Động */}
+                      <div className="rounded-2xl border border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 dark:bg-sky-950 text-sky-700">
+                              <UserCheck className="h-4 w-4" />
+                            </div>
+                            <div>
+                              <h4 className="text-xs font-bold text-slate-900 dark:text-white">3. Trạng Thái Hoạt Động</h4>
+                              <p className="text-[11px] text-slate-500 font-medium">Khóa hoặc kích hoạt lại người dùng</p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setKcEnableStatus(!kcEnableStatus)}
+                            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${kcEnableStatus ? 'bg-sky-500' : 'bg-slate-300'
+                              }`}
+                          >
+                            <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition duration-200 ${kcEnableStatus ? 'translate-x-5' : 'translate-x-0'
+                              }`} />
+                          </button>
+                        </div>
+
+                        {kcEnableStatus && (
+                          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                            <button
+                              type="button"
+                              onClick={() => setKcStatusAction('enable')}
+                              className={`rounded-xl py-2 text-xs font-bold cursor-pointer transition ${kcStatusAction === 'enable' ? 'border border-emerald-500 bg-emerald-100 text-emerald-800' : 'border border-slate-300 text-slate-600'
+                                }`}
+                            >
+                              ✓ Kích Hoạt
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setKcStatusAction('disable')}
+                              className={`rounded-xl py-2 text-xs font-bold cursor-pointer transition ${kcStatusAction === 'disable' ? 'border border-rose-500 bg-rose-100 text-rose-800' : 'border border-slate-300 text-slate-600'
+                                }`}
+                            >
+                              ✗ Vô Hiệu Hóa
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
 
-                  {/* BƯỚC 2C: PYTHAVERSE GIT (ENGINE MỚI TOANH) */}
+                  {/* BƯỚC 2C: PYTHAVERSE GIT */}
                   {selectedBotType === 'git_collaborator' && (
-                    <div className="space-y-4 p-5 rounded-2xl bg-violet-50/60 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-900/40">
+                    <div className="space-y-4 p-5 rounded-2xl bg-violet-50/70 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-900/40">
                       <div className="space-y-1 relative" ref={gitRepoDropdownRef}>
                         <div className="flex justify-between items-center text-xs">
-                          <label className="font-bold text-slate-800 dark:text-slate-200">Đường Dẫn Repository Git Mục Tiêu:</label>
+                          <label className="font-bold text-slate-900 dark:text-slate-200">Đường Dẫn Repository Git Mục Tiêu:</label>
                           <button
                             type="button"
                             onClick={() => setIsGitRepoDropdownOpen(!isGitRepoDropdownOpen)}
-                            className="text-violet-600 font-bold hover:underline cursor-pointer"
+                            className="text-violet-700 font-bold hover:underline cursor-pointer"
                           >
                             {isGitRepoDropdownOpen ? 'Đóng danh sách ✕' : `Chọn từ danh mục (${allAvailableGitRepos.length} repos) ▼`}
                           </button>
@@ -2439,11 +2613,11 @@ export const UnifiedInboxPage: React.FC = () => {
                           value={gitRepoUrl}
                           onChange={(e) => setGitRepoUrl(e.target.value)}
                           placeholder="https://git.pythaverse.space/..."
-                          className="w-full bg-white dark:bg-slate-900 border border-violet-300 dark:border-violet-700 rounded-xl p-2.5 text-xs font-mono"
+                          className="w-full bg-white dark:bg-slate-900 border border-violet-300 dark:border-violet-700 rounded-xl p-2.5 text-xs font-mono font-bold text-slate-900 dark:text-white"
                         />
 
                         {isGitRepoDropdownOpen && (
-                          <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-60 overflow-y-auto p-2 space-y-1">
+                          <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-2xl shadow-xl max-h-60 overflow-y-auto p-2 space-y-1">
                             {filteredAvailableGitRepos.map((r, idx) => (
                               <button
                                 key={idx}
@@ -2456,7 +2630,7 @@ export const UnifiedInboxPage: React.FC = () => {
                               >
                                 <div>
                                   <span className="font-bold text-slate-900 dark:text-white">🐙 {r.repo_name}</span>
-                                  <p className="text-[10px] text-slate-400">Môn: {r.course_name} ({r.category})</p>
+                                  <p className="text-[10px] text-slate-500 font-medium">Môn: {r.course_name} ({r.category})</p>
                                 </div>
                                 {gitRepoUrl === r.repo_url && <Check className="w-4 h-4 text-violet-600" />}
                               </button>
@@ -2466,14 +2640,14 @@ export const UnifiedInboxPage: React.FC = () => {
                       </div>
 
                       <div className="space-y-1">
-                        <label className="text-xs font-bold text-slate-800 dark:text-slate-200">Chọn Vai Trò (Role):</label>
+                        <label className="text-xs font-bold text-slate-900 dark:text-slate-200">Chọn Vai Trò (Role):</label>
                         <div className="grid grid-cols-3 gap-2 text-xs">
                           {['GUEST', 'DEVELOPER', 'ADMIN'].map((r) => (
                             <button
                               key={r}
                               type="button"
                               onClick={() => setGitTargetRole(r as any)}
-                              className={`p-2.5 rounded-xl border text-center font-bold transition cursor-pointer ${gitTargetRole === r ? 'border-violet-600 bg-violet-600 text-white' : 'border-slate-200 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200'
+                              className={`p-2.5 rounded-xl border text-center font-bold transition cursor-pointer ${gitTargetRole === r ? 'border-violet-600 bg-violet-600 text-white' : 'border-slate-300 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200'
                                 }`}
                             >
                               {r}
@@ -2483,13 +2657,13 @@ export const UnifiedInboxPage: React.FC = () => {
                       </div>
 
                       <div className="space-y-1">
-                        <label className="text-xs font-bold text-slate-800 dark:text-slate-200">Danh Sách Username / Email (Mỗi dòng 1 tài khoản):</label>
+                        <label className="text-xs font-bold text-slate-900 dark:text-slate-200">Danh Sách Username / Email (Mỗi dòng 1 tài khoản):</label>
                         <textarea
                           rows={3}
                           value={gitUsersList}
                           onChange={(e) => setGitUsersList(e.target.value)}
                           placeholder="hsdttemd&#10;gvdttemd@pythaverse.net"
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-2 text-xs font-mono"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl p-2 text-xs font-mono font-bold text-slate-900 dark:text-white"
                         />
                       </div>
                     </div>
@@ -2497,30 +2671,29 @@ export const UnifiedInboxPage: React.FC = () => {
 
                   {/* BƯỚC 2D: FEEDBACK SHEET */}
                   {selectedBotType === 'feedback_doc_triage' && (
-                    <div className="space-y-3 p-5 rounded-2xl bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40">
+                    <div className="space-y-3 p-5 rounded-2xl bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40">
                       <div className="space-y-1">
-                        <label className="text-xs font-bold text-slate-800 dark:text-slate-200">Google Doc URL:</label>
+                        <label className="text-xs font-bold text-slate-900 dark:text-slate-200">Google Doc URL:</label>
                         <input
                           type="text"
                           value={docUrl}
                           onChange={(e) => setDocUrl(e.target.value)}
-                          className="w-full bg-white dark:bg-slate-900 border border-blue-300 dark:border-blue-700 rounded-xl p-2.5 text-xs outline-none"
+                          className="w-full bg-white dark:bg-slate-900 border border-blue-300 dark:border-blue-700 rounded-xl p-2.5 text-xs font-bold text-slate-900 dark:text-white outline-none"
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-xs font-bold text-slate-800 dark:text-slate-200">Email Phân Công (@dtt.vn):</label>
+                        <label className="text-xs font-bold text-slate-900 dark:text-slate-200">Email Phân Công (@dtt.vn):</label>
                         <input
                           type="email"
                           value={assigneeEmail}
                           onChange={(e) => setAssigneeEmail(e.target.value)}
-                          className="w-full bg-white dark:bg-slate-900 border border-blue-300 dark:border-blue-700 rounded-xl p-2.5 text-xs outline-none"
+                          className="w-full bg-white dark:bg-slate-900 border border-blue-300 dark:border-blue-700 rounded-xl p-2.5 text-xs font-bold text-slate-900 dark:text-white outline-none"
                         />
                       </div>
                     </div>
                   )}
                 </>
               ) : (
-                /* CHẾ ĐỘ JSON */
                 <textarea
                   rows={14}
                   value={payloadText}
@@ -2530,12 +2703,12 @@ export const UnifiedInboxPage: React.FC = () => {
               )}
             </div>
 
-            {/* Footer Modal: 2 Nút Đưa vào Hàng Đợi & Chạy Ngay 1-Click */}
-            <div className="flex items-center justify-between gap-3 pt-3 border-t border-slate-100 dark:border-slate-800 shrink-0">
+            {/* Footer Modal */}
+            <div className="flex items-center justify-between gap-3 pt-3 border-t border-slate-200 dark:border-slate-800 shrink-0">
               <button
                 type="button"
                 onClick={() => setTaskModalTicket(null)}
-                className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-slate-300 hover:bg-slate-100 transition cursor-pointer"
               >
                 Hủy Bỏ
               </button>
@@ -2576,9 +2749,7 @@ export const UnifiedInboxPage: React.FC = () => {
         document.body
       )}
 
-      {/* ========================================================================= */}
-      {/* 🖼️ MODAL XEM TRƯỚC FILE ĐÍNH KÈM */}
-      {/* ========================================================================= */}
+      {/* MODAL XEM TRƯỚC FILE ĐÍNH KÈM */}
       {previewFile && typeof document !== 'undefined' && createPortal(
         <div
           onClick={() => setPreviewFile(null)}
@@ -2586,12 +2757,12 @@ export const UnifiedInboxPage: React.FC = () => {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-full sm:max-w-2xl lg:max-w-3xl p-6 shadow-2xl space-y-4 my-auto"
+            className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-3xl w-full max-w-full sm:max-w-2xl lg:max-w-3xl p-6 shadow-2xl space-y-4 my-auto"
           >
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Paperclip className="w-4 h-4 text-indigo-600" />
-                <span className="text-xs font-bold truncate max-w-[400px] text-slate-800 dark:text-slate-200">{previewFile.filename}</span>
+                <span className="text-xs font-bold truncate max-w-[400px] text-slate-900 dark:text-slate-200">{previewFile.filename}</span>
               </div>
               <button onClick={() => setPreviewFile(null)} className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
                 <X className="w-4 h-4" />
@@ -2604,7 +2775,7 @@ export const UnifiedInboxPage: React.FC = () => {
               ) : (
                 <div className="text-center space-y-3">
                   <FileSpreadsheetIcon className="w-12 h-12 text-emerald-600 mx-auto" />
-                  <p className="text-xs text-slate-500">File tài liệu hoặc bảng tính không thể hiển thị trực tiếp.</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400 font-medium">File tài liệu hoặc bảng tính không thể hiển thị trực tiếp.</p>
                   <a
                     href={previewFile.url}
                     target="_blank"
@@ -2619,17 +2790,17 @@ export const UnifiedInboxPage: React.FC = () => {
               )}
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
               <a
                 href={previewFile.url}
                 target="_blank"
                 rel="noreferrer"
-                className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-200 transition flex items-center gap-1.5"
+                className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-800 dark:text-slate-300 hover:bg-slate-200 transition flex items-center gap-1.5"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
                 <span>Mở trong Tab Mới</span>
               </a>
-              <button onClick={() => setPreviewFile(null)} className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 transition">
+              <button onClick={() => setPreviewFile(null)} className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 transition">
                 Đóng
               </button>
             </div>
