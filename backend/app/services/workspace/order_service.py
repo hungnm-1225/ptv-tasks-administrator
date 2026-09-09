@@ -4,6 +4,7 @@ import gc
 import json
 import logging
 from typing import Dict, Any, List, Optional
+from datetime import datetime, timezone
 from playwright.async_api import async_playwright, Page, Response
 
 from app.services.workspace.base import WorkspaceBaseService, BASE_WORKSPACE_URL, normalize_date_iso
@@ -15,6 +16,137 @@ logger = logging.getLogger(__name__)
 class WorkspaceOrderService(WorkspaceBaseService):
     """Xử lý các nghiệp vụ liên quan đến School Order & Phê duyệt của Partner bằng cơ chế Event-Driven API."""
 
+    # =========================================================================
+    # 💾 CÁC HÀM NỘI BỘ ĐỒNG BỘ CSDL SUPABASE & LÀM SẠCH RAM CACHE TỨC THỜI
+    # =========================================================================
+    def _invalidate_workspace_ram_cache(self, cache_type: str = "all"):
+        """Xóa RAM cache để Automation Studio nạp lại dữ liệu mới nhất tức thì."""
+        try:
+            from app.api.v1.endpoints.workspace import ws_cache
+            if cache_type in ("all", "orders"):
+                ws_cache.invalidate("all_cached_pending_orders")
+                logger.info("⚡ [CACHE EVICTION] Đã làm sạch RAM Cache Orders ('all_cached_pending_orders').")
+            if cache_type in ("all", "contracts"):
+                ws_cache.invalidate("all_cached_pending_contracts_PRT")
+                ws_cache.invalidate("all_cached_pending_contracts_DST")
+                logger.info("⚡ [CACHE EVICTION] Đã làm sạch RAM Cache Contracts.")
+        except Exception as e:
+            logger.warning(f"⚠️ Không thể invalidate ws_cache: {e}")
+
+    async def _sync_order_status_db(self, order_identifier: str, new_status: str = "Approved", partner_name: Optional[str] = None):
+        """Cập nhật trạng thái School Order thành Approved trong CSDL Supabase."""
+        if not order_identifier:
+            return
+        try:
+            from app.core.supabase import get_supabase_client
+            clean_code = str(order_identifier).strip()
+            core_match = re.search(r"(\d{6,8}-\d+)", clean_code)
+            pattern = f"%{core_match.group(1)}%" if core_match else f"%{clean_code}%"
+            now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            
+            supabase = get_supabase_client()
+            update_res = supabase.table("workspace_orders_cache").update({
+                "status": new_status,
+                "synced_at": now_utc
+            }).ilike("order_id", pattern).execute()
+
+            # Nếu chưa có trong cache thì tạo mới luôn bản ghi đã duyệt
+            if not update_res.data:
+                supabase.table("workspace_orders_cache").insert({
+                    "order_id": clean_code,
+                    "school_name": "Pythaverse School",
+                    "partner_name": partner_name or "Partner",
+                    "distributor_code": "N/A",
+                    "order_date": now_utc,
+                    "total_licenses": 50,
+                    "status": new_status,
+                    "synced_at": now_utc,
+                    "raw_data": {"auto_synced": True}
+                }).execute()
+
+            logger.info(f"💾 [DB SYNC] Đã cập nhật Order [{clean_code}] -> Status: '{new_status}' trong CSDL Supabase.")
+            self._invalidate_workspace_ram_cache("orders")
+        except Exception as e:
+            logger.warning(f"⚠️ [DB SYNC] Lỗi cập nhật Order vào CSDL: {e}")
+
+    async def _record_created_order_db(self, order_id: str, school_name: str, order_data: Dict[str, Any]):
+        """Ghi nhận School Order mới tạo vào CSDL Supabase."""
+        if not order_id:
+            return
+        try:
+            from app.core.supabase import get_supabase_client
+            now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            supabase = get_supabase_client()
+            
+            courses = order_data.get("courses", [])
+            total_lic = sum(int(c.get("licenses", 0)) for c in courses) if courses else int(order_data.get("licenses", 50))
+            
+            record = {
+                "order_id": order_id,
+                "school_name": school_name,
+                "partner_name": order_data.get("partner_name", "Partner"),
+                "distributor_code": order_data.get("distributor_code", "N/A"),
+                "order_date": now_utc,
+                "total_licenses": total_lic,
+                "status": "Awaiting Partner",
+                "synced_at": now_utc,
+                "raw_data": order_data
+            }
+            supabase.table("workspace_orders_cache").upsert(record, on_conflict="order_id").execute()
+            logger.info(f"💾 [DB SYNC] Đã ghi nhận Order mới [{order_id}] -> Status: 'Awaiting Partner'.")
+            self._invalidate_workspace_ram_cache("orders")
+        except Exception as e:
+            logger.warning(f"⚠️ [DB SYNC] Lỗi ghi nhận Order mới: {e}")
+
+    async def _record_created_contract_db(
+        self,
+        contract_code: str,
+        contract_type: str,
+        status: str,
+        partner_name: Optional[str] = None,
+        distributor_name: Optional[str] = None,
+        distributor_code: Optional[str] = None,
+        courses: Optional[List[Dict[str, Any]]] = None,
+        notes: Optional[str] = None
+    ):
+        """Ghi nhận Hợp đồng PRT/DST phát sinh mới vào CSDL Supabase để giảm tải cron quét."""
+        if not contract_code:
+            return
+        try:
+            from app.core.supabase import get_supabase_client
+            now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            supabase = get_supabase_client()
+            
+            total_lic = 0
+            if courses:
+                for c in courses:
+                    total_lic += int(c.get("licenses") or c.get("course_count") or 0)
+                    
+            record = {
+                "contract_code": contract_code,
+                "contract_type": contract_type.upper(),
+                "status": status,
+                "total_licenses": total_lic if total_lic > 0 else 50,
+                "partner_name": partner_name or "Partner",
+                "distributor_name": distributor_name or "Master Distributor",
+                "distributor_code": distributor_code or "N/A",
+                "synced_at": now_utc,
+                "raw_data": {
+                    "notes": notes,
+                    "courses": courses,
+                    "auto_generated": True,
+                    "created_at_utc": now_utc
+                }
+            }
+            supabase.table("workspace_contracts_cache").upsert(record, on_conflict="contract_code").execute()
+            logger.info(f"💾 [DB SYNC] Đã ghi nhận Contract phát sinh [{contract_code}] ({contract_type}) -> Status: '{status}'.")
+            self._invalidate_workspace_ram_cache("contracts")
+        except Exception as e:
+            logger.warning(f"⚠️ [DB SYNC] Lỗi ghi nhận Contract phát sinh: {e}")
+
+    # =========================================================================
+    # ⚙️ CÁC LUỒNG THAO TÁC PLAYWRIGHT WORKSPACE
+    # =========================================================================
     async def _fill_partner_create_contract_form(
         self,
         page: Page,
@@ -152,6 +284,16 @@ class WorkspaceOrderService(WorkspaceBaseService):
 
         if not contract_full_code and contract_num_id:
             contract_full_code = f"PRT-{contract_num_id}"
+
+        # 🟢 GHI NHẬN HỢP ĐỒNG PRT VÀO CSDL SUPABASE
+        if contract_full_code:
+            await self._record_created_contract_db(
+                contract_code=contract_full_code,
+                contract_type="PRT",
+                status="Awaiting Distributor",
+                courses=contract_data.get("courses"),
+                notes=contract_data.get("notes")
+            )
 
         logger.info(f"🎉 PARTNER TẠO PRT CONTRACT THÀNH CÔNG: [{contract_full_code}]")
         return {
@@ -333,6 +475,14 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     if not order_full_code and order_num_id:
                         order_full_code = f"SCH-{order_num_id}"
 
+                    # 🟢 GHI NHẬN ORDER MỚI TẠO VÀO CSDL SUPABASE
+                    if order_full_code:
+                        await self._record_created_order_db(
+                            order_id=order_full_code,
+                            school_name=credentials.get("username", "Pythaverse School"),
+                            order_data=order_data
+                        )
+
                     logger.info(f"🎉 TẠO ORDER THÀNH CÔNG: [{order_full_code}] (ID: {order_num_id})")
                     return {
                         "status": "success",
@@ -502,6 +652,9 @@ class WorkspaceOrderService(WorkspaceBaseService):
                             logger.warning(f"⚠️ Không bắt kịp updateStatusOrder.php ({e}), bấm trực tiếp...")
                             await approve_btn.click(force=True)
                             await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=15000)
+
+                        # 🟢 ĐỒNG BỘ CSDL SUPABASE & LÀM SẠCH CACHE RAM NGAY LẬP TỨC
+                        await self._sync_order_status_db(order_identifier=order_identifier, new_status="Approved", partner_name=credentials.get("username"))
                         
                         return {
                             "status": "success",
@@ -529,6 +682,17 @@ class WorkspaceOrderService(WorkspaceBaseService):
                             if prt_contract_res.get("status") == "success":
                                 prt_code = prt_contract_res.get("contract_code")
                                 logger.info(f"✅ [1-SESSION] Partner đã tạo xong PRT Contract [{prt_code}] gửi Distributor!")
+                                
+                                # 🟢 GHI NHẬN HỢP ĐỒNG PRT MỚI VÀO CSDL SUPABASE
+                                await self._record_created_contract_db(
+                                    contract_code=prt_code,
+                                    contract_type="PRT",
+                                    status="Awaiting Distributor",
+                                    partner_name=credentials.get("username"),
+                                    courses=courses_needed,
+                                    notes=f"Auto-topup to approve School Order {order_identifier}"
+                                )
+
                                 return {
                                     "status": "insufficient_pool_created_prt",
                                     "order_identifier": order_identifier,

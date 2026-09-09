@@ -5,6 +5,7 @@ import gc
 import json
 import logging
 from typing import Dict, Any, List, Optional
+from datetime import datetime, timezone
 from playwright.async_api import async_playwright, Page, Response
 from app.core.config import settings
 
@@ -17,6 +18,103 @@ logger = logging.getLogger(__name__)
 class WorkspaceContractService(WorkspaceBaseService):
     """Xử lý các nghiệp vụ tạo và phê duyệt Contract giữa Partner - Distributor - Sales Admin bằng cơ chế Event-Driven API."""
 
+    # =========================================================================
+    # 💾 CÁC HÀM NỘI BỘ ĐỒNG BỘ CSDL SUPABASE & LÀM SẠCH RAM CACHE TỨC THỜI
+    # =========================================================================
+    def _invalidate_workspace_ram_cache(self, cache_type: str = "all"):
+        """Xóa RAM cache để Automation Studio nạp lại dữ liệu mới nhất tức thì."""
+        try:
+            from app.api.v1.endpoints.workspace import ws_cache
+            if cache_type in ("all", "orders"):
+                ws_cache.invalidate("all_cached_pending_orders")
+            if cache_type in ("all", "contracts"):
+                ws_cache.invalidate("all_cached_pending_contracts_PRT")
+                ws_cache.invalidate("all_cached_pending_contracts_DST")
+                logger.info("⚡ [CACHE EVICTION] Đã làm sạch RAM Cache Contracts (PRT & DST).")
+        except Exception as e:
+            logger.warning(f"⚠️ Không thể invalidate ws_cache: {e}")
+
+    async def _sync_contract_status_db(self, contract_identifier: str, contract_type: str = "PRT", new_status: str = "Approved"):
+        """Cập nhật trạng thái PRT/DST Contract thành Approved trong CSDL Supabase."""
+        if not contract_identifier:
+            return
+        try:
+            from app.core.supabase import get_supabase_client
+            clean_code = str(contract_identifier).strip()
+            core_match = re.search(r"(\d{6,8}-\d+)", clean_code)
+            pattern = f"%{core_match.group(1)}%" if core_match else f"%{clean_code}%"
+            now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            
+            supabase = get_supabase_client()
+            update_res = supabase.table("workspace_contracts_cache").update({
+                "status": new_status,
+                "synced_at": now_utc
+            }).ilike("contract_code", pattern).execute()
+
+            if not update_res.data:
+                supabase.table("workspace_contracts_cache").insert({
+                    "contract_code": clean_code,
+                    "contract_type": contract_type.upper(),
+                    "status": new_status,
+                    "total_licenses": 50,
+                    "synced_at": now_utc,
+                    "raw_data": {"auto_synced": True}
+                }).execute()
+
+            logger.info(f"💾 [DB SYNC] Đã cập nhật {contract_type} Contract [{clean_code}] -> Status: '{new_status}' trong CSDL Supabase.")
+            self._invalidate_workspace_ram_cache("contracts")
+        except Exception as e:
+            logger.warning(f"⚠️ [DB SYNC] Lỗi cập nhật Contract vào CSDL: {e}")
+
+    async def _record_created_contract_db(
+        self,
+        contract_code: str,
+        contract_type: str,
+        status: str,
+        partner_name: Optional[str] = None,
+        distributor_name: Optional[str] = None,
+        distributor_code: Optional[str] = None,
+        courses: Optional[List[Dict[str, Any]]] = None,
+        notes: Optional[str] = None
+    ):
+        """Ghi nhận Hợp đồng PRT/DST phát sinh mới vào CSDL Supabase."""
+        if not contract_code:
+            return
+        try:
+            from app.core.supabase import get_supabase_client
+            now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            supabase = get_supabase_client()
+            
+            total_lic = 0
+            if courses:
+                for c in courses:
+                    total_lic += int(c.get("licenses") or c.get("course_count") or 0)
+                    
+            record = {
+                "contract_code": contract_code,
+                "contract_type": contract_type.upper(),
+                "status": status,
+                "total_licenses": total_lic if total_lic > 0 else 50,
+                "partner_name": partner_name or "Partner",
+                "distributor_name": distributor_name or "Master Distributor",
+                "distributor_code": distributor_code or "N/A",
+                "synced_at": now_utc,
+                "raw_data": {
+                    "notes": notes,
+                    "courses": courses,
+                    "auto_generated": True,
+                    "created_at_utc": now_utc
+                }
+            }
+            supabase.table("workspace_contracts_cache").upsert(record, on_conflict="contract_code").execute()
+            logger.info(f"💾 [DB SYNC] Đã ghi nhận Contract phát sinh [{contract_code}] ({contract_type}) -> Status: '{status}'.")
+            self._invalidate_workspace_ram_cache("contracts")
+        except Exception as e:
+            logger.warning(f"⚠️ [DB SYNC] Lỗi ghi nhận Contract phát sinh: {e}")
+
+    # =========================================================================
+    # ⚙️ CÁC LUỒNG THAO TÁC PLAYWRIGHT CONTRACT
+    # =========================================================================
     async def _safe_navigate(self, page: Page, target_url: str, keyword_in_url: str = "", timeout: int = 35000):
         """Hàm điều hướng an toàn: chống lỗi net::ERR_ABORTED khi dính redirect SSO ngầm."""
         if keyword_in_url and keyword_in_url in page.url:
@@ -203,6 +301,16 @@ class WorkspaceContractService(WorkspaceBaseService):
         if not contract_full_code and contract_num_id:
             contract_full_code = f"DST-{contract_num_id}"
 
+        # 🟢 GHI NHẬN HỢP ĐỒNG DST MỚI TẠO VÀO CSDL SUPABASE
+        if contract_full_code:
+            await self._record_created_contract_db(
+                contract_code=contract_full_code,
+                contract_type="DST",
+                status="Awaiting Sales Admin",
+                courses=contract_data.get("courses"),
+                notes=contract_data.get("notes")
+            )
+
         logger.info(f"🎉 TẠO DST CONTRACT THÀNH CÔNG: [{contract_full_code}] (ID: {contract_num_id})")
         return {
             "status": "success",
@@ -261,6 +369,7 @@ class WorkspaceContractService(WorkspaceBaseService):
                     row_text = (await target_row.inner_text()).lower()
                     if "approved" in row_text or "completed" in row_text:
                         logger.info(f"✨ Partner Contract [{search_code}] đã được duyệt từ trước!")
+                        await self._sync_contract_status_db(search_code, "PRT", "Approved")
                         return {
                             "status": "success",
                             "contract_identifier": search_code,
@@ -306,6 +415,9 @@ class WorkspaceContractService(WorkspaceBaseService):
                         except Exception:
                             await approve_btn.click(force=True)
                             await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=15000)
+
+                        # 🟢 ĐỒNG BỘ CSDL SUPABASE & LÀM SẠCH RAM CACHE TỨC THÌ
+                        await self._sync_contract_status_db(contract_identifier=search_code, contract_type="PRT", new_status="Approved")
                         
                         return {
                             "status": "success",
@@ -333,6 +445,17 @@ class WorkspaceContractService(WorkspaceBaseService):
                         if dst_contract_res.get("status") == "success":
                             dst_code = dst_contract_res.get("contract_code")
                             logger.info(f"✅ [1-SESSION] Đã tạo thành công DST Contract [{dst_code}] gửi Sales Admin!")
+                            
+                            # 🟢 GHI NHẬN HỢP ĐỒNG DST PHÁT SINH MỚI VÀO CSDL SUPABASE
+                            await self._record_created_contract_db(
+                                contract_code=dst_code,
+                                contract_type="DST",
+                                status="Awaiting Sales Admin",
+                                distributor_name=credentials.get("username"),
+                                courses=courses_needed,
+                                notes=f"Auto-topup to approve PRT Contract {search_code}"
+                            )
+
                             return {
                                 "status": "insufficient_pool_created_dst",
                                 "contract_identifier": search_code,
@@ -515,6 +638,17 @@ class WorkspaceContractService(WorkspaceBaseService):
                     if not contract_full_code and contract_num_id:
                         contract_full_code = f"PRT-{contract_num_id}"
 
+                    # 🟢 GHI NHẬN HỢP ĐỒNG PRT VÀO CSDL SUPABASE
+                    if contract_full_code:
+                        await self._record_created_contract_db(
+                            contract_code=contract_full_code,
+                            contract_type="PRT",
+                            status="Awaiting Distributor",
+                            partner_name=credentials.get("username"),
+                            courses=contract_data.get("courses"),
+                            notes=contract_data.get("notes")
+                        )
+
                     logger.info(f"🎉 TẠO CONTRACT PRT THÀNH CÔNG: [{contract_full_code}] (ID: {contract_num_id})")
                     return {
                         "status": "success",
@@ -604,6 +738,7 @@ class WorkspaceContractService(WorkspaceBaseService):
                     row_raw_text = (await target_row.inner_text()).lower()
                     if "approved" in row_raw_text or "completed" in row_raw_text:
                         logger.info(f"✨ Hợp đồng [{search_kw}] đã ở trạng thái ĐÃ DUYỆT từ trước đó!")
+                        await self._sync_contract_status_db(search_kw, "DST", "Approved")
                         return {
                             "status": "success",
                             "contract_identifier": search_kw,
@@ -641,6 +776,7 @@ class WorkspaceContractService(WorkspaceBaseService):
 
                     if await approve_btn.count() == 0 or not (await approve_btn.is_visible()):
                         logger.info(f"✨ Không tìm thấy nút 'Approve' -> Hợp đồng [{search_kw}] có thể đã được duyệt từ trước!")
+                        await self._sync_contract_status_db(search_kw, "DST", "Approved")
                         return {
                             "status": "success",
                             "contract_identifier": search_kw,
@@ -678,6 +814,9 @@ class WorkspaceContractService(WorkspaceBaseService):
                             await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=15000)
                     else:
                         logger.info("🚀 Đã bấm Approve trực tiếp...")
+
+                    # 🟢 ĐỒNG BỘ CSDL SUPABASE & LÀM SẠCH RAM CACHE TỨC THÌ
+                    await self._sync_contract_status_db(contract_identifier=search_kw, contract_type="DST", new_status="Approved")
 
                     logger.info(f"🎉 Sales Admin đã duyệt DST Contract {search_kw} thành công tuyệt đối!")
                     return {
