@@ -1,9 +1,11 @@
 # backend/app/core/playwright_manager.py
+import os
 import re
 import gc
 import time
 import logging
 import asyncio
+import subprocess
 from typing import Optional, Any
 from contextlib import asynccontextmanager
 from playwright.async_api import Route, Page, BrowserContext
@@ -13,14 +15,33 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # 🔒 GLOBAL SINGLE-INSTANCE CONCURRENCY ARCHITECTURE (RENDER 512MB SAFEGUARD)
 # =============================================================================
-# Trên máy chủ Render 512MB RAM: TUYỆT ĐỐI CHỈ CHO PHÉP DUY NHẤT 1 CHROMIUM INSTANCE
-# hoạt động tại bất kỳ thời điểm nào. Tránh hoàn toàn việc 2 browser sống cùng lúc (gây OOM Crash).
+# Khóa trần 1 Chromium duy nhất trên toàn hệ thống
 GLOBAL_PLAYWRIGHT_SEMAPHORE = asyncio.Semaphore(1)
 
 
 class CronSlotYieldException(Exception):
     """Exception nội bộ báo hiệu Cron chủ động nhường slot an toàn."""
     pass
+
+
+def force_kill_zombie_chromium():
+    """
+    Tiêu diệt mọi tiến trình Chromium mồ côi (Zombie) còn sót lại trong container Render
+    để thu hồi bộ nhớ RAM ngay lập tức.
+    """
+    try:
+        # Lệnh pkill trên môi trường Linux Docker Render
+        subprocess.run(["pkill", "-9", "-f", "chromium"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["pkill", "-9", "-f", "chrome"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
+import contextvars
+
+_PLAYWRIGHT_SLOT_HOLDER: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "_playwright_slot_holder", default=None
+)
 
 
 @asynccontextmanager
@@ -32,44 +53,55 @@ async def acquire_playwright_slot(
     """
     Async Context Manager quản lý việc cấp phát slot thực thi Playwright:
     - Sử dụng 1 Global Lock duy nhất để bảo vệ trần 512MB RAM của Render.
+    - Hỗ trợ Re-entrancy an toàn qua ContextVar: chống deadlock khi hàm cha và con đều gọi acquire slot.
     - lane='admin': Ưu tiên tối đa cho Quản trị viên duyệt tác vụ hoặc dispatch từ Studio (Timeout 300s).
     - lane='cron': Tác vụ cào dữ liệu định kỳ (osTicket, Long-Task, Scanner).
-      Nếu quá hạn 120s, tự động nhường slot êm dịu (graceful yield), KHÔNG làm văng lỗi đỏ ASGI.
+      Nếu slot đang bận, tự động ném CronSlotYieldException nhường slot êm dịu, KHÔNG làm văng lỗi đỏ ASGI.
     """
     is_admin = (lane.lower() == "admin")
     lane_tag = "👑 [VIP ADMIN LANE]" if is_admin else "⚙️ [BACKGROUND CRON LANE]"
-    actual_timeout = timeout if is_admin else min(timeout, 120.0)
+    actual_timeout = timeout if is_admin else min(timeout, 45.0)
+
+    # 1. KIỂM TRA RE-ENTRANCY (Nếu coroutine hiện tại đã giữ slot, cho phép đi qua ngay)
+    current_holder = _PLAYWRIGHT_SLOT_HOLDER.get()
+    if current_holder is not None:
+        logger.info(f"🔁 [RE-ENTRANT SLOT] '{task_name}' kế thừa slot Playwright từ '{current_holder}'")
+        yield
+        return
 
     logger.info(f"⏳ {lane_tag} Đang xin slot thực thi Playwright cho: '{task_name}'...")
     acquired = False
-    yielded_slot = False
+    token = None
 
     try:
         try:
             await asyncio.wait_for(GLOBAL_PLAYWRIGHT_SEMAPHORE.acquire(), timeout=actual_timeout)
             acquired = True
+            token = _PLAYWRIGHT_SLOT_HOLDER.set(task_name)
             logger.info(f"🟢 {lane_tag} Đã nhận slot! Bắt đầu thực thi: '{task_name}'")
         except asyncio.TimeoutError:
             if is_admin:
                 logger.error(f"❌ {lane_tag} Quá thời gian chờ slot ({actual_timeout}s) cho: '{task_name}'")
                 raise TimeoutError(f"Hệ thống đang bận xử lý tác vụ khác. Hết thời gian chờ ({actual_timeout}s).")
             else:
-                logger.warning(f"⚠️ {lane_tag} Slot đang bận quá {actual_timeout}s. Tự động nhường slot cho '{task_name}' để bảo toàn tài nguyên Render.")
-                yielded_slot = True
-                raise CronSlotYieldException()
+                logger.warning(f"⚠️ {lane_tag} Slot đang bận quá {actual_timeout}s. Nhường slot cho '{task_name}' để bảo toàn RAM Render.")
+                raise CronSlotYieldException(f"Cron task '{task_name}' nhường slot do hệ thống đang bận.")
 
-        # Chỉ yield cho tác vụ chạy nếu đã thực sự nhận slot
         yield
 
-    except CronSlotYieldException:
-        # Nuốt ngoại lệ nhường slot êm dịu, không để văng lên ASGI application
-        return
     finally:
         if acquired:
+            if token is not None:
+                _PLAYWRIGHT_SLOT_HOLDER.reset(token)
             GLOBAL_PLAYWRIGHT_SEMAPHORE.release()
             logger.info(f"⚪ {lane_tag} Đã giải phóng slot thực thi của: '{task_name}'")
-        # Luôn dọn dẹp nhị phân RAM sau mỗi lần trình duyệt đóng
-        gc.collect()
+            
+            # Thu hồi triệt để Native RAM và tiêu diệt Zombie Chromium còn sót lại
+            try:
+                force_kill_zombie_chromium()
+            except Exception:
+                pass
+            gc.collect()
 
 
 # =============================================================================

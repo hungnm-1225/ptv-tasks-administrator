@@ -9,34 +9,13 @@ from app.core.supabase import get_supabase_client
 router = APIRouter()
 
 # =============================================================================
-# ⚡ IN-MEMORY CACHE CHO WORKBOARD (TỐC ĐỘ 1MS TỪ RAM)
 # =============================================================================
-class BoardMemoryCache:
-    def __init__(self, default_ttl: int = 300):  # Lưu RAM 5 phút
-        self._cache: Dict[str, Any] = {}
+# ⚡ IN-MEMORY CACHE CHO WORKBOARD (TIER A/B - BUDGET <= 40MB)
+# =============================================================================
+from app.core.cache_policy import BoundedMemoryCache, CacheTier
 
-    def get(self, key: str) -> Optional[Any]:
-        if key in self._cache:
-            data, expire_at = self._cache[key]
-            if time.time() < expire_at:
-                return data
-            del self._cache[key]
-        return None
+board_cache = BoundedMemoryCache(tier=CacheTier.TIER_A_CATALOG, max_entries=20, default_ttl=300)
 
-    def set(self, key: str, value: Any, ttl: Optional[int] = None):
-        expire_at = time.time() + (ttl if ttl is not None else 300)
-        self._cache[key] = (value, expire_at)
-
-    def invalidate(self, prefix: str = ""):
-        """Xóa cache khi có thao tác thêm / sửa / xóa / kéo thẻ."""
-        if not prefix:
-            self._cache.clear()
-        else:
-            keys_to_del = [k for k in self._cache if k.startswith(prefix)]
-            for k in keys_to_del:
-                del self._cache[k]
-
-board_cache = BoardMemoryCache(default_ttl=300)
 
 
 class SubtaskItem(BaseModel):

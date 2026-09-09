@@ -9,28 +9,13 @@ from app.core.supabase import get_supabase_client
 router = APIRouter()
 
 # =============================================================================
-# ⚡ IN-MEMORY CACHE CHO BÁO CÁO DASHBOARD (LƯU RAM 60S - TỐC ĐỘ 1MS)
 # =============================================================================
-class ReportsMemoryCache:
-    def __init__(self, default_ttl: int = 60):  # Lưu RAM 60 giây
-        self._cache: Dict[str, Any] = {}
+# ⚡ IN-MEMORY CACHE CHO BÁO CÁO DASHBOARD (TIER B STATUS - BUDGET <= 40MB)
+# =============================================================================
+from app.core.cache_policy import BoundedMemoryCache, CacheTier
 
-    def get(self, key: str) -> Optional[Any]:
-        if key in self._cache:
-            data, expire_at = self._cache[key]
-            if time.time() < expire_at:
-                return data
-            del self._cache[key]
-        return None
+reports_cache = BoundedMemoryCache(tier=CacheTier.TIER_B_STATUS, max_entries=15, default_ttl=60)
 
-    def set(self, key: str, value: Any, ttl: Optional[int] = None):
-        expire_at = time.time() + (ttl if ttl is not None else 60)
-        self._cache[key] = (value, expire_at)
-
-    def invalidate(self):
-        self._cache.clear()
-
-reports_cache = ReportsMemoryCache(default_ttl=60)
 
 CATEGORY_MAP = {
     "bug": "System Bugs",

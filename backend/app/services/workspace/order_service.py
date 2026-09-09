@@ -1,5 +1,6 @@
 # backend/app/services/workspace/order_service.py
 import re
+import gc
 import json
 import logging
 from typing import Dict, Any, List, Optional
@@ -166,7 +167,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
         order_data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Trường học đăng nhập tạo mới School Order (Quan sát API getCourseConfig & schoolCreateOrder)."""
-        async with acquire_playwright_slot("School Create Order"):
+        async with acquire_playwright_slot("School Create Order", lane="admin"):
             async with async_playwright() as p:
                 browser, context, page = await self._create_context(p)
                 try:
@@ -321,13 +322,13 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     # Fallback cào từ DOM
                     if not order_full_code:
                         await page.wait_for_selector("div[role='dialog']", state="hidden", timeout=15000)
-                        await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=500)
+                        await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=400)
 
                         first_row = page.locator(".MuiDataGrid-row").first
                         if await first_row.count() > 0:
                             order_num_id = await first_row.get_attribute("data-id") or ""
                             order_code_elem = first_row.locator("[data-field='school_order_id'] span, [data-field='school_order_id'], .MuiDataGrid-cell").first
-                            order_full_code = (await order_code_elem.inner_text()).strip() if await code_elem.count() > 0 else (order_num_id or "")
+                            order_full_code = (await order_code_elem.inner_text()).strip() if await order_code_elem.count() > 0 else (order_num_id or "")
 
                     if not order_full_code and order_num_id:
                         order_full_code = f"SCH-{order_num_id}"
@@ -346,6 +347,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     return {"status": "failed", "error": str(e)}
                 finally:
                     await browser.close()
+                    gc.collect()
 
     async def partner_approve_school_order(
         self, 
@@ -355,7 +357,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
         courses_needed: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """Partner duyệt School Order (Khép góc Search, đối soát License Available >= Needed & Approve)."""
-        async with acquire_playwright_slot("Partner Approve School Order"):
+        async with acquire_playwright_slot("Partner Approve School Order", lane="admin"):
             async with async_playwright() as p:
                 browser, context, page = await self._create_context(p)
                 try:
@@ -373,7 +375,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     except Exception:
                         await page.goto(f"{BASE_WORKSPACE_URL}/partner-workspace/order-management", wait_until="domcontentloaded", timeout=45000)
 
-                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=500)
+                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=400)
 
                     # 🎯 CHIẾN THUẬT KHÉP GÓC: Gõ order_identifier vào ô Search để cô lập 1 dòng duy nhất!
                     search_code = str(order_identifier or "").strip()
@@ -384,7 +386,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                             await search_input.click(force=True)
                             await page.keyboard.press("Control+A")
                             await page.keyboard.type(search_code)
-                            await page.wait_for_timeout(600)
+                            await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=300)
 
                     target_row = page.locator(".MuiDataGrid-row").first
                     if search_code:
@@ -395,7 +397,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     if await target_row.count() == 0:
                         return {"status": "failed", "error": f"Không tìm thấy Order [{search_code}] trên danh sách Partner!"}
 
-                    # Bấm nút Action menu (button chứa icon lucide-menu)
+                    # Bấm nút Action menu
                     logger.info(f"🔍 Bấm mở menu Action của Order [{search_code}]...")
                     action_btn = target_row.locator("button:has(.lucide-menu), [data-field=' '] button, .MuiButton-containedPrimary").first
                     await action_btn.scroll_into_view_if_needed()
@@ -416,7 +418,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
 
                     # Chờ Dialog "Order Details" hiển thị hoàn chỉnh
                     await page.wait_for_selector("div[role='dialog']:has-text('Order Details')", state="visible", timeout=15000)
-                    await page.wait_for_timeout(800)
+                    await wait_for_dom_and_spinners(page, "div[role='dialog']:has-text('Order Details')", min_pacing_ms=400)
 
                     dialog = page.locator("div[role='dialog']:has-text('Order Details')").first
                     
@@ -425,7 +427,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     if await pool_card.count() > 0:
                         await pool_card.scroll_into_view_if_needed()
 
-                    # 👉 CHUẨN XÁC: ĐỊNH VỊ TRỰC TIẾP TỪNG COMBOBOX POOL LICENSE (KHÔNG ĐẾM TRÙNG THẺ CHA)
+                    # Định vị trực tiếp từng combobox Pool License
                     pool_dropdowns = dialog.locator("div.MuiFormControl-root:has(label:has-text('Pool License')) [role='combobox'], div.MuiFormControl-root:has(label:has-text('Pool License')) .MuiSelect-select")
                     dropdown_count = await pool_dropdowns.count()
                     
@@ -437,7 +439,6 @@ class WorkspaceOrderService(WorkspaceBaseService):
                             dropdown = pool_dropdowns.nth(i)
                             await dropdown.scroll_into_view_if_needed()
 
-                            # Trích xuất số license cần từ thẻ thông tin ngay phía trên dropdown
                             parent_box = dropdown.locator("xpath=./ancestor::div[contains(@class, 'MuiBox-root')][1]")
                             parent_text = await parent_box.inner_text() if await parent_box.count() > 0 else ""
                             
@@ -449,9 +450,8 @@ class WorkspaceOrderService(WorkspaceBaseService):
                             logger.info(f"📚 Môn #{i+1}: Yêu cầu {needed_qty} licenses.")
 
                             await dropdown.click(force=True)
-                            await page.wait_for_timeout(400)
+                            await smart_wait_for_options_loaded(page, min_options=1, timeout=5000)
 
-                            # Quét các options trong menu vừa mở
                             options = page.locator("li[role='option']")
                             opt_count = await options.count()
                             
@@ -465,7 +465,6 @@ class WorkspaceOrderService(WorkspaceBaseService):
                                     avail_num = int(avail_match.group(1))
                                     logger.info(f"   🔎 Option #{o_idx+1}: '{opt_text.strip()}' -> Có: {avail_num} / Cần: {needed_qty}")
                                     
-                                    # CHỈ CHỌN KHI SỐ LƯỢNG AVAILABLE >= NEEDED
                                     if avail_num >= needed_qty:
                                         best_opt = opt
                                         logger.info(f"   🎯 ĐỦ ĐIỀU KIỆN! Chọn option: '{opt_text.strip()}'")
@@ -473,15 +472,12 @@ class WorkspaceOrderService(WorkspaceBaseService):
 
                             if best_opt:
                                 await best_opt.click(force=True)
-                                await page.wait_for_timeout(400)
                             else:
                                 logger.warning(f"❌ Môn #{i+1}: Không có option nào có Available >= {needed_qty}! Kho Partner thiếu.")
                                 all_courses_satisfied = False
                                 await page.keyboard.press("Escape")
-                                await page.wait_for_timeout(200)
                                 break
 
-                    # Kiểm tra nút Approve Order
                     approve_btn = dialog.locator("button:has-text('Approve Order')").first
                     try:
                         await approve_btn.wait_for(state="visible", timeout=3000)
@@ -513,9 +509,8 @@ class WorkspaceOrderService(WorkspaceBaseService):
                             "message": f"Partner đã duyệt thành công School Order: {order_identifier}"
                         }
                     else:
-                        logger.warning("⚠️ Kho Partner KHÔNG ĐỦ License để duyệt Order (Nút Approve Order không xuất hiện)!")
+                        logger.warning("⚠️ Kho Partner KHÔNG ĐỦ License để duyệt Order!")
 
-                        # 🟢 1-SESSION PARTNER: CHUYỂN THẲNG SANG TẠO PRT CONTRACT GỬI DISTRIBUTOR
                         if auto_create_prt_if_short:
                             logger.info(f"⚡ [1-SESSION PARTNER] Thiếu License! Đóng popup và chuyển sang tạo PRT Contract...")
                             close_btn = dialog.locator("button:has-text('Close')").first
@@ -558,14 +553,15 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     return {"status": "failed", "error": str(e)}
                 finally:
                     await browser.close()
+                    gc.collect()
 
     async def fetch_school_order_detailed_courses(
         self,
         credentials: Dict[str, str],
         order_identifier: str
     ) -> Dict[str, Any]:
-        """Trích xuất chi tiết môn học của Order (qua Direct API trong session hoặc Cache)."""
-        async with acquire_playwright_slot("Fetch School Order Details"):
+        """Trích xuất chi tiết môn học của Order qua Direct API trong session."""
+        async with acquire_playwright_slot("Fetch School Order Details", lane="admin"):
             async with async_playwright() as p:
                 browser, context, page = await self._create_context(p)
                 try:
@@ -608,3 +604,4 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     return {"status": "failed", "error": str(e), "courses": []}
                 finally:
                     await browser.close()
+                    gc.collect()

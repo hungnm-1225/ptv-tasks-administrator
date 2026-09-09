@@ -13,11 +13,11 @@ from app.core.supabase import get_supabase_client
 from app.core.config import settings
 from app.workers.bot_executor import execute_approved_bot_task
 from app.services.workspace_lineage_service import workspace_lineage_service
+from app.core.task_coordinator import task_coordinator
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Chuẩn hóa Múi giờ Việt Nam (GMT+7)
 VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
 
 def get_vn_time_str() -> str:
@@ -34,29 +34,12 @@ def format_task_tag(task_id: Optional[str]) -> str:
     return f"[Task #{clean_id[:8]}]"
 
 # =============================================================================
-# ⚡ IN-MEMORY CACHE CHO TASKS (TỐC ĐỘ 1MS)
+# ⚡ IN-MEMORY CACHE CHO TASKS (TIER C SUMMARY - BUDGET <= 40MB)
 # =============================================================================
-class TasksMemoryCache:
-    def __init__(self, default_ttl: int = 60):
-        self._cache: Dict[str, Any] = {}
+from app.core.cache_policy import BoundedMemoryCache, CacheTier
 
-    def get(self, key: str) -> Optional[Any]:
-        if key in self._cache:
-            data, expire_at = self._cache[key]
-            if time.time() < expire_at:
-                return data
-            del self._cache[key]
-        return None
+tasks_cache = BoundedMemoryCache(tier=CacheTier.TIER_C_SUMMARY, max_entries=15, default_ttl=60)
 
-    def set(self, key: str, value: Any, ttl: Optional[int] = None):
-        expire_at = time.time() + (ttl if ttl is not None else 60)
-        self._cache[key] = (value, expire_at)
-
-    def invalidate(self):
-        """Xóa sạch cache khi có duyệt / tạo / cập nhật task."""
-        self._cache.clear()
-
-tasks_cache = TasksMemoryCache(default_ttl=60)
 
 
 class ApproveTaskRequest(BaseModel):
@@ -65,25 +48,24 @@ class ApproveTaskRequest(BaseModel):
 
 
 # =============================================================================
-# HÀM CHẠY WORKER THẬT NGẦM DƯỚI NỀN (CRASH GUARD BỌC THÉP)
+# HÀM CHẠY WORKER THẬT NGẦM DƯỚI NỀN (CRASH GUARD & ATOMIC LEASE COORDINATOR)
 # =============================================================================
 async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, ticket_id: Optional[str]):
-    """Thực thi Worker thật, gắn nhãn [Task #ID], ghi log GMT+7 và chống treo task 100%."""
+    """Thực thi Worker thật, gắn nhãn [Task #ID], claim lease và chống chạy trùng 100%."""
     supabase = get_supabase_client()
     time_str = get_vn_time_str()
     tag = format_task_tag(task_id)
     
-    log_trail = f"[{time_str}] [APPROVAL] [{bot_type}] {tag}: Approved by Admin. Dispatching worker for execution...\n"
+    # 1. Chiếm quyền thực thi (Atomic Task Claim)
+    is_claimed, lease_token, task_data = await task_coordinator.claim_task_for_execution(task_id, bot_type)
+    if not is_claimed:
+        logger.warning(f"🛑 [TASK CLAIM REJECTED] {tag}: {lease_token}")
+        return
+
+    log_trail = f"[{time_str}] [APPROVAL] [{bot_type}] {tag}: Approved. Worker leased (#{lease_token[:8]}) for execution...\n"
+    tasks_cache.invalidate()
     
     try:
-        # 1. Cập nhật task sang 'running' ngay lập tức
-        supabase.table("bot_automation_tasks").update({
-            "execution_status": "running",
-            "execution_logs": log_trail,
-            "executed_at": get_vn_iso()
-        }).eq("id", task_id).execute()
-        tasks_cache.invalidate()
-
         # 2. Bổ sung thông tin Credentials phả hệ nếu là Workspace RPA
         if bot_type == "workspace_rpa":
             school_ident = payload.get("school_name") or payload.get("school_id")
@@ -95,14 +77,14 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
                         payload["partner_credentials"] = lineage.get("partner", {})
                         payload["distributor_credentials"] = lineage.get("distributor", {})
                         payload["country_info"] = lineage.get("country", {})
-                        log_trail += f"[{get_vn_time_str()}] [INFO] [workspace_rpa] {tag}: Đã phân giải phả hệ thành công cho trường '{school_ident}'.\n"
+                        log_trail += f"[{get_vn_time_str()}] [INFO] [{bot_type}] {tag}: Đã phân giải phả hệ thành công cho trường '{school_ident}'.\n"
                     else:
-                        log_trail += f"[{get_vn_time_str()}] [WARNING] [workspace_rpa] {tag}: Không tìm thấy phả hệ trường '{school_ident}', dùng credentials trong payload.\n"
+                        log_trail += f"[{get_vn_time_str()}] [WARNING] [{bot_type}] {tag}: Không tìm thấy phả hệ trường '{school_ident}', dùng credentials trong payload.\n"
                 except Exception as lineage_err:
-                    log_trail += f"[{get_vn_time_str()}] [WARNING] [workspace_rpa] {tag}: Lỗi đọc phả hệ ({lineage_err}), tiếp tục với payload gốc.\n"
+                    log_trail += f"[{get_vn_time_str()}] [WARNING] [{bot_type}] {tag}: Lỗi đọc phả hệ ({lineage_err}), tiếp tục với payload gốc.\n"
 
             if not payload.get("admin_credentials"):
-                admin_pass = getattr(settings, "TEST_ADMIN_PASS", None) or getattr(settings, "TEST_ADMIN_PASS", None)
+                admin_pass = getattr(settings, "TEST_ADMIN_PASS", None)
                 payload["admin_credentials"] = {
                     "username": getattr(settings, "TEST_ADMIN_USER", "salesadmin@dtt.vn"),
                     "password": admin_pass or ""
@@ -125,14 +107,14 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
             log_trail += f"[{end_time_str}] [INFO] [{bot_type}] {tag}: {wait_msg}\n"
 
             merged_payload = {**(payload or {}), **execution_result, "checkpoint": res_checkpoint}
-
-            supabase.table("bot_automation_tasks").update({
-                "execution_status": "waiting_poll",
-                "current_step": current_step or "waiting_poll",
-                "payload_data": merged_payload,
-                "execution_logs": log_trail,
-                "executed_at": get_vn_iso()
-            }).eq("id", task_id).execute()
+            await task_coordinator.release_task_lease(
+                task_id=task_id,
+                lease_token=lease_token,
+                final_status="waiting_poll",
+                payload_data=merged_payload,
+                execution_logs=log_trail,
+                current_step=current_step or "waiting_poll"
+            )
 
         # 🟢 TRƯỜNG HỢP 2: TÁC VỤ HOÀN TẤT THÀNH CÔNG (SUCCESS)
         elif status_res in ["success", "simulated", "completed"] or (execution_result.get("success_count", 0) > 0 and not execution_result.get("failed_count")):
@@ -145,15 +127,15 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
                 log_trail += f"\n--- TIẾN TRÌNH THỰC THI ---\n{execution_result['logs']}\n"
 
             merged_payload = {**(payload or {}), **execution_result, "checkpoint": res_checkpoint}
-
-            supabase.table("bot_automation_tasks").update({
-                "execution_status": "success",
-                "current_step": "completed",
-                "last_error_step": None,
-                "payload_data": merged_payload,
-                "execution_logs": log_trail,
-                "executed_at": get_vn_iso()
-            }).eq("id", task_id).execute()
+            await task_coordinator.release_task_lease(
+                task_id=task_id,
+                lease_token=lease_token,
+                final_status="success",
+                payload_data=merged_payload,
+                execution_logs=log_trail,
+                current_step="completed",
+                last_error_step=None
+            )
 
             # Tự động đóng Ticket nếu có liên kết
             if ticket_id:
@@ -173,15 +155,15 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
                 log_trail += f"\n{execution_result['logs']}\n"
 
             merged_payload = {**(payload or {}), **execution_result, "checkpoint": res_checkpoint}
-
-            supabase.table("bot_automation_tasks").update({
-                "execution_status": "partial_success",
-                "current_step": current_step,
-                "last_error_step": current_step,
-                "payload_data": merged_payload,
-                "execution_logs": log_trail,
-                "executed_at": get_vn_iso()
-            }).eq("id", task_id).execute()
+            await task_coordinator.release_task_lease(
+                task_id=task_id,
+                lease_token=lease_token,
+                final_status="partial_success",
+                payload_data=merged_payload,
+                execution_logs=log_trail,
+                current_step=current_step,
+                last_error_step=current_step
+            )
 
         # 🔴 TRƯỜNG HỢP 4: THẤT BẠI CÓ KIỂM SOÁT (LƯU CHECKPOINT ĐỂ RESUME)
         else:
@@ -193,33 +175,35 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
             elif "logs" in execution_result:
                 log_trail += f"\n{execution_result['logs']}\n"
 
-            # 🎯 BẢO LƯU CHECKPOINT VÀO PAYLOAD ĐỂ LẦN RETRY SAU CHỈ CẦN RESUME
             merged_payload = {**(payload or {}), **execution_result, "checkpoint": res_checkpoint}
-
-            supabase.table("bot_automation_tasks").update({
-                "execution_status": "failed",
-                "current_step": current_step,
-                "last_error_step": current_step,
-                "payload_data": merged_payload,
-                "execution_logs": log_trail,
-                "executed_at": get_vn_iso()
-            }).eq("id", task_id).execute()
+            await task_coordinator.release_task_lease(
+                task_id=task_id,
+                lease_token=lease_token,
+                final_status="failed",
+                payload_data=merged_payload,
+                execution_logs=log_trail,
+                current_step=current_step or "failed",
+                last_error_step=current_step or "failed"
+            )
 
         tasks_cache.invalidate()
 
     except Exception as e:
-        # 🛡️ BẪY LỖI SẬP TIẾN TRÌNH NGOẠI LỆ (CHỐNG TREO TASK)
         end_time_str = get_vn_time_str()
         full_trace = traceback.format_exc()
         err_log = f"{log_trail}[{end_time_str}] [CRITICAL ERROR] [{bot_type}] {tag}: {str(e)}\n\n[TRACEBACK]:\n{full_trace}"
         logger.error(f"❌ [CRASH GUARD] Lỗi sập Task {tag}: {e}\n{full_trace}")
         
         try:
-            supabase.table("bot_automation_tasks").update({
-                "execution_status": "failed",
-                "execution_logs": err_log,
-                "executed_at": get_vn_iso()
-            }).eq("id", task_id).execute()
+            await task_coordinator.release_task_lease(
+                task_id=task_id,
+                lease_token=lease_token,
+                final_status="failed",
+                payload_data=payload,
+                execution_logs=err_log,
+                current_step="system_crash_exception",
+                last_error_step="system_crash_exception"
+            )
         except Exception as db_err:
             logger.critical(f"❌ Không thể ghi log thất bại cho task {tag}: {db_err}")
             
@@ -258,14 +242,13 @@ async def list_tasks(approval_status: Optional[str] = None):
 @router.post("", response_model=Dict[str, Any])
 @router.post("/", response_model=Dict[str, Any])
 async def create_task(payload: Dict[str, Any], background_tasks: BackgroundTasks):
-    """Tạo task mới. Tạo sẵn Task UUID để gắn tag định danh ngay từ dòng log đầu tiên."""
+    """Tạo task mới. Tạo sẵn Task UUID để gắn tag định danh chuẩn xác."""
     ticket_id = payload.get("ticket_id")
     bot_type = payload.get("bot_type", "keycloak_api")
     payload_data = payload.get("payload_data", {"action": "auto_triage", "ticket_id": ticket_id})
     
     run_immediately = payload.get("run_immediately", False) or payload.get("approval_status") == "approved"
     
-    # 🟢 TẠO TRƯỚC UUID ĐỂ GẮN VÀO LOG NGAY LẬP TỨC
     task_id = str(uuid.uuid4())
     tag = format_task_tag(task_id)
     payload_data["task_id"] = task_id
@@ -350,7 +333,7 @@ async def approve_task(task_id: str, req: ApproveTaskRequest, background_tasks: 
 
 @router.put("/{task_id}/retry")
 async def retry_task(task_id: str, background_tasks: BackgroundTasks):
-    """API Chạy lại (Retry) tác vụ bị lỗi - Nhận diện Checkpoint để Resume, chống chạy lại từ đầu."""
+    """API Chạy lại (Retry) tác vụ bị lỗi - Nhận diện Checkpoint để Resume."""
     supabase = get_supabase_client()
     time_str = get_vn_time_str()
     now_iso = get_vn_iso()
@@ -365,6 +348,23 @@ async def retry_task(task_id: str, background_tasks: BackgroundTasks):
     payload = task.get("payload_data") or {}
     payload["task_id"] = task_id
     ticket_id = task.get("ticket_id")
+
+    # Guard chống chạy trùng lặp khi task đang chạy có lease hiệu lực
+    if task.get("execution_status") == "running":
+        lease = payload.get("execution_lease", {})
+        expires_at_str = lease.get("expires_at")
+        if expires_at_str:
+            try:
+                expires_at = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+                if datetime.now(timezone.utc) < expires_at:
+                    raise HTTPException(
+                        status_code=409, 
+                        detail=f"Tác vụ {tag} đang chạy ngầm với Lease #{lease.get('token', '')[:8]}. Vui lòng đợi hoàn tất hoặc hết hạn lease."
+                    )
+            except HTTPException:
+                raise
+            except Exception:
+                pass
     
     checkpoint = payload.get("checkpoint", {})
     last_step = task.get("current_step") or task.get("last_error_step")

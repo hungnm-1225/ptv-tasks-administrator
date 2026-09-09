@@ -3,7 +3,6 @@ import os
 import logging
 import httpx
 import tempfile
-import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional
 
@@ -14,6 +13,7 @@ from app.services.keycloak_service import keycloak_service
 from app.services.github_service import github_service
 from app.services.playwright_service import playwright_lms_service
 from app.services.git_service import git_playwright_service
+from app.services.cof_excel_service import COFExcelService
 
 logger = logging.getLogger(__name__)
 
@@ -57,15 +57,15 @@ async def execute_approved_bot_task(
     if payload_data is None or not isinstance(payload_data, dict):
         payload_data = {}
 
-    # Gắn task_id vào payload_data để các service con tái sử dụng
     if task_id:
         payload_data["task_id"] = task_id
 
-    task_tag = f"[Task #{str(task_id).replace('-', '')[:8]}]" if task_id else "[Task #N/A]"
+    short_id = str(task_id).replace("-", "")[:8] if task_id else "N/A"
+    task_tag = f"[Task #{short_id}]"
     action = payload_data.get("action", "")
     checkpoint = payload_data.get("checkpoint", {})
     
-    logger.info(f"🚀 {task_tag} Bắt đầu thực thi Bot: [{bot_type}] | Action: {action}")
+    logger.info(f"🚀 {task_tag} [BOT {bot_type}] [ACTION {action}] Bắt đầu thực thi...")
     if checkpoint:
         logger.info(f"💾 {task_tag} Nhận Checkpoint từ phiên trước: {list(checkpoint.keys())}")
     
@@ -103,19 +103,11 @@ async def execute_approved_bot_task(
             raw_admin_user = str(getattr(settings, "TEST_ADMIN_USER", "")).strip().strip("'\"")
             raw_admin_pass = str(getattr(settings, "TEST_ADMIN_PASS", "")).strip().strip("'\"")
 
-            # Nếu settings chưa có, thử đọc trực tiếp từ os.environ trên Render
             if not raw_admin_user:
-                raw_admin_user = str(os.getenv("TEST_ADMIN_USER", "")).strip().strip("'\"")
+                raw_admin_user = str(os.getenv("TEST_ADMIN_USER", "salesadmin@dtt.vn")).strip().strip("'\"")
             if not raw_admin_pass:
                 raw_admin_pass = str(os.getenv("TEST_ADMIN_PASS", "")).strip().strip("'\"")
 
-            # Fallback an toàn cuối cùng nếu cả Render cũng trống
-            if not raw_admin_user:
-                raw_admin_user = "salesadmin@dtt.vn"
-
-            if not raw_admin_pass:
-                logger.warning(f"⚠️ {task_tag} TEST_ADMIN_PASS bị rỗng hoặc chưa được cấu hình trên Render!")
-            
             admin_creds = payload_data.get("admin_credentials")
             if not admin_creds or not admin_creds.get("username"):
                 admin_creds = {
@@ -128,9 +120,7 @@ async def execute_approved_bot_task(
                 if "password" in admin_creds:
                     admin_creds["password"] = str(admin_creds["password"]).strip().strip("'\"")
 
-            logger.info(f"📦 {task_tag} Đã nạp thông tin Sales Admin từ Render: Username='{admin_creds.get('username')}', Password Length={len(admin_creds.get('password', ''))} ký tự.")
-
-            # 🟢 AUTO-RESOLVER PHẢ HỆ:
+            # AUTO-RESOLVER PHẢ HỆ:
             if (distributor_name or payload_data.get("distributor_code")) and not distributor_creds:
                 target_dist_id = payload_data.get("distributor_code") or distributor_name
                 d_lin = workspace_lineage_service.resolve_by_distributor(str(target_dist_id))
@@ -297,9 +287,8 @@ async def execute_approved_bot_task(
                     justification=payload_data.get("justification")
                 )
 
-            # --- L. Tạo tài khoản hàng loạt (Chuẩn Hóa Format & Tải Lên Storage Ngay) ---
+            # --- L. Tạo tài khoản hàng loạt (Bulk Account Creation) ---
             elif action == "bulk_account_creation":
-                from app.services.cof_excel_service import COFExcelService
                 from app.core.supabase import get_supabase_client
 
                 file_path = payload_data.get("upload_file_path")
@@ -322,7 +311,7 @@ async def execute_approved_bot_task(
                 temp_dir = "/tmp/ptv_accounts"
                 os.makedirs(temp_dir, exist_ok=True)
                 
-                # 🎯 CHUẨN HÓA FILE: Đưa Header về Hàng 5, Data từ Hàng 6 (Chống mất dòng 1!)
+                # 🎯 CHUẨN HÓA FILE: Tự động detect COF 3 Tabs hoặc 1 Tab
                 normalized_file = os.path.join(temp_dir, f"STANDARDIZED_{os.path.basename(file_path)}")
                 try:
                     ready_file, total_c, _ = COFExcelService.normalize_input_accounts_excel(file_path, normalized_file)
@@ -339,12 +328,15 @@ async def execute_approved_bot_task(
                     checkpoint=checkpoint
                 )
 
-                # 🎯 NẾU XONG NGAY (FAST-PATH): TẢI LÊN STORAGE VÀ GHI LINK ĐỂ NÚT DOWNLOAD HIỆN TRÊN VERCEL!
+                # 🛑 KIỂM TRA REQUEST_ID BẮT BUỘC:
+                req_id = submit_res.get("request_id")
+                
+                # 🎯 NẾU HOÀN THÀNH NGAY (FAST-PATH <=30 USERS):
                 if submit_res.get("status") in ["completed", "success"]:
                     res_file = submit_res.get("result_file_path")
                     if res_file and os.path.exists(res_file):
-                        req_id = submit_res.get("request_id", "BATCH")
-                        storage_path = f"results/RESULT_{req_id}_{os.path.basename(res_file)}"
+                        actual_req_id = req_id or "FASTPATH"
+                        storage_path = f"results/RESULT_{actual_req_id}_{os.path.basename(res_file)}"
                         try:
                             supabase = get_supabase_client()
                             with open(res_file, "rb") as f_up:
@@ -354,7 +346,6 @@ async def execute_approved_bot_task(
                             public_url = supabase.storage.from_("ticket-attachments").get_public_url(storage_path)
                             submit_res["result_file_url"] = public_url
                             
-                            # Cập nhật trực tiếp link tải vào bảng bot_automation_tasks
                             if task_id:
                                 p_data = payload_data or {}
                                 p_data["result_file_url"] = public_url
@@ -370,10 +361,23 @@ async def execute_approved_bot_task(
 
                     return submit_res
 
-                # Nếu chưa xong, chuyển sang waiting_poll cho Cronjob
-                req_id = submit_res.get("request_id")
+                # 🛑 NẾU KHÔNG HOÀN THÀNH NGAY MÀ CŨNG KHÔNG LẤY ĐƯỢC REQUEST_ID:
+                if not req_id or str(req_id).strip() in ["None", "null", ""]:
+                    err_msg = (
+                        submit_res.get("error") or 
+                        "Nộp batch không thành công hoặc không thể trích xuất Request ID từ giao diện trường."
+                    )
+                    logger.error(f"❌ {task_tag} Thất bại khi nộp batch: {err_msg}")
+                    return {
+                        "status": "failed",
+                        "error": err_msg,
+                        "current_step": "submit_batch_failed",
+                        "checkpoint": checkpoint
+                    }
+
+                # 🟢 NẾU LẤY ĐƯỢC REQUEST_ID HỢP LỆ -> CHUYỂN SANG WAITING_POLL CHO CRONJOB:
                 checkpoint["account_batch_request_id"] = req_id
-                wait_seconds = max(total_c * 15, 45)
+                wait_seconds = max(total_c * 15, 60)
                 next_check_time = datetime.now(timezone.utc) + timedelta(seconds=wait_seconds)
 
                 return {
@@ -386,7 +390,7 @@ async def execute_approved_bot_task(
                     "wait_seconds": wait_seconds,
                     "next_check_at": next_check_time.isoformat(),
                     "checkpoint": checkpoint,
-                    "message": f"Đã nộp thành công batch ({total_c} tài khoản) với Mã Request #{req_id}."
+                    "message": f"Đã nộp thành công batch ({total_c} tài khoản). Request ID: #{req_id}."
                 }
 
             # --- M. Kiểm tra tiến độ & tải kết quả (Pha 2) ---

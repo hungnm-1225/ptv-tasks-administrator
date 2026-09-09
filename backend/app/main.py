@@ -10,7 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import inspect
 
-# Import Services
+# Import Core & Services
+from app.core.playwright_manager import acquire_playwright_slot, force_kill_zombie_chromium, CronSlotYieldException
 from app.services.gmail_service import poll_unread_gmails
 from app.services.osticket_service import poll_open_ostickets
 from app.services.google_sheet_service import poll_form_feedbacks
@@ -27,9 +28,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler()
+VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
+
+def get_now_vn_str() -> str:
+    return datetime.now(VN_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 async def safe_job_wrapper(job_func, job_name: str):
-    """Bọc các hàm quét an toàn: hỗ trợ cả sync/async, bẫy lỗi và dọn RAM triệt để."""
+    """Bọc an toàn cho cron: bẫy ngoại lệ, chống crash app và thu hồi RAM."""
     try:
         logger.info(f"🔄 [Cron Job Started] {job_name}")
         if inspect.iscoroutinefunction(job_func):
@@ -37,57 +42,82 @@ async def safe_job_wrapper(job_func, job_name: str):
         else:
             job_func()
         logger.info(f"✔️ [Cron Job Finished] {job_name}")
+    except CronSlotYieldException as ye:
+        logger.info(f"ℹ️ [Cron Job Yielded] {job_name}: {ye}")
     except Exception as e:
         logger.error(f"❌ [Cron Job Error] {job_name}: {str(e)}")
     finally:
         gc.collect()
 
 async def poll_workspace_long_tasks():
-    """Quét Supabase để check các đợt tạo tài khoản đã đến hạn kiểm tra."""
+    """Quét Supabase kiểm tra các batch tạo tài khoản đang waiting_poll."""
     supabase = get_supabase_client()
     now_utc = datetime.now(timezone.utc)
     now_iso = now_utc.isoformat()
 
-    # Query cực nhẹ kiểm tra xem có task nào thực sự cần check không
+    # Query kiểm tra task cần check
     res = supabase.table("bot_automation_tasks")\
         .select("*, inbox_tickets(*)")\
         .eq("bot_type", "workspace_rpa")\
         .eq("execution_status", "waiting_poll")\
         .lte("payload_data->>next_check_at", now_iso)\
+        .order("created_at", desc=False)\
+        .limit(1)\
         .execute()
 
     tasks_to_process = res.data or []
     if not tasks_to_process:
-        # Không có task nào cần xử lý -> Thoát ngay, không động chạm gì tới Chromium hay RAM!
         return
 
-    logger.info(f"📋 Tìm thấy {len(tasks_to_process)} task Workspace đang chờ kiểm tra kết quả...")
+    task = tasks_to_process[0]
+    task_id = task["id"]
+    task_tag = f"[Task #{str(task_id).replace('-', '')[:8]}]"
+    payload = task.get("payload_data", {})
+    request_id = payload.get("request_id")
+    school_creds = payload.get("school_credentials", {})
 
-    for task in tasks_to_process:
-        task_id = task["id"]
-        payload = task.get("payload_data", {})
-        request_id = payload.get("request_id")
-        school_creds = payload.get("school_credentials", {})
-        download_dir = "/tmp/ptv_results"
-        os.makedirs(download_dir, exist_ok=True)
+    now_vn = get_now_vn_str()
 
-        now_vn = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).strftime("%Y-%m-%d %H:%M:%S")
-        logger.info(f"🔍 [{now_vn}] [#{task_id[:8]}] Đến hạn kiểm tra tiến độ Request #{request_id}...")
+    # 🛑 DIỆT TẬN GỐC BUG 'Request #None':
+    if not request_id or str(request_id).strip() in ["None", "null", ""]:
+        err_log = (
+            f"\n[{now_vn}] [ERROR] [workspace_rpa] {task_tag}: "
+            f"Không tìm thấy Request ID hợp lệ để kiểm tra kết quả batch. Đánh dấu thất bại để tránh lặp vô tận."
+        )
+        logger.error(f"❌ {task_tag} Thiếu Request ID hợp lệ trong waiting_poll task!")
+        supabase.table("bot_automation_tasks").update({
+            "execution_status": "failed",
+            "last_error_step": "waiting_poll_missing_request_id",
+            "execution_logs": (task.get("execution_logs") or "") + err_log
+        }).eq("id", task_id).execute()
+        return
 
+    # Gọi hàm check_and_export_batch_result (bên trong hàm này đã tự quản lý acquire_playwright_slot trên lane='cron')
+    download_dir = "/tmp/ptv_results"
+    os.makedirs(download_dir, exist_ok=True)
+    logger.info(f"🔍 [{now_vn}] {task_tag} Bắt đầu kiểm tra tiến độ Request #{request_id}...")
+
+    try:
         check_res = await workspace_playwright_service.check_and_export_batch_result(
             credentials=school_creds,
             request_id=request_id,
             download_dir=download_dir
         )
+    except CronSlotYieldException:
+        logger.info(f"ℹ️ {task_tag} Nhường slot Playwright ở chu kỳ này, sẽ kiểm tra lại ở chu kỳ tiếp theo.")
+        return
+    except Exception as check_err:
+        logger.error(f"Lỗi khi kiểm tra kết quả batch Playwright: {check_err}")
+        check_res = {"status": "error", "error": str(check_err)}
 
         status = check_res.get("status")
 
         if status == "completed":
-            downloaded_file = check_res["result_file_path"]
+            downloaded_file = check_res.get("result_file_path")
             cof_input_path = payload.get("cof_file_path")
             final_file_to_upload = downloaded_file
 
-            if cof_input_path and os.path.exists(cof_input_path):
+            if cof_input_path and os.path.exists(cof_input_path) and downloaded_file and os.path.exists(downloaded_file):
                 output_cof_path = f"/tmp/ptv_results/COMPLETED_{os.path.basename(cof_input_path)}"
                 try:
                     COFExcelService.write_results_back_to_cof(
@@ -119,7 +149,7 @@ async def poll_workspace_long_tasks():
             total_c = payload.get("total_count", 0)
 
             new_log = (
-                f"\n[{now_vn}] [SUCCESS] [workspace_rpa] [#{task_id[:8]}]: Hoàn thành tạo tài khoản (Request #{request_id})!\n"
+                f"\n[{now_vn}] [SUCCESS] [workspace_rpa] {task_tag}: Hoàn thành tạo tài khoản (Request #{request_id})!\n"
                 f"📊 Thống kê: {total_c} tài khoản (Học sinh: {student_c}, Giáo viên: {teacher_c})\n"
                 f"📥 Link tải file kết quả: {result_url}"
             )
@@ -132,17 +162,18 @@ async def poll_workspace_long_tasks():
                 "last_error_step": None,
                 "payload_data": payload,
                 "execution_logs": (task.get("execution_logs") or "") + new_log,
-                "executed_at": datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).isoformat()
+                "executed_at": datetime.now(VN_TZ).isoformat()
             }).eq("id", task_id).execute()
 
             if task.get("ticket_id"):
                 supabase.table("inbox_tickets").update({"status": "completed"}).eq("id", task["ticket_id"]).execute()
 
         elif status == "still_processing":
-            # Nếu chưa xong, chờ thêm 3 phút cho đợt quét tiếp theo
-            next_check = (datetime.now(timezone.utc) + timedelta(minutes=3)).isoformat()
+            # Nếu chưa xong, chờ thêm 5 phút cho đợt quét tiếp theo
+            next_check = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
             payload["next_check_at"] = next_check
-            new_log = f"\n[{now_vn}] [INFO] [workspace_rpa] [#{task_id[:8]}]: Request #{request_id} vẫn đang xử lý ({check_res.get('current_status')}). Sẽ kiểm tra lại sau 3 phút."
+            current_sys_status = check_res.get('current_status', 'Processing')
+            new_log = f"\n[{now_vn}] [INFO] [workspace_rpa] {task_tag}: Request #{request_id} vẫn đang xử lý ({current_sys_status}). Sẽ kiểm tra lại sau 5 phút."
             
             supabase.table("bot_automation_tasks").update({
                 "payload_data": payload,
@@ -153,6 +184,10 @@ async def poll_workspace_long_tasks():
 async def lifespan(app: FastAPI):
     logger.info("🔥 Đang kích hoạt APScheduler (Lịch trình giãn cách chống nghẽn Render 512MB RAM)...")
     
+    # Dọn dẹp process rác trước khi khởi động
+    force_kill_zombie_chromium()
+    gc.collect()
+
     base_start = datetime.now(timezone.utc)
     
     # 1. Quét Gmail mỗi 10 phút (HTTP API thuần, chạy sau 15s)
@@ -183,7 +218,7 @@ async def lifespan(app: FastAPI):
         replace_existing=True
     )
 
-    # 3. Quét Task Workspace Long-Running mỗi 10 phút (Playwright - Chạy ở phút thứ 3 / 180s)
+    # 3. Quét Task Workspace Long-Running mỗi 10 phút (Playwright - Giãn cách ở giây thứ 180)
     scheduler.add_job(
         safe_job_wrapper, 
         'interval', 
@@ -197,7 +232,7 @@ async def lifespan(app: FastAPI):
         replace_existing=True
     )
 
-    # 4. Quét OS Ticket mỗi 15 phút (Playwright - Giãn sang phút thứ 7 / 420s để không đụng độ Workspace Task)
+    # 4. Quét OS Ticket mỗi 15 phút (Playwright - Giãn sang giây thứ 420 để không trùng slot)
     scheduler.add_job(
         safe_job_wrapper, 
         'interval', 
@@ -211,7 +246,7 @@ async def lifespan(app: FastAPI):
         replace_existing=True
     )
 
-    # 5. Quét Live Uptime & Auth Matrix định kỳ mỗi 60 phút (Chạy sau 20 phút / 1200s)
+    # 5. Quét Live Uptime định kỳ mỗi 60 phút (HTTP API - Chạy sau 20 phút / 1200s)
     scheduler.add_job(
         safe_job_wrapper, 
         'interval', 
@@ -225,7 +260,7 @@ async def lifespan(app: FastAPI):
         replace_existing=True
     )
     
-    # 6. Quét Workspace Distributor Cache mỗi 60 phút (Chạy sau 40 phút / 2400s)
+    # 6. Quét Workspace Distributor Cache mỗi 60 phút (Playwright - Chạy sau 40 phút / 2400s)
     scheduler.add_job(
         safe_job_wrapper,
         "interval",
@@ -247,6 +282,8 @@ async def lifespan(app: FastAPI):
     
     logger.info("🛑 Tắt APScheduler...")
     scheduler.shutdown()
+    force_kill_zombie_chromium()
+    gc.collect()
 
 
 app = FastAPI(

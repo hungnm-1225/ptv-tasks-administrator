@@ -13,32 +13,12 @@ router = APIRouter()
 # =============================================================================
 # ⚡ IN-MEMORY CACHE ENGINE (TỐC ĐỘ 1MS - KHÔNG CẦN REDIS/THƯ VIỆN NGOÀI)
 # =============================================================================
-class SimpleMemoryCache:
-    def __init__(self, default_ttl: int = 600):  # Mặc định lưu RAM 10 phút
-        self._cache: Dict[str, Any] = {}
+# ⚡ IN-MEMORY CACHE CHO KHÓA HỌC (TIER A CATALOG - BUDGET <= 40MB)
+# =============================================================================
+from app.core.cache_policy import BoundedMemoryCache, CacheTier
 
-    def get(self, key: str) -> Optional[Any]:
-        if key in self._cache:
-            data, expire_at = self._cache[key]
-            if time.time() < expire_at:
-                return data
-            del self._cache[key]
-        return None
+course_cache = BoundedMemoryCache(tier=CacheTier.TIER_A_CATALOG, max_entries=50, default_ttl=600)
 
-    def set(self, key: str, value: Any, ttl: Optional[int] = None):
-        expire_at = time.time() + (ttl if ttl is not None else 600)
-        self._cache[key] = (value, expire_at)
-
-    def invalidate(self, prefix: str = ""):
-        """Xóa cache khi có thao tác Thêm / Sửa / Xóa."""
-        if not prefix:
-            self._cache.clear()
-        else:
-            keys_to_del = [k for k in self._cache if k.startswith(prefix)]
-            for k in keys_to_del:
-                del self._cache[k]
-
-course_cache = SimpleMemoryCache(default_ttl=600)
 
 
 class CourseSchema(BaseModel):

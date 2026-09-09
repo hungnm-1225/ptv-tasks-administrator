@@ -15,29 +15,12 @@ router = APIRouter()
 # =============================================================================
 # ⚡ IN-MEMORY CACHE CHO PHẢ HỆ 480 TRƯỜNG & KHÓA HỌC WORKSPACE
 # =============================================================================
-class WorkspaceMemoryCache:
-    def __init__(self, default_ttl: int = 900):  # Lưu RAM 15 phút
-        self._cache: Dict[str, Any] = {}
+# ⚡ IN-MEMORY CACHE CHO PHẢ HỆ 480 TRƯỜNG & KHÓA HỌC WORKSPACE (TIER A CATALOG)
+# =============================================================================
+from app.core.cache_policy import BoundedMemoryCache, CacheTier
 
-    def get(self, key: str) -> Optional[Any]:
-        if key in self._cache:
-            data, expire_at = self._cache[key]
-            if time.time() < expire_at:
-                return data
-            del self._cache[key]
-        return None
+ws_cache = BoundedMemoryCache(tier=CacheTier.TIER_A_CATALOG, max_entries=50, default_ttl=900)
 
-    def set(self, key: str, value: Any, ttl: Optional[int] = None):
-        expire_at = time.time() + (ttl if ttl is not None else 900)
-        self._cache[key] = (value, expire_at)
-
-    def invalidate(self, key: str = ""):
-        if not key:
-            self._cache.clear()
-        elif key in self._cache:
-            del self._cache[key]
-
-ws_cache = WorkspaceMemoryCache(default_ttl=900)
 
 
 class ExtractCOFRequest(BaseModel):

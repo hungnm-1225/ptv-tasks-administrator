@@ -1,11 +1,19 @@
 # backend/app/core/config.py
-from typing import Optional, List
+from typing import Optional, List, Any
 import pytz
 from datetime import datetime
 from pydantic_settings import BaseSettings
 
-# Đặt biến Múi giờ Việt Nam và hàm tiện ích Ở NGOÀI class Settings
+# Đặt biến Múi giờ Việt Nam và hàm tiện ích chuẩn hóa thời gian duy nhất toàn hệ thống
 VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
+
+def get_utc_now() -> datetime:
+    """Trả về đối tượng datetime UTC chuẩn."""
+    return datetime.now(pytz.utc)
+
+def get_utc_iso() -> str:
+    """Trả về chuỗi thời gian ISO UTC (Source of Truth trong Database)."""
+    return datetime.now(pytz.utc).isoformat()
 
 def get_vn_time_str(fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
     """Trả về chuỗi thời gian định dạng YYYY-MM-DD HH:MM:SS theo giờ Việt Nam."""
@@ -14,6 +22,25 @@ def get_vn_time_str(fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
 def get_vn_iso() -> str:
     """Trả về chuỗi thời gian ISO theo giờ Việt Nam."""
     return datetime.now(VN_TZ).isoformat()
+
+def to_vn_time_str(val: Any, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
+    """Chuyển đổi mọi đối tượng datetime / chuỗi ISO UTC sang chuỗi giờ Việt Nam (GMT+7)."""
+    if not val:
+        return datetime.now(VN_TZ).strftime(fmt)
+    if isinstance(val, str):
+        clean_str = val.replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(clean_str)
+            if dt.tzinfo is None:
+                dt = pytz.utc.localize(dt)
+            return dt.astimezone(VN_TZ).strftime(fmt)
+        except Exception:
+            return str(val)[:19].replace("T", " ")
+    elif isinstance(val, datetime):
+        if val.tzinfo is None:
+            val = pytz.utc.localize(val)
+        return val.astimezone(VN_TZ).strftime(fmt)
+    return str(val)
 
 
 class Settings(BaseSettings):

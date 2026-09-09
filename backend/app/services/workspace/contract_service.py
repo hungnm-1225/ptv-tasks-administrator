@@ -1,6 +1,7 @@
 # backend/app/services/workspace/contract_service.py
 import re
 import os
+import gc
 import json
 import logging
 from typing import Dict, Any, List, Optional
@@ -185,14 +186,13 @@ class WorkspaceContractService(WorkspaceBaseService):
         except Exception as e:
             logger.warning(f"⚠️ Không bắt kịp API createOrder.php ({e}), chuyển sang cào DataGrid DOM...")
 
-        # Fallback cào từ DOM nếu chưa lấy được mã
         if not contract_full_code:
             try:
                 await page.wait_for_url("**/distributor-workspace/contract-po", timeout=15000)
             except Exception:
                 await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/distributor-workspace/contract-po", "contract-po")
 
-            await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=500)
+            await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=400)
 
             first_row = page.locator(".MuiDataGrid-row").first
             if await first_row.count() > 0:
@@ -219,7 +219,7 @@ class WorkspaceContractService(WorkspaceBaseService):
         courses_needed: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """Duyệt Partner Contract bằng cơ chế Khép góc Search & Direct Approve (hoặc Auto-DST nếu thiếu)."""
-        async with acquire_playwright_slot("Distributor Approve Partner Contract"):
+        async with acquire_playwright_slot("Distributor Approve Partner Contract", lane="admin"):
             async with async_playwright() as p:
                 browser, context, page = await self._create_context(p)
                 try:
@@ -227,7 +227,6 @@ class WorkspaceContractService(WorkspaceBaseService):
                     if not is_ok:
                         return {"status": "failed", "error": login_err}
 
-                    # Mở giao diện Partner Contracts của Distributor
                     logger.info("🏢 Mở giao diện Partner Contracts: /distributor-workspace/partner-contract-po...")
                     try:
                         async with page.expect_response(
@@ -238,9 +237,8 @@ class WorkspaceContractService(WorkspaceBaseService):
                     except Exception:
                         await self._safe_navigate(page, f"{BASE_WORKSPACE_URL}/distributor-workspace/partner-contract-po", "partner-contract-po")
 
-                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row, [role='row']", min_pacing_ms=500)
+                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row, [role='row']", min_pacing_ms=400)
 
-                    # 🎯 CHIẾN THUẬT KHÉP GÓC: Gõ mã hợp đồng vào ô Search để cô lập 1 dòng duy nhất!
                     search_code = str(contract_identifier or "").strip()
                     if search_code:
                         logger.info(f"🎯 [KHÉP GÓC DISTRIBUTOR] Gõ mã hợp đồng [{search_code}] vào ô Search...")
@@ -249,7 +247,7 @@ class WorkspaceContractService(WorkspaceBaseService):
                             await search_input.click(force=True)
                             await page.keyboard.press("Control+A")
                             await page.keyboard.type(search_code)
-                            await page.wait_for_timeout(600)
+                            await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=300)
 
                     target_row = page.locator(".MuiDataGrid-row").first
                     if search_code:
@@ -260,7 +258,6 @@ class WorkspaceContractService(WorkspaceBaseService):
                     if await target_row.count() == 0:
                         return {"status": "failed", "error": f"Không tìm thấy Partner Contract [{search_code}] trên danh sách Distributor!"}
 
-                    # Kiểm tra nếu dòng đã mang trạng thái Đã Duyệt từ trước
                     row_text = (await target_row.inner_text()).lower()
                     if "approved" in row_text or "completed" in row_text:
                         logger.info(f"✨ Partner Contract [{search_code}] đã được duyệt từ trước!")
@@ -271,7 +268,6 @@ class WorkspaceContractService(WorkspaceBaseService):
                             "message": f"Partner Contract [{search_code}] đã được duyệt từ trước."
                         }
 
-                    # Mở modal chi tiết: Bấm nút con mắt (icon lucide-info trong cột actions)
                     logger.info(f"🔍 Bấm xem chi tiết Hợp đồng [{search_code}]...")
                     await target_row.scroll_into_view_if_needed()
                     info_btn = target_row.locator("button[aria-label='View Details'], [data-field='actions'] button, button:has(.lucide-info)").first
@@ -285,13 +281,10 @@ class WorkspaceContractService(WorkspaceBaseService):
                     except Exception:
                         await info_btn.click(force=True)
 
-                    # Chờ Dialog "Partner Order Details" hiển thị hoàn chỉnh
                     await page.wait_for_selector("div[role='dialog']:has-text('Partner Order Details')", state="visible", timeout=15000)
-                    await page.wait_for_timeout(800)
+                    await wait_for_dom_and_spinners(page, "div[role='dialog']:has-text('Partner Order Details')", min_pacing_ms=400)
 
                     dialog = page.locator("div[role='dialog']:has-text('Partner Order Details')").first
-
-                    # Kiểm tra nút Approve Order màu xanh lá (MuiButton-containedSuccess)
                     approve_btn = dialog.locator("button:has-text('Approve Order')").first
                     try:
                         await approve_btn.wait_for(state="visible", timeout=4000)
@@ -320,7 +313,6 @@ class WorkspaceContractService(WorkspaceBaseService):
                             "message": f"Distributor đã phê duyệt thành công Partner Contract [{search_code}]!"
                         }
 
-                    # Nếu nút Approve không sáng lên hoặc thiếu kho ➔ 1-SESSION TẠO DST CONTRACT CẤP BÙ
                     logger.warning(f"⚠️ Kho Distributor KHÔNG ĐỦ License để duyệt Contract [{search_code}]!")
                     
                     if auto_create_dst_if_short:
@@ -365,13 +357,14 @@ class WorkspaceContractService(WorkspaceBaseService):
                     return {"status": "failed", "error": str(e)}
                 finally:
                     await browser.close()
+                    gc.collect()
 
     async def distributor_create_contract(
         self,
         credentials: Dict[str, str],
         contract_data: Dict[str, Any]
     ) -> Dict[str, Any]:
-        async with acquire_playwright_slot("Distributor Create Contract"):
+        async with acquire_playwright_slot("Distributor Create Contract", lane="admin"):
             async with async_playwright() as p:
                 browser, context, page = await self._create_context(p)
                 try:
@@ -385,6 +378,7 @@ class WorkspaceContractService(WorkspaceBaseService):
                     return {"status": "failed", "error": str(e)}
                 finally:
                     await browser.close()
+                    gc.collect()
 
     async def partner_create_contract(
         self,
@@ -392,7 +386,7 @@ class WorkspaceContractService(WorkspaceBaseService):
         contract_data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Partner tạo PRT Contract (Quan sát API getListCourseConfig & createOrderSale)."""
-        async with acquire_playwright_slot("Partner Create Contract"):
+        async with acquire_playwright_slot("Partner Create Contract", lane="admin"):
             async with async_playwright() as p:
                 browser, context, page = await self._create_context(p)
                 try:
@@ -477,7 +471,6 @@ class WorkspaceContractService(WorkspaceBaseService):
                         await page.keyboard.type(lic_qty)
 
                     submit_btn = page.locator("button:has-text('Create Contract/PO')").last
-                    
                     contract_num_id = ""
                     contract_full_code = ""
 
@@ -511,7 +504,7 @@ class WorkspaceContractService(WorkspaceBaseService):
                         except Exception:
                             pass
 
-                        await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=500)
+                        await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=400)
 
                         first_row = page.locator(".MuiDataGrid-row").first
                         if await first_row.count() > 0:
@@ -535,6 +528,7 @@ class WorkspaceContractService(WorkspaceBaseService):
                     return {"status": "failed", "error": str(e)}
                 finally:
                     await browser.close()
+                    gc.collect()
 
     async def admin_approve_distributor_contract(
         self,
@@ -543,7 +537,7 @@ class WorkspaceContractService(WorkspaceBaseService):
         justification: Optional[str] = None
     ) -> Dict[str, Any]:
         """Sales Admin duyệt DST Contract (Quan sát WP REST API /orders/detail & /orders/update-status)."""
-        async with acquire_playwright_slot("Sales Admin Approve DST Contract"):
+        async with acquire_playwright_slot("Sales Admin Approve DST Contract", lane="admin"):
             async with async_playwright() as p:
                 browser, context, page = await self._create_context(p)
                 try:
@@ -639,7 +633,6 @@ class WorkspaceContractService(WorkspaceBaseService):
                             eye_btn = target_row.locator("button[aria-label='View Details'], [data-field='Actions'] button, [data-field='actions'] button, svg[data-testid='VisibilityIcon']").first
                             await eye_btn.click(timeout=15000, force=True)
 
-                    # Chờ nút Approve xuất hiện
                     approve_btn = page.locator("button:has-text('Approve')").first
                     try:
                         await approve_btn.wait_for(state="visible", timeout=10000)
@@ -655,7 +648,6 @@ class WorkspaceContractService(WorkspaceBaseService):
                             "message": f"Hợp đồng [{search_kw}] đã được Sales Admin phê duyệt từ trước đó."
                         }
 
-                    # Bấm nút 'Approve'
                     logger.info("👑 Bấm nút 'Approve' trên trang chi tiết...")
                     await approve_btn.click(force=True)
 
@@ -699,13 +691,11 @@ class WorkspaceContractService(WorkspaceBaseService):
                     return {"status": "failed", "error": str(e)}
                 finally:
                     await browser.close()
+                    gc.collect()
 
-    # =========================================================================
-    # CÁC HÀM LIVE FETCH BỔ TRỢ ĐỒNG BỘ
-    # =========================================================================
     async def fetch_partner_pending_school_orders(self, credentials: Dict[str, str]) -> Dict[str, Any]:
         """Truy vấn danh sách School Orders của Partner."""
-        async with acquire_playwright_slot("Fetch Partner School Orders"):
+        async with acquire_playwright_slot("Fetch Partner School Orders", lane="admin"):
             async with async_playwright() as p:
                 browser, context, page = await self._create_context(p)
                 try:
@@ -714,7 +704,7 @@ class WorkspaceContractService(WorkspaceBaseService):
                         return {"status": "failed", "error": login_err, "orders": []}
 
                     await page.goto(f"{BASE_WORKSPACE_URL}/partner-workspace/order-management", wait_until="domcontentloaded", timeout=45000)
-                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=500)
+                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=400)
 
                     orders = []
                     rows = page.locator(".MuiDataGrid-row")
@@ -730,10 +720,11 @@ class WorkspaceContractService(WorkspaceBaseService):
                     return {"status": "failed", "error": str(e), "orders": []}
                 finally:
                     await browser.close()
+                    gc.collect()
 
     async def fetch_distributor_pending_contracts(self, credentials: Dict[str, str]) -> Dict[str, Any]:
         """Truy vấn danh sách PRT Contracts của Distributor."""
-        async with acquire_playwright_slot("Fetch Distributor Contracts"):
+        async with acquire_playwright_slot("Fetch Distributor Contracts", lane="admin"):
             async with async_playwright() as p:
                 browser, context, page = await self._create_context(p)
                 try:
@@ -742,7 +733,7 @@ class WorkspaceContractService(WorkspaceBaseService):
                         return {"status": "failed", "error": login_err, "contracts": []}
 
                     await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/partner-contract-po", wait_until="domcontentloaded", timeout=45000)
-                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=500)
+                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=400)
 
                     contracts = []
                     rows = page.locator(".MuiDataGrid-row")
@@ -758,10 +749,11 @@ class WorkspaceContractService(WorkspaceBaseService):
                     return {"status": "failed", "error": str(e), "contracts": []}
                 finally:
                     await browser.close()
+                    gc.collect()
 
     async def fetch_sales_admin_pending_contracts(self, credentials: Dict[str, str]) -> Dict[str, Any]:
         """Truy vấn danh sách DST Contracts của Sales Admin."""
-        async with acquire_playwright_slot("Fetch Sales Admin Contracts"):
+        async with acquire_playwright_slot("Fetch Sales Admin Contracts", lane="admin"):
             async with async_playwright() as p:
                 browser, context, page = await self._create_context(p)
                 try:
@@ -770,7 +762,7 @@ class WorkspaceContractService(WorkspaceBaseService):
                         return {"status": "failed", "error": login_err, "contracts": []}
 
                     await page.goto(f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard", wait_until="domcontentloaded", timeout=45000)
-                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=500)
+                    await wait_for_dom_and_spinners(page, ".MuiDataGrid-row", min_pacing_ms=400)
 
                     contracts = []
                     rows = page.locator(".MuiDataGrid-row")
@@ -786,3 +778,4 @@ class WorkspaceContractService(WorkspaceBaseService):
                     return {"status": "failed", "error": str(e), "contracts": []}
                 finally:
                     await browser.close()
+                    gc.collect()

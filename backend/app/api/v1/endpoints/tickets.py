@@ -11,29 +11,13 @@ from app.services.gmail_service import poll_unread_gmails
 router = APIRouter()
 
 # =============================================================================
-# ⚡ IN-MEMORY CACHE CHO INBOX TICKETS (TỐC ĐỘ 1MS)
 # =============================================================================
-class TicketsMemoryCache:
-    def __init__(self, default_ttl: int = 60):  # Lưu RAM 60 giây
-        self._cache: Dict[str, Any] = {}
+# ⚡ IN-MEMORY CACHE CHO INBOX TICKETS (TIER C SUMMARY - BUDGET <= 40MB)
+# =============================================================================
+from app.core.cache_policy import BoundedMemoryCache, CacheTier
 
-    def get(self, key: str) -> Optional[Any]:
-        if key in self._cache:
-            data, expire_at = self._cache[key]
-            if time.time() < expire_at:
-                return data
-            del self._cache[key]
-        return None
+tickets_cache = BoundedMemoryCache(tier=CacheTier.TIER_C_SUMMARY, max_entries=15, default_ttl=60)
 
-    def set(self, key: str, value: Any, ttl: Optional[int] = None):
-        expire_at = time.time() + (ttl if ttl is not None else 60)
-        self._cache[key] = (value, expire_at)
-
-    def invalidate(self):
-        """Xóa sạch cache khi có tác vụ cập nhật / hoàn thành / bỏ qua."""
-        self._cache.clear()
-
-tickets_cache = TicketsMemoryCache(default_ttl=60)
 
 
 @router.get("")

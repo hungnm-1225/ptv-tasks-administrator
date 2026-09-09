@@ -13,29 +13,12 @@ from app.services.site_monitor_service import (
 router = APIRouter()
 
 # =============================================================================
-# ⚡ IN-MEMORY CACHE CHO SITE MONITOR (TỐC ĐỘ 1MS)
+# ⚡ IN-MEMORY CACHE CHO SITE MONITOR (TIER B STATUS - BUDGET <= 40MB)
 # =============================================================================
-class MonitorMemoryCache:
-    def __init__(self, default_ttl: int = 30):  # Lưu RAM 30 giây
-        self._cache: Dict[str, Any] = {}
+from app.core.cache_policy import BoundedMemoryCache, CacheTier
 
-    def get(self, key: str) -> Optional[Any]:
-        if key in self._cache:
-            data, expire_at = self._cache[key]
-            if time.time() < expire_at:
-                return data
-            del self._cache[key]
-        return None
+monitor_cache = BoundedMemoryCache(tier=CacheTier.TIER_B_STATUS, max_entries=10, default_ttl=30)
 
-    def set(self, key: str, value: Any, ttl: Optional[int] = None):
-        expire_at = time.time() + (ttl if ttl is not None else 30)
-        self._cache[key] = (value, expire_at)
-
-    def invalidate(self):
-        """Xóa sạch cache khi bấm nút check-now."""
-        self._cache.clear()
-
-monitor_cache = MonitorMemoryCache(default_ttl=30)
 
 
 # ── TAB 1: Public Sites ──────────────────────────────────────────────────────

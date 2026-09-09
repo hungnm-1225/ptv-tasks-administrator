@@ -19,6 +19,8 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
 | **Security & Identity** | `security-auditor` | `.agent/agents/security-auditor.md` | Whitelist Domain `@dtt.vn`, Fernet Credential Vault (`VAULT_SECRET_KEY`), Keycloak Admin REST API + Playwright Fallback, Bearer Token validation, Human-in-the-Loop Gate. |
 | **Điều Phối Đa Nhiệm** | `orchestrator` | `.agent/agents/orchestrator.md` | Phân tích luồng end-to-end, giải quyết xung đột dữ liệu, thiết kế pipeline liên thông đa dịch vụ. |
 | **Gỡ Lỗi & Điều Tra Lỗi** | `debugger` | `.agent/agents/debugger.md` | 4-Phase Systematic Debugging, bắt log thực thi GMT+7, cô lập nguyên nhân gốc rễ, Gemini 10-model fallback. |
+| **Tài Liệu Kỹ Thuật** | `documentation-writer` | `.agent/agents/documentation-writer.md` | Chuẩn hóa README, API Docs, cẩm nang kiến trúc, Single Source of Truth cho toàn bộ dự án. |
+| **Lập Kế Hoạch Hệ Thống** | `project-planner` | `.agent/agents/project-planner.md` | Phương pháp luận 4 pha (Analysis, Planning, Solutioning, Implementation), lập bản đồ công việc. |
 
 ---
 
@@ -76,16 +78,12 @@ Gói dịch vụ được tách nhỏ thành 8 module chuyên biệt kế thừa
 - Dựng chuỗi thư mục phân tầng tự động: `Root` ➔ `{Năm}` ➔ `{Quốc gia}` ➔ `[Distributor] {Tên}` ➔ `[Partner] {Tên}` ➔ `[School] {Tên}`.
 - Tải file kết quả COF lên đúng thư mục trường học và trả về `web_view_link`.
 
-### 2.8. Ma Trận 8 Bộ Nhớ Đệm In-Memory RAM Caching (1ms Response Engine)
-Hệ thống sử dụng ma trận 8 bộ nhớ đệm RAM độc lập phân bổ tại các router endpoints, phản hồi tốc độ 1ms:
-1. `SimpleMemoryCache` ([`courses.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/courses.py), TTL 10m): Cache danh mục khóa học và categories.
-2. `WorkspaceMemoryCache` ([`workspace.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/workspace.py), TTL 15m): Cache 480 trường học phả hệ, orders & contracts của 5 Distributors.
-3. `BoardMemoryCache` ([`board.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/board.py), TTL 5m): Cache bảng Kanban, cột trạng thái, thẻ công việc, thùng rác.
-4. `BotsMemoryCache` ([`bots.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/bots.py), TTL 15s): Cache trạng thái 8 workers và stream terminal logs.
-5. `TasksMemoryCache` ([`tasks.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/tasks.py), TTL 60s): Cache hàng đợi tác vụ Human-in-the-Loop.
-6. `TicketsMemoryCache` ([`tickets.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/tickets.py), TTL 60s): Cache danh sách vé đa kênh hợp nhất.
-7. `MonitorMemoryCache` ([`monitor.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/monitor.py), TTL 30s): Cache trạng thái Uptime 10 site và lịch sử sự cố.
-8. `ReportsMemoryCache` ([`reports.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/reports.py), TTL 60s): Cache số liệu KPI, Dynamic Health 24h và biểu đồ.
+### 2.8. Ma Trận 8 Bộ Nhớ Đệm Phân Tầng Có Giới Hạn Dung Lượng (`BoundedMemoryCache` - Budget ≤ 40MB)
+Hệ thống chuẩn hóa 8 bộ nhớ đệm RAM độc lập tại [`cache_policy.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/core/cache_policy.py) với thuật toán LRU (`OrderedDict`), chủ động giải phóng mục hết hạn và giới hạn cứng số lượng bản ghi:
+- **Tier A — Catalog (max 30-50 entries, TTL 5-15m):** [`courses.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/courses.py) (SimpleMemoryCache 10m), [`workspace.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/workspace.py) (WorkspaceMemoryCache 15m), [`board.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/board.py) (BoardMemoryCache 5m).
+- **Tier B — Short-lived Status (max 10-20 entries, TTL 15-30s):** [`bots.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/bots.py) (BotsMemoryCache 15s), [`monitor.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/monitor.py) (MonitorMemoryCache 30s), [`reports.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/reports.py) (ReportsMemoryCache 60s).
+- **Tier C — Summary Feeds (max 15 entries, TTL 60s):** [`tasks.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/tasks.py) (TasksMemoryCache 60s), [`tickets.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/tickets.py) (TicketsMemoryCache 60s).
+- **Tier D — Transactional Data (CẤM CACHE):** Trạng thái thực thi (`execution_status`), Lease token, Checkpoint và Retry state luôn truy vấn trực tiếp từ Supabase để bảo toàn tính nhất quán (Single Source of Truth).
 - **Tự động Invalidate:** Mọi thao tác Create, Update, Delete hoặc Bulk Upsert đều gọi `.invalidate()` làm sạch cache ngay lập tức.
 
 ### 2.9. Điều Phối Tác Vụ Độc Lập Automation Studio (`AutomationStudioPage.tsx` / `/studio`)
@@ -126,7 +124,7 @@ Hệ thống sử dụng ma trận 8 bộ nhớ đệm RAM độc lập phân b�
 
 ### 2.14. Quản Trị 8 Bot Workers & Stream Log GMT+7 (`BotCommanderPage.tsx` / `/bots`)
 - Giám sát 8 workers: `gmail_sync_worker`, `osticket_sync_worker`, `feedback_sheet_worker`, `distributor_cache_worker`, `workspace_license_worker`, `keycloak_api_worker`, `lms_git_worker`, `github_dispatcher`.
-- Thẻ trạng thái Real-time (`Active` / `Degraded`), stream log GMT+7 làm sạch tag.
+- Thẻ trạng thái Real-time (`Active` / `Degraded`), stream log GMT+7 làm sạch tag qua Event Taxonomy: `[LIFECYCLE]`, `[STATE]`, `[API]`, `[PLAYWRIGHT]`, `[CHECKPOINT]`, `[RETRY]`, `[CRON]`, `[MEMORY]`.
 - Nút Force Sync 5 luồng on-demand, nút Purge RAM `gc.collect()` và Batch Retry các tác vụ lỗi.
 
 ### 2.15. Tự Động Hóa Pythaverse Git Collaborator (`git_service.py` / `git.pythaverse.space`)
@@ -134,6 +132,10 @@ Hệ thống sử dụng ma trận 8 bộ nhớ đệm RAM độc lập phân b�
 - **Đăng nhập SSO OIDC:** Tự động đăng nhập cổng Pythaverse eID Keycloak qua form OIDC (bảo toàn phiên đăng nhập, né nút header, chống redirect loop).
 - **Phân vai trò linh hoạt:** Hỗ trợ gán vai trò mục tiêu (`ADMIN`, `DEVELOPER`, `GUEST` - mặc định `GUEST`), tự động chuyển đổi vai trò nếu user đã tồn tại trong repo, xử lý an toàn trường hợp tài khoản chưa kích hoạt SSO JIT provisioning.
 - **Lưu cấu hình an toàn:** Nhận diện số lượng thay đổi mới và kích hoạt "Apply changes" lưu cấu hình lên máy chủ Git an toàn.
+
+### 2.16. Bóc Tách Toàn Bộ Nội Dung Email & Re-triage (`gmail_service.py` & `re_triage_all_tickets.py`)
+- **Giải mã đệ quy đa tầng MIME (`extract_gmail_body`):** Duyệt đệ quy toàn bộ các `parts` của MIME payload để giải mã base64 trọn vẹn cả `text/plain` hoặc `text/html`, khắc phục triệt để tình trạng email bị cắt cụt (snippet ngắn < 250 ký tự).
+- **Kịch bản Vá & Re-triage Hàng Loạt (`re_triage_all_tickets.py`):** Quét các ticket chưa hoàn thành trên Supabase, tự động tải lại body gốc từ Gmail API nếu phát hiện nội dung bị thiếu, cập nhật lại vào `raw_content` và gọi `process_ticket_with_ai` để Gemini AI phân tích lại toàn diện.
 
 ---
 
@@ -143,10 +145,18 @@ Hệ thống sử dụng ma trận 8 bộ nhớ đệm RAM độc lập phân b�
    - Tuyệt đối KHÔNG chạy ngầm bất kỳ tác vụ can thiệp hệ thống nào (Keycloak API, Playwright RPA, GitHub Issue...) nếu chưa có trạng thái `approval_status = 'approved'` do Quản trị viên phê duyệt trên Web Portal (trừ khi admin chủ động chọn `run_immediately = true` từ Studio).
 2. **Kiểm Soát Miền Doanh Nghiệp (@dtt.vn Whitelist):**
    - Chỉ người dùng có email Google thuộc miền `@dtt.vn` (đặc biệt quản trị viên tối cao `hung.nguyenmanh@dtt.vn`) mới có quyền truy cập hệ thống. Tự động từ chối và đăng xuất mọi tài khoản ngoài miền.
-3. **Memory Collection Safeguard, Phân Làn Kép Dual-Lane & Lập Lịch So Le 6 Crons:**
-   - **Dual-Lane Concurrency Architecture:** Quản lý phiên Playwright Chromium theo 2 làn độc lập: Làn 1 `PLAYWRIGHT_ADMIN_SEMAPHORE` (1 slot VIP dành riêng cho Quản trị viên duyệt tác vụ và Studio, không bao giờ bị nghẽn) và Làn 2 `PLAYWRIGHT_CRON_SEMAPHORE` (1 slot dành cho các cronjobs quét ngầm: osTicket, Scanner, Smart Poller). Tổng tối đa toàn hệ thống là 2 instances Chromium (~300MB RAM an toàn trên máy chủ Render 512MB RAM). Đã loại bỏ hoàn toàn cờ `--single-process` (gây crash/deadlock) và khóa trần V8 Heap ở 128MB (`--js-flags=--max-old-space-size=128`).
+3. **Memory Collection Safeguard, Single-Instance Playwright Concurrency & Lập Lịch So Le 6 Crons:**
+   - **Single-Instance Concurrency Architecture (`GLOBAL_PLAYWRIGHT_SEMAPHORE = asyncio.Semaphore(1)`):** Quản lý phiên Playwright Chromium nghiêm ngặt để bảo vệ trần 512MB RAM của Render. Đảm bảo tại một thời điểm CHỈ CÓ TỐI ĐA 1 Chromium instance hoạt động. Cung cấp hàm bọc `acquire_playwright_slot(task_name, timeout, lane)` với 2 làn:
+     - *Làn VIP Quản Trị (`lane='admin'`):* Dành riêng cho Quản trị viên duyệt tác vụ trên Web Portal hoặc dispatch từ Automation Studio. Timeout 300s, ưu tiên tối đa không bao giờ bị nghẽn.
+     - *Làn Background Cron (`lane='cron'`):* Dành cho các tác vụ quét ngầm (osTicket, Long-Task, Scanner). Timeout 45s; nếu slot bận quá hạn, tự động kích hoạt ngoại lệ nhường slot êm dịu `CronSlotYieldException` và thoát an toàn, KHÔNG làm văng lỗi đỏ ASGI.
+     - *Chống Deadlock Lồng Nhau Qua Token Re-entrancy (`ContextVar`):* Biến ngữ cảnh `_PLAYWRIGHT_SLOT_HOLDER` cho phép các tác vụ cha và con trong cùng một coroutine context đi qua an toàn mà không tự khóa chính mình.
+     - *Tự Động Tiêu Diệt Zombie Chromium (`force_kill_zombie_chromium()`):* Chạy trong khối `finally` của `acquire_playwright_slot` để quét và tiêu diệt các tiến trình Chromium mồ côi, thu hồi 100% RAM native về hệ điều hành.
+     - *Bộ cờ Chromium tối ưu RAM (`LOW_RAM_CHROMIUM_ARGS`):* Khóa trần V8 Heap ở 128MB (`--js-flags=--max-old-space-size=128`), loại bỏ hoàn toàn GPU, zygote, background networking, không dùng `--single-process`.
+     - *Bộ lọc chặn mạng (`setup_low_ram_routes`):* Tự động hủy (abort) mọi tài nguyên media, image, web fonts và tracking scripts ngầm (`google-analytics`, `clarity`, `hotjar`...).
+   - **Khóa Thực Thi Độc Quyền `TaskCoordinator`:** Mọi luồng khởi chạy tác vụ (`run_approved_task_worker`, `retry_task`) bắt buộc phải xin lease độc quyền qua `TaskCoordinator.claim_task_for_execution()`, cập nhật heartbeat từng bước và giải phóng lease an toàn để chống race condition và click đúp.
+   - **Nguồn Thời Gian Duy Nhất (`Single Source of Time`):** Lưu trữ CSDL chuẩn UTC ISO 8601 (`timestamptz`), chuyển đổi sang GMT+7 qua `to_vn_time_str()` khi hiển thị lên giao diện hoặc stream logs.
    - Mọi tiến trình chạy ngầm hoặc tác vụ Playwright trong `safe_job_wrapper` BẮT BUỘC phải gọi `gc.collect()` trong khối `finally` để giải phóng bộ nhớ nhị phân trên môi trường Render 512MB RAM.
-   - 6 Crons trong `main.py` BẮT BUỘC xuất phát lệch pha (5s, 65s, 125s, 185s, 245s, 305s) để ngăn chặn chạy trùng lặp gây tràn RAM.
+   - 6 Crons trong `main.py` BẮT BUỘC xuất phát lệch pha (15s, 90s, 180s, 420s, 1200s, 2400s) và giãn cách 10m - 60m để ngăn chặn chạy trùng lặp gây tràn RAM.
 4. **Google Gemini Auto-Fallback 10 Tầng:**
    - Khi gọi Gemini AI Triage, luôn sử dụng cơ chế bắt lỗi `429`, `quota`, `resource_exhausted` để tự động chuyển tiếp qua danh sách 10 model dự phòng (`gemini-3.8-flash` ➔ `gemini-3.7-flash` ➔ `gemini-3.5-flash-lite` ➔ `gemini-3.1-pro-preview` ➔ ...).
 
