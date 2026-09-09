@@ -25,49 +25,89 @@ class WorkspaceOrderService(WorkspaceBaseService):
             from app.api.v1.endpoints.workspace import ws_cache
             if cache_type in ("all", "orders"):
                 ws_cache.invalidate("all_cached_pending_orders")
-                logger.info("⚡ [CACHE EVICTION] Đã làm sạch RAM Cache Orders ('all_cached_pending_orders').")
             if cache_type in ("all", "contracts"):
                 ws_cache.invalidate("all_cached_pending_contracts_PRT")
                 ws_cache.invalidate("all_cached_pending_contracts_DST")
-                logger.info("⚡ [CACHE EVICTION] Đã làm sạch RAM Cache Contracts.")
+                logger.info("⚡ [CACHE EVICTION] Đã làm sạch RAM Cache Contracts (PRT & DST).")
         except Exception as e:
             logger.warning(f"⚠️ Không thể invalidate ws_cache: {e}")
 
-    async def _sync_order_status_db(self, order_identifier: str, new_status: str = "Approved", partner_name: Optional[str] = None):
-        """Cập nhật trạng thái School Order thành Approved trong CSDL Supabase."""
-        if not order_identifier:
+    async def _sync_contract_status_db(self, contract_identifier: str, contract_type: str = "PRT", new_status: str = "Approved"):
+        """Cập nhật trạng thái PRT/DST Contract thành Approved trong CSDL Supabase."""
+        if not contract_identifier:
             return
         try:
             from app.core.supabase import get_supabase_client
-            clean_code = str(order_identifier).strip()
-            core_match = re.search(r"(\d{6,8}-\d+)", clean_code)
-            pattern = f"%{core_match.group(1)}%" if core_match else f"%{clean_code}%"
+            clean_code = str(contract_identifier).strip()
             now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             
             supabase = get_supabase_client()
-            update_res = supabase.table("workspace_orders_cache").update({
+            update_res = supabase.table("workspace_contracts_cache").update({
                 "status": new_status,
-                "synced_at": now_utc
-            }).ilike("order_id", pattern).execute()
+                "last_synced_at": now_utc
+            }).ilike("contract_code", f"%{clean_code}%").execute()
 
-            # Nếu chưa có trong cache thì tạo mới luôn bản ghi đã duyệt
             if not update_res.data:
-                supabase.table("workspace_orders_cache").insert({
-                    "order_id": clean_code,
-                    "school_name": "Pythaverse School",
-                    "partner_name": partner_name or "Partner",
-                    "distributor_code": "N/A",
-                    "order_date": now_utc,
-                    "total_licenses": 50,
+                supabase.table("workspace_contracts_cache").insert({
+                    "contract_code": clean_code,
+                    "contract_type": contract_type.upper(),
+                    "sender_name": "Partner" if contract_type.upper() == "PRT" else "Distributor",
+                    "receiver_name": "Distributor" if contract_type.upper() == "PRT" else "Sales Admin",
                     "status": new_status,
-                    "synced_at": now_utc,
-                    "raw_data": {"auto_synced": True}
+                    "contract_date": now_utc.split("T")[0],
+                    "last_synced_at": now_utc,
+                    "raw_payload": {"auto_synced": True}
                 }).execute()
 
-            logger.info(f"💾 [DB SYNC] Đã cập nhật Order [{clean_code}] -> Status: '{new_status}' trong CSDL Supabase.")
-            self._invalidate_workspace_ram_cache("orders")
+            logger.info(f"💾 [DB SYNC] Đã cập nhật {contract_type} Contract [{clean_code}] -> Status: '{new_status}' trong CSDL Supabase.")
+            self._invalidate_workspace_ram_cache("contracts")
         except Exception as e:
-            logger.warning(f"⚠️ [DB SYNC] Lỗi cập nhật Order vào CSDL: {e}")
+            logger.warning(f"⚠️ [DB SYNC] Lỗi cập nhật Contract vào CSDL: {e}")
+
+    async def _record_created_contract_db(
+        self,
+        contract_code: str,
+        contract_type: str,
+        status: str,
+        partner_name: Optional[str] = None,
+        distributor_name: Optional[str] = None,
+        distributor_code: Optional[str] = None,
+        courses: Optional[List[Dict[str, Any]]] = None,
+        notes: Optional[str] = None
+    ):
+        """Ghi nhận Hợp đồng PRT/DST phát sinh mới vào CSDL Supabase (Khớp chuẩn schema)."""
+        if not contract_code:
+            return
+        try:
+            from app.core.supabase import get_supabase_client
+            now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            supabase = get_supabase_client()
+            
+            is_prt = contract_type.upper() == "PRT"
+            sender = (partner_name or "Partner") if is_prt else (distributor_name or "Distributor")
+            receiver = (distributor_name or "Master Distributor") if is_prt else "Sales Admin"
+            
+            record = {
+                "contract_code": contract_code,
+                "contract_type": contract_type.upper(),
+                "status": status,
+                "sender_name": sender,
+                "receiver_name": receiver,
+                "distributor_code": distributor_code or "N/A",
+                "contract_date": now_utc.split("T")[0],
+                "courses_data": courses or [],
+                "last_synced_at": now_utc,
+                "raw_payload": {
+                    "notes": notes,
+                    "auto_generated": True,
+                    "created_at_utc": now_utc
+                }
+            }
+            supabase.table("workspace_contracts_cache").upsert(record, on_conflict="contract_code").execute()
+            logger.info(f"💾 [DB SYNC] Đã ghi nhận Contract phát sinh [{contract_code}] ({contract_type}) -> Status: '{status}'.")
+            self._invalidate_workspace_ram_cache("contracts")
+        except Exception as e:
+            logger.warning(f"⚠️ [DB SYNC] Lỗi ghi nhận Contract phát sinh: {e}")
 
     async def _record_created_order_db(self, order_id: str, school_name: str, order_data: Dict[str, Any]):
         """Ghi nhận School Order mới tạo vào CSDL Supabase."""

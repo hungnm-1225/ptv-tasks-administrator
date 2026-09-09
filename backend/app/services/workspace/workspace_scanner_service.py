@@ -104,7 +104,7 @@ class WorkspaceScannerService(WorkspaceBaseService):
     Service quét tự động và đồng bộ siêu tốc dữ liệu của 5 Master Distributors:
     - Loại bỏ hoàn toàn tiền tố 'PRT-xx-', chuẩn hóa về mã đơn gốc 'SCH-...'.
     - Tra cứu trực tiếp phả hệ gốc từ CSDL Supabase để bảo toàn Tuyến Distributor chuẩn xác 100%.
-    - Áp dụng Smart Delta Sync: Bỏ qua các đơn đã hoàn thành, chỉ cập nhật đơn Pending khi có thay đổi.
+    - Chuẩn hóa 100% cột bảng Supabase (order_code, last_synced_at, raw_payload).
     """
 
     def _get_school_lineage_map(self) -> Dict[str, Dict[str, str]]:
@@ -191,9 +191,9 @@ class WorkspaceScannerService(WorkspaceBaseService):
             if not _is_terminal(c.get("status"))
         }
 
-        # 2. Đọc Orders (lấy cả order_code và order_id để chuẩn hóa tập hợp nhận diện)
+        # 2. Đọc Orders (Chỉ select cột order_code chuẩn mực theo schema!)
         o_res = supabase.table("workspace_orders_cache")\
-            .select("order_code, order_id, status, courses_data")\
+            .select("order_code, status, courses_data")\
             .eq("distributor_code", dist_code)\
             .execute()
         orders_data = o_res.data or []
@@ -202,12 +202,10 @@ class WorkspaceScannerService(WorkspaceBaseService):
         for o in orders_data:
             if o.get("order_code"):
                 all_known_order_codes.add(normalize_to_sch_code(o["order_code"]))
-            if o.get("order_id"):
-                all_known_order_codes.add(normalize_to_sch_code(o["order_id"]))
 
         pending_orders_map: Dict[str, Dict[str, Any]] = {}
         for o in orders_data:
-            code = normalize_to_sch_code(o.get("order_code") or o.get("order_id"))
+            code = normalize_to_sch_code(o.get("order_code"))
             if code and not _is_terminal(o.get("status")):
                 pending_orders_map[code] = {
                     "status": o.get("status", ""),
@@ -495,22 +493,18 @@ class WorkspaceScannerService(WorkspaceBaseService):
                                             true_dist_code = dist_code
                                             true_partner_name = sch.get("partner_name") or "Partner"
 
-                                        total_lic = sum(c.get("licenses", 0) for c in courses_data) if courses_data else int(sch.get("total_licenses") or 50)
-
+                                        # ĐÚNG CHUẨN 100% CÁC CỘT TRONG BẢNG WORKSPACE_ORDERS_CACHE
                                         order_record = {
                                             "order_code": final_order_code,
-                                            "order_id": final_order_code,  # Tương thích 100% cả 2 chuẩn order_code & order_id
                                             "school_name": school_raw_name,
                                             "school_code": school_raw_code,
                                             "partner_name": true_partner_name,
                                             "distributor_name": true_dist_name,
                                             "distributor_code": true_dist_code,
                                             "status": status_name,
-                                            "total_licenses": total_lic,
                                             "order_date": str(sch.get("created_at", "")).split(" ")[0],
                                             "raw_payload": sch,
-                                            "last_synced_at": "now()",
-                                            "synced_at": "now()"
+                                            "last_synced_at": "now()"
                                         }
                                         if courses_data:
                                             order_record["courses_data"] = courses_data
