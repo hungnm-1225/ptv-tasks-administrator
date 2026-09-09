@@ -24,6 +24,23 @@ def _is_terminal(status: Optional[str]) -> bool:
     return status.strip().lower() in TERMINAL_STATUSES
 
 
+def normalize_to_sch_code(code: Optional[str]) -> str:
+    """
+    Chuẩn hóa mã đơn hàng: Loại bỏ hoàn toàn tiền tố 'PRT-xx-' và đưa về 'SCH-...'
+    Ví dụ:
+      'PRT-60-SCH-10266-20260905-1381' -> 'SCH-10266-20260905-1381'
+      'PRT-21-SCH-10696-20260904-1367' -> 'SCH-10696-20260904-1367'
+      'SCH-10266-20260905-1381'        -> 'SCH-10266-20260905-1381'
+    """
+    if not code:
+        return ""
+    clean = str(code).strip()
+    match = re.search(r"(SCH-[\w-]+)", clean, re.IGNORECASE)
+    if match:
+        return match.group(1).upper()
+    return clean
+
+
 def _extract_numeric_id(item: Dict[str, Any], code_key: str = "order_code") -> int:
     """Trích xuất ID số nguyên để so sánh chính xác."""
     raw_id = item.get("id") or item.get("order_id")
@@ -47,30 +64,23 @@ def _get_latest_item_from_list(items: List[Dict[str, Any]], code_key: str = "ord
 def _find_matching_db_order_code(
     remote_sch_code: str, 
     remote_prt_code: str, 
-    numeric_id: int, 
     all_db_order_codes: Set[str]
 ) -> Optional[str]:
     """
-    So sánh gần đúng (Fuzzy Match) đơn hàng giữa API và Database:
-    Khắc phục việc Distributor hiển thị 'PRT-48-SCH-10459-...' còn School lưu 'SCH-10459-...'.
+    So sánh đơn hàng an toàn tuyệt đối:
+    Đã chuẩn hóa về mã 'SCH-...' nên chỉ so khớp chính xác mã, loại bỏ hoàn toàn
+    việc so khớp theo đuôi số lỏng lẻo gây ghi đè chéo giữa các Distributor.
     """
-    # 1. Khớp chính xác trước
-    if remote_prt_code and remote_prt_code in all_db_order_codes:
-        return remote_prt_code
-    if remote_sch_code and remote_sch_code in all_db_order_codes:
-        return remote_sch_code
+    norm_sch = normalize_to_sch_code(remote_sch_code)
+    norm_prt = normalize_to_sch_code(remote_prt_code)
 
-    # 2. Khớp gần đúng (Chứa chuỗi core SCH-...)
-    if remote_sch_code:
-        for db_code in all_db_order_codes:
-            if remote_sch_code in db_code or db_code in remote_sch_code:
-                return db_code
+    target_code = norm_sch or norm_prt
+    if target_code and target_code in all_db_order_codes:
+        return target_code
 
-    # 3. Khớp theo số ID đuôi (-1383)
-    if numeric_id > 0:
-        suffix = f"-{numeric_id}"
+    if target_code:
         for db_code in all_db_order_codes:
-            if db_code.endswith(suffix):
+            if target_code == normalize_to_sch_code(db_code):
                 return db_code
 
     return None
@@ -92,12 +102,44 @@ def _batch_upsert(table_name: str, records: List[Dict[str, Any]], on_conflict: s
 class WorkspaceScannerService(WorkspaceBaseService):
     """
     Service quét tự động và đồng bộ siêu tốc dữ liệu của 5 Master Distributors:
-    Áp dụng thuật toán Smart Delta Sync & Fuzzy Match:
-    - Nhận diện đúng Distributor ID trên cả 3 API.
-    - So sánh gần đúng Order Code giữa Distributor (PRT-...-SCH-...) và School (SCH-...).
-    - Bỏ qua các bản ghi đã ở Terminal State (Approved/Completed/Rejected).
-    - Chỉ update Status cho các đơn đang Pending/Awaiting nếu có thay đổi.
+    - Loại bỏ hoàn toàn tiền tố 'PRT-xx-', chuẩn hóa về mã đơn gốc 'SCH-...'.
+    - Tra cứu trực tiếp phả hệ gốc từ CSDL Supabase để bảo toàn Tuyến Distributor chuẩn xác 100%.
+    - Áp dụng Smart Delta Sync: Bỏ qua các đơn đã hoàn thành, chỉ cập nhật đơn Pending khi có thay đổi.
     """
+
+    def _get_school_lineage_map(self) -> Dict[str, Dict[str, str]]:
+        """
+        Tải danh bạ phả hệ từ CSDL Supabase để bảo đảm mỗi trường luôn được
+        gắn đúng 100% vào Master Distributor của nó, không bị ghi đè nhầm
+        khi cron quét qua các Distributor khác.
+        """
+        supabase = get_supabase_client()
+        lineage_map = {}
+        try:
+            all_orgs = supabase.table("workspace_organizations").select("id, code, name, role_type, parent_id").execute().data or []
+            org_dict = {o["id"]: o for o in all_orgs}
+            
+            for o in all_orgs:
+                if o.get("role_type") == "school":
+                    partner = org_dict.get(o.get("parent_id"), {})
+                    distributor = org_dict.get(partner.get("parent_id"), {})
+                    
+                    school_name_key = (o.get("name") or "").strip().lower()
+                    school_code_key = str(o.get("code") or "").strip().lower()
+                    
+                    entry = {
+                        "distributor_name": distributor.get("name") or "Master Distributor",
+                        "distributor_code": distributor.get("code") or "N/A",
+                        "partner_name": partner.get("name") or "Partner"
+                    }
+                    if school_name_key:
+                        lineage_map[school_name_key] = entry
+                    if school_code_key:
+                        lineage_map[school_code_key] = entry
+            logger.info(f"🗺️ Đã nạp bản đồ phả hệ chuẩn cho {len(lineage_map)} tên/mã trường học.")
+        except Exception as e:
+            logger.warning(f"⚠️ Không thể tải danh bạ phả hệ: {e}")
+        return lineage_map
 
     async def get_all_distributor_credentials(self) -> List[Dict[str, Any]]:
         """Lấy danh sách 5 tài khoản Distributor từ Supabase & giải mã Fernet."""
@@ -149,22 +191,28 @@ class WorkspaceScannerService(WorkspaceBaseService):
             if not _is_terminal(c.get("status"))
         }
 
-        # 2. Đọc Orders
+        # 2. Đọc Orders (lấy cả order_code và order_id để chuẩn hóa tập hợp nhận diện)
         o_res = supabase.table("workspace_orders_cache")\
-            .select("order_code, status, courses_data")\
+            .select("order_code, order_id, status, courses_data")\
             .eq("distributor_code", dist_code)\
             .execute()
         orders_data = o_res.data or []
 
-        all_known_order_codes: Set[str] = {o["order_code"] for o in orders_data if o.get("order_code")}
-        pending_orders_map: Dict[str, Dict[str, Any]] = {
-            o["order_code"]: {
-                "status": o.get("status", ""),
-                "has_courses": bool(o.get("courses_data") and len(o["courses_data"]) > 0)
-            }
-            for o in orders_data
-            if not _is_terminal(o.get("status"))
-        }
+        all_known_order_codes: Set[str] = set()
+        for o in orders_data:
+            if o.get("order_code"):
+                all_known_order_codes.add(normalize_to_sch_code(o["order_code"]))
+            if o.get("order_id"):
+                all_known_order_codes.add(normalize_to_sch_code(o["order_id"]))
+
+        pending_orders_map: Dict[str, Dict[str, Any]] = {}
+        for o in orders_data:
+            code = normalize_to_sch_code(o.get("order_code") or o.get("order_id"))
+            if code and not _is_terminal(o.get("status")):
+                pending_orders_map[code] = {
+                    "status": o.get("status", ""),
+                    "has_courses": bool(o.get("courses_data") and len(o["courses_data"]) > 0)
+                }
 
         return {
             "all_known_contract_codes": all_known_contract_codes,
@@ -178,6 +226,9 @@ class WorkspaceScannerService(WorkspaceBaseService):
         distributors = await self.get_all_distributor_credentials()
         if not distributors:
             return {"status": "error", "message": "Không tìm thấy tài khoản Distributor nào trong két sắt."}
+
+        # Nạp bản đồ phả hệ chuẩn từ Supabase một lần duy nhất trước phiên quét
+        lineage_map = self._get_school_lineage_map()
 
         contracts_to_upsert: List[Dict[str, Any]] = []
         orders_to_upsert: List[Dict[str, Any]] = []
@@ -339,10 +390,9 @@ class WorkspaceScannerService(WorkspaceBaseService):
                                 logger.error(f"❌ Lỗi PRT Contracts của {dist_name}: {e_prt}")
 
                             # =========================================================================
-                            # 3. CÀO & ĐỒNG BỘ SCHOOL ORDERS (School -> Partner) - ĐÃ FIX URL & FUZZY MATCH
+                            # 3. CÀO & ĐỒNG BỘ SCHOOL ORDERS (CHUẨN HÓA SCH-... & KHÓA PHẢ HỆ CHUẨN)
                             # =========================================================================
                             try:
-                                # 👉 CHÍNH XÁC: Phải truyền distributor_id={dist_id} để chỉ lấy đơn của Distributor này!
                                 sch_api_url = f"https://pythaverse.space/wp-content/plugins/distributor_workspace_v3/api/orders_management/getListOrder.php?distributor_id={dist_id}"
                                 sch_res = await page.evaluate(f"""async () => {{
                                     try {{
@@ -362,17 +412,15 @@ class WorkspaceScannerService(WorkspaceBaseService):
                                     latest_remote_sch = latest_sch_item.get("school_order_id") or "" if latest_sch_item else ""
                                     latest_remote_prt = latest_sch_item.get("partner_order_id") or "" if latest_sch_item else ""
 
-                                    # 👉 SO SÁNH GẦN ĐÚNG BẢN GHI MỚI NHẤT
                                     matched_db_latest = _find_matching_db_order_code(
                                         latest_remote_sch, 
                                         latest_remote_prt, 
-                                        latest_num_id, 
                                         db_state["all_known_order_codes"]
                                     )
                                     is_latest_order_in_db = bool(matched_db_latest)
                                     
                                     logger.info(
-                                        f"  👉 School Orders: Remote Newest='{latest_remote_prt or latest_remote_sch}' (ID:{latest_num_id}) "
+                                        f"  👉 School Orders: Remote Newest='{normalize_to_sch_code(latest_remote_prt or latest_remote_sch)}' (ID:{latest_num_id}) "
                                         f"| Matched in DB: '{matched_db_latest}' -> {'TRÙNG KHỚP (Chỉ check pending)' if is_latest_order_in_db else 'CÓ MỚI'}"
                                     )
 
@@ -382,44 +430,31 @@ class WorkspaceScannerService(WorkspaceBaseService):
                                         remote_sch_id = sch.get("school_order_id") or ""
                                         status_name = sch.get("status_name") or ("Approved" if str(sch.get("status")) == "1" else "Awaiting Partner")
 
-                                        # Tìm mã tương ứng đang lưu trong Supabase DB
-                                        matched_db_code = _find_matching_db_order_code(
-                                            remote_sch_id, 
-                                            remote_prt_id, 
-                                            numeric_order_id, 
-                                            db_state["all_known_order_codes"]
-                                        )
+                                        # 🎯 BƯỚC QUAN TRỌNG: Gọt sạch tiền tố 'PRT-xx-', luôn đưa về 'SCH-...'
+                                        normalized_code = normalize_to_sch_code(remote_sch_id or remote_prt_id or f"SCH-{numeric_order_id}")
+                                        final_order_code = normalized_code
 
-                                        is_known = bool(matched_db_code)
-                                        # Khóa chính để upsert: nếu DB đã có mã nào thì giữ nguyên mã đó!
-                                        final_order_code = matched_db_code or remote_prt_id or remote_sch_id or f"SCH-{numeric_order_id}"
-
+                                        is_known = (final_order_code in db_state["all_known_order_codes"])
                                         is_pending_in_db = (final_order_code in db_state["pending_orders_map"])
 
-                                        # Nếu bản ghi mới nhất đã có trong DB và order này đã có trong DB không pending -> BỎ QUA NGAY
                                         if is_latest_order_in_db and is_known and not is_pending_in_db:
                                             continue
 
-                                        # Kiểm tra xem có cần fetch detail không
                                         need_detail_fetch = False
                                         if is_pending_in_db:
                                             pending_info = db_state["pending_orders_map"][final_order_code]
                                             old_status = pending_info["status"]
                                             has_courses = pending_info["has_courses"]
 
-                                            # Status không đổi và đã có chi tiết môn học -> Bỏ qua!
                                             if old_status and old_status.lower() == status_name.lower() and has_courses:
                                                 continue
                                             
-                                            # Đang pending mà thiếu courses_data -> Fetch bù
                                             if not has_courses and ("awaiting" in status_name.lower() or "pending" in status_name.lower()):
                                                 need_detail_fetch = True
                                         
-                                        # Nếu là Order mới tinh chưa từng có trong DB
                                         if not is_known and ("awaiting" in status_name.lower() or "pending" in status_name.lower()):
                                             need_detail_fetch = True
 
-                                        # Chỉ gọi API chi tiết khi thực sự cần thiết
                                         courses_data = []
                                         if need_detail_fetch and numeric_order_id:
                                             try:
@@ -446,17 +481,36 @@ class WorkspaceScannerService(WorkspaceBaseService):
                                             except Exception as e_dt:
                                                 logger.debug(f"Không thể lấy detail order {numeric_order_id}: {e_dt}")
 
+                                        # 🎯 KHÓA TUYẾN DISTRIBUTOR THEO DANH BẠ PHẢ HỆ GỐC
+                                        school_raw_name = sch.get("school_name") or sch.get("school_user_name") or "Unknown School"
+                                        school_raw_code = str(sch.get("school_id") or sch.get("buyer") or "")
+
+                                        lineage_info = lineage_map.get(school_raw_name.strip().lower()) or lineage_map.get(school_raw_code.strip().lower())
+                                        if lineage_info:
+                                            true_dist_name = lineage_info["distributor_name"]
+                                            true_dist_code = lineage_info["distributor_code"]
+                                            true_partner_name = lineage_info["partner_name"] or (sch.get("partner_name") or "Partner")
+                                        else:
+                                            true_dist_name = dist_name
+                                            true_dist_code = dist_code
+                                            true_partner_name = sch.get("partner_name") or "Partner"
+
+                                        total_lic = sum(c.get("licenses", 0) for c in courses_data) if courses_data else int(sch.get("total_licenses") or 50)
+
                                         order_record = {
                                             "order_code": final_order_code,
-                                            "school_name": sch.get("school_name") or sch.get("school_user_name") or "Unknown School",
-                                            "school_code": str(sch.get("school_id") or sch.get("buyer") or ""),
-                                            "partner_name": sch.get("partner_name") or "Partner",
-                                            "distributor_name": dist_name,
-                                            "distributor_code": dist_code,
+                                            "order_id": final_order_code,  # Tương thích 100% cả 2 chuẩn order_code & order_id
+                                            "school_name": school_raw_name,
+                                            "school_code": school_raw_code,
+                                            "partner_name": true_partner_name,
+                                            "distributor_name": true_dist_name,
+                                            "distributor_code": true_dist_code,
                                             "status": status_name,
+                                            "total_licenses": total_lic,
                                             "order_date": str(sch.get("created_at", "")).split(" ")[0],
                                             "raw_payload": sch,
-                                            "last_synced_at": "now()"
+                                            "last_synced_at": "now()",
+                                            "synced_at": "now()"
                                         }
                                         if courses_data:
                                             order_record["courses_data"] = courses_data
@@ -480,8 +534,10 @@ class WorkspaceScannerService(WorkspaceBaseService):
         # Ghi Supabase chỉ khi có bản ghi thay đổi
         if contracts_to_upsert or orders_to_upsert:
             logger.info(f"💾 Cập nhật Supabase: {len(contracts_to_upsert)} Contracts & {len(orders_to_upsert)} Orders có thay đổi...")
-            _batch_upsert("workspace_contracts_cache", contracts_to_upsert, on_conflict="contract_code")
-            _batch_upsert("workspace_orders_cache", orders_to_upsert, on_conflict="order_code")
+            if contracts_to_upsert:
+                _batch_upsert("workspace_contracts_cache", contracts_to_upsert, on_conflict="contract_code")
+            if orders_to_upsert:
+                _batch_upsert("workspace_orders_cache", orders_to_upsert, on_conflict="order_code")
         else:
             logger.info("✨ Tất cả dữ liệu đã đồng bộ hoàn hảo! Không có bản ghi nào cần cập nhật.")
 
