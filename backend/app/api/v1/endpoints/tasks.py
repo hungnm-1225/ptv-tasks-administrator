@@ -4,7 +4,7 @@ import uuid
 import logging
 import traceback
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 import pytz
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
@@ -20,11 +20,14 @@ router = APIRouter()
 
 VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
 
-def get_vn_time_str() -> str:
-    return datetime.now(VN_TZ).strftime("%Y-%m-%d %H:%M:%S")
+def get_log_time_str() -> str:
+    """Trả về chuỗi thời gian định dạng YYYY-MM-DD HH:MM:SS đồng nhất với toàn bộ hệ sinh thái logging."""
+    # Lấy giờ UTC hiện tại và chuyển đổi chính xác sang GMT+7 (chống cộng đúp múi giờ)
+    return datetime.now(timezone.utc).astimezone(VN_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
-def get_vn_iso() -> str:
-    return datetime.now(VN_TZ).isoformat()
+def get_utc_iso() -> str:
+    """Chuẩn hóa thời gian lưu trữ CSDL Supabase theo ISO 8601 UTC chuẩn mực."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 def format_task_tag(task_id: Optional[str]) -> str:
     """Tạo tag định danh chuẩn [Task #12345678]"""
@@ -41,7 +44,6 @@ from app.core.cache_policy import BoundedMemoryCache, CacheTier
 tasks_cache = BoundedMemoryCache(tier=CacheTier.TIER_C_SUMMARY, max_entries=15, default_ttl=60)
 
 
-
 class ApproveTaskRequest(BaseModel):
     approval_status: str = "approved"
     edited_payload: Optional[Dict[str, Any]] = None
@@ -53,7 +55,7 @@ class ApproveTaskRequest(BaseModel):
 async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, ticket_id: Optional[str]):
     """Thực thi Worker thật, gắn nhãn [Task #ID], claim lease và chống chạy trùng 100%."""
     supabase = get_supabase_client()
-    time_str = get_vn_time_str()
+    time_str = get_log_time_str()
     tag = format_task_tag(task_id)
     
     # 1. Chiếm quyền thực thi (Atomic Task Claim)
@@ -77,11 +79,11 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
                         payload["partner_credentials"] = lineage.get("partner", {})
                         payload["distributor_credentials"] = lineage.get("distributor", {})
                         payload["country_info"] = lineage.get("country", {})
-                        log_trail += f"[{get_vn_time_str()}] [INFO] [{bot_type}] {tag}: Đã phân giải phả hệ thành công cho trường '{school_ident}'.\n"
+                        log_trail += f"[{get_log_time_str()}] [INFO] [{bot_type}] {tag}: Đã phân giải phả hệ thành công cho trường '{school_ident}'.\n"
                     else:
-                        log_trail += f"[{get_vn_time_str()}] [WARNING] [{bot_type}] {tag}: Không tìm thấy phả hệ trường '{school_ident}', dùng credentials trong payload.\n"
+                        log_trail += f"[{get_log_time_str()}] [WARNING] [{bot_type}] {tag}: Không tìm thấy phả hệ trường '{school_ident}', dùng credentials trong payload.\n"
                 except Exception as lineage_err:
-                    log_trail += f"[{get_vn_time_str()}] [WARNING] [{bot_type}] {tag}: Lỗi đọc phả hệ ({lineage_err}), tiếp tục với payload gốc.\n"
+                    log_trail += f"[{get_log_time_str()}] [WARNING] [{bot_type}] {tag}: Lỗi đọc phả hệ ({lineage_err}), tiếp tục với payload gốc.\n"
 
             if not payload.get("admin_credentials"):
                 admin_pass = getattr(settings, "TEST_ADMIN_PASS", None)
@@ -92,7 +94,7 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
 
         # 3. KÍCH HOẠT WORKER THỰC THI THẬT (KÈM TASK_ID ĐỂ TRUY VẾT)
         execution_result = await execute_approved_bot_task(bot_type, payload, task_id=task_id)
-        end_time_str = get_vn_time_str()
+        end_time_str = get_log_time_str()
         
         if execution_result is None:
             execution_result = {"status": "failed", "error": f"Worker '{bot_type}' kết thúc mà không trả về dữ liệu."}
@@ -142,7 +144,7 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
                 try:
                     supabase.table("inbox_tickets").update({
                         "status": "completed",
-                        "updated_at": get_vn_iso()
+                        "updated_at": get_utc_iso()
                     }).eq("id", ticket_id).execute()
                 except Exception as t_err:
                     logger.warning(f"Không thể đóng ticket #{ticket_id}: {t_err}")
@@ -189,7 +191,7 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
         tasks_cache.invalidate()
 
     except Exception as e:
-        end_time_str = get_vn_time_str()
+        end_time_str = get_log_time_str()
         full_trace = traceback.format_exc()
         err_log = f"{log_trail}[{end_time_str}] [CRITICAL ERROR] [{bot_type}] {tag}: {str(e)}\n\n[TRACEBACK]:\n{full_trace}"
         logger.error(f"❌ [CRASH GUARD] Lỗi sập Task {tag}: {e}\n{full_trace}")
@@ -255,8 +257,8 @@ async def create_task(payload: Dict[str, Any], background_tasks: BackgroundTasks
 
     try:
         supabase = get_supabase_client()
-        time_str = get_vn_time_str()
-        now_iso = get_vn_iso()
+        time_str = get_log_time_str()
+        now_utc = get_utc_iso()
         
         initial_approval = "approved" if run_immediately else "pending"
         initial_log = (
@@ -276,8 +278,8 @@ async def create_task(payload: Dict[str, Any], background_tasks: BackgroundTasks
             "last_error_step": None,
             "retry_count": 0,
             "execution_logs": initial_log,
-            "created_at": now_iso,
-            "executed_at": now_iso if run_immediately else None
+            "created_at": now_utc,
+            "executed_at": now_utc if run_immediately else None
         }).execute()
         
         task_data = res.data[0] if res.data else {"id": task_id}
@@ -301,8 +303,8 @@ async def create_task(payload: Dict[str, Any], background_tasks: BackgroundTasks
 @router.put("/{task_id}/approve")
 async def approve_task(task_id: str, req: ApproveTaskRequest, background_tasks: BackgroundTasks):
     supabase = get_supabase_client()
-    time_str = get_vn_time_str()
-    now_iso = get_vn_iso()
+    time_str = get_log_time_str()
+    now_utc = get_utc_iso()
     tag = format_task_tag(task_id)
     
     task_res = supabase.table("bot_automation_tasks").select("*, inbox_tickets(*)").eq("id", task_id).execute()
@@ -321,7 +323,7 @@ async def approve_task(task_id: str, req: ApproveTaskRequest, background_tasks: 
         "approval_status": "approved",
         "execution_status": "queued",
         "execution_logs": f"[{time_str}] [INFO] [{bot_type}] {tag}: Task approved by Admin. Queuing worker for execution...",
-        "executed_at": now_iso
+        "executed_at": now_utc
     }).eq("id", task_id).execute()
 
     tasks_cache.invalidate()
@@ -335,8 +337,8 @@ async def approve_task(task_id: str, req: ApproveTaskRequest, background_tasks: 
 async def retry_task(task_id: str, background_tasks: BackgroundTasks):
     """API Chạy lại (Retry) tác vụ bị lỗi - Nhận diện Checkpoint để Resume."""
     supabase = get_supabase_client()
-    time_str = get_vn_time_str()
-    now_iso = get_vn_iso()
+    time_str = get_log_time_str()
+    now_utc = get_utc_iso()
     tag = format_task_tag(task_id)
     
     task_res = supabase.table("bot_automation_tasks").select("*, inbox_tickets(*)").eq("id", task_id).execute()
@@ -378,7 +380,7 @@ async def retry_task(task_id: str, background_tasks: BackgroundTasks):
         "execution_status": "queued",
         "retry_count": retry_count,
         "execution_logs": retry_log,
-        "executed_at": now_iso
+        "executed_at": now_utc
     }).eq("id", task_id).execute()
 
     tasks_cache.invalidate()
@@ -392,13 +394,13 @@ async def retry_task(task_id: str, background_tasks: BackgroundTasks):
 async def reject_task(task_id: str):
     """Từ chối tác vụ không thực thi."""
     supabase = get_supabase_client()
-    now_iso = get_vn_iso()
+    now_utc = get_utc_iso()
     tag = format_task_tag(task_id)
     try:
         supabase.table("bot_automation_tasks").update({
             "approval_status": "rejected",
             "execution_status": "dismissed",
-            "executed_at": now_iso
+            "executed_at": now_utc
         }).eq("id", task_id).execute()
         
         tasks_cache.invalidate()

@@ -284,7 +284,7 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
         if partner_res.get("status") == "success":
             resources["order_approved"] = True
             completed.append("partner_approve_school_order")
-            log_step(f"✅ Partner đã duyệt thành công School Order [{order_identifier}] ngay từ vòng đầu!")
+            log_step(f"✅ Partner đã duyệt thành công School Order [{order_identifier}]!")
             return {"status": "success", "order_code": order_identifier, "checkpoint": cp, "current_step": "completed", "logs": "\n".join(logs)}
 
         # 3. Nếu kho Partner thiếu License, leo cấp lên Distributor
