@@ -318,7 +318,7 @@ async def execute_approved_bot_task(
                     return {"status": "failed", "error": "Thiếu file Excel (.xlsx) hợp lệ."}
 
                 if not school_creds:
-                    target_identifier = payload_data.get("school_code") or school_name
+                    target_identifier = payload_data.get("school_id") or payload_data.get("school_code") or school_name
                     s_lin = workspace_lineage_service.resolve_by_school(str(target_identifier))
                     if s_lin:
                         school_creds = s_lin.get("school")
