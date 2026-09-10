@@ -2665,6 +2665,40 @@ export const AutomationStudioPage: React.FC = () => {
                 })}
               </div>
 
+              {/* 🐙 BENTO SMART BANNER: TỰ ĐỘNG THÊM VÀO GIT REPOS NẾU KHÓA HỌC CÓ CẤU HÌNH REPO */}
+              {lmsActionType === 'enroll' && (
+                <div className="p-4 rounded-2xl border border-violet-200/80 dark:border-violet-900/50 bg-violet-50/50 dark:bg-violet-950/20 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-2 rounded-xl bg-violet-600 text-white shadow-xs">
+                        <GitBranch className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                          <span>Tự Động Đồng Bộ Quyền Pythaverse Git (Single-Session)</span>
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-bold bg-violet-100 dark:bg-violet-900/60 text-violet-700 dark:text-violet-300">
+                            git.pythaverse.space
+                          </span>
+                        </h4>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Tự động thêm tài khoản vào các Repo tương ứng của khóa học đã chọn (Tự phân loại Giáo viên & Học sinh).
+                        </p>
+                      </div>
+                    </div>
+
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={lmsAutoSyncGit}
+                        onChange={(e) => setLmsAutoSyncGit(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
+                    </label>
+                  </div>
+                </div>
+              )}
+
               {/* NỘI DUNG NHẬP EMAIL: PHÂN BIỆT RÕ GIỮA ENROL VÀ UNENROL */}
               {lmsActionType === 'unenrol' ? (
                 <div className="rounded-2xl border border-rose-200/80 dark:border-rose-900/40 bg-rose-50/30 dark:bg-rose-950/20 p-4 space-y-2.5">
