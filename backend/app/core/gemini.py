@@ -49,7 +49,8 @@ class AIEngine:
         else:
             logger.error("❌ Không tìm thấy GEMINI_API_KEY hoặc GOOGLE_API_KEY trong môi trường!")
 
-        kb_path = os.path.join(os.path.dirname(__file__), "../brain/knowledge_base.json")
+        brain_dir = os.path.join(os.path.dirname(__file__), "../brain")
+        kb_path = os.path.join(brain_dir, "knowledge_base.json")
         try:
             with open(kb_path, 'r', encoding='utf-8') as f:
                 self.kb = json.load(f)
@@ -59,6 +60,33 @@ class AIEngine:
                 "categories": ["bug", "account_keycloak", "lms_enroll", "license", "other"],
                 "default_assignee": {"name": "Hung Nguyen", "email": "hung.nguyenmanh@dtt.vn"}
             }
+
+        # Nạp Capabilities & Workflow Rules để grounding AI
+        self.capabilities_summary = []
+        try:
+            cap_path = os.path.join(brain_dir, "capabilities.json")
+            if os.path.exists(cap_path):
+                with open(cap_path, 'r', encoding='utf-8') as f:
+                    caps = json.load(f).get("capabilities", [])
+                    self.capabilities_summary = [
+                        {"id": c["id"], "name": c["name"], "domain": c["domain"], "action": c["action"]}
+                        for c in caps
+                    ]
+        except Exception as cap_err:
+            logger.warning(f"⚠️ Lỗi nạp capabilities: {cap_err}")
+
+        self.workflow_archetypes_summary = []
+        try:
+            wf_path = os.path.join(brain_dir, "workflow_rules.json")
+            if os.path.exists(wf_path):
+                with open(wf_path, 'r', encoding='utf-8') as f:
+                    rules = json.load(f).get("workflow_archetypes", [])
+                    self.workflow_archetypes_summary = [
+                        {"rule_id": r["rule_id"], "title": r["title"], "description": r["description"]}
+                        for r in rules
+                    ]
+        except Exception as wf_err:
+            logger.warning(f"⚠️ Lỗi nạp workflow rules: {wf_err}")
 
     def analyze_ticket(
         self, 
@@ -79,10 +107,14 @@ class AIEngine:
                 "detected_school": None,
                 "suggested_bot_type": None,
                 "suggested_action": None,
-                "suggested_payload": {}
+                "suggested_payload": {},
+                "recommended_workflow_rule": None,
+                "reason_summary_vi": "Thiếu API Key AI để lập kế hoạch."
             }
 
         kb_json_str = json.dumps(self.kb, ensure_ascii=False, indent=2)
+        caps_str = json.dumps(self.capabilities_summary, ensure_ascii=False, indent=2)
+        wf_rules_str = json.dumps(self.workflow_archetypes_summary, ensure_ascii=False, indent=2)
         excel_info_str = json.dumps(excel_summary, ensure_ascii=False, indent=2) if excel_summary else "Không có file Excel đính kèm hoặc chưa bóc tách."
         full_content = raw_content[:20000] if raw_content else ""
 
@@ -90,8 +122,15 @@ class AIEngine:
 Bạn là Trợ lý AI Phân loại & Điều phối Vận hành Cấp cao của Hệ sinh thái Pythaverse & DTT Corporation.
 Nhiệm vụ của bạn là đọc kỹ TOÀN BỘ thông tin vé, LỊCH SỬ TRAO ĐỔI và DỮ LIỆU BÓC TÁCH TỪ FILE ĐÍNH KÈM (nếu có).
 
-[TRI THỨC HỆ THỐNG & QUY TẮC ĐIỀU PHỐI BOT]
+[TRI THỨC HỆ THỐNG & DANH MỤC CAPABILITY ĐƯỢC PHÉP CHỌN]
+- Hệ thống tri thức chung:
 {kb_json_str}
+
+- Danh mục Capabilities hợp lệ (KHÔNG ĐƯỢC TỰ PHÁT MINH CAPABILITY NGOÀI DANH SÁCH):
+{caps_str}
+
+- Các sườn Workflow Archetypes chuẩn:
+{wf_rules_str}
 
 [THÔNG TIN FILE EXCEL BÓC TÁCH ĐƯỢC]
 {excel_info_str}
@@ -106,7 +145,7 @@ Nhiệm vụ của bạn là đọc kỹ TOÀN BỘ thông tin vé, LỊCH SỬ 
 - Phải phân biệt rõ ràng giữa:
   1. Người gửi/Người báo cáo (Sender/Submitter): người gửi email yêu cầu hỗ trợ.
   2. Tài khoản mục tiêu (target_email/target_users): là tài khoản học sinh, giáo viên hoặc người dùng ĐƯỢC NHẮC ĐẾN TRONG NỘI DUNG cần reset mật khẩu, kích hoạt hoặc ghi danh.
-  -> ĐỌC KỸ VÀ PHÂN TÍCH NGỮ CẢNH CẨN THẬN ĐẺ XÁC ĐỊNH ĐÂU LÀ ĐỐI TƯỢNG CẦN XỬ LÝ.
+  -> ĐỌC KỸ VÀ PHÂN TÍCH NGỮ CẢNH CẨN THẬN ĐỂ XÁC ĐỊNH ĐÂU LÀ ĐỐI TƯỢNG CẦN XỬ LÝ.
 
 [HƯỚNG DẪN QUY CHUẨN ĐẦU RA JSON]
 1. 'category': 1 trong 5 giá trị: "license", "lms_enroll", "account_keycloak", "bug", "other".
@@ -116,28 +155,28 @@ Nhiệm vụ của bạn là đọc kỹ TOÀN BỘ thông tin vé, LỊCH SỬ 
    • 🔄 Tiến trình & Cập nhật mới nhất: ...
    • ⚡ Hành động đề xuất: ...
 4. 'target_email': Email hoặc username của người dùng/học sinh cần can thiệp (ví dụ: reset pass, active, ghi danh). Nếu không có, để null.
-5. 'detected_school': Tên hoặc mã trường học nhắc đến (ví dụ: ICA, Vinschool, FPT...) hoặc null.
-6. 'suggested_bot_type': "workspace_rpa" | "keycloak_api" | "lms_playwright" | "git_collaborator" | "feedback_doc_triage" | null.
-7. 'suggested_action': Tên action cụ thể (ví dụ: reset_password, direct_moodle_lms_enroll, pipeline_end_to_end, bulk_account_creation, add_repo_collaborators...).
-8. 'suggested_payload': JSON chứa sẵn các tham số (ví dụ: target_email, identifiers, school_name, courses...).
+5. 'detected_school': Tên hoặc mã trường học nhắc đến (ví dụ: ICA, Vinschool, FPT, Nguyễn Du...) hoặc null.
+6. 'recommended_workflow_rule': 1 trong các rule archetype ("CREATE_ACCOUNTS_AND_ENROLL_LMS", "COF_FULL_ONBOARDING", "KEYCLOAK_IDENTITY_MANAGEMENT", "GIT_COLLABORATOR_ACCESS", "FEEDBACK_DOC_TRIAGE").
+7. 'reason_summary_vi': Giải thích ngắn gọn lý do vì sao chọn workflow và thứ tự các bước (Why this workflow?).
+8. 'suggested_bot_type': "workspace_rpa" | "keycloak_api" | "lms_playwright" | "git_collaborator" | "feedback_doc_triage" | null.
+9. 'suggested_action': Tên action cụ thể.
+10. 'suggested_payload': JSON chứa sẵn các tham số (ví dụ: target_email, identifiers, school_name, courses...).
 
 HÃY TRẢ VỀ DUY NHẤT MỘT JSON OBJECT HỢP LỆ:
 {{
-    "category": "account_keycloak",
+    "category": "lms_enroll",
     "priority": "normal",
     "summary_vi": "🎯 Mục đích gốc: ...\\n🔄 Tiến trình & Cập nhật mới nhất: ...\\n⚡ Hành động đề xuất: ...",
     "assigned_name": "Hung Nguyen",
     "assigned_email": "hung.nguyenmanh@dtt.vn",
-    "target_email": "g3_ica.garcia@gmail.com",
-    "detected_school": "ICA",
-    "suggested_bot_type": "keycloak_api",
-    "suggested_action": "reset_password",
+    "target_email": null,
+    "detected_school": "Nguyễn Du Primary School",
+    "recommended_workflow_rule": "CREATE_ACCOUNTS_AND_ENROLL_LMS",
+    "reason_summary_vi": "Yêu cầu cần tạo tài khoản cho học sinh trường Nguyễn Du trước, sau đó dùng chính các tài khoản này để ghi danh vào khóa học LMS, do đó bước tạo tài khoản phải chạy trước bước ghi danh.",
+    "suggested_bot_type": "workspace_rpa",
+    "suggested_action": "bulk_account_creation",
     "suggested_payload": {{
-        "target_email": "g3_ica.garcia@gmail.com",
-        "identifiers": ["g3_ica.garcia@gmail.com"],
-        "temporary_password": "Ptv@2026",
-        "force_change_on_first_login": true,
-        "actions": ["reset_password"]
+        "school_name": "Nguyễn Du Primary School"
     }}
 }}
 """
@@ -159,6 +198,8 @@ HÃY TRẢ VỀ DUY NHẤT MỘT JSON OBJECT HỢP LỆ:
                         "assigned_email": parsed_res.get("assigned_email", "hung.nguyenmanh@dtt.vn"),
                         "target_email": parsed_res.get("target_email"),
                         "detected_school": parsed_res.get("detected_school"),
+                        "recommended_workflow_rule": parsed_res.get("recommended_workflow_rule"),
+                        "reason_summary_vi": parsed_res.get("reason_summary_vi"),
                         "suggested_bot_type": parsed_res.get("suggested_bot_type"),
                         "suggested_action": parsed_res.get("suggested_action"),
                         "suggested_payload": parsed_res.get("suggested_payload", {})

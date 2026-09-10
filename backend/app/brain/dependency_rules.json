@@ -1,0 +1,66 @@
+{
+  "version": "1.0.0",
+  "description": "Pythaverse Strict Capability Dependency Rules & Data Binding Contracts",
+  "dependencies": {
+    "workspace.bulk_account_creation": {
+      "requires": ["school_identifier", "upload_file_path"],
+      "allowed_upstream": ["workspace.resolve_school", "cof.generate_accounts_file"]
+    },
+    "workspace.poll_account_batch": {
+      "requires": ["school_identifier", "request_id"],
+      "consumes_from_upstream": {
+        "request_id": "workspace.bulk_account_creation.account_batch_request_id"
+      },
+      "allowed_upstream": ["workspace.bulk_account_creation"]
+    },
+    "cof.generate_accounts_file": {
+      "requires": ["users_list"],
+      "allowed_upstream": ["cof.parse_file", "workspace.resolve_school"]
+    },
+    "cof.write_results_back": {
+      "requires": ["original_cof_path", "result_file_path"],
+      "consumes_from_upstream": {
+        "result_file_path": "workspace.poll_account_batch.result_file_url"
+      },
+      "allowed_upstream": ["workspace.poll_account_batch"]
+    },
+    "lms.direct_enroll": {
+      "requires": ["courses"],
+      "optional_upstream_binding": {
+        "student_emails": "workspace.poll_account_batch.created_accounts"
+      }
+    },
+    "workspace.school_enroll_users": {
+      "requires": ["school_identifier", "course_name"],
+      "optional_upstream_binding": {
+        "student_emails": "workspace.poll_account_batch.created_accounts"
+      },
+      "allowed_upstream": ["workspace.poll_account_batch", "workspace.partner_approve_order"]
+    },
+    "workspace.partner_approve_order": {
+      "requires": ["order_code"],
+      "consumes_from_upstream": {
+        "order_code": "workspace.school_create_order.order_code"
+      },
+      "allowed_upstream": ["workspace.school_create_order"]
+    },
+    "workspace.partner_create_contract": {
+      "requires": ["partner_code"],
+      "allowed_upstream": ["workspace.partner_approve_order"]
+    },
+    "workspace.distributor_approve_contract": {
+      "requires": ["contract_code"],
+      "consumes_from_upstream": {
+        "contract_code": "workspace.partner_create_contract.contract_code"
+      },
+      "allowed_upstream": ["workspace.partner_create_contract"]
+    },
+    "workspace.admin_approve_contract": {
+      "requires": ["contract_code"],
+      "consumes_from_upstream": {
+        "contract_code": "workspace.distributor_approve_contract.dst_contract_code"
+      },
+      "allowed_upstream": ["workspace.distributor_approve_contract"]
+    }
+  }
+}

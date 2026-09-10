@@ -251,3 +251,107 @@ export interface LmsEnrollPayload {
   end_date?: string; // YYYY-MM-DD
   group_name?: string;
 }
+
+// =============================================================================
+// ⚡ AI WORKFLOW PRE-PROCESSING & EXECUTION ENGINE TYPES
+// =============================================================================
+
+export type WorkflowStepStatus =
+  | 'ready'
+  | 'waiting_dependency'
+  | 'running'
+  | 'waiting_poll'
+  | 'success'
+  | 'failed'
+  | 'skipped';
+
+export type WorkflowStatus =
+  | 'draft'
+  | 'needs_review'
+  | 'ready'
+  | 'approved'
+  | 'running'
+  | 'waiting_poll'
+  | 'success'
+  | 'partial_success'
+  | 'failed'
+  | 'cancelled'
+  | 'archived';
+
+export interface WorkflowStep {
+  step_id: string;
+  capability_id: string;
+  name: string;
+  description?: string;
+  status: WorkflowStepStatus | string;
+  inputs: Record<string, any>;
+  depends_on: string[];
+  execution_task_id?: string | null;
+  outputs?: Record<string, any>;
+  error_message?: string | null;
+  started_at?: string;
+  completed_at?: string;
+}
+
+export interface WorkflowEntityCandidate {
+  id?: string;
+  name: string;
+  code?: string;
+  confidence: number;
+  metadata?: Record<string, any>;
+}
+
+export interface WorkflowAIAnalysis {
+  summary: string;
+  reason_summary_vi?: string;
+  overall_confidence: number;
+  confidence_breakdown?: Record<string, number>;
+  detected_school?: WorkflowEntityCandidate | null;
+  school_candidates?: WorkflowEntityCandidate[];
+  detected_courses?: Array<{ course_id?: number; course_name: string; category?: string }>;
+  detected_actions?: string[];
+  warnings?: string[];
+}
+
+export interface WorkflowDraft {
+  id: string;
+  ticket_id?: string | null;
+  title: string;
+  goal?: string;
+  status: WorkflowStatus | string;
+  version: number;
+  ai_analysis?: WorkflowAIAnalysis;
+  steps: WorkflowStep[];
+  approved_by?: string | null;
+  approved_at?: string | null;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface CapabilityDefinition {
+  id: string;
+  name: string;
+  description: string;
+  domain: string;
+  bot_type: string;
+  action: string;
+  required_inputs: string[];
+  optional_inputs: string[];
+  produces: string[];
+  consumes: string[];
+  execution_type: 'sync_internal' | 'sync_api' | 'async_playwright' | 'async_polling';
+  risk_level: 'read_only' | 'low_mutation' | 'medium_mutation' | 'high_mutation';
+  available: boolean;
+}
+
+export interface WorkflowValidationResult {
+  is_valid: boolean;
+  status: 'ready' | 'needs_review' | 'invalid';
+  errors: string[];
+  warnings: string[];
+  stats: {
+    total_steps: number;
+    ready_steps: number;
+    dependent_steps: number;
+  };
+}

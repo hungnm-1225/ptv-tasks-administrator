@@ -1,0 +1,191 @@
+{
+  "version": "1.0.0",
+  "description": "Pythaverse Business Workflow Archetypes & Planning Templates",
+  "workflow_archetypes": [
+    {
+      "rule_id": "CREATE_ACCOUNTS_AND_ENROLL_LMS",
+      "title": "Tạo tài khoản và ghi danh học viên LMS",
+      "description": "Dành cho yêu cầu tạo tài khoản mới cho học sinh/giáo viên và add vào các khóa học Moodle PLearn để training/demo",
+      "trigger_keywords": [
+        "tạo tài khoản",
+        "create account",
+        "add vào khoá học",
+        "ghi danh",
+        "enroll",
+        "training",
+        "demo",
+        "moodle"
+      ],
+      "step_templates": [
+        {
+          "step_id": "step_01",
+          "capability_id": "workspace.resolve_school",
+          "name": "Xác định trường học & Phả hệ",
+          "depends_on": []
+        },
+        {
+          "step_id": "step_02",
+          "capability_id": "cof.generate_accounts_file",
+          "name": "Chuẩn bị file tài khoản nộp batch",
+          "depends_on": ["step_01"]
+        },
+        {
+          "step_id": "step_03",
+          "capability_id": "workspace.bulk_account_creation",
+          "name": "Nộp batch tạo tài khoản School Workspace",
+          "depends_on": ["step_02"]
+        },
+        {
+          "step_id": "step_04",
+          "capability_id": "workspace.poll_account_batch",
+          "name": "Kiểm tra tiến độ & Lấy kết quả tài khoản",
+          "depends_on": ["step_03"]
+        },
+        {
+          "step_id": "step_05",
+          "capability_id": "lms.direct_enroll",
+          "name": "Ghi danh khóa học Moodle PLearn",
+          "depends_on": ["step_04"]
+        }
+      ]
+    },
+    {
+      "rule_id": "COF_FULL_ONBOARDING",
+      "title": "Onboarding trường học toàn diện qua file COF",
+      "description": "Dành cho yêu cầu kèm file COF 3 Tabs: bóc tách học sinh mới, cấp License 4 cấp, tạo tài khoản và ghi danh",
+      "trigger_keywords": [
+        "cof",
+        "curriculum order form",
+        "order form",
+        "onboarding",
+        "cấp license"
+      ],
+      "step_templates": [
+        {
+          "step_id": "step_01",
+          "capability_id": "cof.parse_file",
+          "name": "Bóc tách dữ liệu file COF",
+          "depends_on": []
+        },
+        {
+          "step_id": "step_02",
+          "capability_id": "workspace.resolve_school",
+          "name": "Xác thực trường học & Két Sắt Vault",
+          "depends_on": ["step_01"]
+        },
+        {
+          "step_id": "step_03",
+          "capability_id": "cof.generate_accounts_file",
+          "name": "Trích xuất tài khoản chưa tạo",
+          "depends_on": ["step_01", "step_02"]
+        },
+        {
+          "step_id": "step_04",
+          "capability_id": "workspace.bulk_account_creation",
+          "name": "Nộp batch tạo tài khoản School Workspace",
+          "depends_on": ["step_03"]
+        },
+        {
+          "step_id": "step_05",
+          "capability_id": "workspace.poll_account_batch",
+          "name": "Kiểm tra kết quả nộp batch",
+          "depends_on": ["step_04"]
+        },
+        {
+          "step_id": "step_06",
+          "capability_id": "cof.write_results_back",
+          "name": "Ghi ngược kết quả vào COF & Drive",
+          "depends_on": ["step_05"]
+        },
+        {
+          "step_id": "step_07",
+          "capability_id": "workspace.school_create_order",
+          "name": "Tạo đơn hàng License từ Trường",
+          "depends_on": ["step_02"]
+        },
+        {
+          "step_id": "step_08",
+          "capability_id": "workspace.partner_approve_order",
+          "name": "Partner phê duyệt đơn hàng",
+          "depends_on": ["step_07"]
+        },
+        {
+          "step_id": "step_09",
+          "capability_id": "workspace.school_enroll_users",
+          "name": "Ghi danh & phân nhóm lớp School Workspace",
+          "depends_on": ["step_05", "step_08"]
+        }
+      ]
+    },
+    {
+      "rule_id": "KEYCLOAK_IDENTITY_MANAGEMENT",
+      "title": "Quản trị danh tính & mật khẩu Keycloak IDP",
+      "description": "Dành cho yêu cầu quên mật khẩu, cấp pass tạm, kích hoạt tài khoản hoặc verify email",
+      "trigger_keywords": [
+        "reset pass",
+        "quên mật khẩu",
+        "mật khẩu",
+        "keycloak",
+        "eid",
+        "verify email",
+        "kích hoạt tài khoản",
+        "mở khóa"
+      ],
+      "step_templates": [
+        {
+          "step_id": "step_01",
+          "capability_id": "keycloak.reset_password",
+          "name": "Cấp lại mật khẩu tạm Keycloak",
+          "depends_on": []
+        },
+        {
+          "step_id": "step_02",
+          "capability_id": "keycloak.verify_email",
+          "name": "Xác thực email người dùng",
+          "depends_on": ["step_01"]
+        }
+      ]
+    },
+    {
+      "rule_id": "GIT_COLLABORATOR_ACCESS",
+      "title": "Cấp quyền cộng tác Pythaverse Git",
+      "description": "Dành cho yêu cầu cấp quyền truy cập repository git (Guest, Developer, Admin)",
+      "trigger_keywords": [
+        "git",
+        "pgit",
+        "collaborator",
+        "quyền git",
+        "repository",
+        "repo"
+      ],
+      "step_templates": [
+        {
+          "step_id": "step_01",
+          "capability_id": "git.add_collaborators",
+          "name": "Thêm thành viên vào Git Repository",
+          "depends_on": []
+        }
+      ]
+    },
+    {
+      "rule_id": "FEEDBACK_DOC_TRIAGE",
+      "title": "Phân loại báo cáo sự cố & Giao việc Google Doc",
+      "description": "Dành cho form phản hồi, Google Form hoặc tài liệu Doc cần gắn comment tag người phụ trách",
+      "trigger_keywords": [
+        "google form",
+        "báo cáo sự cố",
+        "phản hồi",
+        "tag doc",
+        "comment doc"
+      ],
+      "step_templates": [
+        {
+          "step_id": "step_01",
+          "capability_id": "feedback.comment_and_assign",
+          "name": "Bình luận gắn thẻ phụ trách Google Doc",
+          "depends_on": []
+        }
+      ]
+    }
+  ]
+}
