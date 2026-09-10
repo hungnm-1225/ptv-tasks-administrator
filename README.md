@@ -12,7 +12,7 @@
 - **GitHub:** [`https://github.com/hungnm-1225`](https://github.com/hungnm-1225)
 - **Email:** `hungnm@dtt.vn` / `hung.nguyenmanh@dtt.vn`
 - **Hệ sinh thái:** [Pythaverse Space](https://pythaverse.space)
-- **Phiên bản:** `v2.6.0 Enterprise Reliability Release` (Cập nhật tháng 09/2026)
+- **Phiên bản:** `v2.7.0 Enterprise AI Workflow Edition` (Cập nhật tháng 09/2026)
 
 ---
 
@@ -25,21 +25,21 @@
 5. [PHẦN V: GIẢI PHẪU CHI TIẾT TỪNG FILE & HÀM XỬ LÝ BACKEND (FASTAPI 0.115)](#-phần-v-giải-phẫu-chi-tiết-từng-file--hàm-xử-lý-backend-fastapi-0115)
    - [5.1. Entrypoint & Lifespan Crons Lệch Pha (`main.py`)](#51-entrypoint--lifespan-crons-lệch-pha-mainpy)
    - [5.2. Lõi Hệ Thống Core (`app/core/`)](#52-lõi-hệ-thống-core-appcore)
-   - [5.3. Định Nghĩa Dữ Liệu Schemas (`app/models/`)](#53-định-nghĩa-dữ-liệu-schemas-appmodels)
-   - [5.4. Tri Thức Nghiệp Vụ Brain (`app/brain/knowledge_base.json`)](#54-tri-thức-nghiệp-vụ-brain-appbrainknowledge_basejson)
-   - [5.5. Cổng Giao Tiếp REST API Endpoints & Ma Trận 8 In-Memory Caches (`app/api/v1/endpoints/`)](#55-cổng-giao-tiếp-rest-api-endpoints--ma-trận-8-in-memory-caches-appapiv1endpoints)
+   - [5.3. Định Nghĩa Dữ Liệu Schemas (`app/models/`) – Bổ Sung `workflow.py`](#53-định-nghĩa-dữ-liệu-schemas-appmodels)
+   - [5.4. Tri Thức Nghiệp Vụ & Grounding Registry (`app/brain/`)](#54-tri-thức-nghiệp-vụ-brain-appbrainknowledge_basejson)
+   - [5.5. Cổng Giao Tiếp REST API Endpoints & Ma Trận 8 In-Memory Caches (`app/api/v1/endpoints/`) – Bổ Sung `workflows.py`](#55-cổng-giao-tiếp-rest-api-endpoints--ma-trận-8-in-memory-caches-appapiv1endpoints)
    - [5.6. Gói Dịch Vụ Workspace RPA Đa Kế Thừa (`app/services/workspace/`)](#56-gói-dịch-vụ-workspace-rpa-đa-kế-thừa-appservicesworkspace)
-   - [5.7. Các Dịch Vụ Nghiệp Vụ Chuyên Biệt (`app/services/`)](#57-các-dịch-vụ-nghiệp-vụ-chuyên-biệt-appservices)
+   - [5.7. Các Dịch Vụ Nghiệp Vụ Chuyên Biệt (`app/services/`) – Bổ Sung `workflow_planner.py` & `workflow_executor.py`](#57-các-dịch-vụ-nghiệp-vụ-chuyên-biệt-appservices)
    - [5.8. Bộ Điều Phối Workers Chạy Ngầm (`app/workers/`)](#58-bộ-điều-phối-workers-chạy-ngầm-appworkers)
    - [5.9. Kịch Bản Khởi Tạo Dữ Liệu & Test Scripts (`scripts/`)](#59-kịch-bản-khởi-tạo-dữ-liệu--test-scripts-scripts)
 6. [PHẦN VI: GIẢI PHẪU CHI TIẾT GIAO DIỆN FRONTEND SPA (REACT 19 + VITE 6 + TAILWIND CSS V4)](#-phần-vi-giải-phẫu-chi-tiết-giao-diện-frontend-spa-react-19--vite-6--tailwind-css-v4)
    - [6.1. Khởi Chạy & Định Tuyến Toàn Cục (`App.tsx`, `main.tsx`)](#61-khởi-chạy--định-tuyến-toàn-cục-apptsx-maintsx)
    - [6.2. Thiết Kế Hệ Thống Design System Bento Grid & Enterprise Pastel OKLCH](#62-thiết-kế-hệ-thống-design-system-bento-grid--enterprise-pastel-oklch)
    - [6.3. Cấu Hình Tác Giả, Contexts & Tiện Ích Client (`config/`, `context/`, `lib/`, `types/`)](#63-cấu-hình-tác-giả-contexts--tiện-ích-client-config-context-lib-types)
-   - [6.4. Bóc Tách Chi Tiết 13 Feature Modules](#64-bóc-tách-chi-tiết-13-feature-modules)
+   - [6.4. Bóc Tách Chi Tiết 13 Feature Modules & AI Workflow Console Components](#64-bóc-tách-chi-tiết-13-feature-modules)
    - [6.5. Components Dùng Chung & Bố Cục Layout (`components/common/`, `components/layout/`)](#65-components-dùng-chung--bố-cục-layout-componentscommon-componentslayout)
-7. [PHẦN VII: CƠ SỞ DỮ LIỆU SUPABASE POSTGRESQL 16 (16 BẢNG & STORAGE BUCKET)](#-phần-vii-cơ-sở-dữ-liệu-supabase-postgresql-16-16-bảng--storage-bucket)
-8. [PHẦN VIII: 10 SƠ ĐỒ LUỒNG NGHIỆP VỤ END-TO-END (MERMAID SEQUENCE & FLOWCHARTS)](#-phần-viii-10-sơ-đồ-luồng-nghiệp-vụ-end-to-end-mermaid-sequence--flowcharts)
+7. [PHẦN VII: CƠ SỞ DỮ LIỆU SUPABASE POSTGRESQL 16 (18 BẢNG & STORAGE BUCKET)](#-phần-vii-cơ-sở-dữ-liệu-supabase-postgresql-16-16-bảng--storage-bucket)
+8. [PHẦN VIII: 11 SƠ ĐỒ LUỒNG NGHIỆP VỤ END-TO-END (MERMAID SEQUENCE & FLOWCHARTS)](#-phần-viii-10-sơ-đồ-luồng-nghiệp-vụ-end-to-end-mermaid-sequence--flowcharts)
 9. [PHẦN IX: CẨM NANG VẬN HÀNH & MA TRẬN ĐIỀU HƯỚNG DÀNH CHO AI CODER MỚI](#-phần-ix-cẩm-nang-vận-hành--ma-trận-điều-hướng-dành-cho-ai-coder-mới)
 10. [PHẦN X: CẨM NANG ĐỊNH TUYẾN CHUYÊN GIA AI (INTELLIGENT AGENT ROUTING PLAYBOOK)](#-phần-x-cẩm-nang-định-tuyến-chuyên-gia-ai-intelligent-agent-routing-playbook)
 
@@ -267,7 +267,7 @@ ptv-tasks-administrator/
 ├── backend/                            # Ứng dụng Backend FastAPI (Python 3.11)
 │   ├── app/
 │   │   ├── api/v1/                     # Bộ định tuyến REST API v1
-│   │   │   ├── endpoints/              # 9 Router chi tiết theo miền nghiệp vụ (Có In-Memory Cache)
+│   │   │   ├── endpoints/              # 10 Router chi tiết theo miền nghiệp vụ (Có In-Memory Cache)
 │   │   │   │   ├── board.py            # API Kanban Board, Thùng rác 30 ngày, Columns, Cards (BoardMemoryCache)
 │   │   │   │   ├── bots.py             # API Giám sát 8 Workers, Stream log GMT+7, Retry Worker (BotsMemoryCache)
 │   │   │   │   ├── courses.py          # API CRUD Khóa học (Workspace vs LMS), Git Repos, Bulk Upsert (SimpleMemoryCache)
@@ -276,9 +276,13 @@ ptv-tasks-administrator/
 │   │   │   │   ├── reports.py          # API Thống kê KPI, Dynamic Health 24h, Xuất DTT 3Đ Excel (ReportsMemoryCache)
 │   │   │   │   ├── tasks.py            # API Cổng Duyệt Tác Vụ Human-in-the-Loop, Background Dispatch (TasksMemoryCache)
 │   │   │   │   ├── tickets.py          # API Hòm thư hợp nhất, Multi-filter, AI Triage thủ công (TicketsMemoryCache)
+│   │   │   │   ├── workflows.py        # API AI Workflow Console, DAG Validation, Freeze & Execute, Retry Step
 │   │   │   │   └── workspace.py        # API Phả hệ 480 trường, RAM Cache, Sync Scanner, Extract COF (WorkspaceMemoryCache)
 │   │   │   └── router.py               # Điểm tập hợp toàn bộ Router v1
-│   │   ├── brain/                      # Tri thức nghiệp vụ AI Triage Grounding
+│   │   ├── brain/                      # Tri thức nghiệp vụ & Grounding Registry
+│   │   │   ├── capabilities.json       # 19 Capabilities hệ thống (schemas, inputs/outputs, risk level)
+│   │   │   ├── workflow_rules.json     # 5 Archetypes quy trình chuẩn (COF, LMS Enroll, Keycloak, Git, Doc)
+│   │   │   ├── dependency_rules.json   # Quy tắc ràng buộc tiên quyết giữa các năng lực
 │   │   │   └── knowledge_base.json     # Định nghĩa 7 phân hệ, từ khóa routing cán bộ phụ trách
 │   │   ├── core/                       # Lõi hệ thống & Quản trị tài nguyên
 │   │   │   ├── cache_policy.py         # BoundedMemoryCache LRU Budget ≤ 40MB, 4 Tiers, Active TTL Eviction
@@ -291,7 +295,8 @@ ptv-tasks-administrator/
 │   │   ├── models/                     # Schemas Pydantic Validation
 │   │   │   ├── task.py                 # Schemas Task Create, Approval, Retry
 │   │   │   ├── template.py             # Schemas GitHub Template & XLSX Export Mapping
-│   │   │   └── ticket.py               # Schemas Ticket Create, Update, Filter Params
+│   │   │   ├── ticket.py               # Schemas Ticket Create, Update, Filter Params
+│   │   │   └── workflow.py             # Schemas Workflow Draft, Step DAG, Validation, Approval Freeze
 │   │   ├── services/                   # Các dịch vụ nghiệp vụ chuyên biệt
 │   │   │   ├── workspace/              # GÓI DỊCH VỤ WORKSPACE RPA ĐA KẾ THỪA (8 MODULES)
 │   │   │   │   ├── __init__.py         # Tổng hợp Singleton workspace_playwright_service
@@ -314,6 +319,8 @@ ptv-tasks-administrator/
 │   │   │   ├── playwright_service.py   # Ghi danh trực tiếp Moodle LMS PLearn (Batch Multi-Course, Keyword Filter, Mono-Role)
 │   │   │   ├── site_monitor_service.py # Giám sát Uptime 10 site, Test 16 acc test qua Fernet, Vercel/Render CI/CD
 │   │   │   ├── ticket_processor.py     # Cầu nối tiếp nhận ticket và kích hoạt AI Triage
+│   │   │   ├── workflow_executor.py    # Điều phối thực thi DAG Workflow, TaskCoordinator lease, Playwright Semaphore
+│   │   │   ├── workflow_planner.py     # AI Planner Engine, Entity Resolution 480 trường, DFS Cycle Detection
 │   │   │   ├── workspace_lineage_service.py # Giải mã Fernet Két Sắt & Phân giải phả hệ 3 cấp
 │   │   │   └── workspace_playwright_service.py # Bridge file tương thích ngược
 │   │   ├── workers/                    # Bộ điều phối thực thi chạy ngầm
@@ -346,8 +353,33 @@ ptv-tasks-administrator/
 │   │   │   ├── courses/CoursesManagerPage.tsx # Quản lý 2 bảng khóa học, Git Repos, Bulk Upsert, Category
 │   │   │   ├── dashboard/DashboardPage.tsx # Bảng điều khiển Bento KPI tổng quan, Quick Actions
 │   │   │   ├── github/GithubReporterPage.tsx # Điều phối Issue GitHub, AI Template Generator
-│   │   │   ├── inbox/UnifiedInboxPage.tsx # Hòm thư hợp nhất đa kênh, Gemini AI Triage
+│   │   │   ├── inbox/                  # HÒM THƯ HỢP NHẤT & AI WORKFLOW PRE-PROCESSING CONSOLE
+│   │   │   │   ├── components/
+│   │   │   │   │   ├── WorkflowBuilder.tsx # Trình biên tập trực quan DAG, kéo thả, thêm/xóa bước
+│   │   │   │   │   ├── WorkflowStepCard.tsx # Thẻ bước thực thi, badge trạng thái, inline inputs edit
+│   │   │   │   │   └── WorkflowValidationPanel.tsx # Safety Gate, kiểm tra DAG, cảnh báo an toàn
+│   │   │   │   └── UnifiedInboxPage.tsx # Console 3 vùng Bento: Request, AI Understanding, Workflow DAG
 │   │   │   ├── landing/LandingPage.tsx # Trang chủ giới thiệu tác giả & 7 phân hệ Pythaverse
+│   │   │   ├── monitor/SiteMonitorPage.tsx # Giám sát Uptime 10 site, Auth Matrix 16 acc, CI/CD Vercel & Render
+│   │   │   ├── profile/ProfileSettingsPage.tsx # Hồ sơ tác giả Nguyễn Mạnh Hùng & System Info
+│   │   │   ├── reports/ReportsExportPage.tsx # Báo cáo KPI, Dynamic Health 24h, Xuất Excel DTT 3Đ
+│   │   │   ├── studio/AutomationStudioPage.tsx # Automation Studio độc lập (Manual Operator Playground)
+│   │   │   └── tasks/TaskManagementPage.tsx # Cổng Duyệt Tác Vụ Human-in-the-Loop, Live Terminal Logs
+│   │   ├── lib/
+│   │   │   ├── api.ts                  # Tiện ích fetchApi<T> bọc Bearer token & AbortController
+│   │   │   └── supabase.ts             # Client Supabase JS (VITE_SUPABASE_ANON_KEY)
+│   │   ├── types/
+│   │   │   └── index.ts                # TypeScript strict interfaces (WorkflowDraft, Capability...)
+│   │   ├── App.tsx                     # React 19 SPA Router, Lazy Loading 13 Modules, Purge Caches
+│   │   └── main.tsx                    # React Root Hydration & DOM Mount
+│   ├── package.json                    # Cấu hình dự án & dependencies Frontend
+│   └── vite.config.ts                  # Cấu hình Vite 6 & Tailwind CSS v4
+├── supabase/
+│   ├── migrations/
+│   │   └── 20260910000000_add_automation_workflows.sql # Migration tạo 2 bảng automation_workflows & history
+│   └── schema.sql                      # Đặc tả cấu trúc toàn diện 18 bảng CSDL, RLS & Triggers
+├── GEMINI.md                           # System Instructions & Quy chuẩn tác nghiệp của AI Assistant
+└── README.md                           # Bách khoa toàn thư kiến trúc hệ thống (Single Source of Truth)
 │   │   │   ├── monitor/SiteMonitorPage.tsx # Giám sát 3 Tab: Public Sites, Auth Matrix, CI/CD
 │   │   │   ├── profile/ProfileSettingsPage.tsx # Hồ sơ tác giả, trạng thái biến môi trường, System info
 │   │   │   ├── reports/ReportsExportPage.tsx # Báo cáo phân tích KPI, Dynamic Health, Xuất DTT 3Đ
@@ -525,6 +557,16 @@ ptv-tasks-administrator/
 ---
 
 ### 5.3. Định Nghĩa Dữ Liệu Schemas (`app/models/`)
+- [`workflow.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/models/workflow.py) (Kiến Trúc Mô Hình AI Workflow Console & DAG Engine):
+  - `WorkflowStatus` (Enum): `draft` (Bản thảo AI lập), `ready` (Đã qua Safety Gate), `executing` (Đang chạy DAG), `completed` (Hoàn tất 100%), `failed` (Lỗi gián đoạn), `aborted` (Người dùng hủy).
+  - `WorkflowStepStatus` (Enum): `pending`, `ready`, `running`, `completed`, `failed`, `skipped`.
+  - `WorkflowStepDraft`: Schema biểu diễn từng bước trong đồ thị tuần tự/phân nhánh DAG: `id`, `name`, `capability_id` (Khớp 1-1 với `capabilities.json`), `order_index`, `depends_on` (Danh sách `id` các bước tiền đề), `inputs` (Dữ liệu đầu vào hoặc data binding `$steps.{step_id}.outputs.{field}`), `outputs` (Dữ liệu thu được sau khi thực thi), `status`, `is_mutation` (Cờ cảnh báo tác động thay đổi dữ liệu thật), `requires_approval` (Cờ yêu cầu con người xác nhận trước khi chạy bước này), `timeout_seconds`, `error_message`, `executed_at`.
+  - `WorkflowDraft`: Schema chứa toàn bộ luồng xử lý: `id` (UUID), `ticket_id` (FK ➔ `inbox_tickets.id`), `title`, `goal` (Mục tiêu nghiệp vụ do AI nhận diện), `status`, `steps` (Danh sách `WorkflowStepDraft`), `dag_metadata` (Metadata đồ thị: `cycles_detected`, `critical_path`, `parallel_groups`), `ai_analysis` (Nhận thức của AI: `confidence`, `reason`, `detected_school`, `detected_courses`), `safety_checks` (Kiểm soát an toàn: `has_high_risk_mutations`, `requires_manual_confirmation`, `warnings`), `created_by`, `created_at`, `updated_at`.
+  - `WorkflowDraftUpdate`: Schema gửi từ Frontend khi người dùng chỉnh sửa luồng (sắp xếp lại, đổi tên bước, cập nhật inputs, hoặc bấm chọn trường `detected_school` trong `ai_analysis`).
+  - `WorkflowStepMutation`: Schema thêm mới hoặc chỉnh sửa cục bộ một bước trong luồng.
+  - `WorkflowValidationResult`: Schema phản hồi từ Safety Gate Validator: `valid` (bool), `errors` (Mảng thông báo lỗi chặn thực thi), `warnings` (Mảng cảnh báo), `cycles` (Mảng chu trình khép kín nếu có), `missing_dependencies` (Mảng bước thiếu tiền đề), `safe_to_execute` (bool).
+  - `WorkflowCapability`: Schema định nghĩa chuẩn một khả năng của hệ thống được nạp từ `capabilities.json`.
+  - `WorkflowRule` & `DependencyRule`: Schema luật khuôn mẫu quy trình và luật phụ thuộc tuần tự.
 - [`task.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/models/task.py):
   - `BotType` (Enum): `keycloak_api`, `lms_playwright`, `github_issue_creator`, `google_doc_comment`.
   - `ApprovalStatus` (Enum): `pending`, `approved`, `rejected`.
@@ -542,8 +584,51 @@ ptv-tasks-administrator/
 
 ---
 
-### 5.4. Tri Thức Nghiệp Vụ Brain (`app/brain/knowledge_base.json`)
-- [`knowledge_base.json`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/brain/knowledge_base.json): Tệp tri thức trung tâm chứa định nghĩa kỹ thuật của 7 phân hệ Pythaverse, danh sách cán bộ phụ trách mặc định (Assignees: `hung.nguyenmanh@dtt.vn`, `afiq@dtt.vn`, `hieptc@dtt.vn`...), quy tắc phân loại danh mục khóa học (`SWRP`, `IR`, `ASP`...), giúp Gemini AI phản hồi chính xác tuyệt đối theo ngữ cảnh doanh nghiệp.
+### 5.4. Tri Thức Nghiệp Vụ & Grounding Registry (`app/brain/`)
+
+Hệ thống lưu trữ toàn bộ tri thức doanh nghiệp và bộ quy chuẩn năng lực hệ thống tại `backend/app/brain/`, đóng vai trò neo giữ ngữ cảnh (Grounding Context) để Gemini AI không bao giờ bị ảo giác (hallucination) hay sinh ra các bước tùy tiện không thể thực thi:
+
+1. [`knowledge_base.json`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/brain/knowledge_base.json) (Domain Knowledge Base):
+   - Chứa định nghĩa kỹ thuật của 7 phân hệ Pythaverse, danh sách cán bộ phụ trách mặc định (Assignees: `hung.nguyenmanh@dtt.vn`, `afiq@dtt.vn`, `hieptc@dtt.vn`...), quy tắc phân loại danh mục khóa học (`SWRP`, `IR`, `ASP`...), giúp Gemini AI tóm tắt chính xác theo nghiệp vụ tập đoàn DTT.
+2. [`capabilities.json`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/brain/capabilities.json) (Capability Registry - 19 Năng Lực Nguyên Tử Thực Thi Được):
+   - Đóng vai trò **Danh Mục Năng Lực Chuẩn Mực (Standard Capability Registry)**. Mọi bước trong một AI Workflow đều bắt buộc phải khớp với 1 trong 19 `capability_id` sau:
+     - **Nhóm 1: Bóc Tách & Chuẩn Hóa File COF (`cof`):**
+       - `cof.parse_file`: Phân tích và trích xuất dữ liệu thô từ file COF Excel 3 Tabs (School Name, Môn học, Học sinh, Giáo viên).
+       - `cof.normalize_accounts`: Chuẩn hóa danh sách tài khoản theo chuẩn cột hệ thống (Hàng 2 tiêu đề, Hàng 5 Header, Hàng 6 Dữ liệu).
+       - `cof.write_results_back`: Ghi ngược Username, Password, Group LMS vào file COF gốc, highlight nền cam nhạt (`#FCE4D6`) và chữ in đậm đỏ (`#C00000`).
+     - **Nhóm 2: Cấp Phép License School Workspace (`workspace`):**
+       - `workspace.school_create_order`: RPA School tự tạo Order môn học lên Partner.
+       - `workspace.partner_approve_order`: RPA Partner duyệt Order từ Pool License của Partner (`is_mutation = true`).
+       - `workspace.partner_create_contract`: RPA Partner tạo Contract xin Distributor cấp bù License.
+       - `workspace.distributor_approve_contract`: RPA Distributor duyệt Contract của Partner (`is_mutation = true`).
+       - `workspace.distributor_create_contract`: RPA Distributor tạo Contract xin Sales Admin cấp bù.
+       - `workspace.admin_approve_contract`: RPA Sales Admin duyệt Contract cấp cao nhất (`is_mutation = true`).
+       - `workspace.full_hierarchy_chain`: RPA chạy Master E2E Chain 4 cấp liên hoàn (`is_mutation = true`).
+     - **Nhóm 3: Tạo Tài Khoản & Ghi Danh School Workspace (`workspace`):**
+       - `workspace.bulk_account_creation`: RPA nộp file batch tạo tài khoản học sinh/giáo viên, tự động chuyển Polling nếu >30 users (`is_mutation = true`).
+       - `workspace.school_enroll_users`: RPA tạo group và ghi danh học sinh/giáo viên trên School Workspace (`is_mutation = true`).
+     - **Nhóm 4: Ghi Danh Trực Tiếp Moodle LMS PLearn (`lms`):**
+       - `lms.enroll_users`: RPA ghi danh học sinh/giáo viên vào khóa học Moodle, Keyword Filter 2 nhịp, tạo Group lớp (`is_mutation = true`).
+       - `lms.modify_user_role`: RPA đổi vai trò người dùng (Mono-Role Replacement) (`is_mutation = true`).
+       - `lms.unenrol_users`: RPA gỡ học viên khỏi khóa học Moodle qua Keyword Filter (`is_mutation = true`).
+     - **Nhóm 5: Quản Trị Định Danh Keycloak OIDC (`keycloak`):**
+       - `keycloak.manage_account`: Thực hiện các thao tác Reset mật khẩu, Active/Inactive, Verify Email qua 2-Tier API & RPA (`is_mutation = true`).
+     - **Nhóm 6: Tích Hợp Đa Nền Tảng (`integrations`):**
+       - `git.add_collaborators`: RPA phân quyền Collaborator trên Pythaverse GitBucket qua SSO OIDC.
+       - `github.create_issue`: REST API tạo Issue trực tiếp vào Private Repo `PTV-TechHub/Pythaverse2026`.
+       - `google_doc.insert_comment`: REST API chèn comment gắn thẻ cán bộ vào Google Docs.
+3. [`workflow_rules.json`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/brain/workflow_rules.json) (Workflow Archetypes & Heuristic Rules):
+   - Định nghĩa 5 Khuôn Mẫu Quy Trình Chuẩn làm điểm tựa (Grounding) và Fallback tất định:
+     1. `school_onboarding_full`: Quy trình toàn diện 9 bước dành cho yêu cầu Onboarding trường mới (Bóc tách COF ➔ Nộp batch tài khoản ➔ Ghi ngược kết quả ➔ Tạo Order ➔ Duyệt Order ➔ Ghi danh School Workspace).
+     2. `license_replenish_only`: Quy trình 4 bước tạo và duyệt hợp đồng cấp bù License.
+     3. `bulk_account_creation_only`: Quy trình 3 bước nộp batch tạo tài khoản từ file Excel và xuất kết quả.
+     4. `lms_student_enrollment_only`: Quy trình 2 bước ghi danh học sinh và phân nhóm lớp trực tiếp trên Moodle LMS.
+     5. `git_collaborator_assignment`: Quy trình 1 bước thêm cộng tác viên vào Git Repo.
+4. [`dependency_rules.json`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/brain/dependency_rules.json) (Dependency & DAG Sequencing Rules):
+   - Thiết lập các ràng buộc logic bất biến:
+     - `requires_before`: Quy định bước tiền đề bắt buộc (ví dụ: `cof.write_results_back` bắt buộc phải phụ thuộc vào `workspace.bulk_account_creation`; `workspace.partner_approve_order` bắt buộc phải sau `workspace.school_create_order`).
+     - `can_parallel_with`: Các bước có thể thực thi song song nếu không dùng chung tài nguyên Chromium.
+     - `incompatible_with`: Cấm kết hợp xung đột trong cùng một đồ thị.
 
 ---
 
@@ -562,7 +647,7 @@ Toàn bộ hệ thống REST API Backend được tối ưu hóa phản hồi 1m
 | **7** | `MonitorMemoryCache` | `TIER_B_STATUS` | 10 entries | 30s | [`monitor.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/monitor.py) | Khi quản trị viên bấm nút "Kiểm tra ngay (Check Now)". | Trạng thái Uptime 10 site, lịch sử uptime 45 ngày và nhật ký sự cố. |
 | **8** | `ReportsMemoryCache` | `TIER_B_STATUS` | 10 entries | 60s | [`reports.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/reports.py) | Khi có vé hoặc tác vụ mới hoàn tất. | Thống kê 4 thẻ KPI, Dynamic Health 24h, biểu đồ donut và xu hướng 7 ngày. |
 
-#### Giải Phẫu Chi Tiết 9 Router API:
+#### Giải Phẫu Chi Tiết 10 Router API:
 
 1. **[`tickets.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/tickets.py) (`/tickets`):**
    - `GET /`: `list_tickets(status, category, source, sort)` – lọc đa tiêu chí, đọc từ `TicketsMemoryCache` (`TIER_C_SUMMARY`).
@@ -646,6 +731,17 @@ Toàn bộ hệ thống REST API Backend được tối ưu hóa phản hồi 1m
 9. **[`reports.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/reports.py) (`/reports`):**
    - `GET /summary`: `get_reports_summary(cat_range, trend_range)` – tổng hợp 4 chỉ số KPI, Dynamic Health 24h, phân bố loại yêu cầu và xu hướng tiếp nhận vs xử lý.
    - `GET /kpi-export`: `get_kpi_export_data()` – xuất bảng dữ liệu báo cáo KPI chuẩn mực DTT 3Đ (Đúng - Đủ - Đẹp).
+
+10. **[`workflows.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/workflows.py) (`/workflows`):**
+    - `POST /triage-plan`: `generate_workflow_plan(ticket_id)` – kích hoạt `workflow_planner_service.plan_workflow_from_ticket(ticket_id)`: nạp dữ liệu vé, giải mã file đính kèm, đối chiếu Grounding Registry 19 capabilities và gọi Gemini AI lập bản thảo quy trình tuần tự/phân nhánh DAG gồm các bước chuẩn tắc.
+    - `GET /draft/{ticket_id}`: `get_workflow_draft(ticket_id)` – lấy bản thảo workflow hiện hành của vé từ bảng `automation_workflows`.
+    - `PUT /{workflow_id}`: `update_workflow_draft(workflow_id, payload)` – cập nhật toàn bộ luồng (sắp xếp lại thứ tự, chỉnh sửa tên/inputs của các bước, và lưu cập nhật thực thể trường học `detected_school` trong `ai_analysis`). Tự động ghi nhật ký audit log thay đổi trường vào `automation_workflow_history`.
+    - `POST /{workflow_id}/steps`: `add_workflow_step(workflow_id, mutation)` – thêm một bước mới vào quy trình và tự động đánh lại `order_index`.
+    - `PUT /{workflow_id}/steps/{step_id}`: `modify_workflow_step(workflow_id, step_id, mutation)` – cập nhật cục bộ một bước đơn lẻ (tên, inputs, depends_on).
+    - `DELETE /{workflow_id}/steps/{step_id}`: `remove_workflow_step(workflow_id, step_id)` – xóa một bước khỏi quy trình, đồng thời tự động gỡ bỏ phụ thuộc vào bước này trong các bước khác để bảo toàn tính toàn vẹn của DAG.
+    - `POST /{workflow_id}/validate`: `validate_workflow_api(workflow_id)` – kích hoạt Safety Gate Validator: kiểm tra chu trình khép kín (Cycles), kiểm tra bước tiền đề tồn tại, phát hiện trường học mục tiêu chưa được chọn, nhận diện các bước đột biến dữ liệu (`is_mutation`) và đưa ra danh sách cảnh báo / lỗi chặn trước khi cho phép chạy.
+    - `POST /{workflow_id}/execute`: `execute_workflow_api(workflow_id, background_tasks)` – chốt trạng thái `status = 'executing'`, xếp lịch chạy `workflow_execution_service.execute_workflow_dag(workflow_id)` trong `background_tasks` theo thứ tự sắp xếp tô-pô (Topological Sort), tôn trọng khóa trần Playwright Semaphore 1 Slot và ghi audit log chi tiết từng bước.
+    - `GET /{workflow_id}/status`: `get_workflow_status(workflow_id)` – truy vấn tiến độ thực thi thời gian thực của từng bước trong DAG kèm nhật ký lịch sử từ bảng `automation_workflow_history`.
 
 ---
 
@@ -790,6 +886,52 @@ classDiagram
 - [`osticket_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/osticket_service.py): `poll_open_ostickets` sử dụng Playwright session để cào danh sách vé, bóc tách Custom Form fields và file đính kèm.
 - [`github_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/github_service.py): `create_issue` gửi Issue trực tiếp vào Private Repository `PTV-TechHub/Pythaverse2026` qua Bearer Token `GITHUB_PAT`.
 
+#### 8. [`workflow_planner.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_planner.py) (Bộ Não Lập Kế Hoạch & Safety Gate DAG Validator `WorkflowPlannerService`)
+- **Mục đích:** Đóng vai trò bộ não lập kế hoạch workflow thông minh, kết nối Gemini AI với Grounding Registry (`capabilities.json`, `workflow_rules.json`, `dependency_rules.json`) và kiểm soát an toàn trước thực thi. Khởi tạo singleton `workflow_planner_service`.
+- **Cơ Chế Khởi Tạo & Registry Caching (`_load_registries`):**
+  - Tải và đệm trong RAM toàn bộ 19 capabilities, 5 workflow rules và dependency rules từ `app/brain/`.
+  - Hỗ trợ hàm tìm kiếm capability theo ID `get_capability(id)` và danh sách capabilities hợp lệ.
+- **Quy Trình Lập Kế Hoạch AI Triage (`plan_workflow_from_ticket(ticket_id)`):**
+  1. Truy vấn dữ liệu vé từ `inbox_tickets`, trích xuất tiêu đề, nội dung thô, người gửi và file đính kèm.
+  2. Nếu có file COF/Excel: gọi `COFExcelService.parse_cof_file()` để bóc tách thông tin trường học, khóa học, học sinh, giáo viên.
+  3. Xây dựng prompt chuyên sâu yêu cầu Gemini AI:
+     - Nhận diện mục tiêu cốt lõi (`goal`) và mức độ tự tin (`confidence`).
+     - Xác định trường học mục tiêu (`detected_school`) và danh sách môn học (`detected_courses`).
+     - Sinh đồ thị DAG gồm các bước thực thi, **bắt buộc mỗi bước phải có `capability_id` khớp chính xác với 19 capability trong registry**.
+     - Thiết lập chuỗi phụ thuộc `depends_on` (ví dụ bước duyệt đơn phụ thuộc bước tạo đơn).
+     - Định nghĩa tham số đầu vào `inputs`, hỗ trợ cú pháp data binding động: `$steps.<step_id>.outputs.<field>`.
+  4. Nếu Gemini AI gặp lỗi (Rate limit, JSON parse error): Tự động kích hoạt **Bộ Quy Tắc Fallback Tất Định (Deterministic Heuristic Fallback)** dựa trên category và từ khóa của vé (ví dụ: `license` ➔ dùng template `school_onboarding_full` 9 bước; `account_keycloak` ➔ dùng `bulk_account_creation_only` 3 bước; `lms_enroll` ➔ dùng `lms_student_enrollment_only` 2 bước).
+  5. Lưu bản thảo hoàn chỉnh vào bảng `automation_workflows` với trạng thái `status = 'draft'` và ghi audit log khởi tạo.
+- **Safety Gate DAG Validator (`validate_workflow(workflow_id)`):**
+  - **Kiểm Tra Chu Trình Khép Kín (Cycle Detection):** Sử dụng thuật toán DFS / Kahn để phát hiện đồ thị có chu trình lặp vô tận. Nếu có, trả về `valid = false`, ghi nhận mảng `cycles` và chặn thực thi.
+  - **Kiểm Tra Năng Lực Chuẩn (Capability Grounding):** Xác thực 100% `capability_id` của các bước có tồn tại trong `capabilities.json`. Nếu bước nào không có trong registry, ném lỗi `Unknown capability`.
+  - **Kiểm Tra Bước Tiền Đề (Missing Dependencies):** Đảm bảo mọi `step_id` trong `depends_on` đều tồn tại và được đặt thứ tự chạy trước bước hiện tại.
+  - **Kiểm Tra Trường Học Bắt Buộc (School Resolution Gate):** Với các workflow yêu cầu thao tác Workspace School (ví dụ tạo đơn hàng, nộp batch), hệ thống kiểm tra `detected_school`. Nếu chưa được xác định chắc chắn, validator trả về cảnh báo `Chưa chọn trường học` và yêu cầu người dùng nhấp chọn trên giao diện trước khi kích hoạt chạy.
+  - **Nhận Diện Đột Biến & Cảnh Báo An Toàn (Mutation Warnings):** Duyệt các bước có `is_mutation = true` để tạo danh sách cảnh báo tác động dữ liệu thật (`has_high_risk_mutations = true`) giúp Quản trị viên luôn có nhận thức đầy đủ trước khi bấm xác nhận.
+
+#### 9. [`workflow_executor.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_executor.py) (Động Cơ Thực Thi Luồng Tự Động DAG `WorkflowExecutionService`)
+- **Mục đích:** Thực thi tuần tự hoặc phân nhánh các bước trong đồ thị DAG theo thứ tự sắp xếp tô-pô (Topological Sort), bảo đảm an toàn dữ liệu, giải quyết data binding và ghi nhận audit log thời gian thực. Khởi tạo singleton `workflow_execution_service`.
+- **Giải Thuật Sắp Xếp Tô-pô (`_topological_sort(steps)`):**
+  - Xây dựng đồ thị có hướng từ mảng `depends_on` của từng bước.
+  - Tính toán in-degree và sắp xếp các bước theo thứ tự thực thi chính xác: bước tiền đề luôn hoàn tất trước bước phụ thuộc.
+- **Giải Quyết Data Binding Động (`_resolve_inputs(inputs, step_outputs)`):**
+  - Duyệt đệ quy toàn bộ các trường trong `inputs`.
+  - Nhận diện cú pháp `$steps.<step_id>.outputs.<field>` (hoặc `$steps.<step_id>.<field>`) và tự động thay thế bằng dữ liệu thực tế thu được từ bước tiền đề đã hoàn tất (ví dụ: `$steps.step_01.outputs.file_path` sẽ được bind vào file path thực tế vừa tải về ở bước 1).
+- **Điều Phối Thực Thi Từng Bước (`_execute_step(step, resolved_inputs, context)`):**
+  - Khớp `capability_id` với engine tương ứng:
+    - `cof.*`: Gọi `COFExcelService`.
+    - `workspace.*`: Gọi `WorkspacePlaywrightService` qua `acquire_playwright_slot(task_name, lane='admin')` bảo vệ nghiêm ngặt trần RAM 512MB.
+    - `lms.*`: Gọi `PlaywrightService` (Moodle).
+    - `keycloak.*`: Gọi `KeycloakService` (2-Tier API/RPA).
+    - `git.*`: Gọi `GitPlaywrightService`.
+    - `github.*`: Gọi `GithubService`.
+    - `google_doc.*`: Gọi `GoogleDocService`.
+  - Cập nhật trạng thái từng bước: `running` ➔ `completed` (kèm `outputs`) hoặc `failed` (kèm `error_message`).
+  - Ghi nhận Audit Log từng bước vào bảng `automation_workflow_history` (ghi rõ `step_id`, `step_name`, `action`, `inputs`, `outputs`, `duration_ms`).
+- **Xử Lý Lỗi & Phục Hồi Checkpoint:**
+  - Nếu một bước thất bại, dừng luồng an toàn, đặt bước đó thành `failed`, chuyển workflow sang `status = 'failed'` và giải phóng slot Playwright.
+  - Hỗ trợ khôi phục chạy tiếp từ bước thất bại (Resume from Checkpoint) sau khi người dùng sửa lỗi tham số trên UI Console.
+
 ---
 
 ### 5.8. Bộ Điều Phối Workers Chạy Ngầm (`app/workers/`)
@@ -883,7 +1025,7 @@ classDiagram
 |---|---|---|---|---|
 | **1** | [`DashboardPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/dashboard/DashboardPage.tsx) | `/dashboard` | **Executive Bento Dashboard:** 4 KPI Metric Cards (Tổng Ticket Chờ, Chờ Duyệt, Đã Xử Lý Tháng, Tỷ Lệ Tự Động Hóa), Quick Action buttons dẫn nhanh tới Studio/Courses/GitHub, bảng tóm tắt 5 vé và 5 tác vụ mới nhất. | Gọi `/reports/summary` (RAM Cache Backend 60s). Không dùng LocalStorage. |
 | **2** | [`WorkBoardPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/board/WorkBoardPage.tsx) | `/board` | **Kanban Work Board:** Quản lý đa bảng, tùy biến hình nền/overlay opacity/card opacity, 6 cột trạng thái (`Backlog`, `To Do`, `In Progress`, `Review`, `Done`, `Abort`), kéo thả HTML5 D&D mượt mà, Subtasks checklist với progress bar, kích hoạt Canvas Confetti khi hoàn thành, và **Thùng Rác 30 Ngày** (Soft Delete/Restore/Xóa vĩnh viễn). | Gọi `/board/*` (BoardMemoryCache Backend 5m). Không dùng LocalStorage. |
-| **3** | [`UnifiedInboxPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/inbox/UnifiedInboxPage.tsx) | `/inbox` | **Hòm Thư Đa Kênh Hợp Nhất:** Tiếp nhận ticket từ Gmail, Google Form và OS Ticket; bộ lọc đa tầng (Category, Priority, Source, Status, Keyword); xem trước tệp đính kèm; thẻ tóm tắt AI Gemini Tiếng Việt; gán cán bộ phụ trách; nút điều hướng nhanh sang Automation Studio hoặc GitHub Reporter. | Gọi `/tickets` (TicketsMemoryCache Backend 60s). Không dùng LocalStorage. |
+| **3** | [`UnifiedInboxPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/inbox/UnifiedInboxPage.tsx) | `/inbox` | **Hòm Thư Đa Kênh Hợp Nhất & AI Workflow Console:** Tiếp nhận ticket từ Gmail, Google Form và OS Ticket; bộ lọc đa tầng; xem trước tệp đính kèm; thẻ tóm tắt AI Gemini Tiếng Việt. Tích hợp **AI Workflow Pre-processing & Execution Console (v2)** với Bento 3 Vùng (Yêu Cầu, AI Entity Resolution, Prepared DAG Workflow) cho phép Quản trị viên tinh chỉnh từng bước, chọn trường học Autocomplete và xác nhận chạy qua Safety Gate. | Gọi `/tickets` (RAM Cache 60s) & `/workflows/*`. Không dùng LocalStorage. |
 | **4** | [`AutomationStudioPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/studio/AutomationStudioPage.tsx) | `/studio` | **Trung Tâm Điều Phối Tác Vụ Độc Lập:** 4 Dispatcher Engines thực tế: <br>1. `workspace_rpa`: Cấp phép License Workspace 4 nhóm tác vụ (Phê duyệt đơn/hợp đồng, Chuỗi Master E2E 4 cấp kèm Autocomplete phả hệ 480 trường, Nộp batch tạo tài khoản COF, Ghi danh School Workspace; nạp môn học trực tiếp từ REST API 1ms).<br>2. `keycloak_api`: Quản trị định danh tập trung (Reset pass, Đổi trạng thái Active, Xác thực email, Kích hoạt Git OIDC).<br>3. `git_collaborator`: Thêm cộng tác viên Pythaverse Git tự động qua Keycloak SSO.<br>4. `feedback_doc_triage`: Đọc Docs phản hồi và gắn thẻ bình luận.<br>Hỗ trợ chọn chế độ "Đưa vào hàng đợi" hoặc "Chạy ngay (Run Immediately)". | Gọi `/workspace/*` (WorkspaceMemoryCache Backend 15m). Không dùng LocalStorage. |
 | **5** | [`TaskManagementPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/tasks/TaskManagementPage.tsx) | `/tasks` | **Cổng Phê Duyệt Human-in-the-Loop:** Danh sách tác vụ chờ duyệt; trình xem chi tiết JSON payload; modal phê duyệt kèm chỉnh sửa tham số; Live Terminal Logs thời gian thực hiển thị log màu sắc ANSI; badge `partial_success` (Hoàn thành 1 phần); hiển thị trực tiếp `current_step` (tiến trình bước) & `#retry_count`; nút **Retry Resume Checkpoint** khôi phục điểm gián đoạn; nút tải file kết quả `result_file_url`. | Gọi `/tasks` (TasksMemoryCache Backend 60s). Không dùng LocalStorage. |
 | **6** | [`CoursesManagerPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/courses/CoursesManagerPage.tsx) | `/courses` | **Quản Lý Danh Mục Khóa Học Song Song:** Dual-pane phân tách rõ `workspace_courses` và `lms_courses`; quản lý liên kết kho mã nguồn `git_repos`; CRUD đơn lẻ tự sinh URL Moodle; Bulk Import SheetJS hỗ trợ nạp Excel và paste văn bản tự do theo batch 50 records; Category Manager đổi tên và gộp danh mục hàng loạt. | Gọi `/courses/*` (SimpleMemoryCache Backend 10m). Không dùng LocalStorage. |
@@ -894,6 +1036,64 @@ classDiagram
 | **11** | [`ProfileSettingsPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/profile/ProfileSettingsPage.tsx) | `/profile` | **Hồ Sơ Tác Giả & Cấu Hình:** Khẳng định quyền tác giả Nguyễn Mạnh Hùng; hiển thị trạng thái các biến môi trường backend/frontend; thông tin phiên bản phát hành `v2.6.0 Enterprise Reliability`. | Render client-side + ping env check. |
 | **12** | [`LandingPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/landing/LandingPage.tsx) | `/` | **Trang Chủ Giới Thiệu:** Giới thiệu tác giả và 7 phân hệ trong hệ sinh thái Pythaverse, công nghệ sử dụng, và nút chuyển hướng đăng nhập. | Static SSR-friendly. |
 | **13** | [`LoginPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/auth/LoginPage.tsx) | `/login` | **Cổng Đăng Nhập Doanh Nghiệp:** Đăng nhập một chạm qua Google OAuth với chính sách bảo mật cưỡng chế Whitelist `@dtt.vn`. | Supabase OAuth Flow. |
+
+#### Giải Phẫu Chi Tiết Kiến Trúc AI Workflow Console & 3 Sub-Components (`features/inbox/components/`):
+
+Nhằm đáp ứng những yêu cầu phức tạp từ người dùng không thể đóng khung trong một luồng cứng, hệ thống tích hợp **AI Workflow Pre-processing & Execution Console (v2)** mở ra dạng Modal Bento toàn màn hình khi người dùng bấm "Xem & Duyệt AI Workflow" tại bất kỳ vé nào trên Unified Inbox:
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│               AI Workflow Pre-processing & Execution Console (v2 Modal)                │
+├────────────────────────────────────────┬───────────────────────────────────────────────┤
+│ VÙNG A: THÔNG TIN YÊU CẦU              │ VÙNG B: AI UNDERSTANDING & ENTITY RESOLUTION  │
+│ • Người gửi, thời gian, nguồn vé       │ • Mục tiêu nhận diện (Goal) & Tỷ lệ tin cậy % │
+│ • Tài liệu đính kèm (Nút Xem preview)  │ • Trường mục tiêu (School Selector Auto-      │
+│ • Tóm tắt nội dung thô                 │   complete 480 trường, High-Contrast Light)   │
+│                                        │ • Môn học nhận diện & Box "Lý do chọn luồng"  │
+├────────────────────────────────────────┴───────────────────────────────────────────────┤
+│ VÙNG C: PREPARED WORKFLOW & EXECUTION CONSOLE                                          │
+│ • Header: Số bước DAG, Nút "AI Tái Lập Plan" (Regenerate), Nút "Chỉnh Sửa Luồng"      │
+│ • WorkflowBuilder & StepCards: Danh sách bước kéo thả, Move Up/Down, Edit/Delete, Add  │
+│ • StepInspectorModal: Xem & biên tập Inputs/Outputs, Capability Engine, Phụ thuộc      │
+│ • Safety Gate & Dependency Validation Panel:                                           │
+│   [9 Bước quy trình]  [DAG hợp lệ]  [⚠️ Chưa chọn trường / ✅ Đã chọn]  [Không chu trình]│
+│   [Cảnh báo tác động Mutation dữ liệu thực tế]                                         │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│ FOOTER: Single Playwright Semaphore: 1 Slot - Render 512MB RAM Shield | Nút Xác Nhận   │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+- **Vùng A – Thông Tin Yêu Cầu (Request Context):**
+  - Hiển thị đầy đủ ngữ cảnh nguồn: Người gửi, thời gian tiếp nhận (GMT+7), nguồn ticket badge (Gmail/OS Ticket/Form), tiêu đề và nội dung yêu cầu.
+  - Tích hợp nút xem trước tài liệu đính kèm (Preview Modal) đối với file COF Excel hoặc ảnh.
+- **Vùng B – AI Understanding & Entity Resolution:**
+  - **Mục Tiêu Nhận Diện (`goal`):** Tuyên bố mục đích nghiệp vụ ngắn gọn bằng Tiếng Việt kèm thanh tỷ lệ tự tin (`confidence %`).
+  - **Trường Học Mục Tiêu (`SchoolSelector`):** Cho phép Quản trị viên tìm kiếm và chọn nhanh trường trong phả hệ 480 trường học. Thiết kế **High-Contrast Design**: ở Light Mode, chữ và biểu tượng hiển thị đậm màu hổ phách sắc nét (`text-amber-950 font-bold bg-amber-50/90 border-amber-300`), nút "Thay đổi" hiển thị gạch chân tím đậm rõ ràng (`text-indigo-700 font-bold underline`). Khi đã chọn trường, trạng thái chuyển sang màu ngọc lục bảo tươi mát (`text-emerald-700`). Mọi thay đổi trường được tự động đồng bộ về backend qua payload `ai_analysis.detected_school` và lưu vết vào CSDL.
+  - **Khóa Học Mục Tiêu (`detected_courses`):** Danh sách mã môn và tên môn học được AI phát hiện từ file COF.
+  - **Lý Do Lựa Chọn Luồng Này (`Why this workflow?`):** Hộp chú giải màu vàng kem giải trình cơ sở logic và căn cứ giúp Quản trị viên hiểu rõ tại sao AI đề xuất các bước này.
+- **Vùng C – Prepared Workflow & Execution Console:**
+  - **1. [`WorkflowBuilder.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/inbox/components/WorkflowBuilder.tsx):**
+    - Điều khiển toàn bộ vòng đời của bản thảo DAG.
+    - Cung cấp nút "AI Tái Lập Plan" gọi API `/workflows/triage-plan` để AI suy nghĩ lại từ đầu nếu người dùng chưa ưng ý.
+    - Chế độ "Chỉnh Sửa Luồng": Cho phép thêm bước mới (`AddStepModal`), sắp xếp lại thứ tự bước lên/xuống (Move Up/Down) và cập nhật tức thì lên server qua `PUT /workflows/{id}`.
+  - **2. [`WorkflowStepCard.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/inbox/components/WorkflowStepCard.tsx):**
+    - Hiển thị từng bước trong luồng: Thứ tự bước (01, 02...), biểu tượng loại tác vụ (COF, Workspace, LMS, Keycloak, Git...), tên bước chuẩn hóa.
+    - Huy hiệu trạng thái: `CHỜ BƯỚC TRƯỚC`, `SẴN SÀNG`, `ĐANG CHẠY`, `HOÀN THÀNH`, `LỖI`.
+    - Cờ cảnh báo `MUTATION` màu cam nổi bật đối với các bước ghi dữ liệu thật.
+    - Thẻ liên kết phụ thuộc `Phụ thuộc: step_01, step_02...`.
+    - Accordion bung mở xem trước tham số `inputs` và kết quả `outputs` sau khi chạy.
+    - Modal `StepInspectorModal`: Chỉnh sửa chi tiết từng thuộc tính của bước (tên, capability, dữ liệu input JSON, mảng dependencies).
+  - **3. [`WorkflowValidationPanel.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/inbox/components/WorkflowValidationPanel.tsx):**
+    - **Cổng Kiểm Soát An Toàn (Safety Gate):** Đảm bảo không bao giờ có thao tác mù (blind run).
+    - **Hệ Thống 4 Pill Trạng Thái Siêu Tương Phản (High Contrast OKLCH):**
+      - Pill 1: Tổng số bước trong quy trình.
+      - Pill 2: Đồ thị DAG hợp lệ / Lỗi dependencies.
+      - Pill 3: Trạng thái chọn trường: `⚠️ Chưa chọn trường` (Nền hổ phách đậm, viền nổi, chữ đen sẫm `text-amber-950 font-black` - nhìn rõ ràng tuyệt đối ở chế độ Sáng Light Mode mà không cần bôi đen chuột) hoặc `✅ Đã chọn: [Tên trường]`.
+      - Pill 4: Kiểm tra chu trình kín: `✅ Không chu trình kín` hoặc `❌ Phát hiện chu trình`.
+    - Hộp thông báo cảnh báo mutation dữ liệu: Liệt kê chi tiết những bước nào sẽ tác động thay đổi dữ liệu trên hệ thống thực tế (Tạo đơn hàng, Nộp batch tài khoản, Duyệt hợp đồng).
+  - **Thanh Điều Khiển Chân Trang (Footer Controls):**
+    - Huy hiệu giám sát tài nguyên: `Single Playwright Semaphore: 1 Slot - Render 512MB RAM Shield`.
+    - Nút "Đóng" và nút "Xác Nhận & Khởi Chạy (Confirm & Run)" màu tím gradient quyền lực. Nếu Safety Gate phát hiện lỗi hoặc chưa chọn trường, nút bấm sẽ hiển thị cảnh báo và hướng dẫn người dùng hoàn thiện trước khi thực thi.
 
 ---
 
@@ -906,19 +1106,21 @@ classDiagram
 
 ---
 
-## 🗄️ PHẦN VII: CƠ SỞ DỮ LIỆU SUPABASE POSTGRESQL 16 (16 BẢNG & STORAGE BUCKET)
+## 🗄️ PHẦN VII: CƠ SỞ DỮ LIỆU SUPABASE POSTGRESQL 16 (18 BẢNG & STORAGE BUCKET)
 
-Hệ thống sử dụng cơ sở dữ liệu Supabase PostgreSQL 16 với 16 bảng dữ liệu chuyên biệt, phân chia theo 5 nhóm nghiệp vụ:
+Hệ thống sử dụng cơ sở dữ liệu Supabase PostgreSQL 16 với 18 bảng dữ liệu chuyên biệt, phân chia theo 5 nhóm nghiệp vụ:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                        CƠ SỞ DỮ LIỆU SUPABASE POSTGRESQL 16 (16 BẢNG)                  │
+│                        CƠ SỞ DỮ LIỆU SUPABASE POSTGRESQL 16 (18 BẢNG)                  │
 ├─────────────────────────┬──────────────────────────┬───────────────────────────────────┤
 │ 1. INBOX & AUTOMATION   │ 2. LINEAGE & VAULT       │ 3. SCANNER & COURSE CATALOGS      │
 │ • inbox_tickets         │ • workspace_organizations│ • workspace_contracts_cache       │
 │ • bot_automation_tasks  │ • workspace_credentials_ │ • workspace_orders_cache          │
-│ • templates_config      │   vault                  │ • workspace_courses               │
-│                         │                          │ • lms_courses                     │
+│ • automation_workflows  │   vault                  │ • workspace_courses               │
+│ • automation_workflow_  │                          │ • lms_courses                     │
+│   history               │                          │                                   │
+│ • templates_config      │                          │                                   │
 ├─────────────────────────┼──────────────────────────┼───────────────────────────────────┤
 │ 4. SITE HEALTH & CI/CD  │ 5. KANBAN WORK BOARD     │ 6. STORAGE BUCKET                 │
 │ • site_monitor_         │ • work_boards            │ • ticket-attachments              │
@@ -928,11 +1130,13 @@ Hệ thống sử dụng cơ sở dữ liệu Supabase PostgreSQL 16 với 16 b�
 └─────────────────────────┴──────────────────────────┴───────────────────────────────────┘
 ```
 
-### Chi Tiết Cấu Trúc 16 Bảng Dữ Liệu:
+### Chi Tiết Cấu Trúc 18 Bảng Dữ Liệu:
 
 #### 1. Nhóm Inbox & Tự Động Hóa:
 - `inbox_tickets`: Lưu trữ toàn bộ vé yêu cầu từ Gmail, Google Form, OS Ticket. Các cột chính: `id` (UUID PK), `source` (ENUM), `source_id`, `sender_email`, `submitter_name`, `subject`, `raw_content`, `ai_summary`, `category` (ENUM), `priority` (ENUM), `status` (ENUM), `country`, `doc_url`, `attachments` (JSONB), `metadata` (JSONB), `created_at`, `updated_at`.
 - `bot_automation_tasks`: Hàng đợi tác vụ tự động hóa chờ phê duyệt (Human-in-the-Loop). Các cột chính: `id` (UUID PK), `ticket_id` (FK ➔ `inbox_tickets.id`), `bot_type` (ENUM), `payload_data` (JSONB), `approval_status` (ENUM), `execution_status` (VARCHAR: `queued`, `running`, `waiting_poll`, `partial_success`, `success`, `failed`), `current_step` (VARCHAR: ghi nhận tiến trình bước thời gian thực), `last_error_step` (VARCHAR: bước gặp sự cố gần nhất), `retry_count` (INT4 DEFAULT 0: số lần chạy lại), `execution_logs` (TEXT ANSI), `created_at`, `executed_at`. Các Indexes hiệu năng: `idx_tasks_status` (`execution_status`, `approval_status`) và `idx_tasks_created_at` (`created_at DESC`).
+- `automation_workflows`: Lưu trữ các bản thảo quy trình và trạng thái thực thi của **AI Workflow Pre-processing & Execution Console**. Các cột chính: `id` (UUID PK default `gen_random_uuid()`), `ticket_id` (UUID FK ➔ `inbox_tickets.id` ON DELETE CASCADE), `title` (VARCHAR(255)), `goal` (TEXT: mục tiêu do AI nhận diện), `status` (VARCHAR(32): `draft`, `ready`, `executing`, `completed`, `failed`, `aborted`), `steps` (JSONB: mảng các bước `WorkflowStepDraft`), `dag_metadata` (JSONB: thông tin chu trình, critical path, parallel groups), `ai_analysis` (JSONB: `confidence`, `reason`, `detected_school`, `detected_courses`), `safety_checks` (JSONB: `has_high_risk_mutations`, `warnings`), `created_by` (VARCHAR(255)), `created_at` (TIMESTAMPTZ default `now()`), `updated_at` (TIMESTAMPTZ default `now()`). Indexes hiệu năng: `idx_automation_workflows_ticket` (`ticket_id`), `idx_automation_workflows_status` (`status`). RLS Policy: `admin_dtt_vn_only` áp dụng cho email `@dtt.vn`.
+- `automation_workflow_history`: Nhật ký kiểm tra (Audit Trail) chi tiết từng bước thực thi trong quy trình workflow DAG. Các cột chính: `id` (UUID PK default `gen_random_uuid()`), `workflow_id` (UUID FK ➔ `automation_workflows.id` ON DELETE CASCADE), `step_id` (VARCHAR(64)), `step_name` (VARCHAR(255)), `action` (VARCHAR(128)), `inputs` (JSONB: tham số đầu vào thực tế sau khi giải quyết data binding), `outputs` (JSONB: kết quả đầu ra thực tế), `error_message` (TEXT), `duration_ms` (INT4: thời gian thực thi theo mili-giây), `executed_by` (VARCHAR(255)), `created_at` (TIMESTAMPTZ default `now()`). Indexes: `idx_automation_workflow_history_workflow` (`workflow_id`), `idx_automation_workflow_history_step` (`workflow_id`, `step_id`). RLS Policy: `admin_dtt_vn_only`.
 - `templates_config`: Cấu hình mẫu Markdown cho GitHub Issues và ánh xạ cột báo cáo XLSX. Các cột: `id`, `template_key` (UNIQUE), `name`, `content_markdown`, `fields_mapping` (JSONB), `updated_at`.
 
 #### 2. Nhóm Phả Hệ Tổ Chức & Két Sắt Mã Hóa:
@@ -960,7 +1164,7 @@ Hệ thống sử dụng cơ sở dữ liệu Supabase PostgreSQL 16 với 16 b�
 
 ---
 
-## 🔄 PHẦN VIII: 10 SƠ ĐỒ LUỒNG NGHIỆP VỤ END-TO-END (MERMAID SEQUENCE & FLOWCHARTS)
+## 🔄 PHẦN VIII: 11 SƠ ĐỒ LUỒNG NGHIỆP VỤ END-TO-END (MERMAID SEQUENCE & FLOWCHARTS)
 
 ### Luồng 1: Master E2E License Hierarchy Chain (Chuỗi Cấp Phép License 4 Cấp)
 ```mermaid
@@ -1201,6 +1405,66 @@ sequenceDiagram
 
 ---
 
+### Luồng 11: AI Workflow Pre-processing & Execution Console (DAG Pipeline End-to-End)
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Admin as Quản Trị Viên (Unified Inbox)
+    participant Console as AI Workflow Console Modal
+    participant Backend as FastAPI Workflow Router (/workflows)
+    participant Planner as WorkflowPlannerService
+    participant Gemini as Gemini AI + Grounding Registry
+    participant Validator as Safety Gate Validator
+    participant Executor as WorkflowExecutionService
+    participant DB as Supabase (workflows & history)
+    participant Playwright as Playwright Chromium (1 Slot)
+
+    Admin->>Console: Bấm "Xem & Duyệt AI Workflow" tại Ticket
+    Console->>Backend: POST /workflows/triage-plan (ticket_id)
+    Backend->>Planner: plan_workflow_from_ticket(ticket_id)
+    Planner->>DB: Đọc Ticket info & File COF từ Storage
+    Planner->>Gemini: Đối chiếu 19 capabilities trong registry ➔ Lập DAG Plan
+    Gemini-->>Planner: Trả về Goal, Confidence, Detected School/Courses, Steps & Dependencies
+    Planner->>DB: Lưu WorkflowDraft (status='draft') vào automation_workflows
+    Planner-->>Console: Trả về bản thảo Workflow hoàn chỉnh
+
+    Note over Admin,Console: Tinh chỉnh luồng tại Vùng B & Vùng C
+    opt Quản trị viên đổi trường học hoặc sắp xếp lại bước
+        Admin->>Console: Chọn trường mục tiêu qua Autocomplete / Sửa bước
+        Console->>Backend: PUT /workflows/{id} (steps, ai_analysis: detected_school)
+        Backend->>DB: Cập nhật automation_workflows & ghi audit log
+    end
+
+    Admin->>Console: Bấm "Xác Nhận & Khởi Chạy (Confirm & Run)"
+    Console->>Backend: POST /workflows/{id}/validate
+    Backend->>Validator: validate_workflow(workflow_id)
+    Validator-->>Console: Trả về kết quả Safety Gate (Chu trình, Missing deps, School check)
+    
+    alt Có lỗi chặn hoặc Chưa chọn trường
+        Console-->>Admin: Hiển thị cảnh báo & chặn không cho chạy
+    else Đồ thị hợp lệ & An toàn
+        Console->>Backend: POST /workflows/{id}/execute
+        Backend->>Executor: execute_workflow_dag(workflow_id) trong background
+        Backend-->>Console: Chốt status='executing' & hiển thị tiến trình thời gian thực
+        
+        loop Từng bước theo thứ tự Sắp Xếp Tô-pô (Topological Sort)
+            Executor->>Executor: Giải quyết data binding $steps.<id>.outputs.<field>
+            alt Bước cần trình duyệt RPA
+                Executor->>Playwright: acquire_playwright_slot(lane='admin')
+                Playwright-->>Executor: Cấp quyền chạy an toàn (1 Slot Semaphore)
+                Executor->>Playwright: Thực thi tác vụ & thu hồi RAM gc.collect()
+            else Bước API hoặc File
+                Executor->>Executor: Gọi Service tương ứng (COF / Keycloak / Git / GitHub)
+            end
+            Executor->>DB: Cập nhật bước completed & ghi log vào automation_workflow_history
+        end
+        Executor->>DB: Cập nhật workflow status='completed' & ticket status='completed'
+        Executor-->>Admin: Thông báo hoàn tất toàn bộ quy trình!
+    end
+```
+
+---
+
 ## 🧭 PHẦN IX: CẨM NANG VẬN HÀNH & MA TRẬN ĐIỀU HƯỚNG DÀNH CHO AI CODER MỚI
 
 Khi tiếp nhận bất kỳ yêu cầu nào từ người dùng, AI Coder mới **CHỈ CẦN TRA BẢNG DƯỚI ĐÂY** để biết chính xác file và hàm cần can thiệp:
@@ -1209,6 +1473,10 @@ Khi tiếp nhận bất kỳ yêu cầu nào từ người dùng, AI Coder mới
 
 | Yêu Cầu Nghiệp Vụ Cần Xử Lý | Tệp Tin Cần Mở | Hàm Xử Lý Trọng Tâm | Ghi Chú Kỹ Thuật |
 |---|---|---|---|
+| **Lập Kế Hoạch AI Workflow & Safety Gate** | [`backend/app/services/workflow_planner.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_planner.py) | `plan_workflow_from_ticket`, `validate_workflow`, `_detect_cycles` | Nạp 19 capabilities từ `app/brain/`, phân tích DAG, Fallback tất định, phát hiện chu trình DFS/Kahn. |
+| **Thực Thi Luồng Tự Động DAG & Data Binding** | [`backend/app/services/workflow_executor.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_executor.py) | `execute_workflow_dag`, `_topological_sort`, `_resolve_inputs` | Sắp xếp tô-pô, giải quyết binding `$steps.<id>.outputs.<field>`, tôn trọng Single Playwright Semaphore, ghi audit log `automation_workflow_history`. |
+| **Thêm / Sửa Endpoints AI Workflow** | [`backend/app/api/v1/endpoints/workflows.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/workflows.py) | `generate_workflow_plan`, `update_workflow_draft`, `validate_workflow_api`, `execute_workflow_api` | 9 Endpoints quản trị toàn diện vòng đời DAG bản thảo, bước và thực thi. |
+| **Sửa giao diện AI Workflow Console & Safety Gate** | [`frontend/src/features/inbox/UnifiedInboxPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/inbox/UnifiedInboxPage.tsx) | `UnifiedInboxPage`, `WorkflowBuilder`, `WorkflowStepCard`, `WorkflowValidationPanel` | Bento 3 Vùng (Yêu Cầu, AI Entity Resolution, Prepared DAG Workflow), Autocomplete trường học High-Contrast, Safety Gate pills. |
 | **Sửa lỗi / Nâng cấp Ghi danh Moodle LMS** | [`backend/app/services/playwright_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/playwright_service.py) | `enroll_users_pipeline`, `modify_user_role`, `unenrol_users_pipeline` | Dùng Keyword Filter 2 nhịp, lọc `td.cell.c2`, gỡ sạch role cũ khi gán Mono-Role. |
 | **Thêm / Gỡ Collaborator Pythaverse Git** | [`backend/app/services/git_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/git_service.py) | `add_collaborators_pipeline`, `_internal_add_collaborators` | Chạy trên Làn VIP `lane='admin'`, đăng nhập GitBucket SSO Keycloak OIDC, gán vai trò GUEST/DEVELOPER/ADMIN, xử lý cảnh báo JIT Provisioning. |
 | **Sửa lỗi chuỗi cấp phép License 4 cấp** | [`backend/app/services/workspace/orchestrator_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workspace/orchestrator_service.py) | `execute_full_license_hierarchy_chain` | Kết hợp `order_service.py` và `contract_service.py`, bảo toàn checkpoint ở 100% nhánh rẽ. |

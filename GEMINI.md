@@ -14,7 +14,7 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
 |---|---|---|---|
 | **Frontend UI/UX** | `frontend-specialist` | `.agent/agents/frontend-specialist.md` | React 19, TypeScript Strict, Tailwind CSS v4, Bento Grid, Enterprise Pastel OKLCH, Dark/Light theme, SaaS aesthetic, chống AI-slop, loại bỏ nhãn song ngữ thừa, responsive. |
 | **Backend & REST APIs** | `backend-specialist` | `.agent/agents/backend-specialist.md` | Python 3.11, FastAPI 0.115, Pydantic v2 validation, Async/Await, APScheduler 6 Crons so le, Safe Job Wrapper, Ma trận 8 In-Memory RAM Caches 1ms. |
-| **Database & Storage** | `database-architect` | `.agent/agents/database-architect.md` | Supabase PostgreSQL 16 (16 bảng CSDL + Storage Bucket), ENUMs, Foreign Keys, RLS Policies `@dtt.vn`, Performance Indexes, Triggers. |
+| **Database & Storage** | `database-architect` | `.agent/agents/database-architect.md` | Supabase PostgreSQL 16 (18 bảng CSDL + Storage Bucket), ENUMs, Foreign Keys, RLS Policies `@dtt.vn`, Performance Indexes, Triggers. |
 | **RPA & Web Scraping** | `qa-automation-engineer` | `.agent/agents/qa-automation-engineer.md` | Playwright Async Chromium, Gói `workspace/` modularized 8 modules, Scanner Direct API, Moodle Keyword Filter 2 nhịp trên `td.cell.c2`, Viewport chuẩn, Selector kiên cố, Smart Polling, dọn RAM `gc.collect()`. |
 | **Security & Identity** | `security-auditor` | `.agent/agents/security-auditor.md` | Whitelist Domain `@dtt.vn`, Fernet Credential Vault (`VAULT_SECRET_KEY`), Keycloak Admin REST API + Playwright Fallback, Bearer Token validation, Human-in-the-Loop Gate. |
 | **Điều Phối Đa Nhiệm** | `orchestrator` | `.agent/agents/orchestrator.md` | Phân tích luồng end-to-end, giải quyết xung đột dữ liệu, thiết kế pipeline liên thông đa dịch vụ. |
@@ -136,6 +136,22 @@ Hệ thống chuẩn hóa 8 bộ nhớ đệm RAM độc lập tại [`cache_pol
 ### 2.16. Bóc Tách Toàn Bộ Nội Dung Email & Re-triage (`gmail_service.py` & `re_triage_all_tickets.py`)
 - **Giải mã đệ quy đa tầng MIME (`extract_gmail_body`):** Duyệt đệ quy toàn bộ các `parts` của MIME payload để giải mã base64 trọn vẹn cả `text/plain` hoặc `text/html`, khắc phục triệt để tình trạng email bị cắt cụt (snippet ngắn < 250 ký tự).
 - **Kịch bản Vá & Re-triage Hàng Loạt (`re_triage_all_tickets.py`):** Quét các ticket chưa hoàn thành trên Supabase, tự động tải lại body gốc từ Gmail API nếu phát hiện nội dung bị thiếu, cập nhật lại vào `raw_content` và gọi `process_ticket_with_ai` để Gemini AI phân tích lại toàn diện.
+
+### 2.17. Bàn Điều Khiển & Tiền Xử Lý Luồng AI Workflow Console (`workflows.py`, `workflow_planner.py`, `workflow_executor.py`)
+- **Tách Biệt Rõ Ràng Giữa 2 Trải Nghiệm:**
+  - *Unified Inbox (`/inbox`):* Request ➔ AI Triage / Entity Resolution ➔ Grounding qua Capability Registry ➔ Lập DAG Workflow Draft ➔ Admin Review / Tinh chỉnh ➔ Bấm Confirm & Run ➔ Thực thi tuần tự/song song theo phụ thuộc.
+  - *Automation Studio (`/studio`):* Bàn điều phối thủ công độc lập (Manual Playground), không cần ticket hay AI Planner, dành cho quản trị viên chủ động chọn chức năng và chạy trực tiếp.
+- **Grounding Nghiệp Vụ Chặt Chẽ:** AI Gemini không tự phát minh chức năng mà được neo chặt bởi:
+  - `backend/app/brain/capabilities.json`: 19 Capabilities chuẩn mực kèm input/output schema và mức độ rủi ro (`risk_level`).
+  - `backend/app/brain/workflow_rules.json`: 5 Archetypes chuẩn (`CREATE_ACCOUNTS_AND_ENROLL_LMS`, `COF_FULL_ONBOARDING`, `KEYCLOAK_IDENTITY_MANAGEMENT`, `GIT_COLLABORATOR_ACCESS`, `FEEDBACK_DOC_TRIAGE`).
+  - `backend/app/brain/dependency_rules.json`: Quy tắc ràng buộc tiên quyết giữa các bước.
+- **Data Binding & Ràng Buộc Phụ Thuộc (DAG):**
+  - Hỗ trợ cú pháp liên kết dữ liệu `{{ step_xx.property }}` truyền tự động output của bước trước sang input bước sau.
+  - Thuật toán DFS 3 trạng thái phát hiện và chặn đứng 100% chu trình phụ thuộc khép kín (Circular Dependencies).
+- **Cơ Sở Dữ Liệu Quản Trị Luồng (Bảng 17 & 18):**
+  - Bảng `automation_workflows`: Lưu trữ Workflow Draft, Versioning, AI Analysis, DAG Steps và trạng thái thực thi.
+  - Bảng `automation_workflow_history`: Ghi nhận Audit Log toàn bộ thao tác điều chỉnh của Quản trị viên (đổi trường, sửa bước, thay đổi inputs).
+- **Bảo Vệ Tài Nguyên Máy Chủ:** Khi thực thi workflow, `WorkflowExecutor` luôn tuân thủ nghiêm ngặt `TaskCoordinator.claim_task_for_execution()` (chống race condition) và `acquire_playwright_slot()` (`GLOBAL_PLAYWRIGHT_SEMAPHORE = 1` cho Render 512MB RAM).
 
 ---
 
