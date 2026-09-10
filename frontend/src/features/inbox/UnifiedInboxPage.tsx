@@ -745,127 +745,102 @@ export const UnifiedInboxPage: React.FC = () => {
   };
 
   // =========================================================================
-  // ⚡ SIÊU NĂNG LỰC PRE-FILL: BẮT ĐÚNG EMAIL HỌC SINH & ĐỒNG BỘ FORM
+  // ⚡ SIÊU NĂNG LỰC PRE-FILL 2.0: TỰ BÓC TÁCH COMPOSITE WORKFLOW & DẢI SWRP 4-12
   // =========================================================================
+  const [isCompositeMode, setIsCompositeMode] = useState<boolean>(false);
+  const [compositeSteps, setCompositeSteps] = useState<{
+    enableAccount: boolean;
+    enableLms: boolean;
+    enableGit: boolean;
+  }>({ enableAccount: true, enableLms: true, enableGit: true });
+
   const handleOpenTaskModal = (ticket: InboxTicket) => {
     setTaskModalTicket(ticket);
     setViewMode('form');
 
     const meta = ticket.metadata || {};
     const suggestedTask = meta.suggested_bot_task || {};
-    const excelSummary = meta.excel_summary || null;
-    const cofCourses = meta.cof_courses || excelSummary?.courses || [];
+    const fullText = `${ticket.subject || ''} \n ${ticket.raw_content || ''}`.toLowerCase();
 
-    const fullText = `${ticket.subject || ''} ${ticket.raw_content || ''} ${ticket.submitter_name || ''} ${meta.school_name || ''}`.toLowerCase();
+    // 1. Tự động bóc tách danh sách Người Dùng (Cả Tên lẫn Email) từ raw text
+    const lines = (ticket.raw_content || '').split('\n').map(l => l.trim()).filter(Boolean);
+    const extractedTeachers: { name: string; email: string }[] = [];
+    let tempName = '';
+    const emailRegex = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/;
 
-    // 1. Phân giải trường học thụ hưởng
-    const targetSchoolName = meta.school_name || excelSummary?.school_name || suggestedTask.payload?.school_name || '';
-    let matchedSchool: HierarchySchoolItem | null = null;
+    lines.forEach(line => {
+      const clean = line.replace(/^[\s\-\*•\d\.\)]+/, '').trim();
+      const match = clean.match(emailRegex);
+      if (match) {
+        const email = match[1].toLowerCase();
+        const inlineName = clean.replace(match[0], '').replace(/[-:()]/g, '').trim();
+        const finalName = inlineName || tempName || email.split('@')[0];
+        extractedTeachers.push({ name: finalName, email });
+        tempName = '';
+      } else if (!clean.toLowerCase().includes('support') && !clean.toLowerCase().includes('request') && clean.split(' ').length >= 2 && clean.length < 50) {
+        tempName = clean;
+      }
+    });
 
-    if (targetSchoolName) {
-      matchedSchool = schoolsList.find((s) => s.school_name.toLowerCase().includes(targetSchoolName.toLowerCase())) || null;
+    const teacherEmails = extractedTeachers.map(t => t.email);
+    const emailsForInputs = teacherEmails.length > 0
+      ? teacherEmails.join('\n')
+      : (ticket.sender_email || '');
+
+    setLmsBulkSingleEmails(emailsForInputs);
+    setLmsStudentEmails(emailsForInputs);
+    setGitUsersList(emailsForInputs);
+    setKcTargetEmail(teacherEmails[0] || ticket.sender_email || '');
+
+    // 2. Tự động phân tích Dải Khóa Học (VD: "SWRP 4–12" hoặc "SWRP 4-12")
+    const swrpRangeMatch = fullText.match(/swrp\s*(\d+)\s*[-–—to]+\s*(\d+)/i);
+    let targetCourseNumbers: number[] = [];
+    if (swrpRangeMatch) {
+      const startNum = parseInt(swrpRangeMatch[1]);
+      const endNum = parseInt(swrpRangeMatch[2]);
+      for (let i = startNum; i <= endNum; i++) {
+        targetCourseNumbers.push(i);
+      }
     }
-    if (!matchedSchool) {
-      matchedSchool = schoolsList.find((s) => fullText.includes(s.school_name.toLowerCase()) || (s.school_code && fullText.includes(s.school_code.toLowerCase()))) || schoolsList[0] || null;
-    }
 
-    setSelectedSchool(matchedSchool);
-    if (matchedSchool) {
-      setEntitySearchQuery(matchedSchool.school_name);
-      setSelectedPartner({ name: matchedSchool.partner_name, code: matchedSchool.partner_code || 'PAR' });
-      setSelectedDistributor({ name: matchedSchool.distributor_name, code: matchedSchool.distributor_code || 'DST' });
-    }
-
-    // 2. Điền thông tin khóa học COF nếu Backend đã bóc tách sẵn
-    if (cofCourses.length > 0) {
-      setSelectedCourses(
-        cofCourses.map((c: any) => ({
-          category: c.category || 'SWRP',
-          course_id: c.course_id || 654,
-          course_name: c.course_name || c.name,
-          lms_url: c.lms_url || `https://learn.pythaverse.space/course/view.php?id=${c.course_id || 654}`,
-          licenses: c.licenses || c.quantity || 50,
-          start_date: c.start_date || getFormattedDate(today),
-          end_date: c.end_date || getFormattedDate(nextYear),
-        }))
-      );
-    } else {
-      const defaultCourse = workspaceCoursesList.find((c) => c.category === 'SWRP') || workspaceCoursesList[0] || {
-        course_id: 654,
-        category: 'SWRP',
-        course_name: 'SWRP 9: LEANBOT Programming Applications with IoT [V2] (EN)',
-        lms_url: 'https://learn.pythaverse.space/course/view.php?id=654',
-      };
-      setSelectedCourses([
-        {
-          category: defaultCourse.category,
-          course_id: defaultCourse.course_id,
-          course_name: defaultCourse.course_name,
-          lms_url: defaultCourse.lms_url,
-          licenses: 50,
+    // Khớp môn học LMS theo số hiệu
+    if (targetCourseNumbers.length > 0 && lmsCoursesList.length > 0) {
+      const matchedLms = targetCourseNumbers.map(num => {
+        const found = lmsCoursesList.find(c =>
+          c.course_name.toLowerCase().includes(`swrp ${num}`) ||
+          c.course_name.toLowerCase().includes(`swrp${num}`)
+        );
+        return found ? {
+          category: found.category,
+          course_id: found.course_id,
+          course_name: found.course_name,
           start_date: getFormattedDate(today),
           end_date: getFormattedDate(nextYear),
-        },
-      ]);
+          group_name: `TEACHER_TRAINING_SWRP_${num}`
+        } : null;
+      }).filter(Boolean) as LmsCourseSelectionItem[];
+
+      if (matchedLms.length > 0) {
+        setLmsSelectedCourses(matchedLms);
+      }
     }
 
-    // 3. Phân loại Cỗ máy
-    let botType: 'workspace_rpa' | 'keycloak_api' | 'git_collaborator' | 'feedback_doc_triage' = 'workspace_rpa';
-    let mainCat: 'approve' | 'create_and_approve' | 'bulk_accounts' | 'lms_enroll' = 'create_and_approve';
+    // 3. Nhận diện ngữ cảnh Luồng Liên Hoàn (Composite Workflow)
+    const isTeacherOrTraining = fullText.includes('teacher') || fullText.includes('training') || fullText.includes('demo');
+    const hasRepoRequest = fullText.includes('repositor') || fullText.includes('git');
+    const hasAccountAndLms = fullText.includes('account') && (fullText.includes('swrp') || fullText.includes('access') || fullText.includes('course'));
 
-    if (suggestedTask.bot_type) {
-      if (suggestedTask.bot_type === 'lms_playwright') {
-        botType = 'workspace_rpa';
-        mainCat = 'lms_enroll';
-      } else {
-        botType = suggestedTask.bot_type;
-      }
-
-      if (suggestedTask.action === 'bulk_account_creation') mainCat = 'bulk_accounts';
-      else if (suggestedTask.action === 'pipeline_end_to_end') mainCat = 'create_and_approve';
-      else if (suggestedTask.action?.includes('approve')) mainCat = 'approve';
+    if (hasAccountAndLms || hasRepoRequest) {
+      setIsCompositeMode(true);
+      setCompositeSteps({
+        enableAccount: true,
+        enableLms: true,
+        enableGit: hasRepoRequest
+      });
+      toast.success(`⚡ Gemini AI phát hiện yêu cầu Đa Tác Vụ (${extractedTeachers.length} Giáo viên, SWRP 4–12)!`);
     } else {
-      if (ticket.category === 'account_keycloak') {
-        botType = 'keycloak_api';
-      } else if (ticket.category === 'lms_enroll') {
-        botType = 'workspace_rpa';
-        mainCat = 'lms_enroll';
-      } else if (ticket.category === 'license') {
-        botType = 'workspace_rpa';
-        const hasExcel = ticket.attachments?.some((a: any) => a.filename?.endsWith('.xlsx') || a.filename?.endsWith('.xls'));
-        mainCat = hasExcel ? 'bulk_accounts' : 'create_and_approve';
-      } else if (ticket.source === 'google_form') {
-        botType = 'feedback_doc_triage';
-      }
+      setIsCompositeMode(false);
     }
-
-    setSelectedBotType(botType);
-    setWorkspaceMainCategory(mainCat);
-
-    // 🎯 SỬA LỖI BẮT ĐÚNG EMAIL HỌC SINH: ƯU TIÊN TARGET EMAIL TỪ AI VÀ NỘI DUNG TICKET!
-    const senderEmail = (ticket.sender_email || '').toLowerCase().trim();
-    const rawMatches = ticket.raw_content?.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [];
-
-    // Lọc ra các email có trong nội dung mà KHÔNG PHẢI là email người gửi
-    const contentEmails = Array.from(new Set(rawMatches.map(e => e.toLowerCase().trim()))).filter(
-      (e) => e !== senderEmail && !e.includes('pythaverse.space') && !e.includes('dtt.vn')
-    );
-
-    // Ưu tiên 1: Target email do Gemini AI bóc tách
-    // Ưu tiên 2: Email tìm thấy trong nội dung tin nhắn
-    // Ưu tiên 3: Mới fallback về sender email
-    const resolvedTargetEmail = meta.target_email || suggestedTask.payload?.target_email || (contentEmails.length > 0 ? contentEmails[0] : ticket.sender_email);
-
-    setKcTargetEmail(resolvedTargetEmail);
-    setDocUrl(ticket.doc_url || '');
-    setAssigneeEmail(ticket.assigned_email || 'hung.nguyenmanh@dtt.vn');
-
-    const emailListToUse = contentEmails.length > 0 ? contentEmails : [resolvedTargetEmail];
-    setLmsBulkSingleEmails(emailListToUse.join('\n'));
-    setLmsStudentEmails(emailListToUse.join('\n'));
-    setGitUsersList(emailListToUse.join('\n'));
-
-    toast.success(`✨ AI đã điền sẵn thông số cho tài khoản [${resolvedTargetEmail}]!`);
   };
 
   const computedPayload = useMemo(() => {
@@ -878,6 +853,63 @@ export const UnifiedInboxPage: React.FC = () => {
       contact_info: contactInfo,
       additional_notes: additionalNotes,
     };
+    // Nếu người dùng bật Chế độ Luồng Liên Hoàn
+    if (isCompositeMode) {
+      const stepsToRun: any[] = [];
+      const teacherList = lmsBulkSingleEmails.split(/[\n,;]+/).map(e => e.trim()).filter(Boolean);
+
+      // Bước 1: Keycloak / Account
+      if (compositeSteps.enableAccount) {
+        stepsToRun.push({
+          step_name: "Tạo Định Danh Tài Khoản",
+          bot_type: "keycloak_api",
+          payload: {
+            action: "batch_create_or_reset",
+            target_emails: teacherList,
+            temporary_password: kcTempPass,
+            force_change_on_first_login: true
+          }
+        });
+      }
+
+      // Bước 2: LMS PLearn Direct
+      if (compositeSteps.enableLms) {
+        stepsToRun.push({
+          step_name: "Ghi Danh Moodle LMS PLearn",
+          bot_type: "lms_playwright",
+          payload: {
+            action: "enroll_users_pipeline",
+            role_mode: "same_role",
+            teacher_emails: teacherList,
+            courses: lmsSelectedCourses.map(c => ({
+              course_id: c.course_id,
+              course_name: c.course_name,
+              group_name: c.group_name || "TEACHER_TRAINING"
+            }))
+          }
+        });
+      }
+
+      // Bước 3: Thêm Git Repos
+      if (compositeSteps.enableGit) {
+        stepsToRun.push({
+          step_name: "Phân Quyền Pythaverse Git Repos",
+          bot_type: "git_collaborator",
+          payload: {
+            action: "add_repo_collaborators",
+            users: teacherList,
+            role: "DEVELOPER",
+            repo_url: gitRepoUrl
+          }
+        });
+      }
+
+      return {
+        bot_type: "composite_workflow",
+        ticket_id: tId,
+        steps: stepsToRun
+      };
+    }
 
     if (selectedBotType === 'workspace_rpa') {
       if (workspaceMainCategory === 'approve') {
@@ -1833,6 +1865,37 @@ export const UnifiedInboxPage: React.FC = () => {
                   className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
                 >
                   <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            {/* BANNER CHUYỂN ĐỔI CHẾ ĐỘ: TÁC VỤ ĐƠN LẺ VS LUỒNG LIÊN HOÀN */}
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-indigo-500/10 via-purple-500/10 to-pink-500/10 border border-indigo-200 dark:border-indigo-800 flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-indigo-600 text-white shadow-sm">
+                  <Layers className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-extrabold text-slate-900 dark:text-white uppercase tracking-wider">
+                    Chế Độ Điều Phối Luồng:
+                  </h4>
+                  <p className="text-[11px] text-slate-500">
+                    {isCompositeMode
+                      ? "⚡ Đang kích hoạt Luồng Liên Hoàn (Tài Khoản ➔ LMS ➔ Git)"
+                      : "Tác vụ đơn lẻ (Studio cổ điển)"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCompositeMode(!isCompositeMode)}
+                  className={`px-4 py-2 rounded-xl text-xs font-extrabold cursor-pointer transition shadow-2xs ${isCompositeMode
+                    ? 'bg-indigo-600 text-white shadow-indigo-500/30 ring-2 ring-indigo-400'
+                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300'
+                    }`}
+                >
+                  {isCompositeMode ? "✓ Luồng Liên Hoàn (3-in-1)" : "Chuyển sang Luồng Liên Hoàn"}
                 </button>
               </div>
             </div>

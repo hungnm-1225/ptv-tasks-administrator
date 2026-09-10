@@ -505,6 +505,68 @@ async def execute_approved_bot_task(
             logger.info(f"🐙 {task_tag} Kích hoạt Git Playwright Collaborator Pipeline...")
             return await git_playwright_service.add_collaborators_pipeline(payload_data)
 
+        # =====================================================================
+        # ⚡ 7. NHÓM TASK ĐIỀU PHỐI ĐA TẦNG LIÊN HOÀN (COMPOSITE MULTI-TASK PIPELINE)
+        # =====================================================================
+        elif bot_type == "composite_workflow":
+            steps = payload_data.get("steps", [])
+            if not steps:
+                return {"status": "failed", "error": "Composite Workflow không có bước nào được cấu hình."}
+
+            step_results = {}
+            from app.core.supabase import get_supabase_client
+            supabase = get_supabase_client()
+
+            for step_idx, step in enumerate(steps, 1):
+                s_name = step.get("step_name", f"step_{step_idx}")
+                s_bot = step.get("bot_type")
+                s_payload = step.get("payload", {})
+                
+                # Checkpoint check: nếu bước này đã hoàn thành ở phiên trước, bỏ qua an toàn!
+                if checkpoint.get(f"{s_name}_status") == "success":
+                    logger.info(f"⏩ {task_tag} [BƯỚC {step_idx}/{len(steps)}] {s_name} đã thành công ở checkpoint cũ, bỏ qua.")
+                    step_results[s_name] = checkpoint.get(f"{s_name}_result", {"status": "success", "skipped": True})
+                    continue
+
+                logger.info(f"▶️ {task_tag} [BƯỚC {step_idx}/{len(steps)}] Đang thực thi: {s_name} ({s_bot})...")
+                
+                # Cập nhật trạng thái tiến trình thời gian thực
+                if task_id:
+                    try:
+                        supabase.table("bot_automation_tasks").update({
+                            "current_step": f"Đang chạy {s_name} ({step_idx}/{len(steps)})"
+                        }).eq("id", task_id).execute()
+                    except Exception:
+                        pass
+
+                # Tự đệ quy gọi execute_approved_bot_task để tái sử dụng toàn bộ logic các bot con
+                res = await execute_approved_bot_task(
+                    bot_type=s_bot,
+                    payload_data=s_payload,
+                    task_id=task_id
+                )
+
+                step_results[s_name] = res
+                if res.get("status") in ["failed", "error"]:
+                    checkpoint[f"{s_name}_status"] = "failed"
+                    return {
+                        "status": "failed",
+                        "error": f"Lỗi ở bước '{s_name}': {res.get('error')}",
+                        "current_step": f"{s_name}_failed",
+                        "step_results": step_results,
+                        "checkpoint": checkpoint
+                    }
+
+                checkpoint[f"{s_name}_status"] = "success"
+                checkpoint[f"{s_name}_result"] = res
+
+            logger.info(f"🎉 {task_tag} Composite Workflow đã hoàn tất toàn bộ {len(steps)} bước!")
+            return {
+                "status": "success",
+                "message": f"Đã hoàn thành toàn bộ {len(steps)} bước của quy trình liên hoàn!",
+                "step_results": step_results,
+                "checkpoint": checkpoint
+            }
         else:
             return {"status": "failed", "error": f"Loại bot '{bot_type}' chưa được hỗ trợ."}
 

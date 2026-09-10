@@ -559,3 +559,100 @@ class COFExcelService:
             wb_orig.close()
             del wb_orig
             gc.collect()
+
+
+    # =========================================================================
+    # ⚡ TIỀN XỬ LÝ NÂNG CAO: TỰ ĐỘNG BÓC TÁCH TEXT TRẦN & SINH FILE EXCEL CHUẨN
+    # =========================================================================
+    @classmethod
+    def extract_users_from_raw_text(cls, text: str) -> List[Dict[str, Any]]:
+        """
+        Tự động bóc tách danh sách người dùng từ văn bản trần dạng:
+        Kimberly E. Mabagos
+        - kimmabagos26@gmail.com
+        Hoặc dạng bảng / bullet points bất kỳ.
+        """
+        if not text:
+            return []
+
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        extracted: List[Dict[str, Any]] = []
+        pending_name = ""
+
+        email_pattern = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
+
+        for line in lines:
+            # Loại bỏ các gạch đầu dòng, dấu sao Markdown
+            clean_line = re.sub(r'^[\s\-\*•\d\.\)]+', '', line).strip()
+            
+            emails = email_pattern.findall(clean_line)
+            if emails:
+                email = emails[0].lower().strip()
+                # Tên có thể nằm cùng dòng trước email, hoặc ở dòng ngay trước đó
+                inline_name = email_pattern.sub('', clean_line).strip(' -:()')
+                name_to_use = inline_name or pending_name or email.split('@')[0]
+                
+                parts = [p for p in name_to_use.split() if p]
+                first_name = parts[-1] if len(parts) > 1 else (parts[0] if parts else "Teacher")
+                last_name = " ".join(parts[:-1]) if len(parts) > 1 else "Auto"
+
+                extracted.append({
+                    "full_name": name_to_use,
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "email": email,
+                    "dob": "01/01/2000",
+                    "role": "Teacher"  # Mặc định giáo viên theo ngữ cảnh request
+                })
+                pending_name = ""
+            else:
+                # Nếu không có email và không phải các dòng tiêu đề chung chung, lưu làm tên ứng viên
+                lower_line = clean_line.lower()
+                if not any(kw in lower_line for kw in ["hi ", "dear ", "thank", "support", "request", "access", "swrp", "regards", "lượt"]):
+                    if len(clean_line.split()) >= 2 and len(clean_line) < 60:
+                        pending_name = clean_line
+
+        logger.info(f"✨ [AI PRE-PROCESSOR] Đã bóc tách được {len(extracted)} người dùng từ nội dung raw text!")
+        return extracted
+
+    @classmethod
+    def generate_accounts_excel_from_users(cls, users: List[Dict[str, Any]], output_file_path: str) -> str:
+        """
+        Tự sinh file Excel chuẩn format của trường (Tiêu đề hàng 2, Header hàng 5, Data hàng 6)
+        từ danh sách user dict mà không cần người dùng upload file sẵn.
+        """
+        os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
+        wb = openpyxl.Workbook()
+        try:
+            ws = wb.active
+            ws.title = "Class 7s"
+
+            ws.merge_cells("B2:G2")
+            title_cell = ws["B2"]
+            title_cell.value = "Account creation request form"
+            title_cell.font = Font(name="Arial", size=18, bold=True)
+            title_cell.alignment = Alignment(horizontal="center", vertical="center")
+
+            headers = ["No.", "First Name (*)", "Last Name (*)", "Mobile number", "Email (*)", "Date of Birth (*)", "Role (*)"]
+            for c_i, h in enumerate(headers, 1):
+                cell = ws.cell(row=5, column=c_i, value=h)
+                cell.font = Font(name="Arial", size=10, bold=True)
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+
+            for idx, u in enumerate(users, 1):
+                r = idx + 5
+                ws.cell(row=r, column=1, value=idx)
+                ws.cell(row=r, column=2, value=u.get("first_name", ""))
+                ws.cell(row=r, column=3, value=u.get("last_name", ""))
+                ws.cell(row=r, column=4, value=u.get("mobile", ""))
+                ws.cell(row=r, column=5, value=u.get("email", ""))
+                ws.cell(row=r, column=6, value=cls._format_date_dob(u.get("dob", "01/01/2000")))
+                ws.cell(row=r, column=7, value=str(u.get("role", "Teacher")).capitalize())
+
+            wb.save(output_file_path)
+            logger.info(f"📁 [SYNTHETIC EXCEL] Đã tự động tạo file Excel chuẩn ({len(users)} users): {output_file_path}")
+            return output_file_path
+        finally:
+            wb.close()
+            del wb
+            gc.collect()
