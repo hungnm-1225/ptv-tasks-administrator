@@ -182,14 +182,9 @@ class PlaywrightLMSService:
 
             # 2. Đảm bảo chọn filter type là 'keywords' (Chuẩn theo file test)
             type_select = page.locator("select[data-filterfield='type']").first
-            await type_select.wait_for(state="visible", timeout=10000)
-            
-            curr_type = await type_select.input_value()
-            if curr_type != "keywords":
-                logger.info("🎯 Chọn điều kiện lọc: [Keyword]...")
+            if await type_select.count() > 0 and await type_select.is_enabled():
                 await type_select.select_option(value="keywords")
-                # Đợi Moodle render AJAX ô input value (rất quan trọng trên Render)
-                await page.wait_for_timeout(800)
+                await page.wait_for_timeout(500)
 
             # 3. [Nhịp 1]: Chờ ô Type... xuất hiện, gõ email và bấm Enter để sinh Tag Pill
             kw_input = page.locator(
