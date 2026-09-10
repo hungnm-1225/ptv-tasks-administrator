@@ -675,12 +675,12 @@ export const UnifiedInboxPage: React.FC = () => {
       category === 'bug'
         ? 'System Bugs'
         : category === 'account_keycloak'
-        ? 'Keycloak/Account'
-        : category === 'lms_enroll'
-        ? 'LMS Enroll'
-        : category === 'license'
-        ? 'License'
-        : 'Khác';
+          ? 'Keycloak/Account'
+          : category === 'lms_enroll'
+            ? 'LMS Enroll'
+            : category === 'license'
+              ? 'License'
+              : 'Khác';
 
     return (
       <div className="relative inline-block">
@@ -715,11 +715,10 @@ export const UnifiedInboxPage: React.FC = () => {
                   handleCategoryChange(ticketId, opt.id);
                   setActiveCategoryDropdown(null);
                 }}
-                className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer ${
-                  category === opt.id
-                    ? 'font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-950/30'
-                    : 'text-slate-700 dark:text-slate-300'
-                }`}
+                className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer ${category === opt.id
+                  ? 'font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-950/30'
+                  : 'text-slate-700 dark:text-slate-300'
+                  }`}
               >
                 <span>{opt.label}</span>
                 {category === opt.id && <Check className="w-3.5 h-3.5 text-indigo-600" />}
@@ -825,11 +824,10 @@ export const UnifiedInboxPage: React.FC = () => {
                 <button
                   key={tab.id}
                   onClick={() => setSelectedStatus(tab.id)}
-                  className={`px-3 py-1 rounded-lg font-bold transition cursor-pointer ${
-                    selectedStatus === tab.id
-                      ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                  }`}
+                  className={`px-3 py-1 rounded-lg font-bold transition cursor-pointer ${selectedStatus === tab.id
+                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    }`}
                 >
                   {tab.label}
                 </button>
@@ -1314,21 +1312,18 @@ export const UnifiedInboxPage: React.FC = () => {
                         <div className="relative" ref={schoolPickerRef}>
                           <div
                             onClick={() => setIsSchoolPickerOpen(!isSchoolPickerOpen)}
-                            className={`flex items-center justify-between p-3 rounded-xl border transition cursor-pointer shadow-xs ${
-                              activeWorkflow.ai_analysis?.detected_school?.name
-                                ? 'border-emerald-300 dark:border-emerald-800/60 bg-emerald-50/70 dark:bg-emerald-950/30 hover:bg-emerald-100/60'
-                                : 'border-amber-400 dark:border-amber-700 bg-amber-100/80 dark:bg-amber-950/40 hover:bg-amber-100'
-                            }`}
+                            className={`flex items-center justify-between p-3 rounded-xl border transition cursor-pointer shadow-xs ${activeWorkflow.ai_analysis?.detected_school?.name
+                              ? 'border-emerald-300 dark:border-emerald-800/60 bg-emerald-50/70 dark:bg-emerald-950/30 hover:bg-emerald-100/60'
+                              : 'border-amber-400 dark:border-amber-700 bg-amber-100/80 dark:bg-amber-950/40 hover:bg-amber-100'
+                              }`}
                           >
                             <div className="flex items-center gap-2 min-w-0">
-                              <Building2 className={`w-4 h-4 shrink-0 ${
-                                activeWorkflow.ai_analysis?.detected_school?.name ? 'text-emerald-600' : 'text-amber-700 dark:text-amber-400'
-                              }`} />
-                              <span className={`text-xs font-black truncate ${
-                                activeWorkflow.ai_analysis?.detected_school?.name
-                                  ? 'text-slate-900 dark:text-white'
-                                  : 'text-amber-950 dark:text-amber-200'
-                              }`}>
+                              <Building2 className={`w-4 h-4 shrink-0 ${activeWorkflow.ai_analysis?.detected_school?.name ? 'text-emerald-600' : 'text-amber-700 dark:text-amber-400'
+                                }`} />
+                              <span className={`text-xs font-black truncate ${activeWorkflow.ai_analysis?.detected_school?.name
+                                ? 'text-slate-900 dark:text-white'
+                                : 'text-amber-950 dark:text-amber-200'
+                                }`}>
                                 {activeWorkflow.ai_analysis?.detected_school?.name ||
                                   '⚠️ Chưa xác định chắc chắn trường học (Nhấp để chọn)'}
                               </span>
@@ -1343,15 +1338,15 @@ export const UnifiedInboxPage: React.FC = () => {
                           {/* Dropdown tìm kiếm từ danh sách 480 trường */}
                           {isSchoolPickerOpen && (
                             <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-300 dark:border-slate-700 p-2 z-50 max-h-60 overflow-y-auto space-y-1 animate-in fade-in zoom-in-95 duration-100">
-                              <div className="relative mb-2">
-                                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                              <div className="relative w-full">
                                 <input
                                   type="text"
-                                  placeholder="Gõ tên hoặc mã trường..."
                                   value={schoolSearchQuery}
                                   onChange={(e) => setSchoolSearchQuery(e.target.value)}
-                                  className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:outline-none"
+                                  placeholder="Nhập tên trường hoặc mã trường (VD: Saint Joseph, 123...)"
+                                  className="w-full h-10 pl-9 pr-3 text-xs font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-900 border-2 border-amber-400 dark:border-amber-600 rounded-xl shadow-xs outline-none focus:ring-2 focus:ring-amber-500/30 placeholder:text-slate-400"
                                 />
+                                <Search className="w-4 h-4 text-amber-600 dark:text-amber-400 absolute left-3 top-1/2 -translate-y-1/2" />
                               </div>
 
                               {filteredSchools.length === 0 ? (
@@ -1432,11 +1427,10 @@ export const UnifiedInboxPage: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => setIsEditingWorkflow(!isEditingWorkflow)}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
-                            isEditingWorkflow
-                              ? 'bg-indigo-600 text-white shadow-sm'
-                              : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200'
-                          }`}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${isEditingWorkflow
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200'
+                            }`}
                         >
                           <Edit3 className="w-3.5 h-3.5" />
                           <span>{isEditingWorkflow ? 'Hoàn Tất Chỉnh Sửa' : 'Chỉnh Sửa Luồng'}</span>

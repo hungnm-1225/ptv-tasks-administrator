@@ -5,7 +5,7 @@ import json
 import logging
 import tempfile
 import urllib.request
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -61,7 +61,6 @@ class AIEngine:
                 "default_assignee": {"name": "Hung Nguyen", "email": "hung.nguyenmanh@dtt.vn"}
             }
 
-        # Nạp Capabilities & Workflow Rules để grounding AI
         self.capabilities_summary = []
         try:
             cap_path = os.path.join(brain_dir, "capabilities.json")
@@ -75,19 +74,6 @@ class AIEngine:
         except Exception as cap_err:
             logger.warning(f"⚠️ Lỗi nạp capabilities: {cap_err}")
 
-        self.workflow_archetypes_summary = []
-        try:
-            wf_path = os.path.join(brain_dir, "workflow_rules.json")
-            if os.path.exists(wf_path):
-                with open(wf_path, 'r', encoding='utf-8') as f:
-                    rules = json.load(f).get("workflow_archetypes", [])
-                    self.workflow_archetypes_summary = [
-                        {"rule_id": r["rule_id"], "title": r["title"], "description": r["description"]}
-                        for r in rules
-                    ]
-        except Exception as wf_err:
-            logger.warning(f"⚠️ Lỗi nạp workflow rules: {wf_err}")
-
     def analyze_ticket(
         self, 
         subject: str, 
@@ -100,37 +86,31 @@ class AIEngine:
             return {
                 "category": "other",
                 "priority": "normal",
+                "workflow_outcome": "NO_ACTION",
+                "goal": subject,
                 "summary_vi": f"🎯 Mục đích gốc: {subject}\n🔄 Tiến trình: Thiếu API Key AI\n⚡ Hành động đề xuất: Cần cấu hình GEMINI_API_KEY.",
                 "assigned_name": "Hung Nguyen",
                 "assigned_email": "hung.nguyenmanh@dtt.vn",
                 "target_email": None,
                 "detected_school": None,
+                "requested_operations": [],
+                "entities": {},
                 "suggested_bot_type": None,
                 "suggested_action": None,
                 "suggested_payload": {},
-                "recommended_workflow_rule": None,
                 "reason_summary_vi": "Thiếu API Key AI để lập kế hoạch."
             }
 
         kb_json_str = json.dumps(self.kb, ensure_ascii=False, indent=2)
-        caps_str = json.dumps(self.capabilities_summary, ensure_ascii=False, indent=2)
-        wf_rules_str = json.dumps(self.workflow_archetypes_summary, ensure_ascii=False, indent=2)
         excel_info_str = json.dumps(excel_summary, ensure_ascii=False, indent=2) if excel_summary else "Không có file Excel đính kèm hoặc chưa bóc tách."
         full_content = raw_content[:20000] if raw_content else ""
 
         prompt = f"""
-Bạn là Trợ lý AI Phân loại & Điều phối Vận hành Cấp cao của Hệ sinh thái Pythaverse & DTT Corporation.
-Nhiệm vụ của bạn là đọc kỹ TOÀN BỘ thông tin vé, LỊCH SỬ TRAO ĐỔI và DỮ LIỆU BÓC TÁCH TỪ FILE ĐÍNH KÈM (nếu có).
+Bạn là Trợ lý AI Phân loại & Kiến trúc sư Vận hành Tự động hóa Cấp cao của Pythaverse & DTT Corporation.
+Nhiệm vụ của bạn là đọc kỹ TOÀN BỘ thông tin vé, LỊCH SỬ TRAO ĐỔI và TẬP TIN ĐÍNH KÈM (nếu có) để phân tích Ý ĐỊNH NGHIỆP VỤ THỰC SỰ (Business Intent).
 
-[TRI THỨC HỆ THỐNG & DANH MỤC CAPABILITY ĐƯỢC PHÉP CHỌN]
-- Hệ thống tri thức chung:
+[TRI THỨC HỆ THỐNG]
 {kb_json_str}
-
-- Danh mục Capabilities hợp lệ (KHÔNG ĐƯỢC TỰ PHÁT MINH CAPABILITY NGOÀI DANH SÁCH):
-{caps_str}
-
-- Các sườn Workflow Archetypes chuẩn:
-{wf_rules_str}
 
 [THÔNG TIN FILE EXCEL BÓC TÁCH ĐƯỢC]
 {excel_info_str}
@@ -138,46 +118,60 @@ Nhiệm vụ của bạn là đọc kỹ TOÀN BỘ thông tin vé, LỊCH SỬ 
 [NỘI DUNG VÉ CẦN PHÂN TÍCH]
 - Nguồn tiếp nhận: {source}
 - Tiêu đề vé: {subject}
-- Chi tiết nội dung & Tiến trình trao đổi:
+- Chi tiết nội dung & Lịch sử trao đổi:
 {full_content}
 
-[QUY TẮC PHÂN BIỆT EMAIL ĐẶC BIỆT QUAN TRỌNG]:
-- Phải phân biệt rõ ràng giữa:
-  1. Người gửi/Người báo cáo (Sender/Submitter): người gửi email yêu cầu hỗ trợ.
-  2. Tài khoản mục tiêu (target_email/target_users): là tài khoản học sinh, giáo viên hoặc người dùng ĐƯỢC NHẮC ĐẾN TRONG NỘI DUNG cần reset mật khẩu, kích hoạt hoặc ghi danh.
-  -> ĐỌC KỸ VÀ PHÂN TÍCH NGỮ CẢNH CẨN THẬN ĐỂ XÁC ĐỊNH ĐÂU LÀ ĐỐI TƯỢNG CẦN XỬ LÝ.
+[QUY TẮC NHẬN DIỆN VÀ PHÂN BIỆT ĐẶC BIỆT QUAN TRỌNG]
+1. KIỂM TRA TÍNH HÀNH ĐỘNG (ACTIONABLE CHECK):
+   - Nếu đây là EMAIL QUẢNG CÁO, TIẾP THỊ, THÔNG BÁO TỰ ĐỘNG KHÔNG CẦN CAN THIỆP (ví dụ: UptimeRobot giảm giá, Newsletter, Chúc mừng năm mới, Xác nhận đơn hàng đối tác...):
+     -> 'workflow_outcome' BẮT BUỘC LÀ: "NO_ACTION"
+     -> 'requested_operations' BẮT BUỘC LÀ: [] (mảng rỗng)
+     -> 'suggested_bot_type': null
 
-[HƯỚNG DẪN QUY CHUẨN ĐẦU RA JSON]
-1. 'category': 1 trong 5 giá trị: "license", "lms_enroll", "account_keycloak", "bug", "other".
-2. 'priority': "critical" hoặc "normal".
-3. 'summary_vi': Bắt buộc 3 phần:
-   • 🎯 Mục đích gốc: ...
-   • 🔄 Tiến trình & Cập nhật mới nhất: ...
-   • ⚡ Hành động đề xuất: ...
-4. 'target_email': Email hoặc username của người dùng/học sinh cần can thiệp (ví dụ: reset pass, active, ghi danh). Nếu không có, để null.
-5. 'detected_school': Tên hoặc mã trường học nhắc đến (ví dụ: ICA, Vinschool, FPT, Nguyễn Du...) hoặc null.
-6. 'recommended_workflow_rule': 1 trong các rule archetype ("CREATE_ACCOUNTS_AND_ENROLL_LMS", "COF_FULL_ONBOARDING", "KEYCLOAK_IDENTITY_MANAGEMENT", "GIT_COLLABORATOR_ACCESS", "FEEDBACK_DOC_TRIAGE").
-7. 'reason_summary_vi': Giải thích ngắn gọn lý do vì sao chọn workflow và thứ tự các bước (Why this workflow?).
-8. 'suggested_bot_type': "workspace_rpa" | "keycloak_api" | "lms_playwright" | "git_collaborator" | "feedback_doc_triage" | null.
-9. 'suggested_action': Tên action cụ thể.
-10. 'suggested_payload': JSON chứa sẵn các tham số (ví dụ: target_email, identifiers, school_name, courses...).
+2. BÓC TÁCH ĐA MỤC TIÊU (MULTI-INTENT EXTRACTION):
+   - Một yêu cầu có thể chứa NHIỀU YÊU CẦU CON ĐỘC LẬP. Ví dụ: "Tạo tài khoản giáo viên + Cấp quyền khóa học SWRP + Cấp quyền kho mã nguồn Git".
+   - BẮT BUỘC phải trích xuất đầy đủ từng yêu cầu vào 'requested_operations'.
+   - KHÔNG ĐƯỢC NHẦM LẪN giữa "Tạo tài khoản (Account Provisioning)" với "Quản trị mật khẩu Keycloak (Reset Password / Verify Email)".
+     Chỉ khi nào khách nói rõ "quên mật khẩu", "reset password", "verify email" thì mới gán intent "reset_password" hoặc "verify_email".
+     Nếu khách yêu cầu "tạo tài khoản", "create account" -> intent là "create_accounts".
 
-HÃY TRẢ VỀ DUY NHẤT MỘT JSON OBJECT HỢP LỆ:
+3. CÁC INTENT HỢP LỆ TRONG 'requested_operations':
+   - "create_accounts": Yêu cầu tạo mới tài khoản cho học sinh/giáo viên.
+   - "course_access": Yêu cầu ghi danh/add học sinh, giáo viên vào khóa học LMS.
+   - "repository_access": Yêu cầu thêm collaborator vào Git repository.
+   - "license_order": Yêu cầu tạo đơn hàng, cấp license trường học.
+   - "reset_password": Yêu cầu cấp lại mật khẩu.
+   - "verify_email": Yêu cầu xác thực email.
+   - "doc_triage": Báo cáo sự cố cần tag người phụ trách vào Google Doc.
+
+[HƯỚNG DẪN ĐẦU RA JSON CHUẨN XÁC]
+Trả về DUY NHẤT một JSON Object với các trường sau:
 {{
-    "category": "lms_enroll",
-    "priority": "normal",
+    "workflow_outcome": "ACTIONABLE" | "NO_ACTION" | "NEEDS_INFORMATION",
+    "category": "license" | "lms_enroll" | "account_keycloak" | "bug" | "other",
+    "priority": "critical" | "normal",
+    "goal": "Tuyên bố mục đích ngắn gọn bằng tiếng Việt (ví dụ: Tạo 4 tài khoản giáo viên và cấp quyền SWRP 4-12 LMS + Git)",
     "summary_vi": "🎯 Mục đích gốc: ...\\n🔄 Tiến trình & Cập nhật mới nhất: ...\\n⚡ Hành động đề xuất: ...",
     "assigned_name": "Hung Nguyen",
     "assigned_email": "hung.nguyenmanh@dtt.vn",
-    "target_email": null,
-    "detected_school": "Nguyễn Du Primary School",
-    "recommended_workflow_rule": "CREATE_ACCOUNTS_AND_ENROLL_LMS",
-    "reason_summary_vi": "Yêu cầu cần tạo tài khoản cho học sinh trường Nguyễn Du trước, sau đó dùng chính các tài khoản này để ghi danh vào khóa học LMS, do đó bước tạo tài khoản phải chạy trước bước ghi danh.",
-    "suggested_bot_type": "workspace_rpa",
-    "suggested_action": "bulk_account_creation",
-    "suggested_payload": {{
-        "school_name": "Nguyễn Du Primary School"
-    }}
+    "detected_school": "Tên trường nếu có, hoặc null",
+    "entities": {{
+        "users": [
+            {{"name": "Kimberly E. Mabagos", "email": "kimmabagos26@gmail.com", "role": "teacher"}}
+        ],
+        "courses": ["SWRP 4–12"],
+        "repositories": ["SWRP 4–12"],
+        "school_name": null
+    }},
+    "requested_operations": [
+        {{"intent": "create_accounts", "target": "teachers", "count": 4}},
+        {{"intent": "course_access", "courses": ["SWRP 4–12"], "role": "teacher"}},
+        {{"intent": "repository_access", "repositories": ["SWRP 4–12"]}}
+    ],
+    "reason_summary_vi": "Giải thích logic vì sao hệ thống cần chạy hoặc không cần chạy bước nào.",
+    "suggested_bot_type": "workspace_rpa" | "keycloak_api" | "lms_playwright" | "git_collaborator" | null,
+    "suggested_action": "Tên action tương ứng hoặc null",
+    "suggested_payload": {{}}
 }}
 """
         for model_name in GEMINI_MODELS:
@@ -191,31 +185,36 @@ HÃY TRẢ VỀ DUY NHẤT MỘT JSON OBJECT HỢP LỆ:
                     logger.info(f"✨ Gemini AI phân tích thành công với model [{model_name}]")
                     parsed_res = json.loads(response.text)
                     return {
+                        "workflow_outcome": parsed_res.get("workflow_outcome", "ACTIONABLE"),
                         "category": parsed_res.get("category", "other"),
                         "priority": parsed_res.get("priority", "normal"),
+                        "goal": parsed_res.get("goal", subject),
                         "summary_vi": parsed_res.get("summary_vi", f"Tóm tắt: {subject}"),
                         "assigned_name": parsed_res.get("assigned_name", "Hung Nguyen"),
                         "assigned_email": parsed_res.get("assigned_email", "hung.nguyenmanh@dtt.vn"),
-                        "target_email": parsed_res.get("target_email"),
                         "detected_school": parsed_res.get("detected_school"),
-                        "recommended_workflow_rule": parsed_res.get("recommended_workflow_rule"),
+                        "entities": parsed_res.get("entities", {}),
+                        "requested_operations": parsed_res.get("requested_operations", []),
                         "reason_summary_vi": parsed_res.get("reason_summary_vi"),
                         "suggested_bot_type": parsed_res.get("suggested_bot_type"),
                         "suggested_action": parsed_res.get("suggested_action"),
                         "suggested_payload": parsed_res.get("suggested_payload", {})
                     }
             except Exception as e:
-                logger.warning(f"⚠️ Model {model_name} gặp lỗi, đang chuyển fallback...")
+                logger.warning(f"⚠️ Model {model_name} gặp lỗi: {e}, đang chuyển fallback...")
                 continue
 
         return {
+            "workflow_outcome": "NO_ACTION",
             "category": "other",
             "priority": "normal",
-            "summary_vi": f"🎯 Mục đích gốc: {subject}\n🔄 Tiến trình: Tiếp nhận vé\n⚡ Hành động đề xuất: Kiểm tra thủ công.",
+            "goal": subject,
+            "summary_vi": f"🎯 Mục đích gốc: {subject}\n🔄 Tiến trình: Tiếp nhận vé\n⚡ Hành động đề xuất: Không yêu cầu can thiệp tự động.",
             "assigned_name": "Hung Nguyen",
             "assigned_email": "hung.nguyenmanh@dtt.vn",
-            "target_email": None,
             "detected_school": None,
+            "entities": {},
+            "requested_operations": [],
             "suggested_bot_type": None,
             "suggested_action": None,
             "suggested_payload": {}
@@ -281,31 +280,28 @@ async def process_ticket_with_ai(ticket_id: str) -> Optional[Dict[str, Any]]:
         if not isinstance(existing_meta, dict):
             existing_meta = {}
 
-        suggested_payload = ai_res.get("suggested_payload") or {}
-
-        # Nếu có target_email từ AI, lưu chặt chẽ vào metadata
-        if ai_res.get("target_email"):
-            existing_meta["target_email"] = ai_res.get("target_email")
-            suggested_payload["target_email"] = ai_res.get("target_email")
-            suggested_payload["identifiers"] = [ai_res.get("target_email")]
-
-        if excel_summary:
-            existing_meta["excel_summary"] = excel_summary
-            if excel_summary.get("school_name") and not suggested_payload.get("school_name"):
-                suggested_payload["school_name"] = excel_summary["school_name"]
-            if excel_summary.get("courses"):
-                existing_meta["cof_courses"] = excel_summary["courses"]
-                if "order_details" in suggested_payload:
-                    suggested_payload["order_details"]["courses"] = excel_summary["courses"]
+        # Lưu AI Output có cấu trúc sâu vào metadata của ticket
+        existing_meta["ai_analysis"] = ai_res
+        existing_meta["workflow_outcome"] = ai_res.get("workflow_outcome", "ACTIONABLE")
+        existing_meta["requested_operations"] = ai_res.get("requested_operations", [])
+        existing_meta["entities"] = ai_res.get("entities", {})
 
         if ai_res.get("detected_school"):
             existing_meta["school_name"] = ai_res.get("detected_school")
 
-        existing_meta["suggested_bot_task"] = {
-            "bot_type": ai_res.get("suggested_bot_type"),
-            "action": ai_res.get("suggested_action"),
-            "payload": suggested_payload
-        }
+        if excel_summary:
+            existing_meta["excel_summary"] = excel_summary
+            if excel_summary.get("school_name"):
+                existing_meta["school_name"] = excel_summary["school_name"]
+            if excel_summary.get("courses"):
+                existing_meta["cof_courses"] = excel_summary["courses"]
+
+        if ai_res.get("suggested_bot_type"):
+            existing_meta["suggested_bot_task"] = {
+                "bot_type": ai_res.get("suggested_bot_type"),
+                "action": ai_res.get("suggested_action"),
+                "payload": ai_res.get("suggested_payload", {})
+            }
 
         update_data = {
             "ai_summary": ai_res.get("summary_vi"),
@@ -317,7 +313,7 @@ async def process_ticket_with_ai(ticket_id: str) -> Optional[Dict[str, Any]]:
         }
 
         supabase.table("inbox_tickets").update(update_data).eq("id", ticket_id).execute()
-        logger.info(f"✅ Đã tiền xử lý AI hoàn tất cho ticket #{ticket_id} (Target Email: {ai_res.get('target_email')})")
+        logger.info(f"✅ Đã tiền xử lý AI hoàn tất cho ticket #{ticket_id} (Outcome: {ai_res.get('workflow_outcome')})")
         return ai_res
 
     except Exception as e:

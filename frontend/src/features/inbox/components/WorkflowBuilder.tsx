@@ -1,14 +1,13 @@
 // frontend/src/features/inbox/components/WorkflowBuilder.tsx
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Plus,
-  ArrowDown,
   Layers,
   Sparkles,
-  AlertTriangle,
-  RotateCcw,
+  X,
   Check,
-  X
+  FolderTree,
+  Edit3
 } from 'lucide-react';
 import { WorkflowStep, CapabilityDefinition } from '../../../types';
 import { WorkflowStepCard } from './WorkflowStepCard';
@@ -32,12 +31,23 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
   const [selectedCapId, setSelectedCapId] = useState<string>('');
   const [customStepName, setCustomStepName] = useState<string>('');
 
-  const capabilitiesMap = React.useMemo(() => {
+  const capabilitiesMap = useMemo(() => {
     const map: Record<string, CapabilityDefinition> = {};
     capabilities.forEach((c) => {
       map[c.id] = c;
     });
     return map;
+  }, [capabilities]);
+
+  // Phân nhóm Capabilities theo Domain để hiển thị OptGroup chuyên nghiệp
+  const capabilitiesByDomain = useMemo(() => {
+    const groups: Record<string, CapabilityDefinition[]> = {};
+    capabilities.forEach((c) => {
+      const domain = c.domain || 'Phân Hệ Khác';
+      if (!groups[domain]) groups[domain] = [];
+      groups[domain].push(c);
+    });
+    return groups;
   }, [capabilities]);
 
   const handleUpdateStep = (stepId: string, updated: Partial<WorkflowStep>) => {
@@ -46,17 +56,15 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
   };
 
   const handleDeleteStep = (stepId: string) => {
-    // Kiểm tra xem có bước nào đang phụ thuộc vào bước này không
     const dependents = steps.filter((s) => s.depends_on.includes(stepId));
     if (dependents.length > 0) {
       const depNames = dependents.map((d) => d.name).join(', ');
       const confirmDelete = window.confirm(
-        `Cảnh báo phụ thuộc:\nCác bước sau đây đang cần dữ liệu từ bước này: [${depNames}].\nNếu xóa, các bước trên có thể bị lỗi. Bạn có chắc chắn muốn xóa?`
+        `⚠️ Cảnh báo phụ thuộc:\nCác bước sau đang phụ thuộc vào bước này: [${depNames}].\nNếu xóa, các bước trên có thể bị thiếu dữ liệu. Bạn có chắc chắn muốn xóa?`
       );
       if (!confirmDelete) return;
     }
 
-    // Xóa bước và làm sạch dependencies của các bước sau
     const nextSteps = steps
       .filter((s) => s.step_id !== stepId)
       .map((s) => ({
@@ -106,19 +114,24 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
   };
 
   return (
-    <div className="space-y-3">
-      {/* Tiêu đề & Công cụ điều khiển */}
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-indigo-600 text-white">
+    <div className="space-y-4">
+      {/* Tiêu Đề & Công Cụ Điều Khiển */}
+      <div className="flex items-center justify-between gap-3 flex-wrap bg-slate-50 dark:bg-slate-850 p-3 rounded-2xl border border-slate-200/80 dark:border-slate-800">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 rounded-xl bg-indigo-600 text-white shadow-xs">
             <Layers className="w-4 h-4" />
           </div>
           <div>
-            <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
-              Prepared Execution Workflow ({steps.length} Bước)
-            </h4>
-            <p className="text-[11px] text-slate-500">
-              Đồ thị liên kết tự động tuần tự dựa trên Capability Registry.
+            <div className="flex items-center gap-2">
+              <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                Prepared Execution Workflow
+              </h4>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-200 border border-indigo-300 dark:border-indigo-700">
+                {steps.length} BƯỚC
+              </span>
+            </div>
+            <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mt-0.5">
+              Đồ thị liên kết thực thi tự động dựa trên Capability Registry.
             </p>
           </div>
         </div>
@@ -127,72 +140,94 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
           <button
             type="button"
             onClick={() => setIsAddStepOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition cursor-pointer"
           >
-            <Plus className="w-3.5 h-3.5" />
+            <Plus className="w-4 h-4" />
             <span>Thêm Bước Vào Luồng</span>
           </button>
         )}
       </div>
 
-      {/* Modal / Card thêm bước mới */}
+      {/* Panel / Card Thêm Bước Mới (Giao Diện Nâng Cấp Siêu Tương Phản) */}
       {isAddStepOpen && (
-        <div className="p-4 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 space-y-3 animate-in fade-in zoom-in-95 duration-150">
-          <div className="flex items-center justify-between">
-            <h5 className="text-xs font-extrabold text-indigo-900 dark:text-indigo-200 uppercase tracking-wider">
-              Chọn Capability từ Registry:
-            </h5>
+        <div className="p-4 sm:p-5 rounded-2xl bg-indigo-50/90 dark:bg-indigo-950/60 border-2 border-indigo-300 dark:border-indigo-700 shadow-md space-y-4 animate-in fade-in zoom-in-95 duration-150">
+          <div className="flex items-center justify-between border-b border-indigo-200 dark:border-indigo-800 pb-3">
+            <div className="flex items-center gap-2">
+              <FolderTree className="w-4 h-4 text-indigo-700 dark:text-indigo-300" />
+              <h5 className="text-xs font-black text-indigo-950 dark:text-indigo-200 uppercase tracking-wider">
+                Thêm Bước Thực Thi Từ Capability Registry:
+              </h5>
+            </div>
             <button
               type="button"
               onClick={() => setIsAddStepOpen(false)}
-              className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              className="p-1.5 text-slate-500 hover:text-slate-900 dark:hover:text-white rounded-lg hover:bg-white/60 dark:hover:bg-slate-800 transition cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">
-                Capability mẫu:
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* 1. Dropdown Chọn Capability (ĐÃ FIX TRIỆT ĐỂ LỖI CHỮ TÀNG HÌNH) */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-900 dark:text-slate-200 block">
+                Chọn Cỗ Máy / Capability <span className="text-rose-500 font-bold">*</span>:
               </label>
-              <select
-                value={selectedCapId}
-                onChange={(e) => {
-                  setSelectedCapId(e.target.value);
-                  const cap = capabilitiesMap[e.target.value];
-                  if (cap) setCustomStepName(cap.name);
-                }}
-                className="w-full text-xs p-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-              >
-                <option value="">-- Chọn Capability --</option>
-                {capabilities.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    [{c.domain}] {c.name}
+              <div className="relative">
+                <select
+                  value={selectedCapId}
+                  onChange={(e) => {
+                    setSelectedCapId(e.target.value);
+                    const cap = capabilitiesMap[e.target.value];
+                    if (cap) setCustomStepName(cap.name);
+                  }}
+                  className="w-full h-11 px-3.5 text-xs font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-900 border-2 border-indigo-400 dark:border-indigo-600 rounded-xl shadow-xs outline-none focus:ring-2 focus:ring-indigo-500/30 cursor-pointer"
+                >
+                  <option value="" className="text-slate-400 bg-white dark:bg-slate-900 font-semibold">
+                    -- Nhấp Để Chọn Capability --
                   </option>
-                ))}
-              </select>
+
+                  {Object.entries(capabilitiesByDomain).map(([domain, caps]) => (
+                    <optgroup
+                      key={domain}
+                      label={`📁 ${domain}`}
+                      className="font-black text-indigo-800 dark:text-indigo-300 bg-slate-100 dark:bg-slate-800 py-1"
+                    >
+                      {caps.map((c) => (
+                        <option
+                          key={c.id}
+                          value={c.id}
+                          className="text-slate-900 dark:text-white bg-white dark:bg-slate-900 font-bold py-1.5 text-xs"
+                        >
+                          {c.name} ({c.id})
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
             </div>
 
-            <div>
-              <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">
-                Tên hiển thị tùy chỉnh:
+            {/* 2. Ô Nhập Tên Hiển Thị Tùy Chỉnh (To Rõ, Đậm Nét) */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-900 dark:text-slate-200 block">
+                Tên Hiển Thị Của Bước (Label):
               </label>
               <input
                 type="text"
                 value={customStepName}
                 onChange={(e) => setCustomStepName(e.target.value)}
-                placeholder="Nhập tên bước..."
-                className="w-full text-xs p-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                placeholder="Nhập tên bước gợi nhớ..."
+                className="w-full h-11 px-3.5 text-xs font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-900 border-2 border-indigo-400 dark:border-indigo-600 rounded-xl shadow-xs outline-none focus:ring-2 focus:ring-indigo-500/30 placeholder:text-slate-400"
               />
             </div>
           </div>
 
-          <div className="flex justify-end gap-2 pt-1">
+          <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-indigo-200/80 dark:border-indigo-800">
             <button
               type="button"
               onClick={() => setIsAddStepOpen(false)}
-              className="px-3 py-1 text-xs rounded-lg border text-slate-600 hover:bg-slate-100"
+              className="h-10 px-4 text-xs font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer"
             >
               Hủy
             </button>
@@ -200,19 +235,26 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
               type="button"
               disabled={!selectedCapId}
               onClick={handleAddStep}
-              className="px-4 py-1 text-xs font-bold rounded-lg bg-indigo-600 text-white disabled:opacity-50 hover:bg-indigo-700 shadow-2xs"
+              className="h-10 px-5 text-xs font-black rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm disabled:opacity-50 transition cursor-pointer flex items-center gap-1.5"
             >
-              Xác Nhận Thêm
+              <Check className="w-4 h-4" />
+              <span>Xác Nhận Thêm Vào Luồng</span>
             </button>
           </div>
         </div>
       )}
 
-      {/* Danh sách các Step Cards kết nối trực quan */}
-      <div className="space-y-2">
+      {/* Danh Sách Các Step Cards Kết Nối Trực Quan */}
+      <div className="space-y-2.5">
         {steps.length === 0 ? (
-          <div className="p-8 text-center rounded-2xl border border-dashed border-slate-300 dark:border-slate-800 text-slate-400 text-xs">
-            Chưa có bước nào trong quy trình. Nhấp "Thêm Bước" hoặc kích hoạt AI Tái Lập Plan.
+          <div className="p-10 text-center rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 space-y-2">
+            <Layers className="w-8 h-8 text-slate-400 mx-auto stroke-1" />
+            <p className="text-xs font-bold text-slate-600 dark:text-slate-400">
+              Chưa có bước nào trong quy trình.
+            </p>
+            <p className="text-[11px] text-slate-400">
+              Nhấp nút <strong>"Thêm Bước Vào Luồng"</strong> ở trên hoặc bấm <strong>"AI Tái Lập Plan"</strong>.
+            </p>
           </div>
         ) : (
           steps.map((step, idx) => (
@@ -229,10 +271,10 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
                 onRetryStep={onRetryStep}
               />
 
-              {/* Đường line kết nối giữa các bước */}
+              {/* Đường Line Kết Nối Trực Quan Giữa Các Bước */}
               {idx < steps.length - 1 && (
                 <div className="flex items-center justify-center py-0.5">
-                  <div className="w-0.5 h-3 bg-slate-200 dark:bg-slate-800 rounded-full" />
+                  <div className="w-0.5 h-3.5 bg-indigo-200 dark:bg-indigo-900/60 rounded-full" />
                 </div>
               )}
             </React.Fragment>
