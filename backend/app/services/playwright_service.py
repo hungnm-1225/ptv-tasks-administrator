@@ -184,7 +184,7 @@ class PlaywrightLMSService:
             type_select = page.locator("select[data-filterfield='type']").first
             if await type_select.count() > 0 and await type_select.is_enabled():
                 await type_select.select_option(value="keywords")
-                await page.wait_for_timeout(500)
+                await page.wait_for_timeout(800)
 
             # 3. [Nhịp 1]: Chờ ô Type... xuất hiện, gõ email và bấm Enter để sinh Tag Pill
             kw_input = page.locator(
