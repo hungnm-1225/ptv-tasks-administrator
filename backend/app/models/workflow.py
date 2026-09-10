@@ -53,6 +53,7 @@ class WorkflowDraftUpdate(BaseModel):
     title: Optional[str] = None
     goal: Optional[str] = None
     steps: Optional[List[WorkflowStepDraft]] = None
+    ai_analysis: Optional[Dict[str, Any]] = None
     status: Optional[str] = None
     updated_by: Optional[str] = None
 

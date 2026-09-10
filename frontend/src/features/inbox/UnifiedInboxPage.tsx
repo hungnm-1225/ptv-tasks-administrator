@@ -351,7 +351,11 @@ export const UnifiedInboxPage: React.FC = () => {
     try {
       const res = await fetchApi<WorkflowDraft>(`/workflows/${activeWorkflow.id}`, {
         method: 'PUT',
-        body: JSON.stringify({ steps: updatedSteps, updated_by: 'hung.nguyenmanh@dtt.vn' }),
+        body: JSON.stringify({
+          steps: updatedSteps,
+          ai_analysis: activeWorkflow.ai_analysis,
+          updated_by: 'hung.nguyenmanh@dtt.vn',
+        }),
       });
       if (res) {
         setActiveWorkflow(res);
@@ -397,7 +401,11 @@ export const UnifiedInboxPage: React.FC = () => {
     try {
       const res = await fetchApi<WorkflowDraft>(`/workflows/${activeWorkflow.id}`, {
         method: 'PUT',
-        body: JSON.stringify({ steps: updatedSteps, updated_by: 'hung.nguyenmanh@dtt.vn' }),
+        body: JSON.stringify({
+          steps: updatedSteps,
+          ai_analysis: updatedAnalysis,
+          updated_by: 'hung.nguyenmanh@dtt.vn',
+        }),
       });
       if (res) {
         setActiveWorkflow(res);
@@ -1306,19 +1314,29 @@ export const UnifiedInboxPage: React.FC = () => {
                         <div className="relative" ref={schoolPickerRef}>
                           <div
                             onClick={() => setIsSchoolPickerOpen(!isSchoolPickerOpen)}
-                            className="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 transition cursor-pointer"
+                            className={`flex items-center justify-between p-3 rounded-xl border transition cursor-pointer shadow-xs ${
+                              activeWorkflow.ai_analysis?.detected_school?.name
+                                ? 'border-emerald-300 dark:border-emerald-800/60 bg-emerald-50/70 dark:bg-emerald-950/30 hover:bg-emerald-100/60'
+                                : 'border-amber-400 dark:border-amber-700 bg-amber-100/80 dark:bg-amber-950/40 hover:bg-amber-100'
+                            }`}
                           >
                             <div className="flex items-center gap-2 min-w-0">
-                              <Building2 className="w-4 h-4 text-indigo-600 shrink-0" />
-                              <span className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
+                              <Building2 className={`w-4 h-4 shrink-0 ${
+                                activeWorkflow.ai_analysis?.detected_school?.name ? 'text-emerald-600' : 'text-amber-700 dark:text-amber-400'
+                              }`} />
+                              <span className={`text-xs font-black truncate ${
+                                activeWorkflow.ai_analysis?.detected_school?.name
+                                  ? 'text-slate-900 dark:text-white'
+                                  : 'text-amber-950 dark:text-amber-200'
+                              }`}>
                                 {activeWorkflow.ai_analysis?.detected_school?.name ||
                                   '⚠️ Chưa xác định chắc chắn trường học (Nhấp để chọn)'}
                               </span>
                             </div>
 
-                            <div className="flex items-center gap-1.5 shrink-0 text-slate-400">
-                              <span className="text-[10px] font-semibold">Thay đổi</span>
-                              <ChevronDown className="w-3.5 h-3.5" />
+                            <div className="flex items-center gap-1.5 shrink-0 text-indigo-700 dark:text-indigo-400 font-bold">
+                              <span className="text-xs underline">Thay đổi</span>
+                              <ChevronDown className="w-4 h-4" />
                             </div>
                           </div>
 
@@ -1380,12 +1398,12 @@ export const UnifiedInboxPage: React.FC = () => {
 
                       {/* Giải thích lý do (Why this workflow?) */}
                       {activeWorkflow.ai_analysis?.reason_summary_vi && (
-                        <div className="p-3 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-900/40 text-xs text-amber-900 dark:text-amber-200">
-                          <div className="font-bold mb-0.5 flex items-center gap-1 text-[11px] uppercase tracking-wider text-amber-700 dark:text-amber-400">
-                            <HelpCircle className="w-3 h-3" />
+                        <div className="p-3.5 rounded-xl bg-amber-100/80 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800/70 text-xs text-amber-950 dark:text-amber-100 font-medium leading-relaxed shadow-xs">
+                          <div className="font-extrabold mb-1 flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-amber-900 dark:text-amber-300">
+                            <HelpCircle className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
                             <span>Lý do lựa chọn luồng này (Why this workflow?):</span>
                           </div>
-                          <p className="leading-relaxed">{activeWorkflow.ai_analysis.reason_summary_vi}</p>
+                          <p>{activeWorkflow.ai_analysis.reason_summary_vi}</p>
                         </div>
                       )}
                     </div>

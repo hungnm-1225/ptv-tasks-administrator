@@ -123,6 +123,8 @@ async def update_workflow_draft(workflow_id: str, payload: WorkflowDraftUpdate):
         update_fields["goal"] = payload.goal
     if payload.status is not None:
         update_fields["status"] = payload.status
+    if payload.ai_analysis is not None:
+        update_fields["ai_analysis"] = payload.ai_analysis
     if payload.steps is not None:
         steps_dicts = [s.model_dump() for s in payload.steps]
         update_fields["steps"] = steps_dicts

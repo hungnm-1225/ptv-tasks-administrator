@@ -77,36 +77,44 @@ export const WorkflowValidationPanel: React.FC<WorkflowValidationPanelProps> = (
 
       {/* Danh sách tiêu chí kiểm tra nhanh (Checklist) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3 text-xs">
-        <div className="flex items-center gap-1.5 p-2 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60">
-          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-          <span className="font-semibold truncate">{totalSteps} Bước quy trình</span>
+        <div className="flex items-center gap-1.5 p-2 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 shadow-xs">
+          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+          <span className="font-bold text-slate-800 dark:text-slate-200 truncate">{totalSteps} Bước quy trình</span>
         </div>
 
-        <div className="flex items-center gap-1.5 p-2 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60">
+        <div className="flex items-center gap-1.5 p-2 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 shadow-xs">
           {hasErrors ? (
-            <XCircle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+            <XCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
           ) : (
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
           )}
-          <span className="font-semibold truncate">
+          <span className={`font-bold truncate ${hasErrors ? 'text-rose-700 dark:text-rose-400' : 'text-emerald-700 dark:text-emerald-400'}`}>
             {hasErrors ? 'Lỗi phụ thuộc' : 'DAG hợp lệ'}
           </span>
         </div>
 
-        <div className="flex items-center gap-1.5 p-2 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60">
+        <div className={`flex items-center gap-1.5 p-2 rounded-xl border shadow-xs transition-colors ${
+          isSchoolResolved
+            ? 'bg-white dark:bg-slate-800/80 border-slate-300 dark:border-slate-700'
+            : 'bg-amber-100/90 dark:bg-amber-950/60 border-amber-400 dark:border-amber-700'
+        }`}>
           {isSchoolResolved ? (
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
           ) : (
-            <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400 shrink-0" />
           )}
-          <span className="font-semibold truncate">
+          <span className={`font-black truncate ${
+            isSchoolResolved
+              ? 'text-emerald-700 dark:text-emerald-400'
+              : 'text-amber-950 dark:text-amber-200'
+          }`}>
             {isSchoolResolved ? 'Trường đã chọn' : 'Chưa chọn trường'}
           </span>
         </div>
 
-        <div className="flex items-center gap-1.5 p-2 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60">
-          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-          <span className="font-semibold truncate">Không chu trình kín</span>
+        <div className="flex items-center gap-1.5 p-2 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 shadow-xs">
+          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+          <span className="font-bold text-slate-800 dark:text-slate-200 truncate">Không chu trình kín</span>
         </div>
       </div>
 
@@ -116,7 +124,7 @@ export const WorkflowValidationPanel: React.FC<WorkflowValidationPanelProps> = (
           {validation.errors.map((err, i) => (
             <div
               key={i}
-              className="p-2.5 rounded-xl bg-rose-100/70 dark:bg-rose-950/40 border border-rose-300 text-rose-900 dark:text-rose-200 text-xs flex items-start gap-2"
+              className="p-2.5 rounded-xl bg-rose-100/80 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-800 text-rose-950 dark:text-rose-100 text-xs flex items-start gap-2 font-medium"
             >
               <XCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
               <span>{err}</span>
@@ -131,9 +139,9 @@ export const WorkflowValidationPanel: React.FC<WorkflowValidationPanelProps> = (
           {validation.warnings.map((warn, i) => (
             <div
               key={i}
-              className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 text-amber-900 dark:text-amber-200 text-xs flex items-start gap-2"
+              className="p-2.5 rounded-xl bg-amber-100/80 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800/70 text-amber-950 dark:text-amber-100 text-xs flex items-start gap-2 font-medium"
             >
-              <ShieldAlert className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+              <ShieldAlert className="w-4 h-4 text-amber-700 dark:text-amber-400 shrink-0 mt-0.5" />
               <span>{warn}</span>
             </div>
           ))}
