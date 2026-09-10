@@ -99,14 +99,15 @@ async def execute_approved_bot_task(
                 logger.info(f"🐙 {task_tag} Điều hướng sang Git Playwright Collaborator Service...")
                 return await git_playwright_service.add_collaborators_pipeline(payload_data)
 
-            # Bóc tách và làm sạch thông tin phả hệ
+            # Bóc tách và làm sạch thông tin phả hệ (ƯU TIÊN ID ĐỊNH DANH DUY NHẤT TRƯỚC TÊN)
             hierarchy = payload_data.get("hierarchy") or {}
-            school_name = clean_entity_str(
-                payload_data.get("school_name") 
-                or hierarchy.get("school_name") 
-                or payload_data.get("school_id")
-                or hierarchy.get("school_code")
-            )
+            school_id_val = clean_entity_str(payload_data.get("school_id") or hierarchy.get("school_id"))
+            school_code_val = clean_entity_str(payload_data.get("school_code") or hierarchy.get("school_code"))
+            school_name_val = clean_entity_str(payload_data.get("school_name") or hierarchy.get("school_name"))
+            
+            # Định danh truy vết: Nếu có school_id/school_code thì ưu tiên số 1 để tránh trùng tên với Partner
+            target_school_identifier = school_id_val or school_code_val or school_name_val
+            school_name = school_name_val or school_id_val or "Pythaverse School"
             
             partner_name = clean_entity_str(payload_data.get("partner_name") or payload_data.get("partner_code"))
             distributor_name = clean_entity_str(payload_data.get("distributor_name") or payload_data.get("distributor_code"))
@@ -151,8 +152,8 @@ async def execute_approved_bot_task(
                     partner_creds = partner_creds or p_lin.get("partner")
                     distributor_creds = distributor_creds or p_lin.get("distributor")
 
-            if school_name and (not school_creds or not partner_creds or not distributor_creds):
-                s_lin = workspace_lineage_service.resolve_by_school(school_name)
+            if target_school_identifier and (not school_creds or not partner_creds or not distributor_creds):
+                s_lin = workspace_lineage_service.resolve_by_school(target_school_identifier)
                 if s_lin:
                     school_creds = school_creds or s_lin.get("school")
                     partner_creds = partner_creds or s_lin.get("partner")

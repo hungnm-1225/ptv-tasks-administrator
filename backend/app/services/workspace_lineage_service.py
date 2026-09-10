@@ -51,7 +51,7 @@ class WorkspaceLineageService:
     @staticmethod
     def resolve_by_school(school_identifier: str, country_hint: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
-        Nhập tên trường hoặc mã trường (VD: '10266', 'SCH_10266' hoặc 'Pythaverse School Demo') 
+        Nhập tên trường, mã trường hoặc UUID trường (VD: '10266', 'SCH_10266', UUID hoặc 'Pythaverse School Demo') 
         -> Trả về đầy đủ thông tin tài khoản của Trường, Partner, Distributor và Thư mục Quốc gia.
         """
         if not school_identifier or school_identifier in ["Tự động truy vết", ""]:
@@ -60,10 +60,15 @@ class WorkspaceLineageService:
         supabase = get_supabase_client()
         clean_id = str(school_identifier).strip()
         
-        # 1. Tìm School theo Code (10266 hoặc SCH_10266) hoặc Name
-        query = supabase.table("workspace_organizations").select("*, workspace_credentials_vault(*)")
+        # 🔒 KHÓA CỨNG: Bắt buộc chỉ tìm các tổ chức có role_type = 'school'
+        query = supabase.table("workspace_organizations")\
+            .select("*, workspace_credentials_vault(*)")\
+            .eq("role_type", "school")
             
-        if clean_id.isdigit():
+        # 1. Hỗ trợ tìm kiếm theo UUID định danh duy nhất nếu truyền school_id
+        if len(clean_id) == 36 and clean_id.count("-") == 4:
+            school_res = query.eq("id", clean_id).execute()
+        elif clean_id.isdigit():
             school_res = query.or_(f"code.eq.{clean_id},code.eq.SCH_{clean_id},name.ilike.%{clean_id}%").execute()
         elif clean_id.startswith("SCH_"):
             num_part = clean_id.replace("SCH_", "")
@@ -72,13 +77,16 @@ class WorkspaceLineageService:
             school_res = query.or_(f"code.eq.{clean_id},name.ilike.%{clean_id}%").execute()
 
         if not school_res.data:
-            logger.warning(f"Không tìm thấy trường học phù hợp với: '{school_identifier}'")
+            logger.warning(f"Không tìm thấy trường học (role_type='school') phù hợp với: '{school_identifier}'")
             return None
 
-        # Lấy bản ghi có credentials hợp lệ
+        # 2. Lấy bản ghi School có credentials hợp lệ trong Vault
         school = None
         school_creds = {}
         for s in school_res.data:
+            # Bảo đảm bản ghi đúng chuẩn role_type school
+            if s.get("role_type") != "school":
+                continue
             raw_v = s.get("workspace_credentials_vault")
             s_c = raw_v[0] if (isinstance(raw_v, list) and len(raw_v) > 0) else (raw_v or {})
             if s_c.get("username"):
