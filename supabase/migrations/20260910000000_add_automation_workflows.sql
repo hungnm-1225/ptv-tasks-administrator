@@ -4,6 +4,17 @@
 -- Author: Nguyễn Mạnh Hùng (Lead AI Engineer & Automation Architect)
 -- =============================================================================
 
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- Trigger function cập nhật thời gian
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE TABLE IF NOT EXISTS automation_workflows (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     ticket_id UUID REFERENCES inbox_tickets(id) ON DELETE CASCADE,

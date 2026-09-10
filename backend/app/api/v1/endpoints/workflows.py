@@ -52,8 +52,14 @@ async def get_workflow_for_ticket(ticket_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Lỗi lấy workflow cho ticket #{ticket_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        err_msg = str(e)
+        logger.error(f"Lỗi lấy workflow cho ticket #{ticket_id}: {err_msg}", exc_info=True)
+        if "PGRST205" in err_msg or "automation_workflows" in err_msg:
+            raise HTTPException(
+                status_code=503,
+                detail="Bảng CSDL 'automation_workflows' chưa được khởi tạo trên Supabase. Vui lòng chạy file migration 'supabase/migrations/20260910000000_add_automation_workflows.sql' trong Supabase SQL Editor."
+            )
+        raise HTTPException(status_code=500, detail=err_msg)
 
 
 @router.post("/plan")
@@ -63,10 +69,22 @@ async def plan_ticket_workflow(payload: Dict[str, Any] = Body(...)):
     if not ticket_id:
         raise HTTPException(status_code=400, detail="Thiếu ticket_id.")
 
-    wf = workflow_planner_service.plan_workflow_for_ticket(ticket_id)
-    if not wf:
-        raise HTTPException(status_code=500, detail="Không thể lập kế hoạch cho ticket.")
-    return {"status": "success", "workflow": wf}
+    try:
+        wf = workflow_planner_service.plan_workflow_for_ticket(ticket_id)
+        if not wf:
+            raise HTTPException(status_code=500, detail="Không thể lập kế hoạch cho ticket.")
+        return {"status": "success", "workflow": wf}
+    except HTTPException:
+        raise
+    except Exception as e:
+        err_msg = str(e)
+        logger.error(f"Lỗi lập plan cho ticket #{ticket_id}: {err_msg}", exc_info=True)
+        if "PGRST205" in err_msg or "automation_workflows" in err_msg:
+            raise HTTPException(
+                status_code=503,
+                detail="Bảng CSDL 'automation_workflows' chưa được khởi tạo trên Supabase. Vui lòng chạy file migration 'supabase/migrations/20260910000000_add_automation_workflows.sql' trong Supabase SQL Editor."
+            )
+        raise HTTPException(status_code=500, detail=err_msg)
 
 
 @router.get("/{workflow_id}")

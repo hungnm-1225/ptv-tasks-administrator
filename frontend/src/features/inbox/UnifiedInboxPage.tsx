@@ -43,7 +43,8 @@ import {
   CheckCircle,
   HelpCircle,
   ShieldCheck,
-  Edit3
+  Edit3,
+  Copy
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import {
@@ -120,6 +121,67 @@ const FileSpreadsheetIcon: React.FC<{ className?: string }> = ({ className }) =>
   </svg>
 );
 
+const SQL_MIGRATION_TEXT = `-- Copy & Chạy toàn bộ khối lệnh này trong Supabase Dashboard > SQL Editor:
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TABLE IF NOT EXISTS automation_workflows (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    ticket_id UUID REFERENCES inbox_tickets(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    goal TEXT,
+    status VARCHAR(50) DEFAULT 'draft',
+    version INT DEFAULT 1,
+    ai_analysis JSONB DEFAULT '{}'::jsonb,
+    steps JSONB NOT NULL DEFAULT '[]'::jsonb,
+    approved_by VARCHAR(255),
+    approved_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS automation_workflow_history (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    workflow_id UUID REFERENCES automation_workflows(id) ON DELETE CASCADE,
+    field_changed VARCHAR(100) NOT NULL,
+    old_val JSONB,
+    new_val JSONB,
+    changed_by VARCHAR(255) DEFAULT 'hung.nguyenmanh@dtt.vn',
+    changed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflows_ticket_id ON automation_workflows(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_workflows_status    ON automation_workflows(status);
+CREATE INDEX IF NOT EXISTS idx_workflows_created   ON automation_workflows(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_wf_history_wf_id    ON automation_workflow_history(workflow_id);
+
+ALTER TABLE automation_workflows        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE automation_workflow_history ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "admin_dtt_vn_only" ON automation_workflows;
+CREATE POLICY "admin_dtt_vn_only" ON automation_workflows
+    FOR ALL
+    USING ((auth.jwt() ->> 'email') LIKE '%@dtt.vn');
+
+DROP POLICY IF EXISTS "admin_dtt_vn_only" ON automation_workflow_history;
+CREATE POLICY "admin_dtt_vn_only" ON automation_workflow_history
+    FOR ALL
+    USING ((auth.jwt() ->> 'email') LIKE '%@dtt.vn');
+
+DROP TRIGGER IF EXISTS trg_automation_workflows_updated_at ON automation_workflows;
+CREATE TRIGGER trg_automation_workflows_updated_at
+    BEFORE UPDATE ON automation_workflows
+    FOR EACH ROW
+    EXECUTE FUNCTION set_updated_at();
+`;
+
 export const UnifiedInboxPage: React.FC = () => {
   const navigate = useNavigate();
 
@@ -147,6 +209,7 @@ export const UnifiedInboxPage: React.FC = () => {
   const [selectedWorkflowTicket, setSelectedWorkflowTicket] = useState<InboxTicket | null>(null);
   const [activeWorkflow, setActiveWorkflow] = useState<WorkflowDraft | null>(null);
   const [workflowLoading, setWorkflowLoading] = useState<boolean>(false);
+  const [workflowError, setWorkflowError] = useState<string | null>(null);
   const [workflowValidating, setWorkflowValidating] = useState<boolean>(false);
   const [validationResult, setValidationResult] = useState<WorkflowValidationResult | null>(null);
   const [isEditingWorkflow, setIsEditingWorkflow] = useState<boolean>(false);
@@ -225,6 +288,7 @@ export const UnifiedInboxPage: React.FC = () => {
     setWorkflowLoading(true);
     setIsEditingWorkflow(false);
     setValidationResult(null);
+    setWorkflowError(null);
 
     try {
       const wf = await fetchApi<WorkflowDraft>(`/workflows/ticket/${ticket.id}`);
@@ -234,7 +298,9 @@ export const UnifiedInboxPage: React.FC = () => {
         runValidation(wf.id);
       }
     } catch (err) {
-      toast.error('Lỗi tải Workflow: ' + (err as Error).message);
+      const msg = (err as Error).message || 'Lỗi không xác định';
+      setWorkflowError(msg);
+      toast.error('Lỗi tải Workflow: ' + msg);
     } finally {
       setWorkflowLoading(false);
     }
@@ -257,6 +323,7 @@ export const UnifiedInboxPage: React.FC = () => {
   const handleRePlanWorkflow = async () => {
     if (!selectedWorkflowTicket) return;
     setWorkflowLoading(true);
+    setWorkflowError(null);
     try {
       const res = await fetchApi<{ status: string; workflow: WorkflowDraft }>('/workflows/plan', {
         method: 'POST',
@@ -268,7 +335,9 @@ export const UnifiedInboxPage: React.FC = () => {
         toast.success('✨ AI đã lập lại kế hoạch Workflow thành công!');
       }
     } catch (err) {
-      toast.error('Lỗi khi AI tái lập plan: ' + (err as Error).message);
+      const msg = (err as Error).message || 'Lỗi không xác định';
+      setWorkflowError(msg);
+      toast.error('Lỗi khi AI tái lập plan: ' + msg);
     } finally {
       setWorkflowLoading(false);
     }
@@ -1082,8 +1151,53 @@ export const UnifiedInboxPage: React.FC = () => {
                   <p className="text-xs font-medium text-slate-500">Đang nạp và phân giải đồ thị Workflow...</p>
                 </div>
               ) : !activeWorkflow ? (
-                <div className="py-16 text-center text-slate-400 text-xs">
-                  Không tìm thấy dữ liệu workflow cho yêu cầu này.
+                <div className="py-10 px-4 max-w-2xl mx-auto space-y-4">
+                  {workflowError && (workflowError.includes('automation_workflows') || workflowError.includes('PGRST205') || workflowError.includes('503')) ? (
+                    <div className="p-6 rounded-3xl bg-amber-500/10 border border-amber-500/30 text-slate-800 dark:text-slate-100 space-y-4 shadow-xl">
+                      <div className="flex items-center gap-3 text-amber-600 dark:text-amber-400">
+                        <AlertTriangle className="w-6 h-6 shrink-0" />
+                        <h4 className="text-sm font-black">Chưa khởi tạo bảng cơ sở dữ liệu `automation_workflows`</h4>
+                      </div>
+                      <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                        Hệ thống phát hiện cơ sở dữ liệu Supabase chưa áp dụng migration cho tính năng AI Workflow Console.
+                        Vui lòng copy đoạn mã SQL bên dưới và chạy trong <b>Supabase Dashboard &gt; SQL Editor</b> để hoàn tất thiết lập.
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(SQL_MIGRATION_TEXT);
+                            toast.success("📋 Đã sao chép mã SQL Migration vào Clipboard!");
+                          }}
+                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600 text-white text-xs font-bold hover:bg-amber-700 transition shadow-md shadow-amber-600/20 cursor-pointer"
+                        >
+                          <Copy className="w-4 h-4" />
+                          <span>Sao Chép SQL Migration (1-Click)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => selectedWorkflowTicket && handleOpenWorkflowConsole(selectedWorkflowTicket)}
+                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-bold hover:bg-slate-300 dark:hover:bg-slate-700 transition cursor-pointer"
+                        >
+                          <RefreshCw className="w-4 h-4" />
+                          <span>Thử Lại (Reload)</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="py-16 text-center text-slate-400 text-xs space-y-2">
+                      <p>Không tìm thấy dữ liệu workflow cho yêu cầu này.</p>
+                      {workflowError && <p className="text-rose-500 text-[11px] font-mono">{workflowError}</p>}
+                      <button
+                        type="button"
+                        onClick={handleRePlanWorkflow}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 text-xs font-bold hover:bg-indigo-100 transition mt-2 cursor-pointer"
+                      >
+                        <Wand2 className="w-3.5 h-3.5" />
+                        <span>Yêu cầu AI Lập Kế Hoạch Ngay</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <>
