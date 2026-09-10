@@ -76,7 +76,24 @@ async def execute_approved_bot_task(
         if bot_type == "workspace_rpa":
             if action == "direct_moodle_lms_enroll":
                 logger.info(f"🎓 {task_tag} Điều hướng sang Playwright LMS Direct Enroller...")
-                return await playwright_lms_service.enroll_users_pipeline(payload_data)
+                lms_res = await playwright_lms_service.enroll_users_pipeline(payload_data)
+
+                # 🐙 TỰ ĐỘNG KÍCH HOẠT CHUỖI GÁN GIT REPOS NẾU ĐƯỢC CHỌN TỪ STUDIO
+                if payload_data.get("sync_git_repos") and payload_data.get("git_sync_plan"):
+                    logger.info(f"🐙 {task_tag} [PIPELINE LMS ➔ GIT] Tự động thêm tài khoản vào các Git Repos tương ứng...")
+                    try:
+                        git_payload = {
+                            "action": "add_repo_collaborators",
+                            "repos_plan": payload_data["git_sync_plan"]
+                        }
+                        git_res = await git_playwright_service.add_collaborators_pipeline(git_payload)
+                        lms_res["git_sync_result"] = git_res
+                        lms_res["message"] = f"{lms_res.get('message', '')} | 🐙 Git: {git_res.get('message', '')}"
+                    except Exception as git_err:
+                        logger.warning(f"⚠️ {task_tag} Lỗi trong bước phụ Git Sync: {git_err}")
+                        lms_res["git_sync_error"] = str(git_err)
+
+                return lms_res
 
             if action in ["git_add_collaborators", "add_repo_collaborators"]:
                 logger.info(f"🐙 {task_tag} Điều hướng sang Git Playwright Collaborator Service...")
@@ -422,7 +439,24 @@ async def execute_approved_bot_task(
         # =====================================================================
         elif bot_type in ["lms_playwright", "lms_git_provisioning", "lms_enroll"]:
             logger.info(f"🎓 {task_tag} Kích hoạt Playwright LMS Direct Enroller...")
-            return await playwright_lms_service.enroll_users_pipeline(payload_data)
+            lms_res = await playwright_lms_service.enroll_users_pipeline(payload_data)
+
+            # 🐙 TỰ ĐỘNG KÍCH HOẠT CHUỖI GÁN GIT REPOS NẾU ĐƯỢC CHỌN
+            if payload_data.get("sync_git_repos") and payload_data.get("git_sync_plan"):
+                logger.info(f"🐙 {task_tag} [PIPELINE LMS ➔ GIT] Tự động thêm tài khoản vào các Git Repos tương ứng...")
+                try:
+                    git_payload = {
+                        "action": "add_repo_collaborators",
+                        "repos_plan": payload_data["git_sync_plan"]
+                    }
+                    git_res = await git_playwright_service.add_collaborators_pipeline(git_payload)
+                    lms_res["git_sync_result"] = git_res
+                    lms_res["message"] = f"{lms_res.get('message', '')} | 🐙 Git: {git_res.get('message', '')}"
+                except Exception as git_err:
+                    logger.warning(f"⚠️ {task_tag} Lỗi trong bước phụ Git Sync: {git_err}")
+                    lms_res["git_sync_error"] = str(git_err)
+
+            return lms_res
 
         # =====================================================================
         # 3. NHÓM TASK KEYCLOAK IDENTITY BOT
