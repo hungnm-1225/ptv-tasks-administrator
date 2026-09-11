@@ -1,23 +1,20 @@
 # backend/app/api/v1/endpoints/tickets.py
-import time
+import hashlib
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
+
 from app.core.supabase import get_supabase_client
-from app.core.gemini import process_ticket_with_ai
+from app.core.gemini import gemini_engine
+from app.workers.ticket_processor import process_ticket_revision
 from app.services.osticket_service import poll_open_ostickets
 from app.services.gmail_service import poll_unread_gmails
+from app.core.cache_policy import BoundedMemoryCache, CacheTier
 
 router = APIRouter()
 
-# =============================================================================
-# =============================================================================
-# ⚡ IN-MEMORY CACHE CHO INBOX TICKETS (TIER C SUMMARY - BUDGET <= 40MB)
-# =============================================================================
-from app.core.cache_policy import BoundedMemoryCache, CacheTier
-
+# In-Memory Cache cho Inbox Tickets (Tier C Summary - Budget <= 40MB)
 tickets_cache = BoundedMemoryCache(tier=CacheTier.TIER_C_SUMMARY, max_entries=15, default_ttl=60)
-
 
 
 @router.get("")
@@ -28,7 +25,7 @@ async def list_tickets(
     source: Optional[str] = Query("all"),
     sort: str = Query("desc", regex="^(desc|asc)$")
 ):
-    """Lấy danh sách tickets từ Supabase hỗ trợ lọc đa tầng (Có RAM Cache 1ms)."""
+    """Lấy danh sách tickets từ Supabase hỗ trợ lọc đa tầng (RAM Cache 1ms)."""
     cache_key = f"tickets_{status}_{category}_{source}_{sort}"
     cached = tickets_cache.get(cache_key)
     if cached is not None:
@@ -38,21 +35,17 @@ async def list_tickets(
     try:
         query = supabase.table("inbox_tickets").select("*")
 
-        # 1. Lọc theo trạng thái (Status)
         if status and status != "all":
             query = query.eq("status", status)
         elif status == "all":
             query = query.neq("status", "dismissed")
 
-        # 2. Lọc theo danh mục (Category)
         if category and category != "all":
             query = query.eq("category", category)
 
-        # 3. Lọc theo nguồn (Source)
         if source and source != "all":
             query = query.eq("source", source)
 
-        # 4. Sắp xếp thời gian
         query = query.order("created_at", desc=(sort == "desc"))
 
         res = query.limit(300).execute()
@@ -121,7 +114,6 @@ async def dismiss_ticket(ticket_id: str):
             "updated_at": now_iso
         }).eq("id", ticket_id).execute()
 
-        # Đánh dấu đã đọc trên Gmail nếu nguồn là Gmail
         ticket_res = supabase.table("inbox_tickets").select("source, source_id").eq("id", ticket_id).execute()
         if ticket_res.data and ticket_res.data[0].get("source") == "gmail":
             msg_id = ticket_res.data[0].get("source_id")
@@ -167,12 +159,96 @@ async def update_ticket_category(ticket_id: str, payload: Dict[str, Any]):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# =============================================================================
+# 🧠 DUAL RE-ANALYSIS APIS (PHA 5 MỚI)
+# =============================================================================
+
+@router.post("/{ticket_id}/re-summarize")
+async def re_summarize_ticket(ticket_id: str):
+    """
+    Chỉ làm tươi lại bản tóm tắt Inbox (Soft Summary):
+    - Không làm thay đổi kế hoạch Workflow hay Intent vận hành.
+    """
+    supabase = get_supabase_client()
+    res = supabase.table("inbox_tickets").select("*").eq("id", ticket_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Không tìm thấy ticket.")
+
+    ticket = res.data[0]
+    summary_res = gemini_engine.summarize_ticket(
+        subject=ticket.get("subject", ""),
+        raw_content=ticket.get("raw_content", ""),
+        source=ticket.get("source", "gmail")
+    )
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    supabase.table("inbox_tickets").update({
+        "ai_summary": summary_res.summary_vi,
+        "category": summary_res.category,
+        "priority": summary_res.priority,
+        "updated_at": now_iso
+    }).eq("id", ticket_id).execute()
+
+    tickets_cache.invalidate()
+    return {
+        "status": "success",
+        "message": "Đã cập nhật lại bản tóm tắt AI cho ticket.",
+        "summary": summary_res.model_dump()
+    }
+
+
+@router.post("/{ticket_id}/re-assess-intent")
+async def re_assess_ticket_intent(ticket_id: str):
+    """
+    Đánh giá lại sự thật vận hành & Tái lập Proposal mới:
+    - Bắt buộc gọi Gemini trích xuất lại Intent có bằng chứng.
+    - Tạo assessment mới và lưu proposal version mới.
+    """
+    supabase = get_supabase_client()
+    res = supabase.table("inbox_tickets").select("*").eq("id", ticket_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Không tìm thấy ticket.")
+
+    ticket = res.data[0]
+    raw_content = ticket.get("raw_content") or ""
+    content_hash = hashlib.sha256(raw_content.encode("utf-8")).hexdigest()
+
+    # Lấy hoặc tạo revision mới nhất
+    rev_res = supabase.table("inbox_ticket_revisions")\
+        .select("id")\
+        .eq("ticket_id", ticket_id)\
+        .order("revision_no", desc=True)\
+        .limit(1)\
+        .execute()
+
+    if rev_res.data:
+        revision_id = rev_res.data[0]["id"]
+    else:
+        new_rev = supabase.table("inbox_ticket_revisions").insert({
+            "ticket_id": ticket_id,
+            "revision_no": 1,
+            "content_hash": content_hash,
+            "raw_content": raw_content,
+            "attachments": ticket.get("attachments") or [],
+            "source_updated_at": datetime.now(timezone.utc).isoformat()
+        }).execute()
+        revision_id = new_rev.data[0]["id"] if new_rev.data else None
+
+    if not revision_id:
+        raise HTTPException(status_code=500, detail="Không thể xác định revision để đánh giá lại.")
+
+    # Chạy quy trình một cửa
+    result = await process_ticket_revision(revision_id)
+    tickets_cache.invalidate()
+
+    return {
+        "status": "success",
+        "message": "✨ Đã đánh giá lại toàn diện ý định và lập Proposal mới thành công!",
+        "result": result
+    }
+
+
 @router.post("/{ticket_id}/triage")
 async def force_ai_triage(ticket_id: str):
-    """Kích hoạt Gemini AI phân tích lại ticket."""
-    try:
-        await process_ticket_with_ai(ticket_id)
-        tickets_cache.invalidate()
-        return {"status": "success", "message": "Đã kích hoạt AI phân tích lại ticket."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Bí danh tương thích ngược: Tự động trỏ vào /re-assess-intent."""
+    return await re_assess_ticket_intent(ticket_id)

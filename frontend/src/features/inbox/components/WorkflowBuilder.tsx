@@ -94,6 +94,11 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
     if (!selectedCapId) return;
 
     const capDef = capabilitiesMap[selectedCapId];
+    if (capDef && capDef.available === false) {
+      alert("⚠️ Cỗ máy này hiện đang bị tạm khóa do chưa có Bot Handler trên máy chủ.");
+      return;
+    }
+
     const newStepId = `step_${String(steps.length + 1).padStart(2, '0')}`;
     const prevStepId = steps.length > 0 ? steps[steps.length - 1].step_id : undefined;
 
@@ -148,7 +153,7 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
         )}
       </div>
 
-      {/* Panel / Card Thêm Bước Mới (Giao Diện Nâng Cấp Siêu Tương Phản) */}
+      {/* Panel Thêm Bước Mới (Khóa capability không có handler) */}
       {isAddStepOpen && (
         <div className="p-4 sm:p-5 rounded-2xl bg-indigo-50/90 dark:bg-indigo-950/60 border-2 border-indigo-300 dark:border-indigo-700 shadow-md space-y-4 animate-in fade-in zoom-in-95 duration-150">
           <div className="flex items-center justify-between border-b border-indigo-200 dark:border-indigo-800 pb-3">
@@ -168,7 +173,7 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* 1. Dropdown Chọn Capability (ĐÃ FIX TRIỆT ĐỂ LỖI CHỮ TÀNG HÌNH) */}
+            {/* Dropdown Chọn Capability (Vô hiệu hóa capability available=false) */}
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-900 dark:text-slate-200 block">
                 Chọn Cỗ Máy / Capability <span className="text-rose-500 font-bold">*</span>:
@@ -197,9 +202,13 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
                         <option
                           key={c.id}
                           value={c.id}
-                          className="text-slate-900 dark:text-white bg-white dark:bg-slate-900 font-bold py-1.5 text-xs"
+                          disabled={c.available === false}
+                          className={`py-1.5 text-xs font-bold ${c.available === false
+                            ? 'text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 italic'
+                            : 'text-slate-900 dark:text-white bg-white dark:bg-slate-900'
+                            }`}
                         >
-                          {c.name} ({c.id})
+                          {c.name} {c.available === false ? '(Tạm khóa - Chưa có bot handler)' : `(${c.id})`}
                         </option>
                       ))}
                     </optgroup>
@@ -208,7 +217,7 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
               </div>
             </div>
 
-            {/* 2. Ô Nhập Tên Hiển Thị Tùy Chỉnh (To Rõ, Đậm Nét) */}
+            {/* Ô Nhập Tên Hiển Thị Tùy Chỉnh */}
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-900 dark:text-slate-200 block">
                 Tên Hiển Thị Của Bước (Label):
@@ -233,7 +242,7 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
             </button>
             <button
               type="button"
-              disabled={!selectedCapId}
+              disabled={!selectedCapId || capabilitiesMap[selectedCapId]?.available === false}
               onClick={handleAddStep}
               className="h-10 px-5 text-xs font-black rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm disabled:opacity-50 transition cursor-pointer flex items-center gap-1.5"
             >
@@ -244,7 +253,7 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
         </div>
       )}
 
-      {/* Danh Sách Các Step Cards Kết Nối Trực Quan */}
+      {/* Danh Sách Các Step Cards */}
       <div className="space-y-2.5">
         {steps.length === 0 ? (
           <div className="p-10 text-center rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 space-y-2">
@@ -253,7 +262,7 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
               Chưa có bước nào trong quy trình.
             </p>
             <p className="text-[11px] text-slate-400">
-              Nhấp nút <strong>"Thêm Bước Vào Luồng"</strong> ở trên hoặc bấm <strong>"AI Tái Lập Plan"</strong>.
+              Nhấp nút <strong>"Thêm Bước Vào Luồng"</strong> ở trên hoặc bấm <strong>"AI Đánh giá lại ý định"</strong>.
             </p>
           </div>
         ) : (
@@ -271,7 +280,6 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
                 onRetryStep={onRetryStep}
               />
 
-              {/* Đường Line Kết Nối Trực Quan Giữa Các Bước */}
               {idx < steps.length - 1 && (
                 <div className="flex items-center justify-center py-0.5">
                   <div className="w-0.5 h-3.5 bg-indigo-200 dark:bg-indigo-900/60 rounded-full" />

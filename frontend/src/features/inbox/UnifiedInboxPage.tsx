@@ -44,7 +44,10 @@ import {
   HelpCircle,
   ShieldCheck,
   Edit3,
-  Copy
+  Copy,
+  Info,
+  ListChecks,
+  Quote
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import {
@@ -121,67 +124,6 @@ const FileSpreadsheetIcon: React.FC<{ className?: string }> = ({ className }) =>
   </svg>
 );
 
-const SQL_MIGRATION_TEXT = `-- Copy & Chạy toàn bộ khối lệnh này trong Supabase Dashboard > SQL Editor:
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
-CREATE OR REPLACE FUNCTION set_updated_at()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TABLE IF NOT EXISTS automation_workflows (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    ticket_id UUID REFERENCES inbox_tickets(id) ON DELETE CASCADE,
-    title VARCHAR(255) NOT NULL,
-    goal TEXT,
-    status VARCHAR(50) DEFAULT 'draft',
-    version INT DEFAULT 1,
-    ai_analysis JSONB DEFAULT '{}'::jsonb,
-    steps JSONB NOT NULL DEFAULT '[]'::jsonb,
-    approved_by VARCHAR(255),
-    approved_at TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS automation_workflow_history (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    workflow_id UUID REFERENCES automation_workflows(id) ON DELETE CASCADE,
-    field_changed VARCHAR(100) NOT NULL,
-    old_val JSONB,
-    new_val JSONB,
-    changed_by VARCHAR(255) DEFAULT 'hung.nguyenmanh@dtt.vn',
-    changed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_workflows_ticket_id ON automation_workflows(ticket_id);
-CREATE INDEX IF NOT EXISTS idx_workflows_status    ON automation_workflows(status);
-CREATE INDEX IF NOT EXISTS idx_workflows_created   ON automation_workflows(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_wf_history_wf_id    ON automation_workflow_history(workflow_id);
-
-ALTER TABLE automation_workflows        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE automation_workflow_history ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "admin_dtt_vn_only" ON automation_workflows;
-CREATE POLICY "admin_dtt_vn_only" ON automation_workflows
-    FOR ALL
-    USING ((auth.jwt() ->> 'email') LIKE '%@dtt.vn');
-
-DROP POLICY IF EXISTS "admin_dtt_vn_only" ON automation_workflow_history;
-CREATE POLICY "admin_dtt_vn_only" ON automation_workflow_history
-    FOR ALL
-    USING ((auth.jwt() ->> 'email') LIKE '%@dtt.vn');
-
-DROP TRIGGER IF EXISTS trg_automation_workflows_updated_at ON automation_workflows;
-CREATE TRIGGER trg_automation_workflows_updated_at
-    BEFORE UPDATE ON automation_workflows
-    FOR EACH ROW
-    EXECUTE FUNCTION set_updated_at();
-`;
-
 export const UnifiedInboxPage: React.FC = () => {
   const navigate = useNavigate();
 
@@ -203,9 +145,7 @@ export const UnifiedInboxPage: React.FC = () => {
   const [schoolsList, setSchoolsList] = useState<HierarchySchoolItem[]>([]);
   const [capabilities, setCapabilities] = useState<CapabilityDefinition[]>([]);
 
-  // =========================================================================
-  // ⚡ WORKFLOW PRE-PROCESSING & EXECUTION CONSOLE STATE
-  // =========================================================================
+  // Workflow Console State
   const [selectedWorkflowTicket, setSelectedWorkflowTicket] = useState<InboxTicket | null>(null);
   const [activeWorkflow, setActiveWorkflow] = useState<WorkflowDraft | null>(null);
   const [workflowLoading, setWorkflowLoading] = useState<boolean>(false);
@@ -215,13 +155,17 @@ export const UnifiedInboxPage: React.FC = () => {
   const [isEditingWorkflow, setIsEditingWorkflow] = useState<boolean>(false);
   const [isConfirmingRun, setIsConfirmingRun] = useState<boolean>(false);
 
-  // Entity Resolution: School Picker Autocomplete
+  // Entity Resolution Autocomplete
   const [isSchoolPickerOpen, setIsSchoolPickerOpen] = useState<boolean>(false);
   const [schoolSearchQuery, setSchoolSearchQuery] = useState<string>('');
   const schoolPickerRef = useRef<HTMLDivElement | null>(null);
 
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const SPREADSHEET_ID = '1rZgFBD2PuZWL1jvQefcYZztCQvo99Lhx0GATTKvj1Go';
+
+  const currentOperatorEmail = useMemo(() => {
+    return localStorage.getItem('user_email') || 'hung.nguyenmanh@dtt.vn';
+  }, []);
 
   const loadTickets = useCallback(async (forceSpinner = false) => {
     if (forceSpinner) setLoading(true);
@@ -266,7 +210,6 @@ export const UnifiedInboxPage: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Lọc trường học phục vụ Autocomplete Entity Resolution
   const filteredSchools = useMemo(() => {
     const q = schoolSearchQuery.trim().toLowerCase();
     if (!q) return schoolsList.slice(0, 30);
@@ -294,8 +237,9 @@ export const UnifiedInboxPage: React.FC = () => {
       const wf = await fetchApi<WorkflowDraft>(`/workflows/ticket/${ticket.id}`);
       if (wf) {
         setActiveWorkflow(wf);
-        // Tự động kiểm tra validation
-        runValidation(wf.id);
+        if (wf.steps && wf.steps.length > 0) {
+          runValidation(wf.id);
+        }
       }
     } catch (err) {
       const msg = (err as Error).message || 'Lỗi không xác định';
@@ -320,24 +264,46 @@ export const UnifiedInboxPage: React.FC = () => {
     }
   };
 
-  const handleRePlanWorkflow = async () => {
+  // Nút 1: Tóm tắt lại Inbox (Soft Summary)
+  const handleReSummarize = async () => {
+    if (!selectedWorkflowTicket) return;
+    setWorkflowLoading(true);
+    try {
+      const res = await fetchApi<{ status: string; summary: any }>(`/tickets/${selectedWorkflowTicket.id}/re-summarize`, {
+        method: 'POST',
+      });
+      if (res && res.status === 'success') {
+        toast.success('📝 Đã làm tươi bản tóm tắt Inbox thành công!');
+        await loadTickets(false);
+      }
+    } catch (err) {
+      toast.error('Lỗi tóm tắt lại: ' + (err as Error).message);
+    } finally {
+      setWorkflowLoading(false);
+    }
+  };
+
+  // Nút 2: AI Đánh giá lại ý định (Fact Extraction + New Proposal Version)
+  const handleReAssessIntent = async () => {
     if (!selectedWorkflowTicket) return;
     setWorkflowLoading(true);
     setWorkflowError(null);
     try {
-      const res = await fetchApi<{ status: string; workflow: WorkflowDraft }>('/workflows/plan', {
+      const res = await fetchApi<{ status: string; result: any }>(`/tickets/${selectedWorkflowTicket.id}/re-assess-intent`, {
         method: 'POST',
-        body: JSON.stringify({ ticket_id: selectedWorkflowTicket.id }),
       });
-      if (res && res.workflow) {
-        setActiveWorkflow(res.workflow);
-        runValidation(res.workflow.id);
-        toast.success('✨ AI đã lập lại kế hoạch Workflow thành công!');
+      if (res && res.result && res.result.workflow_draft) {
+        setActiveWorkflow(res.result.workflow_draft);
+        if (res.result.workflow_draft.steps && res.result.workflow_draft.steps.length > 0) {
+          runValidation(res.result.workflow_draft.id);
+        }
+        toast.success('✨ AI đã trích xuất lại sự thật và tạo bản Proposal mới!');
+        await loadTickets(false);
       }
     } catch (err) {
       const msg = (err as Error).message || 'Lỗi không xác định';
       setWorkflowError(msg);
-      toast.error('Lỗi khi AI tái lập plan: ' + msg);
+      toast.error('Lỗi đánh giá lại ý định: ' + msg);
     } finally {
       setWorkflowLoading(false);
     }
@@ -354,7 +320,7 @@ export const UnifiedInboxPage: React.FC = () => {
         body: JSON.stringify({
           steps: updatedSteps,
           ai_analysis: activeWorkflow.ai_analysis,
-          updated_by: 'hung.nguyenmanh@dtt.vn',
+          updated_by: currentOperatorEmail,
         }),
       });
       if (res) {
@@ -370,7 +336,6 @@ export const UnifiedInboxPage: React.FC = () => {
     if (!activeWorkflow) return;
     setIsSchoolPickerOpen(false);
 
-    // Cập nhật trường học vào detected_school và bind vào steps
     const updatedAnalysis = {
       ...activeWorkflow.ai_analysis,
       detected_school: {
@@ -381,9 +346,9 @@ export const UnifiedInboxPage: React.FC = () => {
       },
     };
 
-    const updatedSteps = activeWorkflow.steps.map((s) => {
+    const updatedSteps = (activeWorkflow.steps || []).map((s) => {
       const newInputs = { ...s.inputs };
-      if ('school_identifier' in newInputs || s.capability_id === 'workspace.resolve_school') {
+      if ('school_identifier' in newInputs || s.capability_id === 'workspace.bulk_account_creation') {
         newInputs.school_identifier = school.school_name;
         newInputs.school_name = school.school_name;
         newInputs.school_id = school.school_id;
@@ -404,14 +369,14 @@ export const UnifiedInboxPage: React.FC = () => {
         body: JSON.stringify({
           steps: updatedSteps,
           ai_analysis: updatedAnalysis,
-          updated_by: 'hung.nguyenmanh@dtt.vn',
+          updated_by: currentOperatorEmail,
         }),
       });
       if (res) {
         setActiveWorkflow(res);
         runValidation(res.id);
       }
-      toast.success(`Đã chọn trường: ${school.school_name} (100%)`);
+      toast.success(`Đã chọn trường: ${school.school_name}`);
     } catch (err) {
       toast.error('Lỗi cập nhật trường học: ' + (err as Error).message);
     }
@@ -427,7 +392,7 @@ export const UnifiedInboxPage: React.FC = () => {
         {
           method: 'POST',
           body: JSON.stringify({
-            approved_by: 'hung.nguyenmanh@dtt.vn',
+            approved_by: currentOperatorEmail,
             run_immediately: true,
             frozen_steps: activeWorkflow.steps,
           }),
@@ -441,14 +406,12 @@ export const UnifiedInboxPage: React.FC = () => {
               <CheckCircle2 className="w-4 h-4" />
               <span>Workflow đã được duyệt và đang chạy ngầm!</span>
             </div>
-            <p className="text-xs text-slate-500">Hệ thống đang thực thi từng bước theo thứ tự phụ thuộc.</p>
+            <p className="text-xs text-slate-500">Hệ thống đang thực thi từng bước theo thứ tự Tô-pô DAG.</p>
           </div>,
           { duration: 6000 }
         );
 
         setActiveWorkflow((prev) => (prev ? { ...prev, status: 'running' } : null));
-
-        // Bắt đầu Polling trạng thái live execution mỗi 3s
         startExecutionPolling(activeWorkflow.id);
       }
     } catch (err) {
@@ -488,9 +451,7 @@ export const UnifiedInboxPage: React.FC = () => {
     }
   };
 
-  // =========================================================================
-  // ⚡ INBOX TICKET FILTER & ACTION HANDLERS
-  // =========================================================================
+  // Bộ lọc danh sách Ticket
   const filteredTickets = useMemo(() => {
     return tickets.filter((t) => {
       const matchesSearch =
@@ -730,6 +691,20 @@ export const UnifiedInboxPage: React.FC = () => {
     );
   };
 
+  const isWorkflowRunnable = useMemo(() => {
+    if (!activeWorkflow) return false;
+    if (activeWorkflow.status === 'no_action' || activeWorkflow.status === 'needs_information' || activeWorkflow.status === 'invalid') {
+      return false;
+    }
+    if (!activeWorkflow.steps || activeWorkflow.steps.length === 0) {
+      return false;
+    }
+    if (validationResult && !validationResult.is_valid) {
+      return false;
+    }
+    return true;
+  }, [activeWorkflow, validationResult]);
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-16" onClick={() => setActiveCategoryDropdown(null)}>
       {/* Header Bar */}
@@ -813,7 +788,6 @@ export const UnifiedInboxPage: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap text-xs">
-            {/* Filter Status Tabs */}
             <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
               {[
                 { id: 'pending', label: 'Chờ Xử Lý' },
@@ -834,7 +808,6 @@ export const UnifiedInboxPage: React.FC = () => {
               ))}
             </div>
 
-            {/* Filter Source */}
             <select
               value={selectedSource}
               onChange={(e) => setSelectedSource(e.target.value)}
@@ -846,7 +819,6 @@ export const UnifiedInboxPage: React.FC = () => {
               <option value="google_form">Google Form</option>
             </select>
 
-            {/* Filter Category */}
             <select
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
@@ -902,7 +874,6 @@ export const UnifiedInboxPage: React.FC = () => {
                 key={ticket.id}
                 className="p-5 sm:p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs hover:border-indigo-200 dark:hover:border-indigo-900/60 transition space-y-4"
               >
-                {/* Dòng 1: Tags, Người gửi, Thời gian */}
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
                   <div className="flex flex-wrap items-center gap-2">
                     {renderSourceBadge(ticket.source)}
@@ -927,7 +898,6 @@ export const UnifiedInboxPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Tiêu đề & Thông tin trường */}
                 <div>
                   <h2 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white tracking-tight leading-snug">
                     {ticket.subject || 'Không có tiêu đề'}
@@ -944,7 +914,6 @@ export const UnifiedInboxPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* File Attachments */}
                 {attachments.length > 0 && (
                   <div className="flex flex-wrap gap-2 pt-0.5">
                     {attachments.map((file: any, idx: number) => {
@@ -973,7 +942,7 @@ export const UnifiedInboxPage: React.FC = () => {
                   </div>
                 )}
 
-                {/* Gemini AI Summary & Auto-prefilled Banner */}
+                {/* Gemini AI Summary Banner */}
                 <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-indigo-50/60 via-purple-50/40 to-teal-50/40 dark:from-indigo-950/30 dark:via-purple-950/20 dark:to-teal-950/20 border border-indigo-100 dark:border-indigo-900/40 space-y-2">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -1089,7 +1058,7 @@ export const UnifiedInboxPage: React.FC = () => {
       )}
 
       {/* ========================================================================= */}
-      {/* 🚀 BENTO AI WORKFLOW PRE-PROCESSING & EXECUTION CONSOLE (REVAMPED) */}
+      {/* 🚀 BENTO AI WORKFLOW CONSOLE (EVIDENCE-GROUNDED V3) */}
       {/* ========================================================================= */}
       {selectedWorkflowTicket && typeof document !== 'undefined' && createPortal(
         <div
@@ -1106,7 +1075,7 @@ export const UnifiedInboxPage: React.FC = () => {
             onClick={(e) => e.stopPropagation()}
             className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-3xl w-full max-w-full sm:max-w-4xl lg:max-w-5xl xl:max-w-6xl shadow-2xl overflow-hidden p-6 sm:p-8 max-h-[94vh] flex flex-col my-auto"
           >
-            {/* Header Console */}
+            {/* Header Console với 2 nút Re-analysis độc lập */}
             <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800 flex-wrap gap-2 shrink-0">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 bg-gradient-to-br from-indigo-600 to-purple-600 text-white rounded-2xl shadow-md shadow-indigo-500/20">
@@ -1127,16 +1096,28 @@ export const UnifiedInboxPage: React.FC = () => {
                 </div>
               </div>
 
+              {/* TÁCH BIỆT 2 NÚT HÀNH ĐỘNG AI */}
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={handleRePlanWorkflow}
+                  onClick={handleReSummarize}
                   disabled={workflowLoading}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition cursor-pointer"
-                  title="Yêu cầu Gemini AI phân tích và lập lại kế hoạch luồng"
+                  title="Chỉ làm tươi lại bản tóm tắt Inbox"
                 >
-                  <Wand2 className="w-3.5 h-3.5 text-indigo-500" />
-                  <span>AI Tái Lập Plan</span>
+                  <FileText className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Tóm tắt lại</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleReAssessIntent}
+                  disabled={workflowLoading}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition cursor-pointer"
+                  title="Bắt Gemini AI bóc tách lại sự thật và sinh Proposal version mới"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-600 animate-spin" />
+                  <span>AI Đánh giá lại ý định</span>
                 </button>
 
                 <button
@@ -1154,62 +1135,26 @@ export const UnifiedInboxPage: React.FC = () => {
               {workflowLoading ? (
                 <div className="py-20 flex flex-col items-center justify-center space-y-3">
                   <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
-                  <p className="text-xs font-medium text-slate-500">Đang nạp và phân giải đồ thị Workflow...</p>
+                  <p className="text-xs font-medium text-slate-500">Đang bóc tách sự thật và phân giải đồ thị Workflow...</p>
                 </div>
               ) : !activeWorkflow ? (
-                <div className="py-10 px-4 max-w-2xl mx-auto space-y-4">
-                  {workflowError && (workflowError.includes('automation_workflows') || workflowError.includes('PGRST205') || workflowError.includes('503')) ? (
-                    <div className="p-6 rounded-3xl bg-amber-500/10 border border-amber-500/30 text-slate-800 dark:text-slate-100 space-y-4 shadow-xl">
-                      <div className="flex items-center gap-3 text-amber-600 dark:text-amber-400">
-                        <AlertTriangle className="w-6 h-6 shrink-0" />
-                        <h4 className="text-sm font-black">Chưa khởi tạo bảng cơ sở dữ liệu `automation_workflows`</h4>
-                      </div>
-                      <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                        Hệ thống phát hiện cơ sở dữ liệu Supabase chưa áp dụng migration cho tính năng AI Workflow Console.
-                        Vui lòng copy đoạn mã SQL bên dưới và chạy trong <b>Supabase Dashboard &gt; SQL Editor</b> để hoàn tất thiết lập.
-                      </p>
-                      <div className="flex flex-wrap items-center gap-2 pt-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard.writeText(SQL_MIGRATION_TEXT);
-                            toast.success("📋 Đã sao chép mã SQL Migration vào Clipboard!");
-                          }}
-                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600 text-white text-xs font-bold hover:bg-amber-700 transition shadow-md shadow-amber-600/20 cursor-pointer"
-                        >
-                          <Copy className="w-4 h-4" />
-                          <span>Sao Chép SQL Migration (1-Click)</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => selectedWorkflowTicket && handleOpenWorkflowConsole(selectedWorkflowTicket)}
-                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-bold hover:bg-slate-300 dark:hover:bg-slate-700 transition cursor-pointer"
-                        >
-                          <RefreshCw className="w-4 h-4" />
-                          <span>Thử Lại (Reload)</span>
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="py-16 text-center text-slate-400 text-xs space-y-2">
-                      <p>Không tìm thấy dữ liệu workflow cho yêu cầu này.</p>
-                      {workflowError && <p className="text-rose-500 text-[11px] font-mono">{workflowError}</p>}
-                      <button
-                        type="button"
-                        onClick={handleRePlanWorkflow}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 text-xs font-bold hover:bg-indigo-100 transition mt-2 cursor-pointer"
-                      >
-                        <Wand2 className="w-3.5 h-3.5" />
-                        <span>Yêu cầu AI Lập Kế Hoạch Ngay</span>
-                      </button>
-                    </div>
-                  )}
+                <div className="py-16 text-center text-slate-400 text-xs space-y-2">
+                  <p>Không tìm thấy dữ liệu workflow cho yêu cầu này.</p>
+                  {workflowError && <p className="text-rose-500 text-[11px] font-mono">{workflowError}</p>}
+                  <button
+                    type="button"
+                    onClick={handleReAssessIntent}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 text-xs font-bold hover:bg-indigo-100 transition mt-2 cursor-pointer"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Kích hoạt AI Phân tích ngay</span>
+                  </button>
                 </div>
               ) : (
                 <>
-                  {/* BENTO GRID: VÙNG A (REQUEST) + VÙNG B (AI UNDERSTANDING) */}
+                  {/* BENTO GRID: VÙNG A + VÙNG B */}
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-                    {/* VÙNG A: REQUEST CONTEXT (4 cols) */}
+                    {/* VÙNG A: REQUEST CONTEXT (5 cols) */}
                     <div className="lg:col-span-5 p-4 sm:p-5 rounded-2xl bg-slate-50/80 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 space-y-3 flex flex-col justify-between">
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
@@ -1240,7 +1185,6 @@ export const UnifiedInboxPage: React.FC = () => {
                           </p>
                         </div>
 
-                        {/* File attachments */}
                         {selectedWorkflowTicket.attachments && selectedWorkflowTicket.attachments.length > 0 && (
                           <div className="pt-2">
                             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
@@ -1271,19 +1215,28 @@ export const UnifiedInboxPage: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* VÙNG B: AI UNDERSTANDING & ENTITY RESOLUTION (7 cols) */}
+                    {/* VÙNG B: AI UNDERSTANDING & EVIDENCE PROVENANCE (7 cols) */}
                     <div className="lg:col-span-7 p-4 sm:p-5 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-900/40 space-y-3.5">
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] font-black uppercase tracking-wider text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5">
                           <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                          <span>VÙNG B • AI Understanding & Entity Resolution</span>
+                          <span>VÙNG B • AI Understanding & Evidence Provenance</span>
                         </span>
-                        <span className="text-xs font-mono font-extrabold px-2 py-0.5 rounded-md bg-white dark:bg-slate-900 text-indigo-600 border border-indigo-200 dark:border-indigo-800">
-                          Độ tin cậy: {Math.round((activeWorkflow.ai_analysis?.overall_confidence || 0.9) * 100)}%
-                        </span>
+                        <div className="flex items-center gap-2">
+                          {activeWorkflow.ai_analysis?.model_used && (
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold">
+                              {activeWorkflow.ai_analysis.model_used}
+                            </span>
+                          )}
+                          <span className="text-xs font-mono font-extrabold px-2 py-0.5 rounded-md bg-white dark:bg-slate-900 text-indigo-600 border border-indigo-200 dark:border-indigo-800">
+                            Độ tin cậy: {activeWorkflow.ai_analysis?.overall_confidence !== undefined
+                              ? `${Math.round(activeWorkflow.ai_analysis.overall_confidence * 100)}%`
+                              : 'N/A'}
+                          </span>
+                        </div>
                       </div>
 
-                      {/* Mục tiêu (Goal) */}
+                      {/* Mục tiêu */}
                       <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/30 text-xs">
                         <span className="text-[10px] font-extrabold uppercase text-slate-400 block mb-0.5">
                           Mục Tiêu Nhận Diện (Goal):
@@ -1293,7 +1246,32 @@ export const UnifiedInboxPage: React.FC = () => {
                         </p>
                       </div>
 
-                      {/* ENTITY RESOLUTION: TRƯỜNG HỌC (SCHOOL) */}
+                      {/* 🎯 BẰNG CHỨNG TRÍCH DẪN NGUYÊN VĂN (EVIDENCE PROVENANCE) */}
+                      <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-900/40 space-y-2">
+                        <span className="text-[10px] font-extrabold uppercase text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5">
+                          <Quote className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>Căn Cứ Trích Dẫn Từ Yêu Cầu (AI nói điều này dựa vào câu nào?):</span>
+                        </span>
+
+                        {activeWorkflow.ai_analysis?.evidence_quotes && activeWorkflow.ai_analysis.evidence_quotes.length > 0 ? (
+                          <div className="space-y-1.5">
+                            {activeWorkflow.ai_analysis.evidence_quotes.map((q, q_idx) => (
+                              <div
+                                key={q_idx}
+                                className="p-2 rounded-lg bg-indigo-50/70 dark:bg-indigo-950/40 border-l-2 border-indigo-600 text-xs font-mono text-slate-800 dark:text-slate-200 italic"
+                              >
+                                ❝ {q} ❞
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-[11px] text-slate-400 italic">
+                            Chưa phát hiện trích dẫn trực tiếp từ văn bản gốc.
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Phân giải trường học */}
                       <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/30 space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="text-[10px] font-extrabold uppercase text-slate-400 flex items-center gap-1">
@@ -1303,12 +1281,13 @@ export const UnifiedInboxPage: React.FC = () => {
 
                           {activeWorkflow.ai_analysis?.detected_school && (
                             <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                              ✓ Khớp {Math.round((activeWorkflow.ai_analysis.detected_school.confidence || 0.9) * 100)}%
+                              ✓ Khớp {activeWorkflow.ai_analysis.detected_school.confidence
+                                ? `${Math.round(activeWorkflow.ai_analysis.detected_school.confidence * 100)}%`
+                                : 'Đã xác nhận'}
                             </span>
                           )}
                         </div>
 
-                        {/* Card hiển thị trường hoặc Selector nếu chưa chắc chắn */}
                         <div className="relative" ref={schoolPickerRef}>
                           <div
                             onClick={() => setIsSchoolPickerOpen(!isSchoolPickerOpen)}
@@ -1335,7 +1314,6 @@ export const UnifiedInboxPage: React.FC = () => {
                             </div>
                           </div>
 
-                          {/* Dropdown tìm kiếm từ danh sách 480 trường */}
                           {isSchoolPickerOpen && (
                             <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-300 dark:border-slate-700 p-2 z-50 max-h-60 overflow-y-auto space-y-1 animate-in fade-in zoom-in-95 duration-100">
                               <div className="relative w-full">
@@ -1343,7 +1321,7 @@ export const UnifiedInboxPage: React.FC = () => {
                                   type="text"
                                   value={schoolSearchQuery}
                                   onChange={(e) => setSchoolSearchQuery(e.target.value)}
-                                  placeholder="Nhập tên trường hoặc mã trường (VD: Saint Joseph, 123...)"
+                                  placeholder="Nhập tên trường hoặc mã trường..."
                                   className="w-full h-10 pl-9 pr-3 text-xs font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-900 border-2 border-amber-400 dark:border-amber-600 rounded-xl shadow-xs outline-none focus:ring-2 focus:ring-amber-500/30 placeholder:text-slate-400"
                                 />
                                 <Search className="w-4 h-4 text-amber-600 dark:text-amber-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -1374,7 +1352,7 @@ export const UnifiedInboxPage: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Khóa học nhận diện */}
+                      {/* Khóa học */}
                       {activeWorkflow.ai_analysis?.detected_courses && activeWorkflow.ai_analysis.detected_courses.length > 0 && (
                         <div className="flex items-center gap-2 flex-wrap text-xs">
                           <span className="text-[10px] font-extrabold uppercase text-slate-400 flex items-center gap-1">
@@ -1385,18 +1363,18 @@ export const UnifiedInboxPage: React.FC = () => {
                               key={i}
                               className="px-2.5 py-0.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300"
                             >
-                              {c.course_name}
+                              {typeof c === 'string' ? c : c.course_name}
                             </span>
                           ))}
                         </div>
                       )}
 
-                      {/* Giải thích lý do (Why this workflow?) */}
+                      {/* Lý do lựa chọn luồng */}
                       {activeWorkflow.ai_analysis?.reason_summary_vi && (
                         <div className="p-3.5 rounded-xl bg-amber-100/80 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800/70 text-xs text-amber-950 dark:text-amber-100 font-medium leading-relaxed shadow-xs">
                           <div className="font-extrabold mb-1 flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-amber-900 dark:text-amber-300">
                             <HelpCircle className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
-                            <span>Lý do lựa chọn luồng này (Why this workflow?):</span>
+                            <span>Lý do lựa chọn luồng (Why this workflow?):</span>
                           </div>
                           <p>{activeWorkflow.ai_analysis.reason_summary_vi}</p>
                         </div>
@@ -1404,57 +1382,113 @@ export const UnifiedInboxPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* VÙNG C: PREPARED WORKFLOW & EXECUTION CONSOLE */}
-                  <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4">
-                    <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3 flex-wrap gap-2">
-                      <div className="flex items-center gap-2">
-                        <div className="p-1.5 rounded-lg bg-indigo-600 text-white shadow-sm">
-                          <Layers className="w-4 h-4" />
+                  {/* VÙNG C: PREPARED WORKFLOW / MISSING REQUIREMENTS CHECKLIST */}
+                  {activeWorkflow.status === 'needs_information' ? (
+                    <div className="p-6 rounded-3xl bg-amber-500/10 border-2 border-amber-500/40 space-y-4 shadow-sm">
+                      <div className="flex items-center gap-3 text-amber-700 dark:text-amber-400">
+                        <div className="p-2 rounded-xl bg-amber-500 text-white shadow-sm">
+                          <ListChecks className="w-5 h-5" />
                         </div>
                         <div>
-                          <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
-                            VÙNG C • Prepared Workflow & Execution Console
+                          <h4 className="text-sm font-black uppercase tracking-wider">
+                            Danh Sách Thông Tin Cần Bổ Sung (Missing Requirements Checklist)
                           </h4>
-                          <p className="text-[11px] text-slate-500">
-                            {isEditingWorkflow
-                              ? 'Chế độ chỉnh sửa: Bạn có thể thêm, bớt, đổi thứ tự và sửa inputs của từng bước.'
-                              : 'Kiểm tra thứ tự và các liên kết phụ thuộc trước khi khởi chạy.'}
+                          <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                            Hệ thống đã khóa van an toàn (Fail-Closed). Yêu cầu chưa đủ dữ kiện để tạo bước thực thi tự động.
                           </p>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setIsEditingWorkflow(!isEditingWorkflow)}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${isEditingWorkflow
-                            ? 'bg-indigo-600 text-white shadow-sm'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200'
-                            }`}
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                          <span>{isEditingWorkflow ? 'Hoàn Tất Chỉnh Sửa' : 'Chỉnh Sửa Luồng'}</span>
-                        </button>
+                      <div className="space-y-2 pt-2">
+                        {activeWorkflow.ai_analysis?.missing_requirements && activeWorkflow.ai_analysis.missing_requirements.length > 0 ? (
+                          activeWorkflow.ai_analysis.missing_requirements.map((item: any, idx: number) => (
+                            <div
+                              key={idx}
+                              className="flex items-start gap-3 p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-900/60 shadow-2xs"
+                            >
+                              <div className="p-1 rounded-lg bg-rose-100 dark:bg-rose-950/60 text-rose-600 mt-0.5 shrink-0">
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                              </div>
+                              <div className="text-xs space-y-0.5">
+                                <div className="font-black text-slate-900 dark:text-white flex items-center gap-2">
+                                  <span>Trường thông tin:</span>
+                                  <span className="font-mono px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-indigo-600 dark:text-indigo-400">
+                                    {item.field || 'Chưa xác định'}
+                                  </span>
+                                </div>
+                                <p className="text-slate-600 dark:text-slate-300 font-medium">
+                                  {item.message || JSON.stringify(item)}
+                                </p>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/40 text-xs text-slate-600 dark:text-slate-300">
+                            Không tìm thấy danh sách người dùng, file COF hoặc khóa học cụ thể. Vui lòng liên hệ người gửi để bổ sung.
+                          </div>
+                        )}
                       </div>
                     </div>
+                  ) : activeWorkflow.status === 'no_action' ? (
+                    <div className="p-8 text-center rounded-3xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-3">
+                      <Info className="w-10 h-10 text-slate-400 mx-auto" />
+                      <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                        Không Có Hành Động Tự Động Hóa Nào Được Kích Hoạt
+                      </h4>
+                      <p className="text-xs text-slate-500 max-w-md mx-auto">
+                        Email này được phân loại là bản tin, thông báo tự động hoặc không chứa yêu cầu can thiệp hệ sinh thái.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4">
+                      <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3 flex-wrap gap-2">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1.5 rounded-lg bg-indigo-600 text-white shadow-sm">
+                            <Layers className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                              VÙNG C • Prepared Workflow & Execution Console
+                            </h4>
+                            <p className="text-[11px] text-slate-500">
+                              {isEditingWorkflow
+                                ? 'Chế độ chỉnh sửa: Bạn có thể thêm, bớt, đổi thứ tự và sửa inputs của từng bước.'
+                                : 'Kiểm tra thứ tự và các liên kết phụ thuộc trước khi khởi chạy.'}
+                            </p>
+                          </div>
+                        </div>
 
-                    {/* Workflow Builder Component */}
-                    <WorkflowBuilder
-                      steps={activeWorkflow.steps}
-                      capabilities={capabilities}
-                      isEditable={isEditingWorkflow}
-                      onStepsChange={handleStepsChange}
-                      onRetryStep={handleRetryStep}
-                    />
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingWorkflow(!isEditingWorkflow)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${isEditingWorkflow
+                              ? 'bg-indigo-600 text-white shadow-sm'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200'
+                              }`}
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            <span>{isEditingWorkflow ? 'Hoàn Tất Chỉnh Sửa' : 'Chỉnh Sửa Luồng'}</span>
+                          </button>
+                        </div>
+                      </div>
 
-                    {/* Safety Gate & Validation Panel */}
-                    <WorkflowValidationPanel
-                      validation={validationResult}
-                      isValidating={workflowValidating}
-                      isSchoolResolved={!!activeWorkflow.ai_analysis?.detected_school}
-                      totalSteps={activeWorkflow.steps.length}
-                    />
-                  </div>
+                      <WorkflowBuilder
+                        steps={activeWorkflow.steps || []}
+                        capabilities={capabilities}
+                        isEditable={isEditingWorkflow}
+                        onStepsChange={handleStepsChange}
+                        onRetryStep={handleRetryStep}
+                      />
+
+                      <WorkflowValidationPanel
+                        validation={validationResult}
+                        isValidating={workflowValidating}
+                        isSchoolResolved={!!activeWorkflow.ai_analysis?.detected_school}
+                        totalSteps={(activeWorkflow.steps || []).length}
+                      />
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -1484,17 +1518,27 @@ export const UnifiedInboxPage: React.FC = () => {
                         : 'Workflow đang thực thi ngầm...'}
                     </span>
                   </div>
-                ) : activeWorkflow?.status === 'success' ? (
+                ) : activeWorkflow?.status === 'success' || activeWorkflow?.status === 'succeeded' ? (
                   <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-xs font-extrabold border border-emerald-300">
                     <CheckCircle className="w-4 h-4 text-emerald-600" />
                     <span>Đã Hoàn Thành Toàn Bộ Luồng!</span>
                   </div>
+                ) : activeWorkflow?.status === 'no_action' ? (
+                  <div className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold border border-slate-200 dark:border-slate-700">
+                    <Info className="w-4 h-4 text-slate-400" />
+                    <span>Không yêu cầu thao tác tự động</span>
+                  </div>
+                ) : activeWorkflow?.status === 'needs_information' ? (
+                  <div className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 text-xs font-bold border border-amber-300 dark:border-amber-800">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                    <span>Thiếu thông tin đầu vào (Đã chặn duyệt)</span>
+                  </div>
                 ) : (
                   <button
                     type="button"
-                    disabled={isConfirmingRun || (validationResult ? !validationResult.is_valid : false)}
+                    disabled={isConfirmingRun || !isWorkflowRunnable}
                     onClick={handleConfirmAndRun}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 text-white hover:brightness-110 disabled:opacity-50 transition shadow-lg shadow-indigo-500/25 cursor-pointer"
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 text-white hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-lg shadow-indigo-500/25 cursor-pointer"
                   >
                     {isConfirmingRun ? (
                       <>

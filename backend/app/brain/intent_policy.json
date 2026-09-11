@@ -1,0 +1,149 @@
+{
+    "policy_version": "v1.0.0",
+    "updated_at": "2026-09-11",
+    "intents": {
+        "create_accounts": {
+            "name": "Tạo mới tài khoản School Workspace",
+            "description": "Nộp batch tạo tài khoản giáo viên/học sinh qua cỗ máy Bulk Account Creation",
+            "required_entities": [
+                "school_name"
+            ],
+            "required_inputs": [
+                "school_name",
+                "users_or_file"
+            ],
+            "min_evidence_quotes": 1,
+            "risk_level": "high_mutation",
+            "requires_manual_confirmation": false,
+            "capability_pipeline": [
+                {
+                    "capability_id": "workspace.bulk_account_creation",
+                    "name": "Nộp batch tạo tài khoản School Workspace",
+                    "inputs_mapping": {
+                        "school_identifier": "resolved_school.name",
+                        "school_id": "resolved_school.id",
+                        "attachment_url": "context.attachment_url",
+                        "total_count": "context.total_count"
+                    },
+                    "depends_on": []
+                },
+                {
+                    "capability_id": "workspace.poll_account_batch",
+                    "name": "Kiểm tra tiến độ & Lấy kết quả tài khoản",
+                    "inputs_mapping": {
+                        "school_identifier": "resolved_school.name",
+                        "request_id": "{{ step_01.account_batch_request_id }}"
+                    },
+                    "depends_on": [
+                        "step_01"
+                    ]
+                }
+            ]
+        },
+        "course_access": {
+            "name": "Ghi danh khóa học Moodle PLearn",
+            "description": "Ghi danh học sinh/giáo viên vào các khóa học LMS",
+            "required_entities": [
+                "courses"
+            ],
+            "required_inputs": [
+                "courses",
+                "student_emails"
+            ],
+            "min_evidence_quotes": 1,
+            "risk_level": "medium_mutation",
+            "requires_manual_confirmation": false,
+            "capability_pipeline": [
+                {
+                    "capability_id": "lms.direct_enroll",
+                    "name": "Ghi danh khóa học Moodle PLearn",
+                    "inputs_mapping": {
+                        "courses": "entities.courses",
+                        "student_emails": "context.student_emails",
+                        "role": "context.role"
+                    },
+                    "depends_on": [
+                        "create_accounts_batch_poll_if_exists"
+                    ]
+                }
+            ]
+        },
+        "repository_access": {
+            "name": "Cấp quyền truy cập Git Pythaverse",
+            "description": "Thêm thành viên vào Repository Git Pythaverse",
+            "required_entities": [
+                "repositories"
+            ],
+            "required_inputs": [
+                "repositories",
+                "collaborators"
+            ],
+            "min_evidence_quotes": 1,
+            "risk_level": "medium_mutation",
+            "requires_manual_confirmation": false,
+            "default_role": "GUEST",
+            "capability_pipeline": [
+                {
+                    "capability_id": "git.add_collaborators",
+                    "name": "Cấp quyền cộng tác Git Pythaverse",
+                    "inputs_mapping": {
+                        "repo_url": "context.repo_url",
+                        "collaborators": "context.collaborators",
+                        "target_role": "context.target_role"
+                    },
+                    "depends_on": [
+                        "create_accounts_batch_poll_if_exists"
+                    ]
+                }
+            ]
+        },
+        "reset_password": {
+            "name": "Cấp lại mật khẩu người dùng Keycloak",
+            "description": "Đặt lại mật khẩu tạm thời cho tài khoản định danh",
+            "required_entities": [
+                "target_email"
+            ],
+            "required_inputs": [
+                "target_email",
+                "temporary_password"
+            ],
+            "min_evidence_quotes": 1,
+            "risk_level": "high_mutation",
+            "requires_manual_confirmation": true,
+            "capability_pipeline": [
+                {
+                    "capability_id": "keycloak.reset_password",
+                    "name": "Cấp lại mật khẩu tạm Keycloak",
+                    "inputs_mapping": {
+                        "target_email": "entities.target_email",
+                        "temporary_password": "operator_manual_input"
+                    },
+                    "depends_on": []
+                }
+            ]
+        },
+        "verify_email": {
+            "name": "Kích hoạt xác thực email Keycloak",
+            "description": "Gắn cờ Email Verified cho người dùng trên Keycloak IDP",
+            "required_entities": [
+                "target_email"
+            ],
+            "required_inputs": [
+                "target_email"
+            ],
+            "min_evidence_quotes": 1,
+            "risk_level": "low_mutation",
+            "requires_manual_confirmation": false,
+            "capability_pipeline": [
+                {
+                    "capability_id": "keycloak.verify_email",
+                    "name": "Xác thực email người dùng",
+                    "inputs_mapping": {
+                        "target_email": "entities.target_email"
+                    },
+                    "depends_on": []
+                }
+            ]
+        }
+    }
+}

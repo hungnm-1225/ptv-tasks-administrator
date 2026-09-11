@@ -1,6 +1,6 @@
 {
-  "version": "1.0.0",
-  "description": "Pythaverse Central Admin & Automation Hub - Master Capability Registry",
+  "version": "2.0.0",
+  "description": "Pythaverse Central Admin & Automation Hub - Master Capability Registry (Schema & Handler Contract Synchronized)",
   "capabilities": [
     {
       "id": "workspace.resolve_school",
@@ -9,43 +9,108 @@
       "domain": "School Workspace",
       "bot_type": "workspace_rpa",
       "action": "resolve_lineage",
-      "required_inputs": ["school_name"],
-      "optional_inputs": ["country", "school_code"],
-      "produces": ["school_id", "school_code", "school_name", "partner_code", "partner_name", "distributor_code", "distributor_name", "credentials_ready"],
+      "required_inputs": [
+        "school_name"
+      ],
+      "optional_inputs": [
+        "country",
+        "school_code"
+      ],
+      "input_schema": {
+        "school_name": "string",
+        "school_code": "string?"
+      },
+      "output_schema": {
+        "school_id": "string",
+        "school_code": "string",
+        "partner_name": "string"
+      },
+      "produces": [
+        "school_id",
+        "school_code",
+        "school_name",
+        "partner_code",
+        "partner_name",
+        "distributor_code",
+        "distributor_name",
+        "credentials_ready"
+      ],
       "consumes": [],
       "execution_type": "sync_internal",
       "risk_level": "read_only",
-      "available": true
+      "supported_by_handler": false,
+      "requires_explicit_evidence": false,
+      "requires_manual_confirmation": false,
+      "available": false
     },
     {
       "id": "cof.parse_file",
       "name": "Parse COF Excel File",
-      "description": "Bóc tách file COF (Curriculum Order Form) 3 Tabs: lấy thông tin trường, danh sách môn học, học sinh, giáo viên chưa có tài khoản",
+      "description": "Bóc tách file COF 3 Tabs: lấy thông tin trường, môn học, học sinh, giáo viên",
       "domain": "COF Processing",
       "bot_type": "workspace_rpa",
       "action": "parse_cof",
-      "required_inputs": ["file_url"],
-      "optional_inputs": ["filename"],
-      "produces": ["school_name", "country", "courses", "students_to_create", "teachers_to_create", "existing_accounts_count"],
+      "required_inputs": [
+        "file_url"
+      ],
+      "optional_inputs": [
+        "filename"
+      ],
+      "input_schema": {
+        "file_url": "string"
+      },
+      "output_schema": {
+        "school_name": "string",
+        "students_to_create": "array"
+      },
+      "produces": [
+        "school_name",
+        "country",
+        "courses",
+        "students_to_create",
+        "teachers_to_create",
+        "existing_accounts_count"
+      ],
       "consumes": [],
       "execution_type": "sync_internal",
       "risk_level": "read_only",
-      "available": true
+      "supported_by_handler": false,
+      "requires_explicit_evidence": false,
+      "requires_manual_confirmation": false,
+      "available": false
     },
     {
       "id": "cof.generate_accounts_file",
       "name": "Generate Normalized Accounts File",
-      "description": "Tạo file Excel tài khoản chuẩn hóa từ dữ liệu COF hoặc danh sách người dùng để nộp batch",
+      "description": "Tạo file Excel tài khoản chuẩn hóa từ dữ liệu COF để nộp batch",
       "domain": "COF Processing",
       "bot_type": "workspace_rpa",
       "action": "generate_accounts_file",
-      "required_inputs": ["users_list"],
-      "optional_inputs": ["school_name"],
-      "produces": ["account_file_path", "account_file_url", "total_count"],
-      "consumes": ["cof.parse_file.students_to_create", "cof.parse_file.teachers_to_create"],
+      "required_inputs": [
+        "users_list"
+      ],
+      "optional_inputs": [
+        "school_name"
+      ],
+      "input_schema": {
+        "users_list": "array"
+      },
+      "output_schema": {
+        "account_file_path": "string",
+        "total_count": "integer"
+      },
+      "produces": [
+        "account_file_path",
+        "account_file_url",
+        "total_count"
+      ],
+      "consumes": [],
       "execution_type": "sync_internal",
       "risk_level": "read_only",
-      "available": true
+      "supported_by_handler": false,
+      "requires_explicit_evidence": false,
+      "requires_manual_confirmation": false,
+      "available": false
     },
     {
       "id": "workspace.bulk_account_creation",
@@ -54,12 +119,37 @@
       "domain": "School Workspace",
       "bot_type": "workspace_rpa",
       "action": "bulk_account_creation",
-      "required_inputs": ["school_identifier", "upload_file_path"],
-      "optional_inputs": ["total_count", "attachment_url"],
-      "produces": ["account_batch_request_id", "result_file_url", "created_accounts", "execution_status"],
-      "consumes": ["cof.generate_accounts_file.account_file_path", "workspace.resolve_school.school_id"],
+      "required_inputs": [
+        "school_identifier"
+      ],
+      "optional_inputs": [
+        "upload_file_path",
+        "attachment_url",
+        "total_count"
+      ],
+      "input_schema": {
+        "school_identifier": "string",
+        "upload_file_path": "string?",
+        "attachment_url": "string?",
+        "total_count": "integer?"
+      },
+      "output_schema": {
+        "account_batch_request_id": "string",
+        "result_file_url": "string?",
+        "execution_status": "string"
+      },
+      "produces": [
+        "account_batch_request_id",
+        "result_file_url",
+        "created_accounts",
+        "execution_status"
+      ],
+      "consumes": [],
       "execution_type": "async_polling",
       "risk_level": "high_mutation",
+      "supported_by_handler": true,
+      "requires_explicit_evidence": true,
+      "requires_manual_confirmation": false,
       "available": true
     },
     {
@@ -69,28 +159,68 @@
       "domain": "School Workspace",
       "bot_type": "workspace_rpa",
       "action": "check_account_batch",
-      "required_inputs": ["school_identifier", "request_id"],
+      "required_inputs": [
+        "school_identifier",
+        "request_id"
+      ],
       "optional_inputs": [],
-      "produces": ["result_file_url", "created_accounts", "success_count", "failed_count"],
-      "consumes": ["workspace.bulk_account_creation.account_batch_request_id"],
+      "input_schema": {
+        "school_identifier": "string",
+        "request_id": "string"
+      },
+      "output_schema": {
+        "result_file_url": "string",
+        "success_count": "integer"
+      },
+      "produces": [
+        "result_file_url",
+        "created_accounts",
+        "success_count",
+        "failed_count"
+      ],
+      "consumes": [
+        "workspace.bulk_account_creation.account_batch_request_id"
+      ],
       "execution_type": "async_polling",
       "risk_level": "read_only",
+      "supported_by_handler": true,
+      "requires_explicit_evidence": false,
+      "requires_manual_confirmation": false,
       "available": true
     },
     {
       "id": "cof.write_results_back",
       "name": "Write Credentials Back to COF",
-      "description": "Ghi ngược Username, Password và Group LMS vào file COF gốc, highlight màu cam nhạt và tải lên Google Drive",
+      "description": "Ghi ngược Username, Password và Group LMS vào file COF gốc và tải lên Google Drive",
       "domain": "COF Processing",
       "bot_type": "workspace_rpa",
       "action": "write_results_back",
-      "required_inputs": ["original_cof_path", "result_file_path"],
-      "optional_inputs": ["school_name", "drive_folder_id"],
-      "produces": ["final_cof_url", "google_drive_link"],
-      "consumes": ["workspace.poll_account_batch.result_file_url"],
+      "required_inputs": [
+        "original_cof_path",
+        "result_file_path"
+      ],
+      "optional_inputs": [
+        "school_name",
+        "drive_folder_id"
+      ],
+      "input_schema": {
+        "original_cof_path": "string",
+        "result_file_path": "string"
+      },
+      "output_schema": {
+        "final_cof_url": "string"
+      },
+      "produces": [
+        "final_cof_url",
+        "google_drive_link"
+      ],
+      "consumes": [],
       "execution_type": "sync_internal",
       "risk_level": "low_mutation",
-      "available": true
+      "supported_by_handler": false,
+      "requires_explicit_evidence": false,
+      "requires_manual_confirmation": false,
+      "available": false
     },
     {
       "id": "workspace.school_create_order",
@@ -99,12 +229,33 @@
       "domain": "School Workspace",
       "bot_type": "workspace_rpa",
       "action": "school_create_order",
-      "required_inputs": ["school_identifier", "order_details"],
-      "optional_inputs": ["contact_info", "additional_notes"],
-      "produces": ["order_code", "order_id", "status"],
-      "consumes": ["workspace.resolve_school.school_id", "cof.parse_file.courses"],
+      "required_inputs": [
+        "school_identifier",
+        "order_details"
+      ],
+      "optional_inputs": [
+        "contact_info",
+        "additional_notes"
+      ],
+      "input_schema": {
+        "school_identifier": "string",
+        "order_details": "object"
+      },
+      "output_schema": {
+        "order_code": "string",
+        "status": "string"
+      },
+      "produces": [
+        "order_code",
+        "order_id",
+        "status"
+      ],
+      "consumes": [],
       "execution_type": "async_playwright",
       "risk_level": "medium_mutation",
+      "supported_by_handler": true,
+      "requires_explicit_evidence": true,
+      "requires_manual_confirmation": false,
       "available": true
     },
     {
@@ -114,12 +265,28 @@
       "domain": "School Workspace",
       "bot_type": "workspace_rpa",
       "action": "approve_school_order_standalone",
-      "required_inputs": ["order_code"],
-      "optional_inputs": ["partner_code"],
-      "produces": ["order_status", "prt_contract_code"],
-      "consumes": ["workspace.school_create_order.order_code"],
+      "required_inputs": [
+        "order_code"
+      ],
+      "optional_inputs": [
+        "partner_code"
+      ],
+      "input_schema": {
+        "order_code": "string"
+      },
+      "output_schema": {
+        "order_status": "string"
+      },
+      "produces": [
+        "order_status",
+        "prt_contract_code"
+      ],
+      "consumes": [],
       "execution_type": "async_playwright",
       "risk_level": "high_mutation",
+      "supported_by_handler": true,
+      "requires_explicit_evidence": true,
+      "requires_manual_confirmation": false,
       "available": true
     },
     {
@@ -129,12 +296,28 @@
       "domain": "School Workspace",
       "bot_type": "workspace_rpa",
       "action": "partner_create_contract",
-      "required_inputs": ["partner_code", "contract_data"],
+      "required_inputs": [
+        "partner_code",
+        "contract_data"
+      ],
       "optional_inputs": [],
-      "produces": ["contract_code", "status"],
-      "consumes": ["workspace.partner_approve_order.prt_contract_code"],
+      "input_schema": {
+        "partner_code": "string",
+        "contract_data": "object"
+      },
+      "output_schema": {
+        "contract_code": "string"
+      },
+      "produces": [
+        "contract_code",
+        "status"
+      ],
+      "consumes": [],
       "execution_type": "async_playwright",
       "risk_level": "medium_mutation",
+      "supported_by_handler": true,
+      "requires_explicit_evidence": true,
+      "requires_manual_confirmation": false,
       "available": true
     },
     {
@@ -144,12 +327,28 @@
       "domain": "School Workspace",
       "bot_type": "workspace_rpa",
       "action": "approve_partner_contract_standalone",
-      "required_inputs": ["contract_code"],
-      "optional_inputs": ["distributor_code"],
-      "produces": ["contract_status", "dst_contract_code"],
-      "consumes": ["workspace.partner_create_contract.contract_code"],
+      "required_inputs": [
+        "contract_code"
+      ],
+      "optional_inputs": [
+        "distributor_code"
+      ],
+      "input_schema": {
+        "contract_code": "string"
+      },
+      "output_schema": {
+        "contract_status": "string"
+      },
+      "produces": [
+        "contract_status",
+        "dst_contract_code"
+      ],
+      "consumes": [],
       "execution_type": "async_playwright",
       "risk_level": "high_mutation",
+      "supported_by_handler": true,
+      "requires_explicit_evidence": true,
+      "requires_manual_confirmation": false,
       "available": true
     },
     {
@@ -159,12 +358,28 @@
       "domain": "School Workspace",
       "bot_type": "workspace_rpa",
       "action": "admin_approve_contract",
-      "required_inputs": ["contract_code"],
-      "optional_inputs": ["justification"],
-      "produces": ["approval_status", "activated_at"],
-      "consumes": ["workspace.distributor_approve_contract.dst_contract_code"],
+      "required_inputs": [
+        "contract_code"
+      ],
+      "optional_inputs": [
+        "justification"
+      ],
+      "input_schema": {
+        "contract_code": "string"
+      },
+      "output_schema": {
+        "approval_status": "string"
+      },
+      "produces": [
+        "approval_status",
+        "activated_at"
+      ],
+      "consumes": [],
       "execution_type": "async_playwright",
       "risk_level": "high_mutation",
+      "supported_by_handler": true,
+      "requires_explicit_evidence": true,
+      "requires_manual_confirmation": false,
       "available": true
     },
     {
@@ -174,12 +389,35 @@
       "domain": "School Workspace",
       "bot_type": "workspace_rpa",
       "action": "school_enroll_users",
-      "required_inputs": ["school_identifier", "course_name", "student_emails"],
-      "optional_inputs": ["teacher_emails", "group_name_raw", "start_date", "end_date"],
-      "produces": ["enrollment_summary", "groups_created"],
-      "consumes": ["workspace.bulk_account_creation.created_accounts"],
+      "required_inputs": [
+        "school_identifier",
+        "course_name",
+        "student_emails"
+      ],
+      "optional_inputs": [
+        "teacher_emails",
+        "group_name_raw",
+        "start_date",
+        "end_date"
+      ],
+      "input_schema": {
+        "school_identifier": "string",
+        "course_name": "string",
+        "student_emails": "array"
+      },
+      "output_schema": {
+        "enrollment_summary": "object"
+      },
+      "produces": [
+        "enrollment_summary",
+        "groups_created"
+      ],
+      "consumes": [],
       "execution_type": "async_playwright",
       "risk_level": "medium_mutation",
+      "supported_by_handler": true,
+      "requires_explicit_evidence": true,
+      "requires_manual_confirmation": false,
       "available": true
     },
     {
@@ -189,42 +427,101 @@
       "domain": "Moodle PLearn LMS",
       "bot_type": "lms_playwright",
       "action": "direct_moodle_lms_enroll",
-      "required_inputs": ["courses", "student_emails"],
-      "optional_inputs": ["teacher_emails", "manager_emails", "sync_git_repos", "git_sync_plan"],
-      "produces": ["enrollment_results", "extended_users_count", "groups_created"],
-      "consumes": ["workspace.bulk_account_creation.created_accounts"],
+      "required_inputs": [
+        "courses",
+        "student_emails"
+      ],
+      "optional_inputs": [
+        "teacher_emails",
+        "manager_emails",
+        "sync_git_repos",
+        "git_sync_plan",
+        "role"
+      ],
+      "input_schema": {
+        "courses": "array",
+        "student_emails": "array|string"
+      },
+      "output_schema": {
+        "enrollment_results": "object",
+        "extended_users_count": "integer"
+      },
+      "produces": [
+        "enrollment_results",
+        "extended_users_count",
+        "groups_created"
+      ],
+      "consumes": [],
       "execution_type": "async_playwright",
       "risk_level": "medium_mutation",
+      "supported_by_handler": true,
+      "requires_explicit_evidence": true,
+      "requires_manual_confirmation": false,
       "available": true
     },
     {
       "id": "lms.unenrol_users",
       "name": "PLearn Moodle Unenrol Users",
-      "description": "Moodle LMS: Gỡ bỏ hoặc hủy ghi danh người dùng khỏi khóa học thông qua bộ lọc Keyword Filter",
+      "description": "Moodle LMS: Gỡ bỏ hoặc hủy ghi danh người dùng khỏi khóa học",
       "domain": "Moodle PLearn LMS",
       "bot_type": "lms_playwright",
       "action": "unenrol_users_pipeline",
-      "required_inputs": ["courses", "target_emails"],
+      "required_inputs": [
+        "courses",
+        "target_emails"
+      ],
       "optional_inputs": [],
-      "produces": ["unenrolled_count", "removed_users"],
+      "input_schema": {
+        "courses": "array",
+        "target_emails": "array"
+      },
+      "output_schema": {
+        "unenrolled_count": "integer"
+      },
+      "produces": [
+        "unenrolled_count",
+        "removed_users"
+      ],
       "consumes": [],
       "execution_type": "async_playwright",
       "risk_level": "high_mutation",
-      "available": true
+      "supported_by_handler": false,
+      "requires_explicit_evidence": true,
+      "requires_manual_confirmation": true,
+      "available": false
     },
     {
       "id": "keycloak.reset_password",
       "name": "Keycloak Reset Password",
-      "description": "Keycloak IDP: Cấp lại mật khẩu tạm cho người dùng qua REST API hoặc Playwright Admin fallback",
+      "description": "Keycloak IDP: Cấp lại mật khẩu tạm cho người dùng qua REST API",
       "domain": "Keycloak Auth IDP",
       "bot_type": "keycloak_api",
       "action": "reset_password",
-      "required_inputs": ["target_email"],
-      "optional_inputs": ["temporary_password", "force_change_on_first_login"],
-      "produces": ["user_id", "password_reset_status"],
+      "required_inputs": [
+        "target_email",
+        "temporary_password"
+      ],
+      "optional_inputs": [
+        "force_change_on_first_login"
+      ],
+      "input_schema": {
+        "target_email": "string",
+        "temporary_password": "string"
+      },
+      "output_schema": {
+        "user_id": "string",
+        "password_reset_status": "string"
+      },
+      "produces": [
+        "user_id",
+        "password_reset_status"
+      ],
       "consumes": [],
       "execution_type": "sync_api",
-      "risk_level": "medium_mutation",
+      "risk_level": "high_mutation",
+      "supported_by_handler": true,
+      "requires_explicit_evidence": true,
+      "requires_manual_confirmation": true,
       "available": true
     },
     {
@@ -234,57 +531,125 @@
       "domain": "Keycloak Auth IDP",
       "bot_type": "keycloak_api",
       "action": "set_user_status",
-      "required_inputs": ["target_email", "enabled"],
+      "required_inputs": [
+        "target_email",
+        "enabled"
+      ],
       "optional_inputs": [],
-      "produces": ["user_id", "status_changed_to"],
+      "input_schema": {
+        "target_email": "string",
+        "enabled": "boolean"
+      },
+      "output_schema": {
+        "status_changed_to": "boolean"
+      },
+      "produces": [
+        "user_id",
+        "status_changed_to"
+      ],
       "consumes": [],
       "execution_type": "sync_api",
       "risk_level": "medium_mutation",
+      "supported_by_handler": true,
+      "requires_explicit_evidence": true,
+      "requires_manual_confirmation": true,
       "available": true
     },
     {
       "id": "keycloak.verify_email",
       "name": "Keycloak Mark Email Verified",
-      "description": "Keycloak IDP: Đánh dấu email người dùng đã được xác thực (email_verified = true)",
+      "description": "Keycloak IDP: Đánh dấu email người dùng đã được xác thực",
       "domain": "Keycloak Auth IDP",
       "bot_type": "keycloak_api",
       "action": "mark_email_verified",
-      "required_inputs": ["target_email"],
+      "required_inputs": [
+        "target_email"
+      ],
       "optional_inputs": [],
-      "produces": ["user_id", "email_verified_status"],
+      "input_schema": {
+        "target_email": "string"
+      },
+      "output_schema": {
+        "email_verified_status": "boolean"
+      },
+      "produces": [
+        "user_id",
+        "email_verified_status"
+      ],
       "consumes": [],
       "execution_type": "sync_api",
       "risk_level": "low_mutation",
+      "supported_by_handler": true,
+      "requires_explicit_evidence": true,
+      "requires_manual_confirmation": false,
       "available": true
     },
     {
       "id": "git.add_collaborators",
       "name": "Pythaverse Git Add Collaborators",
-      "description": "Thêm thành viên cộng tác vào kho mã nguồn Pythaverse Git (git.pythaverse.space) với vai trò GUEST, DEVELOPER hoặc ADMIN",
+      "description": "Thêm thành viên cộng tác vào kho mã nguồn Pythaverse Git",
       "domain": "Pythaverse Git",
       "bot_type": "git_collaborator",
       "action": "add_repo_collaborators",
-      "required_inputs": ["repo_url", "collaborators"],
-      "optional_inputs": ["target_role"],
-      "produces": ["added_users", "failed_users", "applied_changes_count"],
-      "consumes": ["workspace.bulk_account_creation.created_accounts"],
+      "required_inputs": [
+        "repo_url",
+        "collaborators"
+      ],
+      "optional_inputs": [
+        "target_role"
+      ],
+      "input_schema": {
+        "repo_url": "string",
+        "collaborators": "array|string",
+        "target_role": "string?"
+      },
+      "output_schema": {
+        "applied_changes_count": "integer"
+      },
+      "produces": [
+        "added_users",
+        "failed_users",
+        "applied_changes_count"
+      ],
+      "consumes": [],
       "execution_type": "async_playwright",
       "risk_level": "medium_mutation",
+      "supported_by_handler": true,
+      "requires_explicit_evidence": true,
+      "requires_manual_confirmation": false,
       "available": true
     },
     {
       "id": "feedback.comment_and_assign",
       "name": "Feedback Sheet Doc Triage",
-      "description": "Đọc Google Doc báo cáo sự cố và chèn bình luận gắn thẻ email người phụ trách xử lý",
+      "description": "Đọc Google Doc báo cáo sự cố và chèn bình luận gắn thẻ email người phụ trách",
       "domain": "Feedback & Helpdesk",
       "bot_type": "feedback_doc_triage",
       "action": "comment_and_assign",
-      "required_inputs": ["doc_url", "assignee_email"],
-      "optional_inputs": ["comment_content"],
-      "produces": ["comment_id", "tagged_status"],
+      "required_inputs": [
+        "doc_url",
+        "assignee_email"
+      ],
+      "optional_inputs": [
+        "comment_content"
+      ],
+      "input_schema": {
+        "doc_url": "string",
+        "assignee_email": "string"
+      },
+      "output_schema": {
+        "tagged_status": "string"
+      },
+      "produces": [
+        "comment_id",
+        "tagged_status"
+      ],
       "consumes": [],
       "execution_type": "sync_api",
       "risk_level": "low_mutation",
+      "supported_by_handler": true,
+      "requires_explicit_evidence": true,
+      "requires_manual_confirmation": false,
       "available": true
     }
   ]

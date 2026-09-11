@@ -3,6 +3,7 @@ import gc
 import os
 import pytz
 import logging
+import asyncio
 from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -30,8 +31,10 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
 VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
 
+
 def get_now_vn_str() -> str:
     return datetime.now(VN_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
 
 async def safe_job_wrapper(job_func, job_name: str):
     """Bọc an toàn cho cron: bẫy ngoại lệ, chống crash app và thu hồi RAM."""
@@ -49,8 +52,12 @@ async def safe_job_wrapper(job_func, job_name: str):
     finally:
         gc.collect()
 
+
 async def poll_workspace_long_tasks():
-    """Quét Supabase kiểm tra các batch tạo tài khoản đang waiting_poll."""
+    """
+    Quét Supabase kiểm tra các batch tạo tài khoản đang waiting_poll.
+    Tự động Resume Workflow hạ nguồn khi hoàn thành batch.
+    """
     supabase = get_supabase_client()
     now_utc = datetime.now(timezone.utc)
     now_iso = now_utc.isoformat()
@@ -78,7 +85,7 @@ async def poll_workspace_long_tasks():
 
     now_vn = get_now_vn_str()
 
-    # 🛑 DIỆT TẬN GỐC BUG 'Request #None':
+    # 🛑 DIỆT TẬN GỐC BUG 'Request #None'
     if not request_id or str(request_id).strip() in ["None", "null", ""]:
         err_log = (
             f"\n[{now_vn}] [ERROR] [workspace_rpa] {task_tag}: "
@@ -92,7 +99,6 @@ async def poll_workspace_long_tasks():
         }).eq("id", task_id).execute()
         return
 
-    # Gọi hàm check_and_export_batch_result (bên trong hàm này đã tự quản lý acquire_playwright_slot trên lane='cron')
     download_dir = "/tmp/ptv_results"
     os.makedirs(download_dir, exist_ok=True)
     logger.info(f"🔍 [{now_vn}] {task_tag} Bắt đầu kiểm tra tiến độ Request #{request_id}...")
@@ -110,81 +116,108 @@ async def poll_workspace_long_tasks():
         logger.error(f"Lỗi khi kiểm tra kết quả batch Playwright: {check_err}")
         check_res = {"status": "error", "error": str(check_err)}
 
-        status = check_res.get("status")
+    status = check_res.get("status")
 
-        if status == "completed":
-            downloaded_file = check_res.get("result_file_path")
-            cof_input_path = payload.get("cof_file_path")
-            final_file_to_upload = downloaded_file
+    if status == "completed":
+        downloaded_file = check_res.get("result_file_path")
+        cof_input_path = payload.get("cof_file_path")
+        final_file_to_upload = downloaded_file
 
-            if cof_input_path and os.path.exists(cof_input_path) and downloaded_file and os.path.exists(downloaded_file):
-                output_cof_path = f"/tmp/ptv_results/COMPLETED_{os.path.basename(cof_input_path)}"
-                try:
-                    COFExcelService.write_results_back_to_cof(
-                        original_cof_path=cof_input_path,
-                        result_excel_path=downloaded_file,
-                        students_all=payload.get("students_all", []),
-                        students_to_create=payload.get("students_to_create", []),
-                        teachers_all=payload.get("teachers_all", []),
-                        teachers_to_create=payload.get("teachers_to_create", []),
-                        output_cof_path=output_cof_path
-                    )
-                    final_file_to_upload = output_cof_path
-                except Exception as cof_err:
-                    logger.error(f"Lỗi ghi ngược COF: {cof_err}")
-
-            storage_path = f"results/RESULT_{request_id}_{os.path.basename(final_file_to_upload)}"
+        if cof_input_path and os.path.exists(cof_input_path) and downloaded_file and os.path.exists(downloaded_file):
+            output_cof_path = f"/tmp/ptv_results/COMPLETED_{os.path.basename(cof_input_path)}"
             try:
-                with open(final_file_to_upload, "rb") as f_up:
-                    supabase.storage.from_("ticket-attachments").upload(
-                        storage_path, f_up, file_options={"content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "upsert": "true"}
-                    )
-                result_url = supabase.storage.from_("ticket-attachments").get_public_url(storage_path)
-            except Exception as up_err:
-                logger.error(f"Lỗi tải kết quả lên Storage: {up_err}")
-                result_url = "N/A"
+                COFExcelService.write_results_back_to_cof(
+                    original_cof_path=cof_input_path,
+                    result_excel_path=downloaded_file,
+                    students_all=payload.get("students_all", []),
+                    students_to_create=payload.get("students_to_create", []),
+                    teachers_all=payload.get("teachers_all", []),
+                    teachers_to_create=payload.get("teachers_to_create", []),
+                    output_cof_path=output_cof_path
+                )
+                final_file_to_upload = output_cof_path
+            except Exception as cof_err:
+                logger.error(f"Lỗi ghi ngược COF: {cof_err}")
 
-            student_c = payload.get("student_count", 0)
-            teacher_c = payload.get("teacher_count", 0)
-            total_c = payload.get("total_count", 0)
+        storage_path = f"results/RESULT_{request_id}_{os.path.basename(final_file_to_upload)}"
+        try:
+            with open(final_file_to_upload, "rb") as f_up:
+                supabase.storage.from_("ticket-attachments").upload(
+                    storage_path, f_up, file_options={"content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "upsert": "true"}
+                )
+            result_url = supabase.storage.from_("ticket-attachments").get_public_url(storage_path)
+        except Exception as up_err:
+            logger.error(f"Lỗi tải kết quả lên Storage: {up_err}")
+            result_url = "N/A"
 
-            new_log = (
-                f"\n[{now_vn}] [SUCCESS] [workspace_rpa] {task_tag}: Hoàn thành tạo tài khoản (Request #{request_id})!\n"
-                f"📊 Thống kê: {total_c} tài khoản (Học sinh: {student_c}, Giáo viên: {teacher_c})\n"
-                f"📥 Link tải file kết quả: {result_url}"
-            )
+        student_c = payload.get("student_count", 0)
+        teacher_c = payload.get("teacher_count", 0)
+        total_c = payload.get("total_count", 0)
 
-            payload["result_file_url"] = result_url
+        new_log = (
+            f"\n[{now_vn}] [SUCCESS] [workspace_rpa] {task_tag}: Hoàn thành tạo tài khoản (Request #{request_id})!\n"
+            f"📊 Thống kê: {total_c} tài khoản (Học sinh: {student_c}, Giáo viên: {teacher_c})\n"
+            f"📥 Link tải file kết quả: {result_url}"
+        )
 
-            supabase.table("bot_automation_tasks").update({
-                "execution_status": "success",
-                "current_step": "completed",
-                "last_error_step": None,
-                "payload_data": payload,
-                "execution_logs": (task.get("execution_logs") or "") + new_log,
-                "executed_at": datetime.now(VN_TZ).isoformat()
-            }).eq("id", task_id).execute()
+        payload["result_file_url"] = result_url
+        check_res["result_file_url"] = result_url
 
+        supabase.table("bot_automation_tasks").update({
+            "execution_status": "success",
+            "current_step": "completed",
+            "last_error_step": None,
+            "payload_data": payload,
+            "execution_logs": (task.get("execution_logs") or "") + new_log,
+            "executed_at": datetime.now(VN_TZ).isoformat()
+        }).eq("id", task_id).execute()
+
+        # 🎯 RESUME WORKFLOW HẠ NGUỒN NẾU TASK NẰM TRONG MỘT WORKFLOW
+        workflow_id = payload.get("workflow_id")
+        workflow_step_id = payload.get("workflow_step_id")
+
+        if workflow_id:
+            logger.info(f"🔄 {task_tag} Task thuộc Workflow #{workflow_id[:8]}, tiến hành resume các bước tiếp theo...")
+            wf_res = supabase.table("automation_workflows").select("*").eq("id", workflow_id).execute()
+            if wf_res.data:
+                wf_record = wf_res.data[0]
+                wf_steps = wf_record.get("steps") or []
+                for s in wf_steps:
+                    if s.get("step_id") == workflow_step_id or s.get("capability_id") == "workspace.poll_account_batch":
+                        s["status"] = "success"
+                        s["outputs"] = check_res
+                        s["completed_at"] = datetime.now(timezone.utc).isoformat()
+
+                supabase.table("automation_workflows").update({
+                    "steps": wf_steps,
+                    "status": "running",
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }).eq("id", workflow_id).execute()
+
+                # Gọi resume workflow chạy ngầm
+                from app.services.workflow_executor import workflow_executor_service
+                asyncio.create_task(workflow_executor_service.execute_approved_workflow(workflow_id))
+        else:
+            # Nếu là task độc lập không qua workflow, mới đánh dấu completed ticket
             if task.get("ticket_id"):
                 supabase.table("inbox_tickets").update({"status": "completed"}).eq("id", task["ticket_id"]).execute()
 
-        elif status == "still_processing":
-            # Nếu chưa xong, chờ thêm 5 phút cho đợt quét tiếp theo
-            next_check = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
-            payload["next_check_at"] = next_check
-            current_sys_status = check_res.get('current_status', 'Processing')
-            new_log = f"\n[{now_vn}] [INFO] [workspace_rpa] {task_tag}: Request #{request_id} vẫn đang xử lý ({current_sys_status}). Sẽ kiểm tra lại sau 5 phút."
-            
-            supabase.table("bot_automation_tasks").update({
-                "payload_data": payload,
-                "execution_logs": (task.get("execution_logs") or "") + new_log
-            }).eq("id", task_id).execute()
+    elif status == "still_processing":
+        next_check = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
+        payload["next_check_at"] = next_check
+        current_sys_status = check_res.get('current_status', 'Processing')
+        new_log = f"\n[{now_vn}] [INFO] [workspace_rpa] {task_tag}: Request #{request_id} vẫn đang xử lý ({current_sys_status}). Sẽ kiểm tra lại sau 5 phút."
+        
+        supabase.table("bot_automation_tasks").update({
+            "payload_data": payload,
+            "execution_logs": (task.get("execution_logs") or "") + new_log
+        }).eq("id", task_id).execute()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("🔥 Đang kích hoạt APScheduler (Lịch trình giãn cách chống nghẽn Render 512MB RAM)...")
+    logger.info("🔥 Đang kích hoạt APScheduler (Lập lịch so le bảo vệ Render 512MB RAM)...")
     
-    # Dọn dẹp process rác trước khi khởi động
     force_kill_zombie_chromium()
     gc.collect()
 

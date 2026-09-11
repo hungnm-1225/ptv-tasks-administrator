@@ -18,6 +18,27 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _is_empty_or_placeholder(value: Any) -> bool:
+    """Kiểm tra giá trị có bị rỗng, null hoặc chứa placeholder giả lập hay không."""
+    if value is None:
+        return True
+    if isinstance(value, str):
+        val_clean = value.strip().lower()
+        if val_clean in ["", "none", "null", "undefined"]:
+            return True
+    if isinstance(value, (list, dict)) and len(value) == 0:
+        return True
+    return False
+
+
+def _is_valid_template_binding(value: Any) -> bool:
+    """Kiểm tra giá trị có phải là cú pháp data binding hợp lệ {{ step_xx.property }}."""
+    if isinstance(value, str):
+        val = value.strip()
+        return val.startswith("{{") and val.endswith("}}")
+    return False
+
+
 @router.get("/capabilities")
 async def get_capabilities():
     """Lấy danh mục Capabilities hợp lệ của hệ thống phục vụ Autocomplete và Editor."""
@@ -57,7 +78,7 @@ async def get_workflow_for_ticket(ticket_id: str):
         if "PGRST205" in err_msg or "automation_workflows" in err_msg:
             raise HTTPException(
                 status_code=503,
-                detail="Bảng CSDL 'automation_workflows' chưa được khởi tạo trên Supabase. Vui lòng chạy file migration 'supabase/migrations/20260910000000_add_automation_workflows.sql' trong Supabase SQL Editor."
+                detail="Bảng CSDL 'automation_workflows' chưa được khởi tạo trên Supabase. Vui lòng chạy file migration trong Supabase SQL Editor."
             )
         raise HTTPException(status_code=500, detail=err_msg)
 
@@ -82,7 +103,7 @@ async def plan_ticket_workflow(payload: Dict[str, Any] = Body(...)):
         if "PGRST205" in err_msg or "automation_workflows" in err_msg:
             raise HTTPException(
                 status_code=503,
-                detail="Bảng CSDL 'automation_workflows' chưa được khởi tạo trên Supabase. Vui lòng chạy file migration 'supabase/migrations/20260910000000_add_automation_workflows.sql' trong Supabase SQL Editor."
+                detail="Bảng CSDL 'automation_workflows' chưa được khởi tạo trên Supabase. Vui lòng chạy file migration trong Supabase SQL Editor."
             )
         raise HTTPException(status_code=500, detail=err_msg)
 
@@ -102,6 +123,7 @@ async def update_workflow_draft(workflow_id: str, payload: WorkflowDraftUpdate):
     """
     Quản trị viên tinh chỉnh Workflow Draft:
     - Sắp xếp thứ tự, thêm/xóa bước, cập nhật inputs/school/course.
+    - Tuyệt đối không dùng placeholder danh tính, bắt buộc xác định người cập nhật.
     - Tự động ghi audit log vào automation_workflow_history.
     """
     supabase = get_supabase_client()
@@ -110,8 +132,13 @@ async def update_workflow_draft(workflow_id: str, payload: WorkflowDraftUpdate):
         raise HTTPException(status_code=404, detail="Không tìm thấy workflow để cập nhật.")
 
     old_wf = res.data[0]
-    if old_wf.get("status") in ["running", "success"]:
+    if old_wf.get("status") in ["running", "success", "succeeded"]:
         raise HTTPException(status_code=400, detail="Không thể chỉnh sửa workflow đang chạy hoặc đã thành công.")
+
+    # Xác định người cập nhật (tuyệt đối không dùng chuỗi rác 'admin')
+    updater = str(payload.updated_by).strip() if payload.updated_by else ""
+    if not updater:
+        raise HTTPException(status_code=400, detail="Thiếu thông tin người thực hiện cập nhật (updated_by).")
 
     update_fields: Dict[str, Any] = {
         "updated_at": datetime.now(timezone.utc).isoformat()
@@ -131,25 +158,27 @@ async def update_workflow_draft(workflow_id: str, payload: WorkflowDraftUpdate):
 
         # Kiểm tra validation ngay sau khi sửa steps
         val_res = workflow_planner_service.validate_workflow_graph(payload.steps)
-        if val_res.is_valid:
-            update_fields["status"] = "ready"
-        else:
+        if not val_res.is_valid:
+            update_fields["status"] = "invalid"
+        elif val_res.warnings:
             update_fields["status"] = "needs_review"
+        else:
+            update_fields["status"] = "ready"
 
     up_res = supabase.table("automation_workflows").update(update_fields).eq("id", workflow_id).execute()
     new_record = up_res.data[0] if up_res.data else old_wf
 
-    # Ghi Audit Log
+    # Ghi Audit Log xác thực
     try:
         supabase.table("automation_workflow_history").insert({
             "workflow_id": workflow_id,
             "field_changed": "steps_edited",
             "old_val": {"steps_count": len(old_wf.get("steps") or [])},
             "new_val": {"steps_count": len(new_record.get("steps") or [])},
-            "changed_by": payload.updated_by or "admin"
+            "changed_by": updater
         }).execute()
-    except Exception:
-        pass
+    except Exception as log_err:
+        logger.warning(f"Lỗi ghi audit log update_workflow_draft: {log_err}")
 
     return new_record
 
@@ -174,9 +203,11 @@ async def approve_and_run_workflow(
     payload: WorkflowApprovalRequest = Body(...)
 ):
     """
-    Xác nhận & Khởi chạy Workflow:
-    - Khóa đóng băng version và đánh dấu approved.
-    - Đưa vào BackgroundTasks để WorkflowExecutor điều phối từng bước.
+    Xác nhận & Khởi chạy Workflow (Safety-Critical Approval Gate):
+    - Server-side Revalidation chặt chẽ (Fail-closed).
+    - Khước từ hoàn toàn: no_action, needs_information, invalid, workflow rỗng.
+    - Xác thực đầy đủ required inputs theo hợp đồng Capability.
+    - Khóa đóng băng version và đưa vào BackgroundTasks.
     """
     supabase = get_supabase_client()
     res = supabase.table("automation_workflows").select("*").eq("id", workflow_id).execute()
@@ -184,30 +215,180 @@ async def approve_and_run_workflow(
         raise HTTPException(status_code=404, detail="Không tìm thấy workflow.")
 
     wf = res.data[0]
-    now_iso = datetime.now(timezone.utc).isoformat()
+    current_status = wf.get("status")
 
-    # Cập nhật trạng thái sang approved
+    # =========================================================================
+    # 1. KIỂM TRA TRẠNG THÁI WORKFLOW (CHẶN ĐỨNG TRẠNG THÁI NGUY HIỂM)
+    # =========================================================================
+    if current_status == "no_action":
+        raise HTTPException(
+            status_code=400,
+            detail="Không thể phê duyệt: Workflow được phân loại là 'no_action' (không có hành động tự động hóa nào)."
+        )
+    if current_status == "needs_information":
+        raise HTTPException(
+            status_code=400,
+            detail="Không thể phê duyệt: Workflow chưa đủ thông tin bắt buộc ('needs_information'). Vui lòng bổ sung đầy đủ dữ liệu trước khi duyệt."
+        )
+    if current_status == "invalid":
+        raise HTTPException(
+            status_code=400,
+            detail="Không thể phê duyệt: Cấu trúc workflow không hợp lệ (lỗi phụ thuộc vòng hoặc capability không tồn tại)."
+        )
+    if current_status in ["running", "succeeded", "success", "approved"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Không thể phê duyệt lại workflow đang ở trạng thái '{current_status}'."
+        )
+    if current_status == "cancelled":
+        raise HTTPException(
+            status_code=400,
+            detail="Không thể phê duyệt: Workflow đã bị hủy bỏ."
+        )
+
+    # =========================================================================
+    # 2. XÁC THỰC DANH TÍNH NGƯỜI PHÊ DUYỆT
+    # =========================================================================
+    approver = str(payload.approved_by).strip() if payload.approved_by else ""
+    if not approver or approver.lower() in ["unknown", "admin", "system"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Bắt buộc phải cung cấp danh tính người phê duyệt hợp lệ (approved_by)."
+        )
+
+    # =========================================================================
+    # 3. TRÍCH XUẤT VÀ KIỂM TRA TẬP BƯỚC (STEPS)
+    # =========================================================================
+    if payload.frozen_steps:
+        step_objs = payload.frozen_steps
+    else:
+        raw_steps = wf.get("steps") or []
+        step_objs = [WorkflowStepDraft(**s) for s in raw_steps]
+
+    if not step_objs or len(step_objs) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Không thể phê duyệt workflow rỗng (0 bước thực thi)."
+        )
+
+    # =========================================================================
+    # 4. SERVER-SIDE REVALIDATION ĐỒ THỊ DAG & CAPABILITIES
+    # =========================================================================
+    val_result = workflow_planner_service.validate_workflow_graph(step_objs)
+    if not val_result.is_valid:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Server-side Validation thất bại: {'; '.join(val_result.errors)}"
+        )
+
+    # =========================================================================
+    # 5. SERVER-SIDE CONTRACT CHECK TỪNG BƯỚC (CHỐNG LỌT DỮ LIỆU THIẾU)
+    # =========================================================================
+    for s in step_objs:
+        cap_id = s.capability_id
+        cap_def = workflow_planner_service.capabilities_map.get(cap_id)
+        if not cap_def:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Bước '{s.name}' sử dụng capability không tồn tại trong hệ thống: '{cap_id}'."
+            )
+
+        if cap_def.get("available") is False:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Bước '{s.name}' yêu cầu capability '{cap_id}' hiện đang bị tạm khóa."
+            )
+
+        inputs = s.inputs or {}
+
+        # 5.1. Ràng buộc trường học đối với Workspace
+        if cap_id in ["workspace.resolve_school", "workspace.bulk_account_creation"]:
+            school = inputs.get("school_identifier") or inputs.get("school_name")
+            if _is_empty_or_placeholder(school):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Bước '{s.name}': Thiếu tên trường học bắt buộc."
+                )
+
+        # 5.2. Ràng buộc khóa học đối với LMS Moodle
+        if cap_id == "lms.direct_enroll":
+            courses = inputs.get("courses")
+            if _is_empty_or_placeholder(courses):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Bước '{s.name}': Thiếu danh sách khóa học Moodle (courses)."
+                )
+
+        # 5.3. Ràng buộc repository đối với Git
+        if cap_id == "git.add_collaborators":
+            repo_url = inputs.get("repo_url")
+            if _is_empty_or_placeholder(repo_url):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Bước '{s.name}': Thiếu URL repository Git (repo_url)."
+                )
+
+        # 5.4. Ràng buộc mật khẩu đối với Reset Password
+        # Tuyệt đối không cho chạy nếu không có mật khẩu tạm do admin chỉ định
+        if cap_id == "keycloak.reset_password":
+            target_email = inputs.get("target_email")
+            if _is_empty_or_placeholder(target_email) or "@" not in str(target_email):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Bước '{s.name}': Email người dùng cần reset mật khẩu không hợp lệ."
+                )
+            temp_pass = inputs.get("temporary_password")
+            if _is_empty_or_placeholder(temp_pass) and not _is_valid_template_binding(temp_pass):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Bước '{s.name}': Quản trị viên bắt buộc phải nhập mật khẩu tạm thời trước khi phê duyệt thực thi."
+                )
+
+    # =========================================================================
+    # 6. KHÓA ĐÓNG BĂNG WORKFLOW & CẬP NHẬT TRẠNG THÁI APPROVED
+    # =========================================================================
+    now_iso = datetime.now(timezone.utc).isoformat()
+    frozen_steps_dicts = [s.model_dump() for s in step_objs]
+
     update_data: Dict[str, Any] = {
         "status": "approved",
-        "approved_by": payload.approved_by,
+        "approved_by": approver,
         "approved_at": now_iso,
-        "updated_at": now_iso
+        "updated_at": now_iso,
+        "steps": frozen_steps_dicts
     }
-    if payload.frozen_steps:
-        update_data["steps"] = [s.model_dump() for s in payload.frozen_steps]
 
     supabase.table("automation_workflows").update(update_data).eq("id", workflow_id).execute()
-    logger.info(f"🔒 [WORKFLOW APPROVED] Quản trị viên '{payload.approved_by}' đã phê duyệt Workflow #{workflow_id[:8]}!")
+    logger.info(f"🔒 [WORKFLOW APPROVED] Quản trị viên '{approver}' đã phê duyệt an toàn Workflow #{workflow_id[:8]}!")
 
+    # Ghi Audit Log phê duyệt
+    try:
+        supabase.table("automation_workflow_history").insert({
+            "workflow_id": workflow_id,
+            "field_changed": "status",
+            "old_val": {"status": current_status},
+            "new_val": {"status": "approved", "steps_count": len(frozen_steps_dicts)},
+            "changed_by": approver
+        }).execute()
+    except Exception as log_err:
+        logger.warning(f"Lỗi ghi audit log approve: {log_err}")
+
+    # =========================================================================
+    # 7. ĐƯA VÀO BACKGROUND TASK THỰC THI (NẾU RUN_IMMEDIATELY = TRUE)
+    # =========================================================================
     if payload.run_immediately:
         background_tasks.add_task(workflow_executor_service.execute_approved_workflow, workflow_id)
         return {
             "status": "success", 
-            "message": "🚀 Workflow đã được phê duyệt và đang bắt đầu thực thi ngầm!",
+            "message": "🚀 Workflow đã vượt qua toàn bộ chốt kiểm định an toàn và đang thực thi ngầm!",
             "workflow_id": workflow_id
         }
 
-    return {"status": "success", "message": "Đã phê duyệt Workflow thành công!", "workflow_id": workflow_id}
+    return {
+        "status": "success", 
+        "message": "Đã phê duyệt và đóng băng Workflow thành công!", 
+        "workflow_id": workflow_id
+    }
 
 
 @router.post("/{workflow_id}/steps/{step_id}/retry")

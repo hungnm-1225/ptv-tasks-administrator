@@ -8,9 +8,10 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 from urllib.parse import urljoin
 from playwright.async_api import async_playwright
+
 from app.core.config import settings
 from app.core.supabase import get_supabase_client
-from app.core.gemini import process_ticket_with_ai
+from app.workers.ticket_processor import process_incoming_ticket
 from app.core.playwright_manager import acquire_playwright_slot, LOW_RAM_CHROMIUM_ARGS, setup_low_ram_routes
 
 logger = logging.getLogger(__name__)
@@ -23,7 +24,7 @@ OSTICKET_PASS = getattr(settings, "OSTICKET_ADMIN_PASS", os.getenv("OSTICKET_ADM
 
 
 class OSTicketService:
-    """Service Playwright chuyên cào vé OS Ticket, bóc tách đầy đủ lịch sử hội thoại Thread và tải Attachment lên Supabase."""
+    """Service Playwright chuyên cào vé OS Ticket, bóc tách lịch sử Thread và chuyển giao cho Canonical Intake."""
 
     def __init__(self):
         self.headless = True
@@ -112,7 +113,7 @@ class OSTicketService:
         return ""
 
     async def scrape_ticket_detail(self, context, internal_id: str, ticket_number: str) -> Optional[Dict[str, Any]]:
-        """Mở chi tiết vé và bóc tách toàn bộ thông tin form cùng đầy đủ lịch sử hội thoại đa chiều."""
+        """Mở chi tiết vé và bóc tách toàn bộ thông tin form cùng đầy đủ lịch sử hội thoại."""
         detail_page = await context.new_page()
         try:
             detail_url = f"{OSTICKET_BASE_URL}/scp/tickets.php?id={internal_id}"
@@ -240,13 +241,11 @@ class OSTicketService:
             created_at_str = ""
             created_at_iso = None
 
-            # Cách A: Lấy thẻ time ISO từ tin nhắn mở đầu
             first_time_el = detail_page.locator("#thread-items .thread-entry.message time[datetime]").first
             if await first_time_el.count() > 0:
                 created_at_iso = await first_time_el.get_attribute("datetime")
                 created_at_str = (await first_time_el.inner_text()).strip()
 
-            # Cách B: Lấy từ bảng thông tin Create Date
             if not created_at_iso:
                 created_at_str = await self._get_text_by_candidates(detail_page, [
                     "xpath=//th[contains(., 'Create Date:')]/following-sibling::td",
@@ -316,7 +315,7 @@ class OSTicketService:
             await detail_page.close()
 
     async def poll_open_ostickets(self):
-        """Quét danh sách Open Queue và cào các vé mới nhất (Chạy trên Làn nền cron, không chặn Admin)."""
+        """Quét danh sách Open Queue và cào các vé mới nhất (Đẩy sang Canonical Intake Pipeline)."""
         supabase = get_supabase_client()
         async with acquire_playwright_slot("OSTicket Queue Polling", timeout=60.0, lane="cron"):
             async with async_playwright() as p:
@@ -396,9 +395,9 @@ class OSTicketService:
 
                                     insert_res = supabase.table("inbox_tickets").insert(insert_payload).execute()
                                     if insert_res.data:
-                                        new_id = insert_res.data[0]["id"]
-                                        logger.info(f"💾 Đã lưu vé mới #{ticket_number}! Kích hoạt Gemini Triage...")
-                                        await process_ticket_with_ai(new_id)
+                                        created_ticket = insert_res.data[0]
+                                        logger.info(f"💾 Đã lưu vé mới #{ticket_number}! Kích hoạt Canonical Intake Pipeline...")
+                                        await process_incoming_ticket(created_ticket)
                                 else:
                                     ticket_db_id = existing_ticket["id"]
                                     old_attachments = existing_ticket.get("attachments") or []
@@ -421,9 +420,11 @@ class OSTicketService:
                                     if ticket_data.get("created_at"):
                                         update_payload["created_at"] = ticket_data["created_at"]
 
-                                    supabase.table("inbox_tickets").update(update_payload).eq("id", ticket_db_id).execute()
-                                    logger.info(f"🔄 Đã cập nhật diễn biến mới cho vé #{ticket_number}! Kích hoạt Gemini Triage phân tích lại...")
-                                    await process_ticket_with_ai(ticket_db_id)
+                                    up_res = supabase.table("inbox_tickets").update(update_payload).eq("id", ticket_db_id).execute()
+                                    if up_res.data:
+                                        updated_ticket = up_res.data[0]
+                                        logger.info(f"🔄 Đã cập nhật hội thoại mới cho vé #{ticket_number}! Kích hoạt Canonical Intake...")
+                                        await process_incoming_ticket(updated_ticket)
 
                         except Exception as row_err:
                             logger.error(f"❌ Lỗi khi quét dòng {r_idx}: {row_err}")

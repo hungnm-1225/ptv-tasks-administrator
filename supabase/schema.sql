@@ -1,8 +1,8 @@
 -- =============================================================================
 -- PTV-TASKS-ADMINISTRATOR – Pythaverse Central Admin & Automation Hub
--- Complete Database Schema (Supabase PostgreSQL 16 - 16 Tables & Policies)
+-- Complete Database Schema (Supabase PostgreSQL 16 - 20 Tables & Policies)
 -- Author: Nguyễn Mạnh Hùng (Lead AI Engineer & Automation Architect)
--- Version: 2.5.0 Enterprise | Updated: 2026-09-03
+-- Version: 2.6.0 Enterprise | Updated: 2026-09-11
 -- =============================================================================
 
 -- Enable UUID Extension
@@ -28,7 +28,7 @@ CREATE TYPE bot_type AS ENUM (
 CREATE TYPE approval_status AS ENUM ('pending', 'approved', 'rejected');
 
 -- =============================================================================
--- SECTION 2: TABLES DEFINITIONS (16 TABLES)
+-- SECTION 2: TABLES DEFINITIONS (20 TABLES)
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -99,6 +99,68 @@ CREATE TABLE IF NOT EXISTS automation_workflow_history (
     new_val JSONB,
     changed_by VARCHAR(255) DEFAULT 'hung.nguyenmanh@dtt.vn',
     changed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- -----------------------------------------------------------------------------
+-- 1.1 PROVENANCE, REVISIONS & WORKFLOW PROPOSALS (PHA 1 MỚI)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS inbox_ticket_revisions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    ticket_id UUID NOT NULL REFERENCES inbox_tickets(id) ON DELETE CASCADE,
+    revision_no INT NOT NULL DEFAULT 1,
+    content_hash VARCHAR(64) NOT NULL,
+    raw_content TEXT,
+    attachments JSONB DEFAULT '[]'::jsonb,
+    source_updated_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT uq_ticket_revision UNIQUE (ticket_id, revision_no)
+);
+
+CREATE TABLE IF NOT EXISTS ticket_ai_assessments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    ticket_revision_id UUID NOT NULL REFERENCES inbox_ticket_revisions(id) ON DELETE CASCADE,
+    assessment_kind VARCHAR(50) NOT NULL, -- 'summary' | 'fact_extraction'
+    model_name VARCHAR(100) NOT NULL,
+    prompt_version VARCHAR(50) NOT NULL,
+    registry_version VARCHAR(50) NOT NULL,
+    structured_result JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status VARCHAR(50) NOT NULL DEFAULT 'completed', -- 'completed' | 'failed'
+    errors JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS workflow_proposals (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    ticket_id UUID NOT NULL REFERENCES inbox_tickets(id) ON DELETE CASCADE,
+    ticket_revision_id UUID NOT NULL REFERENCES inbox_ticket_revisions(id) ON DELETE CASCADE,
+    intent_assessment_id UUID REFERENCES ticket_ai_assessments(id) ON DELETE SET NULL,
+    version INT NOT NULL DEFAULT 1,
+    status VARCHAR(50) NOT NULL DEFAULT 'ready_for_review', -- 'no_action' | 'needs_information' | 'ready_for_review' | 'approved' | 'superseded' | 'cancelled'
+    evidence JSONB DEFAULT '[]'::jsonb,
+    missing_requirements JSONB DEFAULT '[]'::jsonb,
+    plan JSONB NOT NULL DEFAULT '[]'::jsonb,
+    policy_version VARCHAR(50) NOT NULL DEFAULT 'v1',
+    frozen_plan JSONB,
+    superseded_by UUID REFERENCES workflow_proposals(id) ON DELETE SET NULL,
+    approved_by VARCHAR(255),
+    approved_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT uq_ticket_proposal_version UNIQUE (ticket_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS workflow_execution_events (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    proposal_id UUID REFERENCES workflow_proposals(id) ON DELETE SET NULL,
+    workflow_id UUID REFERENCES automation_workflows(id) ON DELETE SET NULL,
+    step_id VARCHAR(100) NOT NULL,
+    event_type VARCHAR(50) NOT NULL, -- 'started' | 'waiting' | 'succeeded' | 'failed' | 'retried' | 'cancelled'
+    inputs JSONB DEFAULT '{}'::jsonb,
+    outputs JSONB DEFAULT '{}'::jsonb,
+    error TEXT,
+    duration_ms INT,
+    actor VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- -----------------------------------------------------------------------------
@@ -263,6 +325,11 @@ CREATE TABLE IF NOT EXISTS work_board_cards (
 -- SECTION 3: INDEXES (Tối ưu hiệu năng truy vấn)
 -- =============================================================================
 
+-- Partial Unique Index chống cào trùng lặp ticket
+CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_tickets_source_source_id_unique 
+ON inbox_tickets(source, source_id) 
+WHERE source_id IS NOT NULL AND source_id != '';
+
 CREATE INDEX IF NOT EXISTS idx_tickets_status       ON inbox_tickets(status);
 CREATE INDEX IF NOT EXISTS idx_tickets_category     ON inbox_tickets(category);
 CREATE INDEX IF NOT EXISTS idx_tickets_priority     ON inbox_tickets(priority);
@@ -270,6 +337,24 @@ CREATE INDEX IF NOT EXISTS idx_tickets_source       ON inbox_tickets(source);
 CREATE INDEX IF NOT EXISTS idx_tickets_email        ON inbox_tickets(sender_email);
 CREATE INDEX IF NOT EXISTS idx_tickets_created      ON inbox_tickets(created_at DESC);
 
+-- Indexes hạ tầng Revisions, Assessments & Proposals
+CREATE INDEX IF NOT EXISTS idx_ticket_revisions_ticket_id ON inbox_ticket_revisions(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_ticket_revisions_created   ON inbox_ticket_revisions(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_ai_assessments_revision_id ON ticket_ai_assessments(ticket_revision_id);
+CREATE INDEX IF NOT EXISTS idx_ai_assessments_kind        ON ticket_ai_assessments(assessment_kind);
+CREATE INDEX IF NOT EXISTS idx_ai_assessments_created     ON ticket_ai_assessments(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_proposals_ticket_id ON workflow_proposals(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_proposals_status    ON workflow_proposals(status);
+CREATE INDEX IF NOT EXISTS idx_proposals_created   ON workflow_proposals(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_execution_events_proposal_id ON workflow_execution_events(proposal_id);
+CREATE INDEX IF NOT EXISTS idx_execution_events_workflow_id ON workflow_execution_events(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_execution_events_step_id     ON workflow_execution_events(step_id);
+CREATE INDEX IF NOT EXISTS idx_execution_events_created     ON workflow_execution_events(created_at DESC);
+
+-- Indexes Bot & Workflows
 CREATE INDEX IF NOT EXISTS idx_tasks_approval       ON bot_automation_tasks(approval_status);
 CREATE INDEX IF NOT EXISTS idx_tasks_execution      ON bot_automation_tasks(execution_status);
 CREATE INDEX IF NOT EXISTS idx_tasks_ticket_id      ON bot_automation_tasks(ticket_id);
@@ -317,6 +402,10 @@ ALTER TABLE work_board_columns         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE work_board_cards           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE automation_workflows        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE automation_workflow_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE inbox_ticket_revisions    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ticket_ai_assessments     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workflow_proposals        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workflow_execution_events ENABLE ROW LEVEL SECURITY;
 
 DO $$ 
 DECLARE
@@ -324,6 +413,8 @@ DECLARE
     tables text[] := ARRAY[
         'inbox_tickets', 'bot_automation_tasks', 'templates_config',
         'automation_workflows', 'automation_workflow_history',
+        'inbox_ticket_revisions', 'ticket_ai_assessments', 
+        'workflow_proposals', 'workflow_execution_events',
         'workspace_organizations', 'workspace_credentials_vault',
         'workspace_contracts_cache', 'workspace_orders_cache',
         'workspace_courses', 'lms_courses',
@@ -374,6 +465,12 @@ CREATE TRIGGER trg_work_board_cards_updated_at
 DROP TRIGGER IF EXISTS trg_automation_workflows_updated_at ON automation_workflows;
 CREATE TRIGGER trg_automation_workflows_updated_at
     BEFORE UPDATE ON automation_workflows
+    FOR EACH ROW
+    EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_workflow_proposals_updated_at ON workflow_proposals;
+CREATE TRIGGER trg_workflow_proposals_updated_at
+    BEFORE UPDATE ON workflow_proposals
     FOR EACH ROW
     EXECUTE FUNCTION set_updated_at();
 

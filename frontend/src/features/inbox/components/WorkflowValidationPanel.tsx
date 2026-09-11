@@ -6,7 +6,8 @@ import {
   XCircle,
   ShieldCheck,
   ShieldAlert,
-  Info
+  FileSearch,
+  Scale
 } from 'lucide-react';
 import { WorkflowValidationResult } from '../../../types';
 
@@ -48,34 +49,33 @@ export const WorkflowValidationPanel: React.FC<WorkflowValidationPanelProps> = (
           )}
 
           <div>
-            <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
-              Safety Gate & Dependency Validation
+            <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-1.5">
+              <span>Safety Gate & Policy Invariant Validation</span>
             </h4>
             <p className="text-[11px] text-slate-500">
               {hasErrors
-                ? 'Phát hiện vấn đề ngăn cản thực thi luồng.'
+                ? 'Phát hiện vi phạm chính sách hoặc capability chưa hỗ trợ handler.'
                 : hasWarnings
-                ? 'Luồng hợp lệ kèm cảnh báo an toàn cần lưu ý.'
-                : 'Đồ thị luồng và toàn bộ tham số hoàn toàn hợp lệ.'}
+                  ? 'Luồng hợp lệ kèm cảnh báo an toàn cần quản trị viên xác nhận.'
+                  : 'Đồ thị DAG và chính sách nghiệp vụ hoàn toàn hợp lệ.'}
             </p>
           </div>
         </div>
 
         {/* Trạng thái tổng quát */}
         <span
-          className={`px-2.5 py-1 rounded-full text-xs font-extrabold uppercase ${
-            hasErrors
-              ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
-              : hasWarnings
+          className={`px-2.5 py-1 rounded-full text-xs font-extrabold uppercase ${hasErrors
+            ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+            : hasWarnings
               ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
               : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-          }`}
+            }`}
         >
-          {hasErrors ? 'Chưa thể chạy' : hasWarnings ? 'Cần xem xét' : 'Sẵn sàng khởi chạy'}
+          {hasErrors ? 'Chặn khởi chạy' : hasWarnings ? 'Cần xem xét' : 'Sẵn sàng khởi chạy'}
         </span>
       </div>
 
-      {/* Danh sách tiêu chí kiểm tra nhanh (Checklist) */}
+      {/* Danh sách tiêu chí kiểm tra nhanh (Checklist 4 tiêu chí) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3 text-xs">
         <div className="flex items-center gap-1.5 p-2 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 shadow-xs">
           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
@@ -93,28 +93,26 @@ export const WorkflowValidationPanel: React.FC<WorkflowValidationPanelProps> = (
           </span>
         </div>
 
-        <div className={`flex items-center gap-1.5 p-2 rounded-xl border shadow-xs transition-colors ${
-          isSchoolResolved
-            ? 'bg-white dark:bg-slate-800/80 border-slate-300 dark:border-slate-700'
-            : 'bg-amber-100/90 dark:bg-amber-950/60 border-amber-400 dark:border-amber-700'
-        }`}>
+        <div className={`flex items-center gap-1.5 p-2 rounded-xl border shadow-xs transition-colors ${isSchoolResolved
+          ? 'bg-white dark:bg-slate-800/80 border-slate-300 dark:border-slate-700'
+          : 'bg-amber-100/90 dark:bg-amber-950/60 border-amber-400 dark:border-amber-700'
+          }`}>
           {isSchoolResolved ? (
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
           ) : (
             <AlertTriangle className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400 shrink-0" />
           )}
-          <span className={`font-black truncate ${
-            isSchoolResolved
-              ? 'text-emerald-700 dark:text-emerald-400'
-              : 'text-amber-950 dark:text-amber-200'
-          }`}>
+          <span className={`font-black truncate ${isSchoolResolved
+            ? 'text-emerald-700 dark:text-emerald-400'
+            : 'text-amber-950 dark:text-amber-200'
+            }`}>
             {isSchoolResolved ? 'Trường đã chọn' : 'Chưa chọn trường'}
           </span>
         </div>
 
         <div className="flex items-center gap-1.5 p-2 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 shadow-xs">
-          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-          <span className="font-bold text-slate-800 dark:text-slate-200 truncate">Không chu trình kín</span>
+          <Scale className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+          <span className="font-bold text-slate-800 dark:text-slate-200 truncate">Policy Khớp 100%</span>
         </div>
       </div>
 

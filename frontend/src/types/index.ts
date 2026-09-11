@@ -19,7 +19,7 @@ export interface InboxTicket {
   priority?: string | null;
   status: TicketStatus | string;
 
-  // 🎯 CÁC TRƯỜNG BỔ SUNG CHO GOOGLE FORM & OS TICKET
+  // Trường bổ sung cho Google Form & OS Ticket
   country?: string | null;
   doc_url?: string | null;
   assigned_name?: string | null;
@@ -43,7 +43,6 @@ export type BotType =
   | 'git_collaborator'
   | 'git_playwright'
   | 'git_repo_collaborator';
-
 
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 export type ExecutionStatus = 'queued' | 'running' | 'waiting_poll' | 'success' | 'partial_success' | 'failed';
@@ -247,13 +246,13 @@ export interface LmsEnrollPayload {
   course_id: number;
   emails: string[];
   role?: 'student' | 'teacher' | 'manager';
-  role_id?: number; // 9: Student, 7: Non-editing teacher, 1: Manager
-  end_date?: string; // YYYY-MM-DD
+  role_id?: number;
+  end_date?: string;
   group_name?: string;
 }
 
 // =============================================================================
-// ⚡ AI WORKFLOW PRE-PROCESSING & EXECUTION ENGINE TYPES
+// ⚡ AI WORKFLOW PRE-PROCESSING & EXECUTION ENGINE TYPES (SAFETY V3)
 // =============================================================================
 
 export type WorkflowStepStatus =
@@ -276,7 +275,9 @@ export type WorkflowStatus =
   | 'partial_success'
   | 'failed'
   | 'cancelled'
-  | 'archived';
+  | 'archived'
+  | 'no_action'
+  | 'needs_information';
 
 export interface WorkflowStep {
   step_id: string;
@@ -301,16 +302,26 @@ export interface WorkflowEntityCandidate {
   metadata?: Record<string, any>;
 }
 
+export interface MissingRequirementItem {
+  field?: string;
+  intent?: string;
+  message: string;
+}
+
 export interface WorkflowAIAnalysis {
   summary: string;
   reason_summary_vi?: string;
   overall_confidence: number;
+  workflow_outcome?: 'NO_ACTION' | 'NEEDS_INFORMATION' | 'ACTIONABLE' | string;
   confidence_breakdown?: Record<string, number>;
   detected_school?: WorkflowEntityCandidate | null;
   school_candidates?: WorkflowEntityCandidate[];
   detected_courses?: Array<{ course_id?: number; course_name: string; category?: string }>;
   detected_actions?: string[];
+  missing_requirements?: MissingRequirementItem[];
+  evidence_quotes?: string[];
   warnings?: string[];
+  model_used?: string | null;
 }
 
 export interface WorkflowDraft {
@@ -328,6 +339,25 @@ export interface WorkflowDraft {
   updated_at?: string;
 }
 
+export interface WorkflowProposal {
+  id: string;
+  ticket_id: string;
+  ticket_revision_id: string;
+  intent_assessment_id?: string | null;
+  version: number;
+  status: 'no_action' | 'needs_information' | 'ready_for_review' | 'approved' | 'superseded' | 'cancelled';
+  evidence: string[];
+  missing_requirements: MissingRequirementItem[];
+  plan: WorkflowStep[];
+  policy_version: string;
+  frozen_plan?: WorkflowStep[] | null;
+  superseded_by?: string | null;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  created_at: string;
+  updated_at?: string;
+}
+
 export interface CapabilityDefinition {
   id: string;
   name: string;
@@ -337,18 +367,24 @@ export interface CapabilityDefinition {
   action: string;
   required_inputs: string[];
   optional_inputs: string[];
+  input_schema?: Record<string, string>;
+  output_schema?: Record<string, string>;
   produces: string[];
   consumes: string[];
   execution_type: 'sync_internal' | 'sync_api' | 'async_playwright' | 'async_polling';
   risk_level: 'read_only' | 'low_mutation' | 'medium_mutation' | 'high_mutation';
+  supported_by_handler?: boolean;
+  requires_explicit_evidence?: boolean;
+  requires_manual_confirmation?: boolean;
   available: boolean;
 }
 
 export interface WorkflowValidationResult {
   is_valid: boolean;
-  status: 'ready' | 'needs_review' | 'invalid';
+  status: 'ready' | 'needs_review' | 'needs_information' | 'invalid';
   errors: string[];
   warnings: string[];
+  missing_requirements?: MissingRequirementItem[];
   stats: {
     total_steps: number;
     ready_steps: number;
