@@ -7,7 +7,8 @@ import {
   X,
   Check,
   FolderTree,
-  Edit3
+  Edit3,
+  UserCheck
 } from 'lucide-react';
 import { WorkflowStep, CapabilityDefinition } from '../../../types';
 import { WorkflowStepCard } from './WorkflowStepCard';
@@ -39,7 +40,7 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
     return map;
   }, [capabilities]);
 
-  // Phân nhóm Capabilities theo Domain để hiển thị OptGroup chuyên nghiệp
+  // Phân nhóm Capabilities theo Domain
   const capabilitiesByDomain = useMemo(() => {
     const groups: Record<string, CapabilityDefinition[]> = {};
     capabilities.forEach((c) => {
@@ -60,7 +61,7 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
     if (dependents.length > 0) {
       const depNames = dependents.map((d) => d.name).join(', ');
       const confirmDelete = window.confirm(
-        `⚠️ Cảnh báo phụ thuộc:\nCác bước sau đang phụ thuộc vào bước này: [${depNames}].\nNếu xóa, các bước trên có thể bị thiếu dữ liệu. Bạn có chắc chắn muốn xóa?`
+        `⚠️ Cảnh báo phụ thuộc:\nCác bước sau đang phụ thuộc vào bước này: [${depNames}].\nNếu xóa, các bước trên có thể bị thiếu dữ liệu đầu vào. Bạn có chắc chắn muốn xóa?`
       );
       if (!confirmDelete) return;
     }
@@ -94,15 +95,17 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
     if (!selectedCapId) return;
 
     const capDef = capabilitiesMap[selectedCapId];
-    if (capDef && capDef.available === false) {
-      alert("⚠️ Cỗ máy này hiện đang bị tạm khóa do chưa có Bot Handler trên máy chủ.");
+    // FAIL-CLOSED: Kiểm tra cả 2 cờ available và supported_by_handler
+    if (capDef && (capDef.available === false || capDef.supported_by_handler === false)) {
+      alert("⚠️ Cỗ máy này hiện không khả dụng để thực thi (chưa có bot handler thực tế trên máy chủ).");
       return;
     }
 
     const newStepId = `step_${String(steps.length + 1).padStart(2, '0')}`;
     const prevStepId = steps.length > 0 ? steps[steps.length - 1].step_id : undefined;
 
-    const newStep: WorkflowStep = {
+    // ĐÁNH DẤU RÕ RÀNG: BƯỚC DO QUẢN TRỊ VIÊN THÊM THỦ CÔNG (is_manual: true)
+    const newStep: WorkflowStep & { is_manual?: boolean } = {
       step_id: newStepId,
       capability_id: selectedCapId,
       name: customStepName.trim() || (capDef ? capDef.name : selectedCapId),
@@ -110,9 +113,10 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
       status: 'ready',
       inputs: {},
       depends_on: prevStepId ? [prevStepId] : [],
+      is_manual: true, // KHÔNG GẮN NHÃN AI-GENERATED
     };
 
-    onStepsChange([...steps, newStep]);
+    onStepsChange([...steps, newStep as WorkflowStep]);
     setSelectedCapId('');
     setCustomStepName('');
     setIsAddStepOpen(false);
@@ -136,7 +140,7 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
               </span>
             </div>
             <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mt-0.5">
-              Đồ thị liên kết thực thi tự động dựa trên Capability Registry.
+              Đồ thị liên kết thực thi tự động dựa trên Capability Registry & Kahn Topological DAG.
             </p>
           </div>
         </div>
@@ -160,7 +164,7 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
             <div className="flex items-center gap-2">
               <FolderTree className="w-4 h-4 text-indigo-700 dark:text-indigo-300" />
               <h5 className="text-xs font-black text-indigo-950 dark:text-indigo-200 uppercase tracking-wider">
-                Thêm Bước Thực Thi Từ Capability Registry:
+                Thêm Bước Thực Thi Thủ Công (Operator Manual Step):
               </h5>
             </div>
             <button
@@ -173,7 +177,7 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Dropdown Chọn Capability (Vô hiệu hóa capability available=false) */}
+            {/* Dropdown Chọn Capability (Vô hiệu hóa capability không khả dụng) */}
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-900 dark:text-slate-200 block">
                 Chọn Cỗ Máy / Capability <span className="text-rose-500 font-bold">*</span>:
@@ -198,19 +202,22 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
                       label={`📁 ${domain}`}
                       className="font-black text-indigo-800 dark:text-indigo-300 bg-slate-100 dark:bg-slate-800 py-1"
                     >
-                      {caps.map((c) => (
-                        <option
-                          key={c.id}
-                          value={c.id}
-                          disabled={c.available === false}
-                          className={`py-1.5 text-xs font-bold ${c.available === false
-                            ? 'text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 italic'
-                            : 'text-slate-900 dark:text-white bg-white dark:bg-slate-900'
-                            }`}
-                        >
-                          {c.name} {c.available === false ? '(Tạm khóa - Chưa có bot handler)' : `(${c.id})`}
-                        </option>
-                      ))}
+                      {caps.map((c) => {
+                        const isExecutable = c.available === true && c.supported_by_handler === true;
+                        return (
+                          <option
+                            key={c.id}
+                            value={c.id}
+                            disabled={!isExecutable}
+                            className={`py-1.5 text-xs font-bold ${!isExecutable
+                              ? 'text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 italic'
+                              : 'text-slate-900 dark:text-white bg-white dark:bg-slate-900'
+                              }`}
+                          >
+                            {c.name} {!isExecutable ? '(Tạm khóa - Chưa có bot handler)' : `(${c.id})`}
+                          </option>
+                        );
+                      })}
                     </optgroup>
                   ))}
                 </select>
@@ -242,7 +249,11 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
             </button>
             <button
               type="button"
-              disabled={!selectedCapId || capabilitiesMap[selectedCapId]?.available === false}
+              disabled={
+                !selectedCapId ||
+                capabilitiesMap[selectedCapId]?.available === false ||
+                capabilitiesMap[selectedCapId]?.supported_by_handler === false
+              }
               onClick={handleAddStep}
               className="h-10 px-5 text-xs font-black rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm disabled:opacity-50 transition cursor-pointer flex items-center gap-1.5"
             >

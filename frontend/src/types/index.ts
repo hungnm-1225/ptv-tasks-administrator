@@ -322,6 +322,16 @@ export interface WorkflowAIAnalysis {
   evidence_quotes?: string[];
   warnings?: string[];
   model_used?: string | null;
+  requested_operations?: Array<{ intent: string; confidence?: number } | string>;
+  entities?: {
+    school_name?: string;
+    courses?: string[];
+    repositories?: string[];
+    users?: any[];
+    target_email?: string;
+    git_role?: string;
+    [key: string]: any;
+  };
 }
 
 export interface WorkflowDraft {

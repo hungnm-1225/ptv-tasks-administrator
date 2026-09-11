@@ -64,7 +64,7 @@ async def get_workflow_for_ticket(ticket_id: str):
         if res.data and len(res.data) > 0:
             return res.data[0]
 
-        # Chưa có workflow -> Kích hoạt Planner tự động (CÓ AWAIT!)
+        # Chưa có workflow -> Kích hoạt Planner tự động
         logger.info(f"✨ Chưa có workflow cho ticket #{ticket_id[:8]}, đang tự động lập plan...")
         new_wf = await workflow_planner_service.plan_workflow_for_ticket(ticket_id)
         if not new_wf:
@@ -126,8 +126,11 @@ async def update_workflow_draft(workflow_id: str, payload: WorkflowDraftUpdate):
         raise HTTPException(status_code=400, detail="Không thể chỉnh sửa workflow đang chạy hoặc đã thành công.")
 
     updater = str(payload.updated_by).strip() if payload.updated_by else ""
-    if not updater:
-        raise HTTPException(status_code=400, detail="Thiếu thông tin người thực hiện cập nhật (updated_by).")
+    if not updater or not updater.endswith("@dtt.vn"):
+        raise HTTPException(
+            status_code=400, 
+            detail="Bắt buộc phải cung cấp danh tính người thực hiện cập nhật hợp lệ có đuôi '@dtt.vn' (updated_by)."
+        )
 
     update_fields: Dict[str, Any] = {
         "updated_at": datetime.now(timezone.utc).isoformat()
@@ -189,7 +192,13 @@ async def approve_and_run_workflow(
     background_tasks: BackgroundTasks,
     payload: WorkflowApprovalRequest = Body(...)
 ):
-    """Xác nhận & Khởi chạy Workflow (Safety-Critical Approval Gate)."""
+    """
+    Xác nhận & Khởi chạy Workflow (Safety-Critical Approval Gate):
+    - Chặn hoàn toàn: no_action, needs_information, invalid, workflow rỗng.
+    - Bắt buộc người duyệt có email @dtt.vn.
+    - Fail-Closed: Bắt buộc capability có available=True và supported_by_handler=True.
+    - Kiểm tra nghiêm ngặt input: school, courses, repo_url, git_role, temp_passwords.
+    """
     supabase = get_supabase_client()
     res = supabase.table("automation_workflows").select("*").eq("id", workflow_id).execute()
     if not res.data:
@@ -206,12 +215,12 @@ async def approve_and_run_workflow(
     if current_status == "needs_information":
         raise HTTPException(
             status_code=400,
-            detail="Không thể phê duyệt: Workflow chưa đủ thông tin bắt buộc ('needs_information')."
+            detail="Không thể phê duyệt: Workflow chưa đủ thông tin bắt buộc ('needs_information'). Vui lòng bổ sung đầy đủ dữ kiện."
         )
     if current_status == "invalid":
         raise HTTPException(
             status_code=400,
-            detail="Không thể phê duyệt: Cấu trúc workflow không hợp lệ (lỗi chu trình hoặc capability không tồn tại)."
+            detail="Không thể phê duyệt: Cấu trúc workflow không hợp lệ (lỗi chu trình hoặc capability không khả dụng)."
         )
     if current_status in ["running", "succeeded", "success", "approved"]:
         raise HTTPException(
@@ -224,13 +233,15 @@ async def approve_and_run_workflow(
             detail="Không thể phê duyệt: Workflow đã bị hủy bỏ."
         )
 
+    # 1. Kiểm tra danh tính người phê duyệt hợp lệ (@dtt.vn)
     approver = str(payload.approved_by).strip() if payload.approved_by else ""
-    if not approver or approver.lower() in ["unknown", "admin", "system"]:
+    if not approver or not approver.endswith("@dtt.vn") or approver.lower().startswith(("admin@", "unknown@", "test@")):
         raise HTTPException(
             status_code=400,
-            detail="Bắt buộc phải cung cấp danh tính người phê duyệt hợp lệ (approved_by)."
+            detail="Bắt buộc phải cung cấp danh tính người phê duyệt hợp lệ thuộc tổ chức (@dtt.vn)."
         )
 
+    # 2. Thu thập và kiểm tra danh sách bước
     if payload.frozen_steps:
         step_objs = payload.frozen_steps
     else:
@@ -243,6 +254,7 @@ async def approve_and_run_workflow(
             detail="Không thể phê duyệt workflow rỗng (0 bước thực thi)."
         )
 
+    # 3. Server-side Validation toàn bộ Đồ thị DAG
     val_result = workflow_planner_service.validate_workflow_graph(step_objs)
     if not val_result.is_valid:
         raise HTTPException(
@@ -250,23 +262,21 @@ async def approve_and_run_workflow(
             detail=f"Server-side Validation thất bại: {'; '.join(val_result.errors)}"
         )
 
+    # 4. Kiểm tra chi tiết từng bước & từng capability
     for s in step_objs:
         cap_id = s.capability_id
-        cap_def = workflow_planner_service.capabilities_map.get(cap_id)
-        if not cap_def:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Bước '{s.name}' sử dụng capability không tồn tại: '{cap_id}'."
-            )
 
-        if cap_def.get("available") is False:
+        # Kiểm tra capability có tồn tại và executable (available=True & supported_by_handler=True)
+        if not workflow_planner_service.is_capability_executable(cap_id):
             raise HTTPException(
                 status_code=422,
-                detail=f"Bước '{s.name}' yêu cầu capability '{cap_id}' hiện đang bị tạm khóa."
+                detail=f"Bước '{s.name}' yêu cầu capability '{cap_id}' hiện không khả dụng để thực thi "
+                       f"(yêu cầu đồng thời available=True và supported_by_handler=True)."
             )
 
         inputs = s.inputs or {}
 
+        # Kiểm tra contract input từng loại action
         if cap_id in ["workspace.resolve_school", "workspace.bulk_account_creation"]:
             school = inputs.get("school_identifier") or inputs.get("school_name")
             if _is_empty_or_placeholder(school):
@@ -285,10 +295,16 @@ async def approve_and_run_workflow(
 
         if cap_id == "git.add_collaborators":
             repo_url = inputs.get("repo_url")
+            target_role = inputs.get("target_role")
             if _is_empty_or_placeholder(repo_url):
                 raise HTTPException(
                     status_code=422,
                     detail=f"Bước '{s.name}': Thiếu URL repository Git (repo_url)."
+                )
+            if _is_empty_or_placeholder(target_role):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Bước '{s.name}': Thiếu vai trò Git (target_role). Nghiêm cấm dùng role mặc định."
                 )
 
         if cap_id == "keycloak.reset_password":
@@ -302,12 +318,13 @@ async def approve_and_run_workflow(
             if _is_empty_or_placeholder(temp_pass) and not _is_valid_template_binding(temp_pass):
                 raise HTTPException(
                     status_code=422,
-                    detail=f"Bước '{s.name}': Quản trị viên bắt buộc phải nhập mật khẩu tạm thời trước khi duyệt."
+                    detail=f"Bước '{s.name}': Quản trị viên bắt buộc phải nhập mật khẩu tạm thời cụ thể trước khi phê duyệt."
                 )
 
     now_iso = datetime.now(timezone.utc).isoformat()
     frozen_steps_dicts = [s.model_dump() for s in step_objs]
 
+    # 5. Đóng băng plan và chuyển trạng thái approved
     update_data: Dict[str, Any] = {
         "status": "approved",
         "approved_by": approver,
@@ -330,6 +347,7 @@ async def approve_and_run_workflow(
     except Exception as log_err:
         logger.warning(f"Lỗi ghi audit log approve: {log_err}")
 
+    # 6. Khởi chạy ngầm nếu có yêu cầu run_immediately
     if payload.run_immediately:
         background_tasks.add_task(workflow_executor_service.execute_approved_workflow, workflow_id)
         return {

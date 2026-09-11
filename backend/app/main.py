@@ -56,7 +56,7 @@ async def safe_job_wrapper(job_func, job_name: str):
 async def poll_workspace_long_tasks():
     """
     Quét Supabase kiểm tra các batch tạo tài khoản đang waiting_poll.
-    Tự động Resume Workflow hạ nguồn khi hoàn thành batch.
+    Fail-closed toàn diện: Xử lý triệt để lỗi Request #None và tự động Resume Workflow hạ nguồn.
     """
     supabase = get_supabase_client()
     now_utc = datetime.now(timezone.utc)
@@ -82,21 +82,53 @@ async def poll_workspace_long_tasks():
     payload = task.get("payload_data", {})
     request_id = payload.get("request_id")
     school_creds = payload.get("school_credentials", {})
+    workflow_id = payload.get("workflow_id")
+    workflow_step_id = payload.get("workflow_step_id")
 
     now_vn = get_now_vn_str()
 
-    # 🛑 DIỆT TẬN GỐC BUG 'Request #None'
+    # 🛑 1. DIỆT TẬN GỐC BUG 'Request #None' (FAIL-CLOSED TOÀN DIỆN)
     if not request_id or str(request_id).strip() in ["None", "null", ""]:
-        err_log = (
-            f"\n[{now_vn}] [ERROR] [workspace_rpa] {task_tag}: "
-            f"Không tìm thấy Request ID hợp lệ để kiểm tra kết quả batch. Đánh dấu thất bại để tránh lặp vô tận."
-        )
-        logger.error(f"❌ {task_tag} Thiếu Request ID hợp lệ trong waiting_poll task!")
+        err_msg = "Không tìm thấy Request ID hợp lệ để kiểm tra kết quả batch (Request #None)."
+        err_log = f"\n[{now_vn}] [ERROR] [workspace_rpa] {task_tag}: {err_msg} Đánh dấu thất bại để tránh lặp vô tận."
+        logger.error(f"❌ {task_tag} {err_msg}")
+
+        # A. Cập nhật bot task
         supabase.table("bot_automation_tasks").update({
             "execution_status": "failed",
             "last_error_step": "waiting_poll_missing_request_id",
             "execution_logs": (task.get("execution_logs") or "") + err_log
         }).eq("id", task_id).execute()
+
+        # B. Đồng bộ fail cho Workflow tương ứng (Không để workflow treo!)
+        if workflow_id:
+            wf_res = supabase.table("automation_workflows").select("*").eq("id", workflow_id).execute()
+            if wf_res.data:
+                wf_record = wf_res.data[0]
+                wf_steps = wf_record.get("steps") or []
+                for s in wf_steps:
+                    if s.get("step_id") == workflow_step_id or s.get("capability_id") == "workspace.poll_account_batch":
+                        s["status"] = "failed"
+                        s["error_message"] = err_msg
+
+                supabase.table("automation_workflows").update({
+                    "steps": wf_steps,
+                    "status": "failed",
+                    "updated_at": now_iso
+                }).eq("id", workflow_id).execute()
+
+            # Ghi Audit Event: FAILED
+            try:
+                supabase.table("workflow_execution_events").insert({
+                    "workflow_id": workflow_id,
+                    "step_id": workflow_step_id or "poll_account_batch",
+                    "event_type": "failed",
+                    "error": err_msg,
+                    "actor": "cron_workspace_long_tasks",
+                    "created_at": now_iso
+                }).execute()
+            except Exception as ev_err:
+                logger.warning(f"Lỗi ghi execution event missing_request_id: {ev_err}")
         return
 
     download_dir = "/tmp/ptv_results"
@@ -118,6 +150,7 @@ async def poll_workspace_long_tasks():
 
     status = check_res.get("status")
 
+    # 🟢 2. BATCH HOÀN TẤT THÀNH CÔNG (COMPLETED)
     if status == "completed":
         downloaded_file = check_res.get("result_file_path")
         cof_input_path = payload.get("cof_file_path")
@@ -173,9 +206,6 @@ async def poll_workspace_long_tasks():
         }).eq("id", task_id).execute()
 
         # 🎯 RESUME WORKFLOW HẠ NGUỒN NẾU TASK NẰM TRONG MỘT WORKFLOW
-        workflow_id = payload.get("workflow_id")
-        workflow_step_id = payload.get("workflow_step_id")
-
         if workflow_id:
             logger.info(f"🔄 {task_tag} Task thuộc Workflow #{workflow_id[:8]}, tiến hành resume các bước tiếp theo...")
             wf_res = supabase.table("automation_workflows").select("*").eq("id", workflow_id).execute()
@@ -186,15 +216,28 @@ async def poll_workspace_long_tasks():
                     if s.get("step_id") == workflow_step_id or s.get("capability_id") == "workspace.poll_account_batch":
                         s["status"] = "success"
                         s["outputs"] = check_res
-                        s["completed_at"] = datetime.now(timezone.utc).isoformat()
+                        s["completed_at"] = now_iso
 
                 supabase.table("automation_workflows").update({
                     "steps": wf_steps,
                     "status": "running",
-                    "updated_at": datetime.now(timezone.utc).isoformat()
+                    "updated_at": now_iso
                 }).eq("id", workflow_id).execute()
 
-                # Gọi resume workflow chạy ngầm
+                # Ghi Audit Event: SUCCEEDED
+                try:
+                    supabase.table("workflow_execution_events").insert({
+                        "workflow_id": workflow_id,
+                        "step_id": workflow_step_id or "poll_account_batch",
+                        "event_type": "succeeded",
+                        "outputs": check_res,
+                        "actor": "cron_workspace_long_tasks",
+                        "created_at": now_iso
+                    }).execute()
+                except Exception as ev_err:
+                    logger.warning(f"Lỗi ghi audit event poll success: {ev_err}")
+
+                # Kích hoạt Resume Workflow chạy ngầm qua executor
                 from app.services.workflow_executor import workflow_executor_service
                 asyncio.create_task(workflow_executor_service.execute_approved_workflow(workflow_id))
         else:
@@ -202,6 +245,7 @@ async def poll_workspace_long_tasks():
             if task.get("ticket_id"):
                 supabase.table("inbox_tickets").update({"status": "completed"}).eq("id", task["ticket_id"]).execute()
 
+    # ⏳ 3. BATCH VẪN ĐANG XỬ LÝ (STILL PROCESSING)
     elif status == "still_processing":
         next_check = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
         payload["next_check_at"] = next_check
@@ -212,6 +256,46 @@ async def poll_workspace_long_tasks():
             "payload_data": payload,
             "execution_logs": (task.get("execution_logs") or "") + new_log
         }).eq("id", task_id).execute()
+
+    # 🔴 4. BATCH THẤT BẠI HOẶC LỖI HỆ THỐNG (FAILED / ERROR)
+    elif status in ["failed", "error"]:
+        err_msg = check_res.get("error") or "Lỗi kiểm tra tiến độ batch tài khoản trên School Workspace."
+        new_log = f"\n[{now_vn}] [ERROR] [workspace_rpa] {task_tag}: Batch Request #{request_id} thất bại: {err_msg}"
+        logger.error(f"❌ {task_tag} {err_msg}")
+
+        supabase.table("bot_automation_tasks").update({
+            "execution_status": "failed",
+            "last_error_step": "batch_processing_failed",
+            "execution_logs": (task.get("execution_logs") or "") + new_log
+        }).eq("id", task_id).execute()
+
+        if workflow_id:
+            wf_res = supabase.table("automation_workflows").select("*").eq("id", workflow_id).execute()
+            if wf_res.data:
+                wf_record = wf_res.data[0]
+                wf_steps = wf_record.get("steps") or []
+                for s in wf_steps:
+                    if s.get("step_id") == workflow_step_id or s.get("capability_id") == "workspace.poll_account_batch":
+                        s["status"] = "failed"
+                        s["error_message"] = err_msg
+
+                supabase.table("automation_workflows").update({
+                    "steps": wf_steps,
+                    "status": "failed",
+                    "updated_at": now_iso
+                }).eq("id", workflow_id).execute()
+
+            try:
+                supabase.table("workflow_execution_events").insert({
+                    "workflow_id": workflow_id,
+                    "step_id": workflow_step_id or "poll_account_batch",
+                    "event_type": "failed",
+                    "error": err_msg,
+                    "actor": "cron_workspace_long_tasks",
+                    "created_at": now_iso
+                }).execute()
+            except Exception as ev_err:
+                logger.warning(f"Lỗi ghi audit event poll failed: {ev_err}")
 
 
 @asynccontextmanager

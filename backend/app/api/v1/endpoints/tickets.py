@@ -1,12 +1,14 @@
 # backend/app/api/v1/endpoints/tickets.py
-import hashlib
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 
 from app.core.supabase import get_supabase_client
 from app.core.gemini import gemini_engine
-from app.workers.ticket_processor import process_ticket_revision
+from app.workers.ticket_processor import (
+    process_ticket_revision,
+    create_or_get_ticket_revision
+)
 from app.services.osticket_service import poll_open_ostickets
 from app.services.gmail_service import poll_unread_gmails
 from app.core.cache_policy import BoundedMemoryCache, CacheTier
@@ -160,7 +162,7 @@ async def update_ticket_category(ticket_id: str, payload: Dict[str, Any]):
 
 
 # =============================================================================
-# 🧠 DUAL RE-ANALYSIS APIS (PHA 5 MỚI)
+# 🧠 DUAL RE-ANALYSIS APIS (PROVENANCE & AUDIT TRACKING)
 # =============================================================================
 
 @router.post("/{ticket_id}/re-summarize")
@@ -168,6 +170,7 @@ async def re_summarize_ticket(ticket_id: str):
     """
     Chỉ làm tươi lại bản tóm tắt Inbox (Soft Summary):
     - Không làm thay đổi kế hoạch Workflow hay Intent vận hành.
+    - Ghi nhận đầy đủ bản đánh giá mới vào ticket_ai_assessments để đảm bảo Provenance!
     """
     supabase = get_supabase_client()
     res = supabase.table("inbox_tickets").select("*").eq("id", ticket_id).execute()
@@ -175,13 +178,44 @@ async def re_summarize_ticket(ticket_id: str):
         raise HTTPException(status_code=404, detail="Không tìm thấy ticket.")
 
     ticket = res.data[0]
+    raw_content = ticket.get("raw_content") or ""
+    attachments = ticket.get("attachments") or []
+
+    # 1. Lấy hoặc tạo revision snapshot chuẩn hóa
+    revision_id, rev_no, _ = create_or_get_ticket_revision(
+        ticket_id=ticket_id,
+        raw_content=raw_content,
+        attachments=attachments,
+        source_updated_at=ticket.get("updated_at")
+    )
+
+    if not revision_id:
+        raise HTTPException(status_code=500, detail="Không thể xác định revision để cập nhật tóm tắt.")
+
+    # 2. Gọi AI Tóm tắt mềm
     summary_res = gemini_engine.summarize_ticket(
         subject=ticket.get("subject", ""),
-        raw_content=ticket.get("raw_content", ""),
+        raw_content=raw_content,
         source=ticket.get("source", "gmail")
     )
 
+    # 3. Ghi vết đánh giá vào ticket_ai_assessments (Bắt buộc theo chuẩn Provenance)
     now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        supabase.table("ticket_ai_assessments").insert({
+            "ticket_revision_id": revision_id,
+            "assessment_kind": "summary",
+            "model_name": summary_res.model_name or "fallback",
+            "prompt_version": summary_res.prompt_version,
+            "registry_version": "v1.1.0",
+            "structured_result": summary_res.model_dump(),
+            "status": "completed",
+            "created_at": now_iso
+        }).execute()
+    except Exception as assess_err:
+        print(f"⚠️ Lỗi lưu ticket_ai_assessments trong /re-summarize: {assess_err}")
+
+    # 4. Cập nhật bản tóm tắt hiển thị trên UI
     supabase.table("inbox_tickets").update({
         "ai_summary": summary_res.summary_vi,
         "category": summary_res.category,
@@ -192,8 +226,9 @@ async def re_summarize_ticket(ticket_id: str):
     tickets_cache.invalidate()
     return {
         "status": "success",
-        "message": "Đã cập nhật lại bản tóm tắt AI cho ticket.",
-        "summary": summary_res.model_dump()
+        "message": "Đã cập nhật lại bản tóm tắt AI và lưu lịch sử provenance cho ticket.",
+        "summary": summary_res.model_dump(),
+        "revision_id": revision_id
     }
 
 
@@ -202,6 +237,7 @@ async def re_assess_ticket_intent(ticket_id: str):
     """
     Đánh giá lại sự thật vận hành & Tái lập Proposal mới:
     - Bắt buộc gọi Gemini trích xuất lại Intent có bằng chứng.
+    - Sử dụng Một Cửa Tiếp Nhận chuẩn hóa: create_or_get_ticket_revision.
     - Tạo assessment mới và lưu proposal version mới.
     """
     supabase = get_supabase_client()
@@ -211,33 +247,20 @@ async def re_assess_ticket_intent(ticket_id: str):
 
     ticket = res.data[0]
     raw_content = ticket.get("raw_content") or ""
-    content_hash = hashlib.sha256(raw_content.encode("utf-8")).hexdigest()
+    attachments = ticket.get("attachments") or []
 
-    # Lấy hoặc tạo revision mới nhất
-    rev_res = supabase.table("inbox_ticket_revisions")\
-        .select("id")\
-        .eq("ticket_id", ticket_id)\
-        .order("revision_no", desc=True)\
-        .limit(1)\
-        .execute()
-
-    if rev_res.data:
-        revision_id = rev_res.data[0]["id"]
-    else:
-        new_rev = supabase.table("inbox_ticket_revisions").insert({
-            "ticket_id": ticket_id,
-            "revision_no": 1,
-            "content_hash": content_hash,
-            "raw_content": raw_content,
-            "attachments": ticket.get("attachments") or [],
-            "source_updated_at": datetime.now(timezone.utc).isoformat()
-        }).execute()
-        revision_id = new_rev.data[0]["id"] if new_rev.data else None
+    # 1. Lấy hoặc tạo revision chuẩn hóa tập trung (Không hard-code revision_no = 1)
+    revision_id, rev_no, _ = create_or_get_ticket_revision(
+        ticket_id=ticket_id,
+        raw_content=raw_content,
+        attachments=attachments,
+        source_updated_at=ticket.get("updated_at")
+    )
 
     if not revision_id:
-        raise HTTPException(status_code=500, detail="Không thể xác định revision để đánh giá lại.")
+        raise HTTPException(status_code=500, detail="Không thể xác định revision để đánh giá lại ý định.")
 
-    # Chạy quy trình một cửa
+    # 2. Kích hoạt Canonical Intake Orchestrator
     result = await process_ticket_revision(revision_id)
     tickets_cache.invalidate()
 

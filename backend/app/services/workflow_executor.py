@@ -2,7 +2,6 @@
 import re
 import json
 import time
-import inspect
 import logging
 import asyncio
 from datetime import datetime, timezone
@@ -19,16 +18,16 @@ logger = logging.getLogger(__name__)
 class WorkflowExecutorService:
     """
     Bộ điều phối thực thi Workflow tập trung (Safety-Critical Topological Workflow Executor):
-    - True Topological Sorting (Kahn's Algorithm - In-degree DAG resolution).
-    - Bảo vệ Concurrency & Atomic Lease qua TaskCoordinator.claim_task_for_execution().
-    - Đồng bộ trạng thái waiting_poll hai chiều với bot_automation_tasks (Không bị kẹt Cron).
-    - Append-only Audit Trail ghi vào workflow_execution_events (Che mờ toàn bộ mật khẩu).
-    - KHÔNG sử dụng dữ liệu mockup/mẫu điền sẵn.
+    - Quản lý Atomic Lease cấp Workflow thông qua TaskCoordinator.claim_workflow_lease().
+    - Bọc toàn bộ quá trình chạy trong try ... finally để đảm bảo 100% giải phóng Lease.
+    - True Topological Sorting (Kahn's Algorithm): ném lỗi và dừng ngay khi phát hiện chu trình (Cycle).
+    - Khắc phục triệt để lỗi Request #None tại bước waiting_poll.
+    - Loại bỏ hoàn toàn fallback đoán mò ('workspace_rpa', capability_id).
     """
 
     @staticmethod
     def _sanitize_payload(data: Any) -> Any:
-        """Lọc và che giấu toàn bộ thông tin nhạy cảm (passwords, secrets) trước khi ghi log/audit."""
+        """Lọc và che giấu toàn bộ thông tin nhạy cảm trước khi ghi log/audit."""
         if isinstance(data, dict):
             sanitized = {}
             for k, v in data.items():
@@ -44,10 +43,7 @@ class WorkflowExecutorService:
 
     @staticmethod
     def _resolve_input_bindings(inputs: Dict[str, Any], step_outputs: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Giải mã chuỗi template dạng {{ step_id.field_name }} thành giá trị thực tế
-        sinh ra từ outputs của các bước phụ thuộc trước đó.
-        """
+        """Giải mã chuỗi template dạng {{ step_id.field_name }} thành giá trị thực tế."""
         resolved: Dict[str, Any] = {}
         pattern = re.compile(r"\{\{\s*([a-zA-Z0-9_-]+)\.([a-zA-Z0-9_-]+)\s*\}\}")
 
@@ -74,10 +70,7 @@ class WorkflowExecutorService:
 
     @staticmethod
     def _topological_sort(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Sắp xếp Tô-pô thực thụ (Kahn's Algorithm):
-        Đảm bảo thứ tự thực thi chuẩn xác theo đồ thị có hướng không chu trình (DAG).
-        """
+        """Sắp xếp Tô-pô thực thụ (Kahn's Algorithm). Ném ValueError nếu phát hiện chu trình."""
         step_map = {s["step_id"]: s for s in steps}
         in_degree = {s["step_id"]: 0 for s in steps}
         adj: Dict[str, List[str]] = {s["step_id"]: [] for s in steps}
@@ -88,7 +81,6 @@ class WorkflowExecutorService:
                     in_degree[s["step_id"]] += 1
                     adj[dep].append(s["step_id"])
 
-        # Hàng đợi các bước sẵn sàng (In-degree == 0)
         queue = [sid for sid, deg in in_degree.items() if deg == 0]
         sorted_steps: List[Dict[str, Any]] = []
 
@@ -101,8 +93,10 @@ class WorkflowExecutorService:
                     queue.append(neighbor)
 
         if len(sorted_steps) != len(steps):
-            logger.error("❌ Phát hiện chu trình phụ thuộc trong DAG khi thực hiện Topological Sort!")
-            return steps  # Fallback mảng gốc nếu có dị biệt
+            cycle_steps = [sid for sid, deg in in_degree.items() if deg > 0]
+            err_msg = f"Phát hiện chu trình phụ thuộc (Circular Dependency) trong DAG tại các bước: {cycle_steps}!"
+            logger.error(f"❌ {err_msg}")
+            raise ValueError(err_msg)
 
         return sorted_steps
 
@@ -117,7 +111,7 @@ class WorkflowExecutorService:
         duration_ms: Optional[int] = None,
         actor: str = "workflow_executor"
     ):
-        """Ghi nhận sự kiện thực thi bất biến (Append-Only Audit) vào bảng workflow_execution_events."""
+        """Ghi nhận sự kiện thực thi bất biến vào bảng workflow_execution_events."""
         try:
             supabase = get_supabase_client()
             event_data = {
@@ -137,10 +131,10 @@ class WorkflowExecutorService:
 
     async def execute_approved_workflow(self, workflow_id: str) -> Dict[str, Any]:
         """
-        Thực thi toàn bộ một Workflow đã được Quản trị viên duyệt:
-        - Chiếm Lease độc quyền qua TaskCoordinator.
-        - Khóa đóng băng version và sắp xếp Tô-pô thực thụ.
-        - Cập nhật đồng bộ waiting_poll để Cronjob không bị mù.
+        THỰC THI WORKFLOW ĐÃ DUYỆT (SAFETY-CRITICAL EXECUTION):
+        - Chiếm Workflow Lease thực thụ (Fail-closed nếu bị trùng lặp).
+        - Toàn bộ hàm nằm trong try ... finally để luôn giải phóng Lease.
+        - Xử lý waiting_poll an toàn: Chặn đứng lỗi Request #None.
         """
         supabase = get_supabase_client()
         res = supabase.table("automation_workflows").select("*").eq("id", workflow_id).execute()
@@ -152,248 +146,287 @@ class WorkflowExecutorService:
         if not raw_steps:
             return {"status": "failed", "error": "Workflow không có bước thực thi nào."}
 
-        # 1. Chiếm Lease độc quyền qua TaskCoordinator (Chống click đúp và xung đột RAM 512MB)
-        lease_key = f"workflow_{workflow_id}"
-        lease_acquired = False
-        try:
-            if hasattr(TaskCoordinator, "claim_task_for_execution"):
-                fn = TaskCoordinator.claim_task_for_execution
-                lease_acquired = await fn(lease_key) if inspect.iscoroutinefunction(fn) else fn(lease_key)
-            else:
-                lease_acquired = True
-        except Exception as lease_err:
-            logger.warning(f"⚠️ Kiểm tra lease TaskCoordinator: {lease_err}")
-            lease_acquired = True
+        operator_name = wf.get("approved_by") or "system_operator"
 
-        if not lease_acquired:
-            logger.warning(f"🛑 [WF #{workflow_id[:8]}] Không thể chiếm Lease thực thi. Tác vụ đang chạy ở luồng khác!")
-            return {"status": "running", "message": "Workflow đang được thực thi bởi một tiến trình khác."}
+        # 1. CHIẾM WORKFLOW-LEVEL LEASE (CHỐNG RACE-CONDITION THỰC SỰ)
+        is_claimed, lease_token, _ = await TaskCoordinator.claim_workflow_lease(
+            workflow_id=workflow_id,
+            operator=operator_name
+        )
+        if not is_claimed:
+            logger.warning(f"🛑 [WORKFLOW BLOCKED] {lease_token}")
+            return {"status": "running", "message": lease_token}
 
         wf_tag = f"[WF #{workflow_id[:8]}]"
         now_iso = datetime.now(timezone.utc).isoformat()
+        final_workflow_status = "failed"
 
-        # Đánh dấu workflow đang chạy
-        supabase.table("automation_workflows").update({
-            "status": "running",
-            "updated_at": now_iso
-        }).eq("id", workflow_id).execute()
-
-        # 2. Sắp xếp các bước theo chuẩn Topological Sorting
-        steps = self._topological_sort(raw_steps)
-
-        step_outputs: Dict[str, Any] = {}
-        for s in steps:
-            if s.get("status") == "success" and s.get("outputs"):
-                step_outputs[s["step_id"]] = s["outputs"]
-
-        logger.info(f"🚀 {wf_tag} Bắt đầu thực thi DAG gồm {len(steps)} bước (Topological Order)...")
-
-        for idx, step in enumerate(steps):
-            step_id = step.get("step_id")
-            step_name = step.get("name", step_id)
-            current_status = step.get("status")
-
-            # A. Bước đã thành công từ trước (khi resume hoặc retry), bỏ qua an toàn
-            if current_status == "success":
-                logger.info(f"⏩ {wf_tag} Bước '{step_name}' ({step_id}) đã hoàn thành ở checkpoint trước, bỏ qua.")
-                continue
-
-            # B. Kiểm tra phụ thuộc (Dependencies)
-            deps = step.get("depends_on") or []
-            unmet_deps = [d for d in deps if d not in step_outputs]
-            if unmet_deps:
-                msg = f"Bước '{step_name}' chưa thỏa mãn phụ thuộc từ: {unmet_deps}"
-                logger.warning(f"⏸️ {wf_tag} {msg}")
-                step["status"] = "waiting_dependency"
-                self._update_workflow_steps(workflow_id, steps)
-                return {"status": "waiting_dependency", "message": msg, "blocked_step": step_id}
-
-            # C. Phân giải Data Bindings cho inputs
-            raw_inputs = step.get("inputs") or {}
-            resolved_inputs = self._resolve_input_bindings(raw_inputs, step_outputs)
-            step["inputs"] = resolved_inputs
-
-            # D. Ánh xạ Capability sang Bot
-            cap_id = step.get("capability_id", "")
-            bot_type, action = self._map_capability_to_bot(cap_id)
-
-            task_payload = {
-                **resolved_inputs,
-                "action": action,
-                "workflow_id": workflow_id,
-                "workflow_step_id": step_id,
-                "step_name": step_name
-            }
-
-            # E. Tạo bản ghi bot_automation_tasks
-            task_res = supabase.table("bot_automation_tasks").insert({
-                "ticket_id": wf.get("ticket_id"),
-                "bot_type": bot_type,
-                "payload_data": task_payload,
-                "approval_status": "approved",
-                "execution_status": "running"
-            }).execute()
-
-            execution_task_id = task_res.data[0]["id"] if task_res.data else None
-            step["execution_task_id"] = execution_task_id
-            step["status"] = "running"
-            step["started_at"] = datetime.now(timezone.utc).isoformat()
-            self._update_workflow_steps(workflow_id, steps)
-
-            # Ghi Audit Event: STARTED
-            start_ts = time.time()
-            await self._record_execution_event(
-                workflow_id=workflow_id,
-                step_id=step_id,
-                event_type="started",
-                inputs=resolved_inputs,
-                actor=wf.get("approved_by") or "system_operator"
-            )
-
-            # F. Thực thi tác vụ Bot
-            logger.info(f"▶️ {wf_tag} [BƯỚC {idx+1}/{len(steps)}] Thực thi: {step_name} ({cap_id})...")
-            step_result = {}
+        try:
+            # 2. Sắp xếp các bước theo Topological Sorting
             try:
-                if any(kw in cap_id for kw in ["playwright", "bulk_account", "lms", "git", "order"]):
-                    async with acquire_playwright_slot(f"wf_{step_id}", timeout=300.0, lane="admin"):
+                steps = self._topological_sort(raw_steps)
+            except ValueError as cycle_err:
+                err_str = str(cycle_err)
+                final_workflow_status = "failed"
+                await self._record_execution_event(
+                    workflow_id=workflow_id,
+                    step_id="dag_sort",
+                    event_type="failed",
+                    error=err_str,
+                    actor=operator_name
+                )
+                return {"status": "failed", "error": err_str}
+
+            step_outputs: Dict[str, Any] = {}
+            for s in steps:
+                if s.get("status") == "success" and s.get("outputs"):
+                    step_outputs[s["step_id"]] = s["outputs"]
+
+            logger.info(f"🚀 {wf_tag} Bắt đầu thực thi DAG gồm {len(steps)} bước (Lease #{lease_token[:8]})...")
+
+            for idx, step in enumerate(steps):
+                step_id = step.get("step_id")
+                step_name = step.get("name", step_id)
+                current_status = step.get("status")
+
+                # Gia hạn heartbeat định kỳ
+                await TaskCoordinator.update_workflow_heartbeat(workflow_id, lease_token)
+
+                # A. Bước đã thành công từ trước (Checkpoint resume), bỏ qua an toàn
+                if current_status == "success":
+                    logger.info(f"⏩ {wf_tag} Bước '{step_name}' ({step_id}) đã thành công ở checkpoint trước, bỏ qua.")
+                    continue
+
+                # B. Kiểm tra phụ thuộc (Dependencies)
+                deps = step.get("depends_on") or []
+                unmet_deps = [d for d in deps if d not in step_outputs]
+                if unmet_deps:
+                    msg = f"Bước '{step_name}' chưa thỏa mãn phụ thuộc từ: {unmet_deps}"
+                    logger.warning(f"⏸️ {wf_tag} {msg}")
+                    step["status"] = "waiting_dependency"
+                    self._update_workflow_steps(workflow_id, steps)
+                    final_workflow_status = "waiting_dependency"
+                    return {"status": "waiting_dependency", "message": msg, "blocked_step": step_id}
+
+                # C. Phân giải Data Bindings
+                raw_inputs = step.get("inputs") or {}
+                resolved_inputs = self._resolve_input_bindings(raw_inputs, step_outputs)
+                step["inputs"] = resolved_inputs
+
+                # D. Ánh xạ Capability sang Bot (FAIL-CLOSED)
+                cap_id = step.get("capability_id", "")
+                try:
+                    bot_type, action = self._map_capability_to_bot(cap_id)
+                except ValueError as map_err:
+                    err_str = str(map_err)
+                    logger.error(f"❌ {wf_tag} {err_str}")
+                    step["status"] = "failed"
+                    step["error_message"] = err_str
+                    self._update_workflow_steps(workflow_id, steps)
+                    final_workflow_status = "failed"
+                    await self._record_execution_event(
+                        workflow_id=workflow_id,
+                        step_id=step_id,
+                        event_type="failed",
+                        error=err_str,
+                        actor=operator_name
+                    )
+                    return {"status": "failed", "failed_step": step_id, "error": err_str}
+
+                task_payload = {
+                    **resolved_inputs,
+                    "action": action,
+                    "workflow_id": workflow_id,
+                    "workflow_step_id": step_id,
+                    "step_name": step_name
+                }
+
+                # E. Tạo bản ghi bot_automation_tasks
+                task_res = supabase.table("bot_automation_tasks").insert({
+                    "ticket_id": wf.get("ticket_id"),
+                    "bot_type": bot_type,
+                    "payload_data": task_payload,
+                    "approval_status": "approved",
+                    "execution_status": "running"
+                }).execute()
+
+                execution_task_id = task_res.data[0]["id"] if task_res.data else None
+                step["execution_task_id"] = execution_task_id
+                step["status"] = "running"
+                step["started_at"] = datetime.now(timezone.utc).isoformat()
+                self._update_workflow_steps(workflow_id, steps)
+
+                # Ghi Audit Event: STARTED
+                start_ts = time.time()
+                await self._record_execution_event(
+                    workflow_id=workflow_id,
+                    step_id=step_id,
+                    event_type="started",
+                    inputs=resolved_inputs,
+                    actor=operator_name
+                )
+
+                # F. Thực thi Bot với Semaphore bảo vệ RAM Render 512MB
+                logger.info(f"▶️ {wf_tag} [BƯỚC {idx+1}/{len(steps)}] Thực thi: {step_name} ({cap_id})...")
+                step_result = {}
+                try:
+                    if any(kw in cap_id for kw in ["playwright", "bulk_account", "lms", "git", "order"]):
+                        async with acquire_playwright_slot(f"wf_{step_id}", timeout=300.0, lane="admin"):
+                            step_result = await execute_approved_bot_task(
+                                bot_type=bot_type,
+                                payload_data=task_payload,
+                                task_id=execution_task_id
+                            )
+                    else:
                         step_result = await execute_approved_bot_task(
                             bot_type=bot_type,
                             payload_data=task_payload,
                             task_id=execution_task_id
                         )
-                else:
-                    step_result = await execute_approved_bot_task(
-                        bot_type=bot_type,
-                        payload_data=task_payload,
-                        task_id=execution_task_id
+                except Exception as ex:
+                    logger.error(f"❌ {wf_tag} Lỗi ngoại lệ tại bước {step_name}: {ex}", exc_info=True)
+                    step_result = {"status": "failed", "error": str(ex)}
+
+                duration_ms = int((time.time() - start_ts) * 1000)
+                status_res = step_result.get("status")
+
+                # G. Xử lý kết quả trả về
+                # 1. TRƯỜNG HỢP WAITING_POLL (DIỆT TẬN GỐC LỖI REQUEST #NONE)
+                if status_res == "waiting_poll":
+                    req_id = step_result.get("request_id")
+                    # Chặn đứng Request #None!
+                    if not req_id or str(req_id).strip() in ["", "None", "null", "undefined"]:
+                        err_msg = f"Bước '{step_name}' trả về waiting_poll nhưng thiếu request_id hợp lệ!"
+                        logger.error(f"❌ {wf_tag} {err_msg}")
+                        step["status"] = "failed"
+                        step["error_message"] = err_msg
+                        self._update_workflow_steps(workflow_id, steps)
+                        final_workflow_status = "failed"
+
+                        if execution_task_id:
+                            supabase.table("bot_automation_tasks").update({
+                                "execution_status": "failed",
+                                "last_error_step": step_id
+                            }).eq("id", execution_task_id).execute()
+
+                        await self._record_execution_event(
+                            workflow_id=workflow_id,
+                            step_id=step_id,
+                            event_type="failed",
+                            error=err_msg,
+                            duration_ms=duration_ms,
+                            actor=operator_name
+                        )
+                        return {"status": "failed", "failed_step": step_id, "error": err_msg}
+
+                    logger.info(f"⏳ {wf_tag} Bước '{step_name}' chuyển sang WAITING_POLL an toàn (Request ID: {req_id}).")
+                    step["status"] = "waiting_poll"
+                    step["outputs"] = step_result
+                    self._update_workflow_steps(workflow_id, steps)
+
+                    # Cập nhật bot_automation_tasks để Cronjob nhận diện
+                    if execution_task_id:
+                        updated_payload = {
+                            **task_payload,
+                            **step_result,
+                            "workflow_id": workflow_id,
+                            "workflow_step_id": step_id
+                        }
+                        supabase.table("bot_automation_tasks").update({
+                            "execution_status": "waiting_poll",
+                            "payload_data": updated_payload,
+                            "current_step": f"waiting_poll_{step_id}"
+                        }).eq("id", execution_task_id).execute()
+
+                    await self._record_execution_event(
+                        workflow_id=workflow_id,
+                        step_id=step_id,
+                        event_type="waiting",
+                        outputs=step_result,
+                        duration_ms=duration_ms,
+                        actor=operator_name
                     )
-            except Exception as ex:
-                logger.error(f"❌ {wf_tag} Lỗi ngoại lệ tại bước {step_name}: {ex}", exc_info=True)
-                step_result = {"status": "failed", "error": str(ex)}
+                    final_workflow_status = "waiting_poll"
+                    return {"status": "waiting_poll", "step_id": step_id, "step_result": step_result}
 
-            duration_ms = int((time.time() - start_ts) * 1000)
-            status_res = step_result.get("status")
+                # 2. TRƯỜNG HỢP BƯỚC THẤT BẠI (FAILED)
+                elif status_res in ["failed", "error"]:
+                    err_msg = step_result.get("error") or "Lỗi thực thi bước."
+                    logger.error(f"❌ {wf_tag} Bước '{step_name}' thất bại: {err_msg}")
+                    step["status"] = "failed"
+                    step["error_message"] = err_msg
+                    step["completed_at"] = datetime.now(timezone.utc).isoformat()
+                    self._update_workflow_steps(workflow_id, steps)
 
-            # G. Xử lý kết quả trả về
-            # 1. TRƯỜNG HỢP NỘP BATCH CHỜ POLLING (WAITING_POLL)
-            if status_res == "waiting_poll":
-                logger.info(f"⏳ {wf_tag} Bước '{step_name}' chuyển sang WAITING_POLL (Request ID: {step_result.get('request_id')}).")
-                step["status"] = "waiting_poll"
-                step["outputs"] = step_result
-                self._update_workflow_steps(workflow_id, steps)
+                    if execution_task_id:
+                        supabase.table("bot_automation_tasks").update({
+                            "execution_status": "failed",
+                            "last_error_step": step_id
+                        }).eq("id", execution_task_id).execute()
 
-                # Đồng bộ trạng thái vào automation_workflows
-                supabase.table("automation_workflows").update({
-                    "status": "waiting_poll",
-                    "updated_at": datetime.now(timezone.utc).isoformat()
-                }).eq("id", workflow_id).execute()
+                    await self._record_execution_event(
+                        workflow_id=workflow_id,
+                        step_id=step_id,
+                        event_type="failed",
+                        error=err_msg,
+                        duration_ms=duration_ms,
+                        actor=operator_name
+                    )
+                    final_workflow_status = "failed"
+                    return {"status": "failed", "failed_step": step_id, "error": err_msg}
 
-                # 🎯 ĐỒNG BỘ HAI CHIỀU QUAN TRỌNG: Cập nhật bot_automation_tasks để Cronjob nhìn thấy!
-                if execution_task_id:
-                    updated_payload = {
-                        **task_payload,
-                        **step_result,
-                        "workflow_id": workflow_id,
-                        "workflow_step_id": step_id
-                    }
-                    supabase.table("bot_automation_tasks").update({
-                        "execution_status": "waiting_poll",
-                        "payload_data": updated_payload,
-                        "current_step": f"waiting_poll_{step_id}"
-                    }).eq("id", execution_task_id).execute()
+                # 3. TRƯỜNG HỢP BƯỚC THÀNH CÔNG (SUCCESS)
+                else:
+                    logger.info(f"✅ {wf_tag} Bước '{step_name}' hoàn thành xuất sắc!")
+                    step["status"] = "success"
+                    step["outputs"] = step_result
+                    step["completed_at"] = datetime.now(timezone.utc).isoformat()
+                    step_outputs[step_id] = step_result
+                    self._update_workflow_steps(workflow_id, steps)
 
-                # Ghi Audit Event: WAITING
-                await self._record_execution_event(
-                    workflow_id=workflow_id,
-                    step_id=step_id,
-                    event_type="waiting",
-                    outputs=step_result,
-                    duration_ms=duration_ms,
-                    actor=wf.get("approved_by") or "system_operator"
-                )
-                return {"status": "waiting_poll", "step_id": step_id, "step_result": step_result}
+                    if execution_task_id:
+                        supabase.table("bot_automation_tasks").update({
+                            "execution_status": "success",
+                            "current_step": "completed"
+                        }).eq("id", execution_task_id).execute()
 
-            # 2. TRƯỜNG HỢP BƯỚC THẤT BẠI (FAILED)
-            elif status_res in ["failed", "error"]:
-                err_msg = step_result.get("error") or "Lỗi thực thi bước."
-                logger.error(f"❌ {wf_tag} Bước '{step_name}' thất bại: {err_msg}")
-                step["status"] = "failed"
-                step["error_message"] = err_msg
-                step["completed_at"] = datetime.now(timezone.utc).isoformat()
-                self._update_workflow_steps(workflow_id, steps)
+                    await self._record_execution_event(
+                        workflow_id=workflow_id,
+                        step_id=step_id,
+                        event_type="succeeded",
+                        outputs=step_result,
+                        duration_ms=duration_ms,
+                        actor=operator_name
+                    )
 
-                supabase.table("automation_workflows").update({
-                    "status": "failed",
-                    "updated_at": datetime.now(timezone.utc).isoformat()
-                }).eq("id", workflow_id).execute()
+            # Toàn bộ DAG thành công 100%
+            logger.info(f"🎉 {wf_tag} Toàn bộ {len(steps)} bước đã hoàn tất thành công rực rỡ!")
+            final_workflow_status = "success"
 
-                # Cập nhật bot_automation_tasks
-                if execution_task_id:
-                    supabase.table("bot_automation_tasks").update({
-                        "execution_status": "failed",
-                        "last_error_step": step_id
-                    }).eq("id", execution_task_id).execute()
+            # Đánh dấu ticket completed
+            ticket_id = wf.get("ticket_id")
+            if ticket_id:
+                try:
+                    supabase.table("inbox_tickets").update({
+                        "status": "completed",
+                        "updated_at": datetime.now(timezone.utc).isoformat()
+                    }).eq("id", ticket_id).execute()
+                except Exception as ticket_err:
+                    logger.warning(f"Lỗi cập nhật ticket completed: {ticket_err}")
 
-                # Ghi Audit Event: FAILED
-                await self._record_execution_event(
-                    workflow_id=workflow_id,
-                    step_id=step_id,
-                    event_type="failed",
-                    error=err_msg,
-                    duration_ms=duration_ms,
-                    actor=wf.get("approved_by") or "system_operator"
-                )
-                return {"status": "failed", "failed_step": step_id, "error": err_msg}
+            return {
+                "status": "success", 
+                "message": f"Workflow #{workflow_id[:8]} đã hoàn thành 100%!", 
+                "step_outputs": step_outputs
+            }
 
-            # 3. TRƯỜNG HỢP BƯỚC THÀNH CÔNG (SUCCESS)
-            else:
-                logger.info(f"✅ {wf_tag} Bước '{step_name}' hoàn thành xuất sắc!")
-                step["status"] = "success"
-                step["outputs"] = step_result
-                step["completed_at"] = datetime.now(timezone.utc).isoformat()
-                step_outputs[step_id] = step_result
-                self._update_workflow_steps(workflow_id, steps)
-
-                # Cập nhật bot_automation_tasks
-                if execution_task_id:
-                    supabase.table("bot_automation_tasks").update({
-                        "execution_status": "success",
-                        "current_step": "completed"
-                    }).eq("id", execution_task_id).execute()
-
-                # Ghi Audit Event: SUCCEEDED
-                await self._record_execution_event(
-                    workflow_id=workflow_id,
-                    step_id=step_id,
-                    event_type="succeeded",
-                    outputs=step_result,
-                    duration_ms=duration_ms,
-                    actor=wf.get("approved_by") or "system_operator"
-                )
-
-        # 3. Toàn bộ các bước hoàn thành thành công 100%
-        logger.info(f"🎉 {wf_tag} Toàn bộ {len(steps)} bước trong Workflow đã hoàn tất thành công rực rỡ!")
-        supabase.table("automation_workflows").update({
-            "status": "success",
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        }).eq("id", workflow_id).execute()
-
-        # CHỈ ĐÁNH DẤU TICKET COMPLETED KHI TOÀN BỘ WORKFLOW ĐÃ SUCCESS
-        ticket_id = wf.get("ticket_id")
-        if ticket_id:
-            try:
-                supabase.table("inbox_tickets").update({
-                    "status": "completed",
-                    "updated_at": datetime.now(timezone.utc).isoformat()
-                }).eq("id", ticket_id).execute()
-            except Exception as ticket_err:
-                logger.warning(f"Lỗi cập nhật ticket: {ticket_err}")
-
-        return {
-            "status": "success", 
-            "message": f"Workflow #{workflow_id[:8]} đã hoàn thành 100%!", 
-            "step_outputs": step_outputs
-        }
+        finally:
+            # 🎯 BẢO VỆ TUYỆT ĐỐI: LUÔN GIẢI PHÓNG LEASE TRONG KHỐI FINALLY!
+            await TaskCoordinator.release_workflow_lease(
+                workflow_id=workflow_id,
+                lease_token=lease_token,
+                final_status=final_workflow_status
+            )
 
     async def retry_workflow_step(self, workflow_id: str, target_step_id: str) -> Dict[str, Any]:
         """Cho phép Retry một bước bị lỗi và tiếp tục các bước hạ nguồn."""
@@ -428,10 +461,7 @@ class WorkflowExecutorService:
 
     @staticmethod
     def _map_capability_to_bot(capability_id: str) -> Tuple[str, str]:
-        """
-        Ánh xạ capability_id sang (bot_type, action) theo hợp đồng của capabilities.json.
-        Tuyệt đối không map sang các action ảo không có handler.
-        """
+        """Ánh xạ capability sang bot handler thực tế (Fail-Closed)."""
         mapping = {
             "workspace.bulk_account_creation": ("workspace_rpa", "bulk_account_creation"),
             "workspace.poll_account_batch": ("workspace_rpa", "check_account_batch"),
@@ -448,7 +478,9 @@ class WorkflowExecutorService:
             "git.add_collaborators": ("git_collaborator", "add_repo_collaborators"),
             "feedback.comment_and_assign": ("feedback_doc_triage", "comment_and_assign"),
         }
-        return mapping.get(capability_id, ("workspace_rpa", capability_id))
+        if capability_id not in mapping:
+            raise ValueError(f"Capability '{capability_id}' không có bot handler ánh xạ hợp lệ trong hệ thống (Fail-Closed)!")
+        return mapping[capability_id]
 
     @staticmethod
     def _update_workflow_steps(workflow_id: str, steps: List[Dict[str, Any]]):

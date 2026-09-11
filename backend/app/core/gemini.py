@@ -15,7 +15,14 @@ load_dotenv()
 import google.generativeai as genai
 from app.core.supabase import get_supabase_client
 from app.services.cof_excel_service import COFExcelService
-from app.models.intent import IntentAssessment, TicketSummary, ExtractedIntent, EvidenceSpan
+from app.models.intent import (
+    IntentAssessment, 
+    VerifiedIntentAssessment,
+    TicketSummary, 
+    ExtractedIntent, 
+    EvidenceSpan
+)
+from app.services.evidence_verifier import evidence_verifier
 
 try:
     from app.core.config import settings
@@ -49,6 +56,7 @@ class AIEngine:
     - KEY 1 (GEMINI_API_KEY): Chuyên trách summarize_ticket() (System 1 - Inbox Summary).
     - KEY 2 (GEMINI_API_KEY2): Chuyên trách extract_operational_facts() (System 2 - Operational Facts).
     - Tự động hoán đổi chìa (Cross-Key Failover) khi một trong hai chìa chạm giới hạn 429/Quota.
+    - EVIDENCE VERIFICATION: Kiểm định bằng chứng nguyên văn chống Ảo giác (Zero-Hallucination).
     """
 
     def __init__(self):
@@ -94,7 +102,7 @@ class AIEngine:
                 with open(intent_p, "r", encoding="utf-8") as f:
                     self.intent_prompt_tpl = f.read()
 
-            logger.info("📄 Đã nạp thành công các prompt templates (v1) cho Gemini Engine!")
+            logger.info("📄 Đã nạp thành công các prompt templates (v1.1.0) cho Gemini Engine!")
         except Exception as e:
             logger.warning(f"⚠️ Lỗi nạp prompt templates: {e}")
 
@@ -112,7 +120,6 @@ class AIEngine:
         key_1 = primary_key or self.api_key_summary
         key_2 = self.api_key_facts if key_1 == self.api_key_summary else self.api_key_summary
 
-        # Danh sách chìa khóa sẽ thử cho mỗi model (loại bỏ trùng lặp nếu chỉ có 1 chìa)
         available_keys = [k for k in [key_1, key_2] if k]
         seen_keys = []
         keys_to_try = []
@@ -145,7 +152,7 @@ class AIEngine:
                         continue
                     else:
                         logger.warning(f"⚠️ Model [{model_name}] gặp sự cố: {e}. Đang chuyển model fallback tiếp theo...")
-                        break  # Đổi model tiếp theo
+                        break
 
         logger.error("❌ Toàn bộ 10 model Gemini trên cả hai API Key đều thất bại!")
         return None, None
@@ -189,7 +196,7 @@ class AIEngine:
             assigned_name=parsed_data.get("assigned_name", "Hung Nguyen"),
             assigned_email=parsed_data.get("assigned_email", "hung.nguyenmanh@dtt.vn"),
             model_name=used_model,
-            prompt_version="v1"
+            prompt_version="v1.1.0"
         )
 
     def extract_operational_facts(
@@ -197,11 +204,12 @@ class AIEngine:
         subject: str,
         raw_content: str,
         source: str,
-        excel_summary: Optional[Dict[str, Any]] = None
-    ) -> IntentAssessment:
+        excel_summary: Optional[Dict[str, Any]] = None,
+        source_revision_id: Optional[str] = None
+    ) -> VerifiedIntentAssessment:
         """
         PATH 2: Trích xuất sự thật vận hành có bằng chứng (Sử dụng Key 2: api_key_facts).
-        Tuyệt đối không tự bịa thông tin ngoài nguồn.
+        TÍCH HỢP EVIDENCE VERIFIER: Bắt buộc đối soát nguyên văn 100% với raw_content.
         """
         full_content = raw_content[:20000] if raw_content else "(Trống)"
         excel_info_str = json.dumps(excel_summary, ensure_ascii=False, indent=2) if excel_summary else "Không có file Excel đính kèm hoặc chưa bóc tách."
@@ -216,24 +224,46 @@ class AIEngine:
 
         parsed_data, used_model = self._call_gemini_with_fallback(prompt, primary_key=self.api_key_facts)
         if not parsed_data:
-            return IntentAssessment(
+            return VerifiedIntentAssessment(
                 outcome="needs_information",
                 model_name=None,
                 prompt_version="fallback",
                 missing_requirements=[{"field": "ai_engine", "message": "Không thể kết nối với Gemini AI Engine."}],
-                warnings=["Hệ thống AI không phản hồi."]
+                warnings=["Hệ thống AI không phản hồi."],
+                is_fully_verified=False
             )
 
         raw_intents = parsed_data.get("intents", [])
         structured_intents: List[ExtractedIntent] = []
         raw_evidence_quotes: List[str] = []
 
+        # 1. Bóc tách chi tiết từng bằng chứng kèm offset
         for item in raw_intents:
             ev_list = []
             for ev in item.get("evidence", []):
-                quote_str = ev.get("quote", "").strip() if isinstance(ev, dict) else str(ev).strip()
+                if isinstance(ev, dict):
+                    quote_str = ev.get("quote", "").strip()
+                    start_off = ev.get("start_offset", -1)
+                    end_off = ev.get("end_offset", -1)
+                    src_kind = ev.get("source_kind", "ticket_body")
+                    note = ev.get("context_note")
+                else:
+                    quote_str = str(ev).strip()
+                    start_off = -1
+                    end_off = -1
+                    src_kind = "ticket_body"
+                    note = None
+
                 if quote_str:
-                    ev_list.append(EvidenceSpan(quote=quote_str))
+                    ev_list.append(
+                        EvidenceSpan(
+                            quote=quote_str,
+                            start_offset=start_off,
+                            end_offset=end_off,
+                            source_kind=src_kind,
+                            context_note=note
+                        )
+                    )
                     raw_evidence_quotes.append(quote_str)
 
             structured_intents.append(
@@ -249,10 +279,10 @@ class AIEngine:
         if outcome not in ["no_action", "needs_information", "candidate_action"]:
             outcome = "needs_information"
 
-        return IntentAssessment(
+        raw_assessment = IntentAssessment(
             outcome=outcome,
             model_name=used_model,
-            prompt_version="v1",
+            prompt_version="v1.1.0",
             intents=structured_intents,
             entities=parsed_data.get("entities", {}),
             missing_requirements=parsed_data.get("missing_requirements", []),
@@ -260,27 +290,38 @@ class AIEngine:
             raw_evidence_quotes=raw_evidence_quotes
         )
 
+        # 2. CHỐT CHẶN AN TOÀN: ĐỐI SOÁT BẰNG CHỨNG THỰC TẾ QUA EVIDENCE VERIFIER
+        verified_assessment = evidence_verifier.verify_intent_assessment(
+            assessment=raw_assessment,
+            raw_content=raw_content,
+            source_revision_id=source_revision_id
+        )
+
+        return verified_assessment
+
     def analyze_ticket(
         self,
         subject: str,
         raw_content: str,
         source: str,
         excel_summary: Optional[Dict[str, Any]] = None,
-        attachments: Optional[list] = None
+        attachments: Optional[list] = None,
+        source_revision_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Hàm cầu nối hợp nhất (Bridge Compatibility):
-        Chạy song song 2 luồng độc lập với 2 Keys riêng biệt và trả về kết quả tương thích cho Planner.
+        Chạy song song 2 luồng độc lập với 2 Keys riêng biệt và trả về kết quả đã kiểm chứng cho Planner.
         """
         summary_res = self.summarize_ticket(subject=subject, raw_content=raw_content, source=source)
         facts_res = self.extract_operational_facts(
             subject=subject,
             raw_content=raw_content,
             source=source,
-            excel_summary=excel_summary
+            excel_summary=excel_summary,
+            source_revision_id=source_revision_id
         )
 
-        requested_ops = [{"intent": i.type, "confidence": i.confidence} for i in facts_res.intents]
+        requested_ops = [{"intent": i.type, "confidence": i.confidence} for i in facts_res.intents if i.is_valid]
 
         outcome_mapped = "NO_ACTION" if facts_res.outcome == "no_action" else "NEEDS_INFORMATION" if facts_res.outcome == "needs_information" else "ACTIONABLE"
 
@@ -299,7 +340,8 @@ class AIEngine:
             "warnings": facts_res.warnings,
             "evidence_quotes": facts_res.raw_evidence_quotes,
             "model_used": facts_res.model_name or summary_res.model_name,
-            "reason_summary_vi": f"AI trích xuất {len(facts_res.intents)} ý định có bằng chứng từ văn bản gốc."
+            "is_fully_verified": facts_res.is_fully_verified,
+            "reason_summary_vi": f"AI trích xuất {len(facts_res.intents)} ý định đã được kiểm chứng bằng chứng từ văn bản gốc."
         }
 
 
@@ -310,7 +352,7 @@ async def process_ticket_with_ai(ticket_id: str) -> Optional[Dict[str, Any]]:
     """
     Tiền xử lý toàn diện Ticket:
     1. Bóc tách file COF/Excel nếu có.
-    2. Tạo bản ghi revision đầu tiên trong inbox_ticket_revisions (Provenance).
+    2. Sử dụng create_or_get_ticket_revision tạo/lấy revision snapshot bất biến.
     3. Phân tách 2 đánh giá độc lập ghi vào ticket_ai_assessments (Summary & Facts).
     4. Cập nhật metadata cho inbox_tickets.
     """
@@ -362,63 +404,51 @@ async def process_ticket_with_ai(ticket_id: str) -> Optional[Dict[str, Any]]:
                 except Exception as ex_err:
                     logger.warning(f"⚠️ Lỗi bóc tách file Excel [{fname}]: {ex_err}")
 
-        # 2. Tạo hoặc lấy revision hiện tại trong inbox_ticket_revisions
-        content_hash = hashlib.sha256(raw_content.encode("utf-8")).hexdigest()
-        now_iso = datetime.now(timezone.utc).isoformat()
+        # 2. Sử dụng create_or_get_ticket_revision tập trung (Diệt tận gốc bẫy revision_no = 1)
+        from app.workers.ticket_processor import create_or_get_ticket_revision
+        revision_id, rev_no, _ = create_or_get_ticket_revision(
+            ticket_id=ticket_id,
+            raw_content=raw_content,
+            attachments=attachments,
+            source_updated_at=ticket.get("updated_at")
+        )
 
-        rev_res = supabase.table("inbox_ticket_revisions")\
-            .select("id, revision_no")\
-            .eq("ticket_id", ticket_id)\
-            .order("revision_no", desc=True)\
-            .limit(1)\
-            .execute()
-
-        revision_id = None
-        if rev_res.data and len(rev_res.data) > 0:
-            revision_id = rev_res.data[0]["id"]
-        else:
-            new_rev = supabase.table("inbox_ticket_revisions").insert({
-                "ticket_id": ticket_id,
-                "revision_no": 1,
-                "content_hash": content_hash,
-                "raw_content": raw_content,
-                "attachments": attachments,
-                "source_updated_at": ticket.get("updated_at") or now_iso
-            }).execute()
-            if new_rev.data:
-                revision_id = new_rev.data[0]["id"]
-
-        # 3. Phân tách 2 đánh giá độc lập (Key 1 cho Summary, Key 2 cho Facts)
+        # 3. Phân tách 2 đánh giá độc lập (Key 1 cho Summary, Key 2 cho Facts kèm Evidence Verification)
         summary_res = gemini_engine.summarize_ticket(subject=subject, raw_content=raw_content, source=source)
         facts_res = gemini_engine.extract_operational_facts(
             subject=subject,
             raw_content=raw_content,
             source=source,
-            excel_summary=excel_summary
+            excel_summary=excel_summary,
+            source_revision_id=revision_id
         )
 
         # 4. Ghi nhận vào ticket_ai_assessments
         if revision_id:
+            now_iso = datetime.now(timezone.utc).isoformat()
             try:
-                supabase.table("ticket_ai_assessments").insert({
-                    "ticket_revision_id": revision_id,
-                    "assessment_kind": "summary",
-                    "model_name": summary_res.model_name or "fallback",
-                    "prompt_version": summary_res.prompt_version,
-                    "registry_version": "v1",
-                    "structured_result": summary_res.model_dump(),
-                    "status": "completed"
-                }).execute()
-
-                supabase.table("ticket_ai_assessments").insert({
-                    "ticket_revision_id": revision_id,
-                    "assessment_kind": "fact_extraction",
-                    "model_name": facts_res.model_name or "fallback",
-                    "prompt_version": facts_res.prompt_version,
-                    "registry_version": "v1",
-                    "structured_result": facts_res.model_dump(),
-                    "status": "completed"
-                }).execute()
+                supabase.table("ticket_ai_assessments").insert([
+                    {
+                        "ticket_revision_id": revision_id,
+                        "assessment_kind": "summary",
+                        "model_name": summary_res.model_name or "fallback",
+                        "prompt_version": summary_res.prompt_version,
+                        "registry_version": "v1.1.0",
+                        "structured_result": summary_res.model_dump(),
+                        "status": "completed",
+                        "created_at": now_iso
+                    },
+                    {
+                        "ticket_revision_id": revision_id,
+                        "assessment_kind": "fact_extraction",
+                        "model_name": facts_res.model_name or "fallback",
+                        "prompt_version": facts_res.prompt_version,
+                        "registry_version": "v1.1.0",
+                        "structured_result": facts_res.model_dump(),
+                        "status": "completed",
+                        "created_at": now_iso
+                    }
+                ]).execute()
             except Exception as assess_err:
                 logger.warning(f"⚠️ Không thể lưu ticket_ai_assessments: {assess_err}")
 
@@ -428,7 +458,8 @@ async def process_ticket_with_ai(ticket_id: str) -> Optional[Dict[str, Any]]:
             raw_content=raw_content,
             source=source,
             excel_summary=excel_summary,
-            attachments=attachments
+            attachments=attachments,
+            source_revision_id=revision_id
         )
 
         existing_meta = ticket.get("metadata") or {}

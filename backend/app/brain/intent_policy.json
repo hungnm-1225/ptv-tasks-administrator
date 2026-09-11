@@ -1,5 +1,5 @@
 {
-    "policy_version": "v1.0.0",
+    "policy_version": "v1.1.0",
     "updated_at": "2026-09-11",
     "intents": {
         "create_accounts": {
@@ -76,12 +76,12 @@
             ],
             "required_inputs": [
                 "repositories",
-                "collaborators"
+                "collaborators",
+                "git_role"
             ],
             "min_evidence_quotes": 1,
             "risk_level": "medium_mutation",
             "requires_manual_confirmation": false,
-            "default_role": "GUEST",
             "capability_pipeline": [
                 {
                     "capability_id": "git.add_collaborators",
@@ -89,7 +89,7 @@
                     "inputs_mapping": {
                         "repo_url": "context.repo_url",
                         "collaborators": "context.collaborators",
-                        "target_role": "context.target_role"
+                        "target_role": "entities.git_role"
                     },
                     "depends_on": [
                         "create_accounts_batch_poll_if_exists"
