@@ -258,7 +258,7 @@ def test_unsupported_capability_fails_closed():
             step_id="step_01",
             capability_id="workspace.resolve_school",  # Capability này có supported_by_handler=False
             name="Phân giải trường học",
-            status="ready",
+            status="ready", 
             inputs={"school_name": "ABC"}
         )
     ]
