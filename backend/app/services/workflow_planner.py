@@ -22,9 +22,9 @@ BRAIN_DIR = os.path.join(os.path.dirname(__file__), "../brain")
 class WorkflowPlannerService:
     """
     Bộ lập kế hoạch Workflow tất định (Deterministic Safety-Critical Planning Engine):
-    - KHÔNG GỌI GEMINI: Nhận IntentAssessment độc lập đã được chứng thực từ Pha 2.
-    - Deterministic Mapping: Chỉ ánh xạ qua intent_policy.json và capabilities.json.
-    - Fail-closed: Chặn đứng capability available=false hoặc thiếu bằng chứng / required inputs.
+    - KHÔNG GỌI GEMINI TRỰC TIẾP TRONG CORE: Nhận IntentAssessment độc lập đã được chứng thực.
+    - Deterministic Mapping: Ánh xạ qua intent_policy.json và capabilities.json.
+    - Chặn đứng capability available=false hoặc thiếu bằng chứng / required inputs.
     - Lưu trữ Provenance vào bảng mới 'workflow_proposals' và duy trì bảng 'automation_workflows'.
     """
 
@@ -149,12 +149,10 @@ class WorkflowPlannerService:
             intent_type = extracted_intent.type
             policy = self.policy_registry.get(intent_type)
 
-            # 1. Kiểm tra Intent có nằm trong Policy không
             if not policy:
                 warnings.append(f"Ý định '{intent_type}' chưa được định nghĩa trong intent_policy.json.")
                 continue
 
-            # 2. Kiểm tra bằng chứng (Evidence Invariant)
             min_ev = policy.get("min_evidence_quotes", 1)
             if len(extracted_intent.evidence) < min_ev:
                 missing_requirements.append({
@@ -164,9 +162,7 @@ class WorkflowPlannerService:
                 })
                 continue
 
-            # =================================================================
-            # A. POLICY: CREATE_ACCOUNTS
-            # =================================================================
+            # A. CREATE_ACCOUNTS
             if intent_type == "create_accounts":
                 users_list = entities.get("users", [])
                 total_c = len(users_list) if isinstance(users_list, list) else 0
@@ -185,7 +181,6 @@ class WorkflowPlannerService:
                     })
 
                 if target_school_name and (total_c > 0 or attachment_url):
-                    # Bước 1: Nộp batch
                     s1_id = f"step_{step_counter:02d}"
                     steps.append(WorkflowStepDraft(
                         step_id=s1_id,
@@ -202,7 +197,6 @@ class WorkflowPlannerService:
                     ))
                     step_counter += 1
 
-                    # Bước 2: Polling kết quả
                     s2_id = f"step_{step_counter:02d}"
                     steps.append(WorkflowStepDraft(
                         step_id=s2_id,
@@ -218,9 +212,7 @@ class WorkflowPlannerService:
                     account_step_id = s2_id
                     step_counter += 1
 
-            # =================================================================
-            # B. POLICY: COURSE_ACCESS
-            # =================================================================
+            # B. COURSE_ACCESS
             elif intent_type == "course_access":
                 courses = entities.get("courses", [])
                 if not courses:
@@ -259,9 +251,7 @@ class WorkflowPlannerService:
                     ))
                     step_counter += 1
 
-            # =================================================================
-            # C. POLICY: REPOSITORY_ACCESS
-            # =================================================================
+            # C. REPOSITORY_ACCESS
             elif intent_type == "repository_access":
                 repos = entities.get("repositories", [])
                 if not repos:
@@ -303,9 +293,7 @@ class WorkflowPlannerService:
                         ))
                         step_counter += 1
 
-            # =================================================================
-            # D. POLICY: RESET_PASSWORD
-            # =================================================================
+            # D. RESET_PASSWORD
             elif intent_type == "reset_password":
                 raw_users = entities.get("users", [])
                 emails = [u.get("email") for u in raw_users if isinstance(u, dict) and u.get("email")]
@@ -334,9 +322,7 @@ class WorkflowPlannerService:
                     warnings.append(f"Thao tác đặt lại mật khẩu cho '{target_email}' yêu cầu Quản trị viên nhập mật khẩu lúc duyệt.")
                     step_counter += 1
 
-            # =================================================================
-            # E. POLICY: VERIFY_EMAIL
-            # =================================================================
+            # E. VERIFY_EMAIL
             elif intent_type == "verify_email":
                 raw_users = entities.get("users", [])
                 emails = [u.get("email") for u in raw_users if isinstance(u, dict) and u.get("email")]
@@ -360,7 +346,6 @@ class WorkflowPlannerService:
                     ))
                     step_counter += 1
 
-        # Quyết định trạng thái
         if missing_requirements:
             status = "needs_information"
         elif any(s.capability_id == "keycloak.reset_password" for s in steps) or warnings:
@@ -372,8 +357,11 @@ class WorkflowPlannerService:
 
         return status, steps, missing_requirements, warnings
 
-    def plan_workflow_for_ticket(self, ticket_id: str) -> Optional[Dict[str, Any]]:
-        """Lập kế hoạch Workflow tất định từ Fact Assessment của Ticket."""
+    async def plan_workflow_for_ticket(self, ticket_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Lập kế hoạch Workflow tất định từ Fact Assessment của Ticket.
+        (HÀM BẤT ĐỒNG BỘ: Có await process_ticket_with_ai).
+        """
         supabase = get_supabase_client()
         res = supabase.table("inbox_tickets").select("*").eq("id", ticket_id).execute()
         if not res.data:
@@ -384,37 +372,47 @@ class WorkflowPlannerService:
         meta = ticket.get("metadata") or {}
         ai_data = meta.get("ai_analysis")
 
-        # 1. Nếu ticket chưa có ai_analysis, gọi engine Pha 2 phân tích
-        if not ai_data or "workflow_outcome" not in ai_data:
+        # Đảm bảo ai_data là dict nếu vô tình lưu dưới dạng string
+        if isinstance(ai_data, str):
+            try:
+                ai_data = json.loads(ai_data)
+            except Exception:
+                ai_data = {}
+
+        # 1. Nếu ticket chưa có ai_analysis, gọi engine Pha 2 phân tích (BẮT BUỘC CÓ AWAIT!)
+        if not ai_data or not isinstance(ai_data, dict) or "workflow_outcome" not in ai_data:
             logger.info(f"✨ Kích hoạt tiền xử lý AI Pha 2 cho ticket #{ticket_id[:8]}...")
-            ai_data = process_ticket_with_ai(ticket_id)
-            if not ai_data:
+            ai_data = await process_ticket_with_ai(ticket_id)
+            if not ai_data or not isinstance(ai_data, dict):
                 ai_data = {}
 
         # 2. Chuyển đổi dữ liệu sang IntentAssessment
         from app.models.intent import ExtractedIntent, EvidenceSpan
         structured_intents = []
-        for op in ai_data.get("requested_operations", []):
-            structured_intents.append(
-                ExtractedIntent(
-                    type=op.get("intent", "unknown"),
-                    confidence=float(op.get("confidence", 0.8)),
-                    evidence=[EvidenceSpan(quote=q) for q in ai_data.get("evidence_quotes", [])]
-                )
-            )
+        raw_ops = ai_data.get("requested_operations", [])
+        if isinstance(raw_ops, list):
+            for op in raw_ops:
+                if isinstance(op, dict):
+                    structured_intents.append(
+                        ExtractedIntent(
+                            type=op.get("intent", "unknown"),
+                            confidence=float(op.get("confidence", 0.8)),
+                            evidence=[EvidenceSpan(quote=q) for q in ai_data.get("evidence_quotes", []) if isinstance(q, str)]
+                        )
+                    )
 
         outcome_raw = str(ai_data.get("workflow_outcome", "needs_information")).lower()
         if outcome_raw not in ["no_action", "needs_information", "candidate_action"]:
-            outcome_raw = "candidate_action" if ai_data.get("requested_operations") else "no_action"
+            outcome_raw = "candidate_action" if structured_intents else "no_action"
 
         assessment = IntentAssessment(
             outcome=outcome_raw,
             model_name=ai_data.get("model_used"),
             intents=structured_intents,
-            entities=ai_data.get("entities", {}),
-            missing_requirements=ai_data.get("missing_requirements", []),
-            warnings=ai_data.get("warnings", []),
-            raw_evidence_quotes=ai_data.get("evidence_quotes", [])
+            entities=ai_data.get("entities", {}) if isinstance(ai_data.get("entities"), dict) else {},
+            missing_requirements=ai_data.get("missing_requirements", []) if isinstance(ai_data.get("missing_requirements"), list) else [],
+            warnings=ai_data.get("warnings", []) if isinstance(ai_data.get("warnings"), list) else [],
+            raw_evidence_quotes=ai_data.get("evidence_quotes", []) if isinstance(ai_data.get("evidence_quotes"), list) else []
         )
 
         # 3. Phân giải thực thể trường học (Entity Resolution)
@@ -461,7 +459,7 @@ class WorkflowPlannerService:
         title = f"Workflow #{ticket_id[:8]}" if status != "needs_information" else f"Cần bổ sung thông tin #{ticket_id[:8]}"
 
         # 6. Lưu song song vào workflow_proposals (mới) và automation_workflows (legacy)
-        proposal_record = self._save_workflow_proposal(
+        self._save_workflow_proposal(
             ticket_id=ticket_id,
             status=status,
             evidence=assessment.raw_evidence_quotes,
@@ -502,7 +500,6 @@ class WorkflowPlannerService:
                 if cap_def.get("risk_level") == "high_mutation":
                     warnings.append(f"Bước '{s.name}' có mức rủi ro cao (high_mutation). Cần xác nhận của quản trị viên.")
 
-        # Phát hiện chu trình (DFS)
         visited: Dict[str, int] = {s.step_id: 0 for s in steps}
 
         def dfs(node: str, path: List[str]):
@@ -549,7 +546,6 @@ class WorkflowPlannerService:
         supabase = get_supabase_client()
         now_iso = datetime.now(timezone.utc).isoformat()
         try:
-            # Lấy revision mới nhất
             rev_res = supabase.table("inbox_ticket_revisions")\
                 .select("id")\
                 .eq("ticket_id", ticket_id)\

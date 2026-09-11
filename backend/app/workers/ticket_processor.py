@@ -26,7 +26,6 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
     """
     supabase = get_supabase_client()
     try:
-        # 1. Truy vấn Revision
         rev_res = supabase.table("inbox_ticket_revisions").select("*, inbox_tickets(*)").eq("id", revision_id).execute()
         if not rev_res.data:
             logger.error(f"❌ Không tìm thấy revision #{revision_id}!")
@@ -40,7 +39,6 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
         source = ticket.get("source") or "gmail"
         attachments = revision.get("attachments") or ticket.get("attachments") or []
 
-        # 2. Bóc tách file COF/Excel nếu có
         excel_summary = None
         for att in attachments:
             fname = att.get("filename", "").lower()
@@ -76,7 +74,7 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                 except Exception as ex_err:
                     logger.warning(f"⚠️ Lỗi bóc tách file Excel [{fname}]: {ex_err}")
 
-        # 3. Phân tách 2 đánh giá AI độc lập (Dual-Path)
+        # Phân tách 2 đánh giá AI độc lập
         summary_res = gemini_engine.summarize_ticket(subject=subject, raw_content=raw_content, source=source)
         facts_res = gemini_engine.extract_operational_facts(
             subject=subject,
@@ -85,7 +83,6 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
             excel_summary=excel_summary
         )
 
-        # 4. Ghi nhận 2 bản ghi vào ticket_ai_assessments (Provenance)
         try:
             supabase.table("ticket_ai_assessments").insert([
                 {
@@ -110,7 +107,6 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
         except Exception as assess_err:
             logger.warning(f"⚠️ Lỗi ghi ticket_ai_assessments: {assess_err}")
 
-        # 5. Cập nhật metadata và summary cho inbox_tickets
         combined_meta = ticket.get("metadata") or {}
         combined_meta["ai_analysis"] = {
             "workflow_outcome": "NO_ACTION" if facts_res.outcome == "no_action" else "NEEDS_INFORMATION" if facts_res.outcome == "needs_information" else "ACTIONABLE",
@@ -138,8 +134,8 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
             "metadata": combined_meta
         }).eq("id", ticket_id).execute()
 
-        # 6. Tự động kích hoạt Deterministic Planner sinh Workflow Proposal
-        wf_draft = workflow_planner_service.plan_workflow_for_ticket(ticket_id)
+        # 🎯 BẬT AWAIT CHUẨN XÁC CHO PLANNER:
+        wf_draft = await workflow_planner_service.plan_workflow_for_ticket(ticket_id)
         logger.info(f"✨ Đã hoàn tất xử lý Revision #{revision_id[:8]} cho ticket #{ticket_id[:8]} (Status: {wf_draft.get('status') if wf_draft else 'N/A'})")
 
         return {
@@ -153,11 +149,7 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
 
 
 async def process_incoming_ticket(ticket_data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Cầu nối tiếp nhận vé mới từ các Ingestion Adapters:
-    - Tự động tạo bản ghi Revision trong inbox_ticket_revisions nếu chưa có.
-    - Kích hoạt process_ticket_revision một cửa.
-    """
+    """Cầu nối tiếp nhận vé mới từ các Ingestion Adapters."""
     ticket_id = ticket_data.get("id")
     if not ticket_id:
         logger.warning("⚠️ Không có ticket_id trong ticket_data!")
@@ -168,7 +160,6 @@ async def process_incoming_ticket(ticket_data: Dict[str, Any]) -> Dict[str, Any]
     content_hash = hashlib.sha256(raw_content.encode("utf-8")).hexdigest()
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    # Kiểm tra hoặc tạo revision
     rev_res = supabase.table("inbox_ticket_revisions")\
         .select("id")\
         .eq("ticket_id", ticket_id)\
