@@ -93,18 +93,18 @@ async def poll_workspace_long_tasks():
         err_log = f"\n[{now_vn}] [ERROR] [workspace_rpa] {task_tag}: {err_msg} Đánh dấu thất bại để tránh lặp vô tận."
         logger.error(f"❌ {task_tag} {err_msg}")
 
-        # A. Cập nhật bot task
         supabase.table("bot_automation_tasks").update({
             "execution_status": "failed",
             "last_error_step": "waiting_poll_missing_request_id",
             "execution_logs": (task.get("execution_logs") or "") + err_log
         }).eq("id", task_id).execute()
 
-        # B. Đồng bộ fail cho Workflow tương ứng (Không để workflow treo!)
         if workflow_id:
             wf_res = supabase.table("automation_workflows").select("*").eq("id", workflow_id).execute()
+            proposal_id = None
             if wf_res.data:
                 wf_record = wf_res.data[0]
+                proposal_id = wf_record.get("proposal_id") # << PHA E: LẤY PROPOSAL_ID
                 wf_steps = wf_record.get("steps") or []
                 for s in wf_steps:
                     if s.get("step_id") == workflow_step_id or s.get("capability_id") == "workspace.poll_account_batch":
@@ -117,9 +117,10 @@ async def poll_workspace_long_tasks():
                     "updated_at": now_iso
                 }).eq("id", workflow_id).execute()
 
-            # Ghi Audit Event: FAILED
+            # Ghi Audit Event: FAILED (ĐÓNG DẤU PROPOSAL_ID)
             try:
                 supabase.table("workflow_execution_events").insert({
+                    "proposal_id": proposal_id, # << PHA E
                     "workflow_id": workflow_id,
                     "step_id": workflow_step_id or "poll_account_batch",
                     "event_type": "failed",
@@ -211,6 +212,7 @@ async def poll_workspace_long_tasks():
             wf_res = supabase.table("automation_workflows").select("*").eq("id", workflow_id).execute()
             if wf_res.data:
                 wf_record = wf_res.data[0]
+                proposal_id = wf_record.get("proposal_id") # << PHA E: LẤY PROPOSAL_ID
                 wf_steps = wf_record.get("steps") or []
                 for s in wf_steps:
                     if s.get("step_id") == workflow_step_id or s.get("capability_id") == "workspace.poll_account_batch":
@@ -224,9 +226,10 @@ async def poll_workspace_long_tasks():
                     "updated_at": now_iso
                 }).eq("id", workflow_id).execute()
 
-                # Ghi Audit Event: SUCCEEDED
+                # Ghi Audit Event: SUCCEEDED (ĐÓNG DẤU PROPOSAL_ID)
                 try:
                     supabase.table("workflow_execution_events").insert({
+                        "proposal_id": proposal_id, # << PHA E
                         "workflow_id": workflow_id,
                         "step_id": workflow_step_id or "poll_account_batch",
                         "event_type": "succeeded",
@@ -237,7 +240,6 @@ async def poll_workspace_long_tasks():
                 except Exception as ev_err:
                     logger.warning(f"Lỗi ghi audit event poll success: {ev_err}")
 
-                # Kích hoạt Resume Workflow chạy ngầm qua executor
                 from app.services.workflow_executor import workflow_executor_service
                 asyncio.create_task(workflow_executor_service.execute_approved_workflow(workflow_id))
         else:
@@ -271,8 +273,10 @@ async def poll_workspace_long_tasks():
 
         if workflow_id:
             wf_res = supabase.table("automation_workflows").select("*").eq("id", workflow_id).execute()
+            proposal_id = None
             if wf_res.data:
                 wf_record = wf_res.data[0]
+                proposal_id = wf_record.get("proposal_id") # << PHA E: LẤY PROPOSAL_ID
                 wf_steps = wf_record.get("steps") or []
                 for s in wf_steps:
                     if s.get("step_id") == workflow_step_id or s.get("capability_id") == "workspace.poll_account_batch":
@@ -285,8 +289,10 @@ async def poll_workspace_long_tasks():
                     "updated_at": now_iso
                 }).eq("id", workflow_id).execute()
 
+            # Ghi Audit Event: FAILED (ĐÓNG DẤU PROPOSAL_ID)
             try:
                 supabase.table("workflow_execution_events").insert({
+                    "proposal_id": proposal_id, # << PHA E
                     "workflow_id": workflow_id,
                     "step_id": workflow_step_id or "poll_account_batch",
                     "event_type": "failed",

@@ -13,6 +13,7 @@ class WorkflowStepDraft(BaseModel):
         default="ready", 
         description="Trạng thái: ready | waiting_dependency | running | waiting_poll | success | failed | skipped"
     )
+    is_manual: bool = Field(default=False, description="Đánh dấu bước do Admin tự thêm thủ công") # << BỔ SUNG
     inputs: Dict[str, Any] = Field(default_factory=dict, description="Các tham số đầu vào của bước")
     depends_on: List[str] = Field(default_factory=list, description="Danh sách step_id phụ thuộc")
     execution_task_id: Optional[str] = Field(None, description="ID của bot_automation_tasks khi bước này được thực thi")
@@ -20,6 +21,39 @@ class WorkflowStepDraft(BaseModel):
     error_message: Optional[str] = Field(None, description="Thông điệp lỗi nếu bước thất bại")
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
+
+
+class WorkflowDraftUpdate(BaseModel):
+    title: Optional[str] = None
+    goal: Optional[str] = None
+    steps: Optional[List[WorkflowStepDraft]] = None
+    ai_analysis: Optional[Dict[str, Any]] = None
+    status: Optional[str] = None
+    updated_by: Optional[str] = None
+    operator_reason: Optional[str] = Field(None, description="Lý do can thiệp chỉnh sửa thủ công của Admin") # << BỔ SUNG
+
+
+class WorkflowApprovalRequest(BaseModel):
+    approved_by: str = Field(default="hung.nguyenmanh@dtt.vn")
+    run_immediately: bool = Field(default=True)
+    frozen_steps: Optional[List[WorkflowStepDraft]] = None
+    operator_reason: Optional[str] = Field(None, description="Lý do phê duyệt nếu có sai khác so với proposal gốc") # << BỔ SUNG
+
+
+class WorkflowResponse(BaseModel):
+    id: str
+    proposal_id: Optional[str] = None # << BỔ SUNG KHÓA PROVENANCE
+    ticket_id: Optional[str] = None
+    title: str
+    goal: Optional[str] = None
+    status: str
+    version: int = 1
+    ai_analysis: Optional[Dict[str, Any]] = None
+    steps: List[WorkflowStepDraft] = Field(default_factory=list)
+    approved_by: Optional[str] = None
+    approved_at: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 class WorkflowEntityCandidate(BaseModel):
@@ -49,15 +83,6 @@ class WorkflowDraftCreate(BaseModel):
     steps: List[WorkflowStepDraft] = Field(default_factory=list)
 
 
-class WorkflowDraftUpdate(BaseModel):
-    title: Optional[str] = None
-    goal: Optional[str] = None
-    steps: Optional[List[WorkflowStepDraft]] = None
-    ai_analysis: Optional[Dict[str, Any]] = None
-    status: Optional[str] = None
-    updated_by: Optional[str] = None
-
-
 class WorkflowValidationResult(BaseModel):
     is_valid: bool
     status: str = Field(..., description="ready | needs_review | invalid")
@@ -66,23 +91,3 @@ class WorkflowValidationResult(BaseModel):
     stats: Dict[str, Any] = Field(default_factory=dict)
 
 
-class WorkflowApprovalRequest(BaseModel):
-    approved_by: str = Field(default="hung.nguyenmanh@dtt.vn")
-    run_immediately: bool = Field(default=True)
-    frozen_steps: Optional[List[WorkflowStepDraft]] = None
-
-
-
-class WorkflowResponse(BaseModel):
-    id: str
-    ticket_id: Optional[str] = None
-    title: str
-    goal: Optional[str] = None
-    status: str
-    version: int = 1
-    ai_analysis: Optional[Dict[str, Any]] = None
-    steps: List[WorkflowStepDraft] = Field(default_factory=list)
-    approved_by: Optional[str] = None
-    approved_at: Optional[str] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None

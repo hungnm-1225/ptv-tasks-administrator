@@ -1,13 +1,14 @@
 # backend/app/services/evidence_verifier.py
 import re
 import logging
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict, Any
 from datetime import datetime, timezone
 
 from app.models.intent import (
     EvidenceSpan,
     ExtractedIntent,
     ExtractedEntity,
+    TypedEntities,
     IntentAssessment,
     VerifiedIntentAssessment
 )
@@ -32,6 +33,7 @@ class EvidenceVerifierService:
     - Kiểm tra tính xác thực 100% của bằng chứng (Evidence Grounding).
     - So khớp từng ký tự với raw_content từ immutable revision.
     - Loại bỏ hoàn toàn ảo giác (Hallucinations) và trích dẫn giả mạo.
+    - Fail-Closed: Tạm thời vô hiệu hóa attachment_extract (chuyển unverified).
     - Chuyển outcome sang needs_information nếu intent không đủ bằng chứng kiểm chứng.
     """
 
@@ -51,18 +53,32 @@ class EvidenceVerifierService:
     ) -> Tuple[bool, EvidenceSpan]:
         """
         Kiểm định một đoạn trích dẫn nguyên văn đối chiếu với nội dung gốc:
-        1. Kiểm tra rỗng.
-        2. Kiểm tra Prompt Injection.
-        3. Kiểm tra vị trí offset. Nếu lệch, dò tìm substring để hiệu chuẩn offset.
+        1. Kiểm tra rỗng & độ dài tối thiểu.
+        2. FAIL-CLOSED: Nếu nguồn là 'attachment_extract', tạm thời chưa hỗ trợ đối soát raw text.
+        3. Kiểm tra Prompt Injection.
+        4. Kiểm tra vị trí offset. Nếu lệch, tự động dò tìm substring để hiệu chuẩn offset.
         """
         raw_quote = span.quote or ""
         clean_quote = raw_quote.strip()
+
+        # Luôn đóng dấu source_revision_id vào span
+        if source_revision_id:
+            span.source_revision_id = source_revision_id
 
         if not clean_quote or len(clean_quote) < 2:
             span.is_verified = False
             return False, span
 
-        # Chặn Prompt Injection thô
+        # PHA C (FAIL-CLOSED): Tạm thời chỉ hỗ trợ đối soát trên ticket_body
+        if span.source_kind == "attachment_extract":
+            logger.info(
+                f"📎 [ATTACHMENT EVIDENCE FAIL-CLOSED] Bằng chứng từ file đính kèm ('{clean_quote[:30]}...') "
+                f"chưa hỗ trợ trích xuất văn bản bất biến ở pha này ➔ Đánh dấu unverified."
+            )
+            span.is_verified = False
+            return False, span
+
+        # Chặn Prompt Injection
         quote_lower = clean_quote.lower()
         for pattern in INJECTION_SUSPICIOUS_PATTERNS:
             if re.search(pattern, quote_lower, re.IGNORECASE):
@@ -79,7 +95,6 @@ class EvidenceVerifierService:
             sliced = normalized_content[start:end]
             if sliced == clean_quote:
                 span.is_verified = True
-                span.source_revision_id = source_revision_id
                 return True, span
 
         # Trường hợp 2: Offset lệch (do Gemini đếm sai), tự động dò tìm vị trí substring thực tế
@@ -88,7 +103,6 @@ class EvidenceVerifierService:
             span.start_offset = found_pos
             span.end_offset = found_pos + len(clean_quote)
             span.is_verified = True
-            span.source_revision_id = source_revision_id
             return True, span
 
         # Trường hợp 3: Thử tìm kiếm không phân biệt hoa thường (Case-insensitive fallback)
@@ -100,7 +114,6 @@ class EvidenceVerifierService:
             span.start_offset = found_lower
             span.end_offset = found_lower + len(clean_quote)
             span.is_verified = True
-            span.source_revision_id = source_revision_id
             return True, span
 
         # Không tìm thấy trích dẫn trong văn bản gốc -> ẢO GIÁC (HALLUCINATION)!
@@ -190,10 +203,182 @@ class EvidenceVerifierService:
             missing_requirements=missing_reqs,
             warnings=warnings,
             raw_evidence_quotes=verified_quotes,
-            is_fully_verified=True,
+            is_fully_verified=(current_outcome == "candidate_action"),
             source_revision_id=source_revision_id,
             verified_at=now_iso
         )
+
+
+def load_verified_assessment(
+    assessment_record: Dict[str, Any],
+    expected_revision_id: str
+) -> VerifiedIntentAssessment:
+    """
+    PHA C FACTORY FUNCTION:
+    Giải tuần tự (deserialize) an toàn từ bảng ticket_ai_assessments:
+    - Bảo toàn 100% EvidenceSpan và cờ is_verified.
+    - Kiểm tra nghiêm ngặt: span.source_revision_id == expected_revision_id.
+    - Reject intent nếu bất kỳ evidence bắt buộc nào không verified.
+    - Không tự ý chuyển đổi quote/evidence giữa các intent.
+    - Xây dựng đối tượng TypedEntities chuẩn mực để Planner tiêu thụ trực tiếp.
+    """
+    structured_fact = assessment_record.get("structured_result") or {}
+    record_rev_id = assessment_record.get("ticket_revision_id") or structured_fact.get("source_revision_id")
+
+    missing_requirements: List[Dict[str, str]] = list(structured_fact.get("missing_requirements", []))
+    warnings: List[str] = list(structured_fact.get("warnings", []))
+
+    # 1. Kiểm tra khớp revision (Anti-Provenance Skew)
+    if record_rev_id and str(record_rev_id) != str(expected_revision_id):
+        msg = f"Dữ liệu đánh giá thuộc revision cũ ({str(record_rev_id)[:8]}), không khớp với revision #{expected_revision_id[:8]}."
+        logger.warning(f"🛡️ [PROVENANCE REVISION MISMATCH] {msg}")
+        warnings.append(msg)
+        missing_requirements.append({
+            "field": "revision_mismatch",
+            "message": msg
+        })
+
+    # 2. Giải tuần tự các Intents kèm kiểm tra tính hợp lệ của bằng chứng
+    raw_intents = structured_fact.get("intents", [])
+    deserialized_intents: List[ExtractedIntent] = []
+
+    for raw_op in raw_intents:
+        if not isinstance(raw_op, dict):
+            continue
+
+        raw_evidence = raw_op.get("evidence", [])
+        evidence_spans: List[EvidenceSpan] = []
+        for e in raw_evidence:
+            if isinstance(e, dict):
+                span = EvidenceSpan(**e)
+            elif isinstance(e, str):
+                span = EvidenceSpan(quote=e)
+            else:
+                continue
+
+            # Bằng chứng không khớp revision ➔ Bị từ chối
+            if span.source_revision_id and str(span.source_revision_id) != str(expected_revision_id):
+                span.is_verified = False
+
+            # Bằng chứng attachment ➔ Tạm thời Fail-Closed
+            if span.source_kind == "attachment_extract":
+                span.is_verified = False
+
+            evidence_spans.append(span)
+
+        # Intent chỉ hợp lệ khi có ít nhất 1 bằng chứng đã được verified
+        has_verified_evidence = any(s.is_verified for s in evidence_spans)
+        intent_is_valid = raw_op.get("is_valid", True) and has_verified_evidence
+
+        intent_type = raw_op.get("type", "unknown")
+        if not intent_is_valid:
+            missing_requirements.append({
+                "field": "evidence",
+                "intent": intent_type,
+                "message": f"Ý định '{intent_type}' không có bằng chứng hợp lệ đã kiểm chứng cho revision #{expected_revision_id[:8]}."
+            })
+
+        deserialized_intents.append(
+            ExtractedIntent(
+                type=intent_type,
+                confidence=float(raw_op.get("confidence", 0.8)),
+                evidence=evidence_spans,
+                required_entities=raw_op.get("required_entities", []),
+                is_valid=intent_is_valid
+            )
+        )
+
+    # 3. Giải tuần tự Extracted Entities & Dựng TypedEntities
+    raw_entities = structured_fact.get("extracted_entities", [])
+    deserialized_entities: List[ExtractedEntity] = []
+    verified_typed = TypedEntities()
+
+    for ent in raw_entities:
+        if not isinstance(ent, dict):
+            continue
+
+        ent_evidence: List[EvidenceSpan] = []
+        for e in ent.get("evidence", []):
+            if isinstance(e, dict):
+                span = EvidenceSpan(**e)
+            elif isinstance(e, str):
+                span = EvidenceSpan(quote=e)
+            else:
+                continue
+            if span.source_revision_id and str(span.source_revision_id) != str(expected_revision_id):
+                span.is_verified = False
+            if span.source_kind == "attachment_extract":
+                span.is_verified = False
+            ent_evidence.append(span)
+
+        is_ent_verified = ent.get("is_verified", False) and any(s.is_verified for s in ent_evidence)
+        deserialized_entities.append(
+            ExtractedEntity(
+                type=ent.get("type", "other"),
+                raw_value=ent.get("raw_value"),
+                confidence=float(ent.get("confidence", 1.0)),
+                evidence=ent_evidence,
+                is_verified=is_ent_verified
+            )
+        )
+
+        if is_ent_verified:
+            e_type = ent.get("type")
+            val = ent.get("raw_value")
+            if e_type == "school_name" and isinstance(val, str):
+                verified_typed.school_name = val
+            elif e_type == "courses" and isinstance(val, list):
+                verified_typed.courses = [str(c) for c in val]
+            elif e_type == "repositories" and isinstance(val, list):
+                verified_typed.repositories = [str(r) for r in val]
+            elif e_type == "users" and isinstance(val, list):
+                verified_typed.users = val
+            elif e_type == "target_email" and isinstance(val, str):
+                verified_typed.target_email = val
+            elif e_type == "git_role" and isinstance(val, str):
+                verified_typed.git_role = val
+
+    # Backward compatibility fallback cho legacy entities (nếu chưa có extracted_entities)
+    legacy_entities = structured_fact.get("entities", {})
+    if not verified_typed.school_name and legacy_entities.get("school_name"):
+        verified_typed.school_name = legacy_entities.get("school_name")
+    if not verified_typed.courses and legacy_entities.get("courses"):
+        verified_typed.courses = legacy_entities.get("courses", [])
+    if not verified_typed.repositories and legacy_entities.get("repositories"):
+        verified_typed.repositories = legacy_entities.get("repositories", [])
+    if not verified_typed.users and legacy_entities.get("users"):
+        verified_typed.users = legacy_entities.get("users", [])
+    if not verified_typed.target_email and legacy_entities.get("target_email"):
+        verified_typed.target_email = legacy_entities.get("target_email")
+    if not verified_typed.git_role and legacy_entities.get("git_role"):
+        verified_typed.git_role = legacy_entities.get("git_role")
+
+    # 4. Xác định Outcome cuối cùng
+    orig_outcome = structured_fact.get("outcome", "needs_information")
+    if orig_outcome == "no_action":
+        final_outcome = "no_action"
+    elif missing_requirements or any(not i.is_valid for i in deserialized_intents):
+        final_outcome = "needs_information"
+    elif not deserialized_intents:
+        final_outcome = "no_action"
+    else:
+        final_outcome = "candidate_action"
+
+    return VerifiedIntentAssessment(
+        outcome=final_outcome,
+        model_name=assessment_record.get("model_name"),
+        prompt_version=assessment_record.get("prompt_version", "v1.1.0"),
+        intents=deserialized_intents,
+        entities=legacy_entities,
+        typed_entities=verified_typed,
+        extracted_entities=deserialized_entities,
+        missing_requirements=missing_requirements,
+        warnings=warnings,
+        raw_evidence_quotes=structured_fact.get("raw_evidence_quotes", []),
+        is_fully_verified=(final_outcome == "candidate_action"),
+        source_revision_id=expected_revision_id,
+        verified_at=datetime.now(timezone.utc).isoformat()
+    )
 
 
 evidence_verifier = EvidenceVerifierService()

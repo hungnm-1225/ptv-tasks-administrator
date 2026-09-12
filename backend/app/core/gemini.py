@@ -20,8 +20,10 @@ from app.models.intent import (
     VerifiedIntentAssessment,
     TicketSummary, 
     ExtractedIntent, 
+    ExtractedEntity,
     EvidenceSpan
 )
+
 from app.services.evidence_verifier import evidence_verifier
 
 try:
@@ -209,7 +211,7 @@ class AIEngine:
     ) -> VerifiedIntentAssessment:
         """
         PATH 2: Trích xuất sự thật vận hành có bằng chứng (Sử dụng Key 2: api_key_facts).
-        TÍCH HỢP EVIDENCE VERIFIER: Bắt buộc đối soát nguyên văn 100% với raw_content.
+        TÍCH HỢP EVIDENCE VERIFIER: Đóng dấu source_revision_id vào 100% bằng chứng.
         """
         full_content = raw_content[:20000] if raw_content else "(Trống)"
         excel_info_str = json.dumps(excel_summary, ensure_ascii=False, indent=2) if excel_summary else "Không có file Excel đính kèm hoặc chưa bóc tách."
@@ -230,14 +232,15 @@ class AIEngine:
                 prompt_version="fallback",
                 missing_requirements=[{"field": "ai_engine", "message": "Không thể kết nối với Gemini AI Engine."}],
                 warnings=["Hệ thống AI không phản hồi."],
-                is_fully_verified=False
+                is_fully_verified=False,
+                source_revision_id=source_revision_id
             )
 
         raw_intents = parsed_data.get("intents", [])
         structured_intents: List[ExtractedIntent] = []
         raw_evidence_quotes: List[str] = []
 
-        # 1. Bóc tách chi tiết từng bằng chứng kèm offset
+        # 1. Bóc tách chi tiết từng bằng chứng kèm offset và gán source_revision_id
         for item in raw_intents:
             ev_list = []
             for ev in item.get("evidence", []):
@@ -257,6 +260,7 @@ class AIEngine:
                 if quote_str:
                     ev_list.append(
                         EvidenceSpan(
+                            source_revision_id=source_revision_id, # << GẮN CHẶT REVISION
                             quote=quote_str,
                             start_offset=start_off,
                             end_offset=end_off,
@@ -275,6 +279,29 @@ class AIEngine:
                 )
             )
 
+        # 2. Bóc tách Extracted Entities nếu có
+        raw_entities = parsed_data.get("extracted_entities", [])
+        structured_entities: List[ExtractedEntity] = []
+        if isinstance(raw_entities, list):
+            for ent in raw_entities:
+                if isinstance(ent, dict):
+                    ent_spans = []
+                    for e in ent.get("evidence", []):
+                        if isinstance(e, dict) and e.get("quote"):
+                            ent_spans.append(EvidenceSpan(
+                                source_revision_id=source_revision_id,
+                                quote=str(e.get("quote", "")).strip(),
+                                start_offset=e.get("start_offset", -1),
+                                end_offset=e.get("end_offset", -1),
+                                source_kind=e.get("source_kind", "ticket_body")
+                            ))
+                    structured_entities.append(ExtractedEntity(
+                        type=ent.get("type", "other"),
+                        raw_value=ent.get("raw_value"),
+                        confidence=float(ent.get("confidence", 1.0)),
+                        evidence=ent_spans
+                    ))
+
         outcome = parsed_data.get("outcome", "needs_information")
         if outcome not in ["no_action", "needs_information", "candidate_action"]:
             outcome = "needs_information"
@@ -285,12 +312,13 @@ class AIEngine:
             prompt_version="v1.1.0",
             intents=structured_intents,
             entities=parsed_data.get("entities", {}),
+            extracted_entities=structured_entities,
             missing_requirements=parsed_data.get("missing_requirements", []),
             warnings=parsed_data.get("warnings", []),
             raw_evidence_quotes=raw_evidence_quotes
         )
 
-        # 2. CHỐT CHẶN AN TOÀN: ĐỐI SOÁT BẰNG CHỨNG THỰC TẾ QUA EVIDENCE VERIFIER
+        # 3. CHỐT CHẶN AN TOÀN: ĐỐI SOÁT BẰNG CHỨNG THỰC TẾ QUA EVIDENCE VERIFIER
         verified_assessment = evidence_verifier.verify_intent_assessment(
             assessment=raw_assessment,
             raw_content=raw_content,
@@ -298,7 +326,7 @@ class AIEngine:
         )
 
         return verified_assessment
-
+    
     def analyze_ticket(
         self,
         subject: str,

@@ -4,6 +4,7 @@ import json
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timezone
+from app.services.evidence_verifier import evidence_verifier, load_verified_assessment
 
 from app.core.supabase import get_supabase_client
 from app.models.intent import (
@@ -205,6 +206,10 @@ class WorkflowPlannerService:
 
         # Duyệt qua từng intent đã kiểm chứng và đối soát với Registry
         for extracted_intent in assessment.intents:
+            # PHA C: CHỈ DUYỆT CÁC INTENT ĐÃ ĐƯỢC XÁC THỰC BẰNG CHỨNG (IS_VALID == TRUE)
+            if not extracted_intent.is_valid:
+                continue
+
             intent_type = extracted_intent.type
             policy = self.policy_registry.get(intent_type)
 
@@ -375,178 +380,6 @@ class WorkflowPlannerService:
 
         return status, steps, missing_requirements, warnings
 
-    async def plan_workflow_for_ticket(
-        self, 
-        ticket_id: str,
-        revision_id: Optional[str] = None
-    ) -> Optional[Dict[str, Any]]:
-        """
-        PHA D: NỐI ĐẦY ĐỦ PROVENANCE CHAIN.
-        - Đọc đánh giá sự thật trực tiếp từ bảng 'ticket_ai_assessments' (assessment_kind='fact_extraction').
-        - Liên kết chặt chẽ: ticket_revision_id và intent_assessment_id.
-        - Supersede toàn bộ proposal cũ chưa approved.
-        """
-        supabase = get_supabase_client()
-        res = supabase.table("inbox_tickets").select("*").eq("id", ticket_id).execute()
-        if not res.data:
-            logger.warning(f"Không tìm thấy ticket #{ticket_id} để lập plan!")
-            return None
-
-        ticket = res.data[0]
-
-        # 1. Xác định chính xác revision_id
-        target_revision_id = revision_id
-        if not target_revision_id:
-            rev_res = supabase.table("inbox_ticket_revisions")\
-                .select("id")\
-                .eq("ticket_id", ticket_id)\
-                .order("revision_no", desc=True)\
-                .limit(1)\
-                .execute()
-            if rev_res.data:
-                target_revision_id = rev_res.data[0]["id"]
-
-        # Nếu chưa có revision nào, kích hoạt tiền xử lý
-        if not target_revision_id:
-            from app.workers.ticket_processor import process_incoming_ticket
-            proc_res = await process_incoming_ticket(ticket)
-            target_revision_id = proc_res.get("revision_id")
-
-        if not target_revision_id:
-            logger.error(f"❌ Không thể phân giải revision cho ticket #{ticket_id}")
-            return None
-
-        # 2. Đọc trực tiếp từ ticket_ai_assessments (Không lượm từ metadata.ai_analysis)
-        assess_res = supabase.table("ticket_ai_assessments")\
-            .select("*")\
-            .eq("ticket_revision_id", target_revision_id)\
-            .eq("assessment_kind", "fact_extraction")\
-            .order("created_at", desc=True)\
-            .limit(1)\
-            .execute()
-
-        assessment_record = assess_res.data[0] if assess_res.data else None
-
-        # Nếu chưa có assessment trong CSDL, chạy quy trình phân tích
-        if not assessment_record:
-            from app.workers.ticket_processor import process_ticket_revision
-            proc_res = await process_ticket_revision(target_revision_id)
-            assess_res = supabase.table("ticket_ai_assessments")\
-                .select("*")\
-                .eq("ticket_revision_id", target_revision_id)\
-                .eq("assessment_kind", "fact_extraction")\
-                .order("created_at", desc=True)\
-                .limit(1)\
-                .execute()
-            assessment_record = assess_res.data[0] if assess_res.data else None
-
-        if not assessment_record:
-            logger.error(f"❌ Không tìm thấy bản ghi Fact Extraction cho revision #{target_revision_id[:8]}")
-            return None
-
-        assessment_id = assessment_record["id"]
-        structured_fact = assessment_record.get("structured_result") or {}
-
-        # 3. Dựng đối tượng VerifiedIntentAssessment
-        structured_intents: List[ExtractedIntent] = []
-        for op in structured_fact.get("intents", []):
-            if isinstance(op, dict):
-                ev_list = [
-                    EvidenceSpan(**e) if isinstance(e, dict) else EvidenceSpan(quote=str(e))
-                    for e in op.get("evidence", [])
-                ]
-                structured_intents.append(
-                    ExtractedIntent(
-                        type=op.get("type", "unknown"),
-                        confidence=float(op.get("confidence", 0.8)),
-                        evidence=ev_list,
-                        required_entities=op.get("required_entities", [])
-                    )
-                )
-
-        assessment = IntentAssessment(
-            outcome=structured_fact.get("outcome", "needs_information"),
-            model_name=assessment_record.get("model_name"),
-            prompt_version=assessment_record.get("prompt_version", "v1.1.0"),
-            intents=structured_intents,
-            entities=structured_fact.get("entities", {}),
-            missing_requirements=structured_fact.get("missing_requirements", []),
-            warnings=structured_fact.get("warnings", []),
-            raw_evidence_quotes=structured_fact.get("raw_evidence_quotes", [])
-        )
-
-        # 4. Phân giải thực thể trường học (Entity Resolution)
-        meta = ticket.get("metadata") or {}
-        excel_summary = meta.get("excel_summary") or {}
-        attachments = ticket.get("attachments") or []
-        attachment_url = attachments[0].get("url") if attachments else None
-
-        detected_school_str = (
-            assessment.entities.get("school_name") or
-            meta.get("school_name") or
-            excel_summary.get("school_name")
-        )
-        best_school, candidates = self.resolve_school_entities(detected_school_str)
-
-        # 5. Thực thi Deterministic Planning Core
-        status, steps, missing_reqs, plan_warnings = self.build_workflow_proposal(
-            assessment=assessment,
-            resolved_school=best_school,
-            candidates=candidates,
-            attachment_url=attachment_url
-        )
-
-        # 6. Kiểm định Đồ thị DAG
-        val_result = self.validate_workflow_graph(steps)
-        all_warnings = list(set(plan_warnings + val_result.warnings))
-        if not val_result.is_valid:
-            status = "invalid"
-
-        ai_analysis_dict = {
-            "summary": ticket.get("ai_summary"),
-            "reason_summary_vi": f"Registry Policy Engine đã sinh {len(steps)} bước thực thi từ chính sách {self.policy_version}.",
-            "overall_confidence": 0.95 if status in ["ready", "needs_review"] else 0.60,
-            "workflow_outcome": "NO_ACTION" if status == "no_action" else "NEEDS_INFORMATION" if status == "needs_information" else "ACTIONABLE",
-            "missing_requirements": missing_reqs,
-            "detected_school": best_school.model_dump() if best_school else None,
-            "school_candidates": [c.model_dump() for c in candidates],
-            "detected_courses": assessment.entities.get("courses", []),
-            "detected_actions": [s.capability_id for s in steps],
-            "warnings": all_warnings + val_result.errors,
-            "evidence_quotes": assessment.raw_evidence_quotes,
-            "provenance": {
-                "ticket_revision_id": target_revision_id,
-                "intent_assessment_id": assessment_id,
-                "policy_version": self.policy_version
-            }
-        }
-
-        # 7. LƯU PROVENANCE VÀO BẢNG workflow_proposals (KÈM ĐÁNH DẤU SUPERSEDED)
-        self._save_workflow_proposal(
-            ticket_id=ticket_id,
-            revision_id=target_revision_id,
-            assessment_id=assessment_id,
-            status=status,
-            evidence=assessment.raw_evidence_quotes,
-            missing_requirements=missing_reqs,
-            entity_resolution={
-                "detected_school": best_school.model_dump() if best_school else None,
-                "candidates_count": len(candidates)
-            },
-            plan=[s.model_dump() for s in steps]
-        )
-
-        # 8. Lưu bản ghi draft cho giao diện hiện hành
-        title = f"Workflow #{ticket_id[:8]}" if status != "needs_information" else f"Cần bổ sung thông tin #{ticket_id[:8]}"
-        return self._save_workflow_draft(
-            ticket_id=ticket_id,
-            title=title,
-            goal=ticket.get("subject"),
-            status=status,
-            ai_analysis=ai_analysis_dict,
-            steps=[s.model_dump() for s in steps]
-        )
-
     def validate_workflow_graph(self, steps: List[WorkflowStepDraft]) -> WorkflowValidationResult:
         """Kiểm định chặt chẽ Đồ thị DAG & tính khả dụng của capabilities."""
         errors: List[str] = []
@@ -608,6 +441,159 @@ class WorkflowPlannerService:
             }
         )
 
+    async def plan_workflow_for_ticket(
+        self, 
+        ticket_id: str,
+        revision_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        PHA D: NỐI ĐẦY ĐỦ PROVENANCE CHAIN.
+        - Đọc đánh giá sự thật trực tiếp từ bảng 'ticket_ai_assessments' (assessment_kind='fact_extraction').
+        - Liên kết chặt chẽ: ticket_revision_id và intent_assessment_id.
+        - Supersede toàn bộ proposal cũ chưa approved.
+        - BẢO TOÀN TÍNH NHẤT QUÁN: Không sinh workflow draft nếu proposal thất bại!
+        """
+        supabase = get_supabase_client()
+        res = supabase.table("inbox_tickets").select("*").eq("id", ticket_id).execute()
+        if not res.data:
+            logger.warning(f"Không tìm thấy ticket #{ticket_id} để lập plan!")
+            return None
+
+        ticket = res.data[0]
+
+        # 1. Xác định chính xác revision_id
+        target_revision_id = revision_id
+        if not target_revision_id:
+            rev_res = supabase.table("inbox_ticket_revisions")\
+                .select("id")\
+                .eq("ticket_id", ticket_id)\
+                .order("revision_no", desc=True)\
+                .limit(1)\
+                .execute()
+            if rev_res.data:
+                target_revision_id = rev_res.data[0]["id"]
+
+        # Nếu chưa có revision nào, kích hoạt tiền xử lý
+        if not target_revision_id:
+            from app.workers.ticket_processor import process_incoming_ticket
+            proc_res = await process_incoming_ticket(ticket)
+            target_revision_id = proc_res.get("revision_id")
+
+        if not target_revision_id:
+            logger.error(f"❌ Không thể phân giải revision cho ticket #{ticket_id}")
+            return None
+
+        # 2. Đọc trực tiếp từ ticket_ai_assessments (Không lượm từ metadata.ai_analysis)
+        assess_res = supabase.table("ticket_ai_assessments")\
+            .select("*")\
+            .eq("ticket_revision_id", target_revision_id)\
+            .eq("assessment_kind", "fact_extraction")\
+            .order("created_at", desc=True)\
+            .limit(1)\
+            .execute()
+
+        assessment_record = assess_res.data[0] if assess_res.data else None
+
+        # Nếu chưa có assessment trong CSDL, chạy quy trình phân tích
+        if not assessment_record:
+            from app.workers.ticket_processor import process_ticket_revision
+            proc_res = await process_ticket_revision(target_revision_id)
+            assess_res = supabase.table("ticket_ai_assessments")\
+                .select("*")\
+                .eq("ticket_revision_id", target_revision_id)\
+                .eq("assessment_kind", "fact_extraction")\
+                .order("created_at", desc=True)\
+                .limit(1)\
+                .execute()
+            assessment_record = assess_res.data[0] if assess_res.data else None
+
+        if not assessment_record:
+            logger.error(f"❌ Không tìm thấy bản ghi Fact Extraction cho revision #{target_revision_id[:8]}")
+            return None
+
+        assessment_id = assessment_record["id"]
+
+        # 3. DỰNG VERIFIED INTENT ASSESSMENT CHUẨN MỰC BẰNG FACTORY FUNCTION (PHA C)
+        assessment = load_verified_assessment(
+            assessment_record=assessment_record,
+            expected_revision_id=target_revision_id
+        )
+
+        # 4. Phân giải thực thể trường học (Entity Resolution)
+        meta = ticket.get("metadata") or {}
+        excel_summary = meta.get("excel_summary") or {}
+        attachments = ticket.get("attachments") or []
+        attachment_url = attachments[0].get("url") if attachments else None
+
+        detected_school_str = (
+            assessment.entities.get("school_name") or
+            meta.get("school_name") or
+            excel_summary.get("school_name")
+        )
+        best_school, candidates = self.resolve_school_entities(detected_school_str)
+
+        # 5. Thực thi Deterministic Planning Core
+        status, steps, missing_reqs, plan_warnings = self.build_workflow_proposal(
+            assessment=assessment,
+            resolved_school=best_school,
+            candidates=candidates,
+            attachment_url=attachment_url
+        )
+
+        # 6. Kiểm định Đồ thị DAG
+        val_result = self.validate_workflow_graph(steps)
+        all_warnings = list(set(plan_warnings + val_result.warnings))
+        if not val_result.is_valid:
+            status = "invalid"
+
+        # 7. LƯU PROVENANCE VÀO BẢNG workflow_proposals (FAIL-CLOSED: LỖI LÀ RAISE, KHÔNG NUỐT!)
+        created_proposal = self._save_workflow_proposal(
+            ticket_id=ticket_id,
+            revision_id=target_revision_id,
+            assessment_id=assessment_id,
+            status=status,
+            evidence=assessment.raw_evidence_quotes,
+            missing_requirements=missing_reqs,
+            entity_resolution={
+                "detected_school": best_school.model_dump() if best_school else None,
+                "candidates_count": len(candidates)
+            },
+            plan=[s.model_dump() for s in steps]
+        )
+        proposal_id = created_proposal["id"]
+
+        ai_analysis_dict = {
+            "summary": ticket.get("ai_summary"),
+            "reason_summary_vi": f"Registry Policy Engine đã sinh {len(steps)} bước thực thi từ chính sách {self.policy_version}.",
+            "overall_confidence": 0.95 if status in ["ready", "needs_review"] else 0.60,
+            "workflow_outcome": "NO_ACTION" if status == "no_action" else "NEEDS_INFORMATION" if status == "needs_information" else "ACTIONABLE",
+            "missing_requirements": missing_reqs,
+            "detected_school": best_school.model_dump() if best_school else None,
+            "school_candidates": [c.model_dump() for c in candidates],
+            "detected_courses": assessment.entities.get("courses", []),
+            "detected_actions": [s.capability_id for s in steps],
+            "warnings": all_warnings + val_result.errors,
+            "evidence_quotes": assessment.raw_evidence_quotes,
+            "provenance": {
+                "ticket_revision_id": target_revision_id,
+                "intent_assessment_id": assessment_id,
+                "proposal_id": proposal_id,
+                "policy_version": self.policy_version
+            }
+        }
+
+        # 8. Lưu bản ghi draft cho giao diện hiện hành (Kèm liên kết proposal_id)
+        title = f"Workflow #{ticket_id[:8]}" if status != "needs_information" else f"Cần bổ sung thông tin #{ticket_id[:8]}"
+        return self._save_workflow_draft(
+            ticket_id=ticket_id,
+            proposal_id=proposal_id,
+            title=title,
+            goal=ticket.get("subject"),
+            status=status,
+            ai_analysis=ai_analysis_dict,
+            steps=[s.model_dump() for s in steps]
+        )
+
     def _save_workflow_proposal(
         self,
         ticket_id: str,
@@ -618,10 +604,11 @@ class WorkflowPlannerService:
         missing_requirements: List[Dict[str, str]],
         entity_resolution: Dict[str, Any],
         plan: List[Dict[str, Any]]
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """
-        PHA D: Lưu bản đề xuất vào bảng workflow_proposals với đầy đủ Provenance Chain.
+        PHA A & D: Lưu bản đề xuất vào bảng workflow_proposals với đầy đủ Provenance Chain.
         Tự động supersede các bản đề xuất cũ chưa duyệt.
+        FAIL-CLOSED: Nếu có bất kỳ lỗi DB nào, NÉM EXCEPTION NGAY LẬP TỨC!
         """
         supabase = get_supabase_client()
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -653,10 +640,14 @@ class WorkflowPlannerService:
                 "updated_at": now_iso
             }
             res = supabase.table("workflow_proposals").insert(insert_data).execute()
-            created_proposal = res.data[0] if res.data else None
+            if not res.data:
+                raise RuntimeError(
+                    f"Insert workflow_proposals trả về dữ liệu rỗng cho ticket #{ticket_id}"
+                )
+            created_proposal = res.data[0]
 
             # 3. Đánh dấu superseded cho proposal cũ (nếu chưa được approved)
-            if created_proposal and old_proposal_id:
+            if old_proposal_id:
                 old_status = existing.data[0].get("status")
                 if old_status not in ["approved", "executed"]:
                     try:
@@ -666,24 +657,34 @@ class WorkflowPlannerService:
                             "updated_at": now_iso
                         }).eq("id", old_proposal_id).execute()
                     except Exception as sup_err:
-                        logger.warning(f"Lỗi cập nhật superseded_by: {sup_err}")
+                        logger.warning(f"Lỗi cập nhật superseded_by cho proposal #{old_proposal_id}: {sup_err}")
 
-            logger.info(f"📜 [PROVENANCE CHAIN] Đã lưu Proposal v{new_version} (assessment: {assessment_id[:8]}) cho ticket #{ticket_id[:8]}!")
+            logger.info(
+                f"📜 [PROVENANCE CHAIN] Đã lưu Proposal #{created_proposal['id'][:8]} (v{new_version}, "
+                f"assessment: {assessment_id[:8]}) cho ticket #{ticket_id[:8]}!"
+            )
             return created_proposal
         except Exception as e:
-            logger.warning(f"⚠️ Lỗi lưu workflow_proposals: {e}")
-            return None
+            logger.error(
+                f"❌ [PROVENANCE CRITICAL] Lỗi nghiêm trọng khi lưu workflow_proposals cho ticket #{ticket_id}: {e}",
+                exc_info=True
+            )
+            raise RuntimeError(f"Database error persisting workflow proposal: {e}") from e
 
     def _save_workflow_draft(
         self,
         ticket_id: str,
+        proposal_id: str,
         title: str,
         goal: str,
         status: str,
         ai_analysis: Dict[str, Any],
         steps: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
-        """Lưu phiên bản vào automation_workflows (Tương thích UI hiện hành)."""
+        """
+        Lưu phiên bản vào automation_workflows (Tương thích UI hiện hành).
+        BẮT BUỘC lưu kèm proposal_id để bảo toàn liên kết với Frozen Proposal.
+        """
         supabase = get_supabase_client()
         now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -706,6 +707,7 @@ class WorkflowPlannerService:
 
         insert_payload = {
             "ticket_id": ticket_id,
+            "proposal_id": proposal_id,
             "title": title,
             "goal": goal,
             "status": status,
@@ -717,10 +719,14 @@ class WorkflowPlannerService:
         }
 
         res = supabase.table("automation_workflows").insert(insert_payload).execute()
-        wf_record = res.data[0] if res.data else insert_payload
+        if not res.data:
+            raise RuntimeError(f"Insert automation_workflows thất bại cho ticket #{ticket_id}")
+        wf_record = res.data[0]
 
-        logger.info(f"💾 Đã lưu Workflow Draft #{wf_record.get('id', 'N/A')[:8]} (v{new_version}, status='{status}') cho ticket #{ticket_id[:8]}!")
+        logger.info(
+            f"💾 Đã lưu Workflow Draft #{wf_record.get('id', 'N/A')[:8]} (proposal: {proposal_id[:8]}, "
+            f"v{new_version}, status='{status}') cho ticket #{ticket_id[:8]}!"
+        )
         return wf_record
-
 
 workflow_planner_service = WorkflowPlannerService()

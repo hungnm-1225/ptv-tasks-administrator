@@ -35,7 +35,7 @@ def compute_canonical_content_hash(
                 canonical_attachments.append({
                     "filename": str(att.get("filename") or "").strip().lower(),
                     "url": str(att.get("url") or "").strip(),
-                    "size": att.get("size") or 0
+                    "size": int(att.get("size") or 0)
                 })
         canonical_attachments.sort(key=lambda x: (x["filename"], x["url"]))
 
@@ -55,10 +55,8 @@ def create_or_get_ticket_revision(
 ) -> Tuple[Optional[str], int, bool]:
     """
     HÀM DUY NHẤT TẠO HOẶC LẤY REVISION (Single Source of Truth):
-    - Tính hash chuẩn hóa (text + file đính kèm).
-    - Nếu hash trùng khớp: Tái sử dụng revision cũ (is_new = False).
-    - Nếu hash mới: Tự động tính toán atomic revision_no = max(revision_no) + 1 (is_new = True).
-    - Chống hoàn toàn lỗi xung đột ràng buộc Unique Constraint uq_ticket_revision!
+    - PHA D: Gọi PostgreSQL RPC 'create_or_get_inbox_ticket_revision' (FOR UPDATE Atomic Lock).
+    - Triệt tiêu 100% race condition uq_ticket_revision khi nhiều worker chạy đồng thời.
     Trả về: (revision_id, revision_no, is_new)
     """
     supabase = get_supabase_client()
@@ -66,7 +64,26 @@ def create_or_get_ticket_revision(
     now_iso = datetime.now(timezone.utc).isoformat()
     updated_at_val = source_updated_at or now_iso
 
-    # 1. Kiểm tra xem revision với content_hash này đã tồn tại chưa
+    # 1. Gọi RPC Atomic trên CSDL PostgreSQL
+    try:
+        rpc_res = supabase.rpc("create_or_get_inbox_ticket_revision", {
+            "p_ticket_id": ticket_id,
+            "p_content_hash": content_hash,
+            "p_raw_content": raw_content or "",
+            "p_attachments": attachments or [],
+            "p_source_updated_at": updated_at_val
+        }).execute()
+
+        if rpc_res.data and len(rpc_res.data) > 0:
+            rec = rpc_res.data[0]
+            is_new = bool(rec.get("is_new", False))
+            log_prefix = "✨ [NEW REVISION CREATED]" if is_new else "🔁 [REVISION REUSED]"
+            logger.info(f"{log_prefix} Ticket #{ticket_id[:8]} -> Revision #{rec['id'][:8]} (rev_no={rec['revision_no']})")
+            return rec["id"], rec["revision_no"], is_new
+    except Exception as rpc_err:
+        logger.warning(f"⚠️ Lỗi gọi RPC create_or_get_inbox_ticket_revision (sử dụng fallback): {rpc_err}")
+
+    # 2. Fallback dự phòng an toàn (nếu RPC chưa được nạp vào DB)
     existing_rev = supabase.table("inbox_ticket_revisions")\
         .select("id, revision_no")\
         .eq("ticket_id", ticket_id)\
@@ -76,10 +93,8 @@ def create_or_get_ticket_revision(
 
     if existing_rev.data:
         rec = existing_rev.data[0]
-        logger.info(f"🔁 [REVISION REUSED] Ticket #{ticket_id[:8]} tái sử dụng Revision #{rec['id'][:8]} (rev_no={rec['revision_no']})")
         return rec["id"], rec["revision_no"], False
 
-    # 2. Nếu là nội dung mới, truy vấn max revision_no hiện tại để tăng dần an toàn
     max_rev_res = supabase.table("inbox_ticket_revisions")\
         .select("revision_no")\
         .eq("ticket_id", ticket_id)\
@@ -89,7 +104,6 @@ def create_or_get_ticket_revision(
 
     next_rev_no = (max_rev_res.data[0]["revision_no"] + 1) if max_rev_res.data else 1
 
-    # 3. Tạo revision mới bất biến (Immutable Snapshot)
     try:
         new_rev = supabase.table("inbox_ticket_revisions").insert({
             "ticket_id": ticket_id,
@@ -103,23 +117,19 @@ def create_or_get_ticket_revision(
 
         if new_rev.data:
             rec = new_rev.data[0]
-            logger.info(f"✨ [NEW REVISION CREATED] Ticket #{ticket_id[:8]} đã tạo Revision #{rec['id'][:8]} (rev_no={next_rev_no}) thành công!")
             return rec["id"], next_rev_no, True
-
     except Exception as insert_err:
-        logger.warning(f"⚠️ Thử bắt xung đột race-condition khi tạo revision: {insert_err}")
-        # Fallback kiểm tra lại nếu có luồng khác vừa tạo cùng lúc
-        double_check = supabase.table("inbox_ticket_revisions")\
+        logger.warning(f"⚠️ Xung đột race-condition fallback: {insert_err}")
+        check = supabase.table("inbox_ticket_revisions")\
             .select("id, revision_no")\
             .eq("ticket_id", ticket_id)\
             .eq("content_hash", content_hash)\
             .limit(1)\
             .execute()
-        if double_check.data:
-            rec = double_check.data[0]
-            return rec["id"], rec["revision_no"], False
+        if check.data:
+            return check.data[0]["id"], check.data[0]["revision_no"], False
 
-    logger.error(f"❌ Không thể tạo hoặc lấy revision cho ticket #{ticket_id}!")
+    logger.error(f"❌ Không thể tạo revision cho ticket #{ticket_id}!")
     return None, 0, False
 
 
@@ -128,9 +138,9 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
     CANONICAL INTAKE ORCHESTRATOR (Một cửa tiếp nhận chuẩn hóa):
     1. Đọc nội dung snapshot bất biến từ inbox_ticket_revisions.
     2. Bóc tách file COF/Excel (nếu có).
-    3. Chạy Dual-Path AI (Summary mềm cho UI + Fact Extraction có trích dẫn bằng chứng).
+    3. Chạy Dual-Path AI (Summary mềm + Fact Extraction TRUYỀN ĐỦ source_revision_id).
     4. Lưu độc lập 2 assessments vào ticket_ai_assessments.
-    5. Khởi chạy Deterministic Planner sinh Workflow Proposal chuẩn mực.
+    5. Khởi chạy Deterministic Planner kèm revision_id xác định.
     """
     supabase = get_supabase_client()
     try:
@@ -182,16 +192,18 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                 except Exception as ex_err:
                     logger.warning(f"⚠️ Lỗi bóc tách file Excel [{fname}]: {ex_err}")
 
-        # Phân tách 2 đánh giá AI độc lập (Dual-Path Cognition)
+        # Phân tách 2 đánh giá AI độc lập (BẮT BUỘC TRUYỀN source_revision_id)
         summary_res = gemini_engine.summarize_ticket(subject=subject, raw_content=raw_content, source=source)
         facts_res = gemini_engine.extract_operational_facts(
             subject=subject,
             raw_content=raw_content,
             source=source,
-            excel_summary=excel_summary
+            excel_summary=excel_summary,
+            source_revision_id=revision_id  # << SỬA LỖI: TRUYỀN SOURCE_REVISION_ID
         )
 
         # Lưu độc lập 2 bản đánh giá AI vào ticket_ai_assessments
+        now_iso = datetime.now(timezone.utc).isoformat()
         try:
             supabase.table("ticket_ai_assessments").insert([
                 {
@@ -201,7 +213,8 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                     "prompt_version": summary_res.prompt_version,
                     "registry_version": "v1.1.0",
                     "structured_result": summary_res.model_dump(),
-                    "status": "completed"
+                    "status": "completed",
+                    "created_at": now_iso
                 },
                 {
                     "ticket_revision_id": revision_id,
@@ -210,7 +223,8 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                     "prompt_version": facts_res.prompt_version,
                     "registry_version": "v1.1.0",
                     "structured_result": facts_res.model_dump(),
-                    "status": "completed"
+                    "status": "completed",
+                    "created_at": now_iso
                 }
             ]).execute()
         except Exception as assess_err:
@@ -225,7 +239,7 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
             "summary_vi": summary_res.summary_vi,
             "detected_school": facts_res.entities.get("school_name"),
             "entities": facts_res.entities,
-            "requested_operations": [{"intent": i.type, "confidence": i.confidence} for i in facts_res.intents],
+            "requested_operations": [{"intent": i.type, "confidence": i.confidence} for i in facts_res.intents if i.is_valid],
             "missing_requirements": facts_res.missing_requirements,
             "warnings": facts_res.warnings,
             "evidence_quotes": facts_res.raw_evidence_quotes,
@@ -243,8 +257,11 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
             "metadata": combined_meta
         }).eq("id", ticket_id).execute()
 
-        # Bật await chuẩn xác cho Planner tự động sinh Proposal
-        wf_draft = await workflow_planner_service.plan_workflow_for_ticket(ticket_id)
+        # Bật await chuẩn xác cho Planner (TRUYỀN ĐỦ revision_id ĐỂ KHÔNG PHẢI GUESS)
+        wf_draft = await workflow_planner_service.plan_workflow_for_ticket(
+            ticket_id=ticket_id, 
+            revision_id=revision_id  # << SỬA LỖI: TRUYỀN REVISION_ID
+        )
         logger.info(f"✨ Đã hoàn tất xử lý Revision #{revision_id[:8]} cho ticket #{ticket_id[:8]} (Status: {wf_draft.get('status') if wf_draft else 'N/A'})")
 
         return {

@@ -308,66 +308,6 @@ export interface MissingRequirementItem {
   message: string;
 }
 
-export interface WorkflowAIAnalysis {
-  summary: string;
-  reason_summary_vi?: string;
-  overall_confidence: number;
-  workflow_outcome?: 'NO_ACTION' | 'NEEDS_INFORMATION' | 'ACTIONABLE' | string;
-  confidence_breakdown?: Record<string, number>;
-  detected_school?: WorkflowEntityCandidate | null;
-  school_candidates?: WorkflowEntityCandidate[];
-  detected_courses?: Array<{ course_id?: number; course_name: string; category?: string }>;
-  detected_actions?: string[];
-  missing_requirements?: MissingRequirementItem[];
-  evidence_quotes?: string[];
-  warnings?: string[];
-  model_used?: string | null;
-  requested_operations?: Array<{ intent: string; confidence?: number } | string>;
-  entities?: {
-    school_name?: string;
-    courses?: string[];
-    repositories?: string[];
-    users?: any[];
-    target_email?: string;
-    git_role?: string;
-    [key: string]: any;
-  };
-}
-
-export interface WorkflowDraft {
-  id: string;
-  ticket_id?: string | null;
-  title: string;
-  goal?: string;
-  status: WorkflowStatus | string;
-  version: number;
-  ai_analysis?: WorkflowAIAnalysis;
-  steps: WorkflowStep[];
-  approved_by?: string | null;
-  approved_at?: string | null;
-  created_at: string;
-  updated_at?: string;
-}
-
-export interface WorkflowProposal {
-  id: string;
-  ticket_id: string;
-  ticket_revision_id: string;
-  intent_assessment_id?: string | null;
-  version: number;
-  status: 'no_action' | 'needs_information' | 'ready_for_review' | 'approved' | 'superseded' | 'cancelled';
-  evidence: string[];
-  missing_requirements: MissingRequirementItem[];
-  plan: WorkflowStep[];
-  policy_version: string;
-  frozen_plan?: WorkflowStep[] | null;
-  superseded_by?: string | null;
-  approved_by?: string | null;
-  approved_at?: string | null;
-  created_at: string;
-  updated_at?: string;
-}
-
 export interface CapabilityDefinition {
   id: string;
   name: string;
@@ -400,4 +340,108 @@ export interface WorkflowValidationResult {
     ready_steps: number;
     dependent_steps: number;
   };
+}
+
+// frontend/src/types/index.ts
+
+export interface WorkflowStep {
+  step_id: string;
+  capability_id: string;
+  name: string;
+  description?: string;
+  status: WorkflowStepStatus | string;
+  is_manual?: boolean; // << BỔ SUNG: Đánh dấu bước do Admin can thiệp thủ công
+  inputs: Record<string, any>;
+  depends_on: string[];
+  execution_task_id?: string | null;
+  outputs?: Record<string, any>;
+  error_message?: string | null;
+  started_at?: string;
+  completed_at?: string;
+}
+
+export interface WorkflowAIAnalysis {
+  summary: string;
+  reason_summary_vi?: string;
+  overall_confidence: number;
+  workflow_outcome?: 'NO_ACTION' | 'NEEDS_INFORMATION' | 'ACTIONABLE' | string;
+  confidence_breakdown?: Record<string, number>;
+  detected_school?: WorkflowEntityCandidate | null;
+  school_candidates?: WorkflowEntityCandidate[];
+  detected_courses?: Array<{ course_id?: number; course_name: string; category?: string }>;
+  detected_actions?: string[];
+  missing_requirements?: MissingRequirementItem[];
+  evidence_quotes?: string[];
+  warnings?: string[];
+  operator_reason?: string; // << BỔ SUNG: Lý do can thiệp của Admin
+  model_used?: string | null;
+  requested_operations?: Array<{ intent: string; confidence?: number } | string>;
+  entities?: {
+    school_name?: string;
+    courses?: string[];
+    repositories?: string[];
+    users?: any[];
+    target_email?: string;
+    git_role?: string;
+    [key: string]: any;
+  };
+}
+
+export interface WorkflowDraft {
+  id: string;
+  proposal_id?: string | null; // << BỔ SUNG: Khóa ngoại liên kết Frozen Proposal
+  ticket_id?: string | null;
+  title: string;
+  goal?: string;
+  status: WorkflowStatus | string;
+  version: number;
+  ai_analysis?: WorkflowAIAnalysis;
+  steps: WorkflowStep[];
+  approved_by?: string | null;
+  approved_at?: string | null;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface WorkflowProposal {
+  id: string;
+  ticket_id: string;
+  ticket_revision_id: string;
+  intent_assessment_id?: string | null;
+  version: number;
+  status: 'no_action' | 'needs_information' | 'ready_for_review' | 'approved' | 'superseded' | 'cancelled';
+  evidence: string[];
+  missing_requirements: MissingRequirementItem[];
+  entity_resolution?: Record<string, any>; // << BỔ SUNG CỘT PHA A
+  plan: WorkflowStep[];
+  policy_version: string;
+  frozen_plan?: WorkflowStep[] | null;
+  superseded_by?: string | null;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  created_at: string;
+  updated_at?: string;
+}
+
+// BỔ SUNG: Payload gửi lên khi Admin bấm Phê duyệt (Approve)
+export interface WorkflowApprovalRequest {
+  approved_by?: string;
+  run_immediately?: boolean;
+  frozen_steps?: WorkflowStep[];
+  operator_reason?: string;
+}
+
+// BỔ SUNG: Dữ liệu sự kiện Audit Trail bất biến (Pha B & E)
+export interface WorkflowExecutionEvent {
+  id: string;
+  proposal_id?: string | null;
+  workflow_id?: string | null;
+  step_id: string;
+  event_type: 'approved' | 'started' | 'waiting' | 'succeeded' | 'failed' | 'retried' | 'cancelled';
+  inputs?: Record<string, any>;
+  outputs?: Record<string, any>;
+  error?: string | null;
+  duration_ms?: number | null;
+  actor: string;
+  created_at: string;
 }

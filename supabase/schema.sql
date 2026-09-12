@@ -76,8 +76,30 @@ CREATE TABLE IF NOT EXISTS templates_config (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS workflow_proposals (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    ticket_id UUID NOT NULL REFERENCES inbox_tickets(id) ON DELETE CASCADE,
+    ticket_revision_id UUID NOT NULL REFERENCES inbox_ticket_revisions(id) ON DELETE CASCADE,
+    intent_assessment_id UUID REFERENCES ticket_ai_assessments(id) ON DELETE SET NULL,
+    version INT NOT NULL DEFAULT 1,
+    status VARCHAR(50) NOT NULL DEFAULT 'ready_for_review', -- 'no_action' | 'needs_information' | 'ready_for_review' | 'approved' | 'superseded' | 'cancelled'
+    evidence JSONB DEFAULT '[]'::jsonb,
+    missing_requirements JSONB DEFAULT '[]'::jsonb,
+    entity_resolution JSONB NOT NULL DEFAULT '{}'::jsonb,
+    plan JSONB NOT NULL DEFAULT '[]'::jsonb,
+    policy_version VARCHAR(50) NOT NULL DEFAULT 'v1',
+    frozen_plan JSONB,
+    superseded_by UUID REFERENCES workflow_proposals(id) ON DELETE SET NULL,
+    approved_by VARCHAR(255),
+    approved_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT uq_ticket_proposal_version UNIQUE (ticket_id, version)
+);
+
 CREATE TABLE IF NOT EXISTS automation_workflows (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    proposal_id UUID REFERENCES workflow_proposals(id) ON DELETE SET NULL,
     ticket_id UUID REFERENCES inbox_tickets(id) ON DELETE CASCADE,
     title VARCHAR(255) NOT NULL,
     goal TEXT,
@@ -127,26 +149,6 @@ CREATE TABLE IF NOT EXISTS ticket_ai_assessments (
     status VARCHAR(50) NOT NULL DEFAULT 'completed', -- 'completed' | 'failed'
     errors JSONB,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS workflow_proposals (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    ticket_id UUID NOT NULL REFERENCES inbox_tickets(id) ON DELETE CASCADE,
-    ticket_revision_id UUID NOT NULL REFERENCES inbox_ticket_revisions(id) ON DELETE CASCADE,
-    intent_assessment_id UUID REFERENCES ticket_ai_assessments(id) ON DELETE SET NULL,
-    version INT NOT NULL DEFAULT 1,
-    status VARCHAR(50) NOT NULL DEFAULT 'ready_for_review', -- 'no_action' | 'needs_information' | 'ready_for_review' | 'approved' | 'superseded' | 'cancelled'
-    evidence JSONB DEFAULT '[]'::jsonb,
-    missing_requirements JSONB DEFAULT '[]'::jsonb,
-    plan JSONB NOT NULL DEFAULT '[]'::jsonb,
-    policy_version VARCHAR(50) NOT NULL DEFAULT 'v1',
-    frozen_plan JSONB,
-    superseded_by UUID REFERENCES workflow_proposals(id) ON DELETE SET NULL,
-    approved_by VARCHAR(255),
-    approved_at TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    CONSTRAINT uq_ticket_proposal_version UNIQUE (ticket_id, version)
 );
 
 CREATE TABLE IF NOT EXISTS workflow_execution_events (

@@ -27,18 +27,18 @@ class ExtractedIntent(BaseModel):
 
 
 class ExtractedEntity(BaseModel):
-    """Thực thể nghiệp vụ được trích xuất kèm bằng chứng."""
+    """Thực thể nghiệp vụ được trích xuất kèm bằng chứng xác thực."""
     type: Literal["school_name", "courses", "repositories", "users", "target_email", "git_role", "other"] = Field(
         description="Loại thực thể nghiệp vụ"
     )
     raw_value: Any = Field(description="Giá trị thực tế trích xuất được")
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     evidence: List[EvidenceSpan] = Field(default_factory=list, description="Bằng chứng trích xuất cho thực thể này")
-    is_verified: bool = Field(default=False, description="Đã được kiểm chứng thực tế")
+    is_verified: bool = Field(default=False, description="Đã được kiểm chứng thực tế trong văn bản gốc")
 
 
 class TypedEntities(BaseModel):
-    """Cấu trúc thực thể chuẩn mực (Typed Entities)."""
+    """Cấu trúc thực thể chuẩn mực (Typed Verified Entities) làm cơ sở quyết định cho Planner."""
     school_name: Optional[str] = None
     courses: List[str] = Field(default_factory=list)
     repositories: List[str] = Field(default_factory=list)

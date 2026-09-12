@@ -5,7 +5,7 @@ import time
 import logging
 import asyncio
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Set
 
 from app.core.supabase import get_supabase_client
 from app.core.task_coordinator import TaskCoordinator
@@ -18,11 +18,13 @@ logger = logging.getLogger(__name__)
 class WorkflowExecutorService:
     """
     Bộ điều phối thực thi Workflow tập trung (Safety-Critical Topological Workflow Executor):
+    - PHA B & E: Bắt buộc đọc từ Frozen Proposal làm Single Source of Truth.
+    - Truy vết đầy đủ: Mọi Execution Event bắt buộc đóng dấu proposal_id bất biến.
     - Quản lý Atomic Lease cấp Workflow thông qua TaskCoordinator.claim_workflow_lease().
     - Bọc toàn bộ quá trình chạy trong try ... finally để đảm bảo 100% giải phóng Lease.
     - True Topological Sorting (Kahn's Algorithm): ném lỗi và dừng ngay khi phát hiện chu trình (Cycle).
     - Khắc phục triệt để lỗi Request #None tại bước waiting_poll.
-    - Loại bỏ hoàn toàn fallback đoán mò ('workspace_rpa', capability_id).
+    - Reset thông minh toàn bộ downstream dependencies khi retry một bước.
     """
 
     @staticmethod
@@ -102,6 +104,7 @@ class WorkflowExecutorService:
 
     async def _record_execution_event(
         self,
+        proposal_id: Optional[str],
         workflow_id: str,
         step_id: str,
         event_type: str,
@@ -111,10 +114,14 @@ class WorkflowExecutorService:
         duration_ms: Optional[int] = None,
         actor: str = "workflow_executor"
     ):
-        """Ghi nhận sự kiện thực thi bất biến vào bảng workflow_execution_events."""
+        """
+        PHA B & E: Ghi nhận sự kiện thực thi bất biến vào bảng workflow_execution_events.
+        BẮT BUỘC lưu proposal_id để truy vết trọn vẹn chuỗi Provenance.
+        """
         try:
             supabase = get_supabase_client()
             event_data = {
+                "proposal_id": proposal_id,
                 "workflow_id": workflow_id,
                 "step_id": step_id,
                 "event_type": event_type,
@@ -132,7 +139,9 @@ class WorkflowExecutorService:
     async def execute_approved_workflow(self, workflow_id: str) -> Dict[str, Any]:
         """
         THỰC THI WORKFLOW ĐÃ DUYỆT (SAFETY-CRITICAL EXECUTION):
-        - Chiếm Workflow Lease thực thụ (Fail-closed nếu bị trùng lặp).
+        - Bắt buộc kiểm tra proposal_id và xác thực Proposal đã 'approved'.
+        - Lấy 'frozen_plan' từ proposal làm chân lý tối cao.
+        - Chiếm Workflow Lease thực thụ (Fail-closed nếu bị tranh chấp).
         - Toàn bộ hàm nằm trong try ... finally để luôn giải phóng Lease.
         - Xử lý waiting_poll an toàn: Chặn đứng lỗi Request #None.
         """
@@ -142,13 +151,38 @@ class WorkflowExecutorService:
             return {"status": "failed", "error": f"Không tìm thấy workflow #{workflow_id}"}
 
         wf = res.data[0]
-        raw_steps = wf.get("steps") or []
-        if not raw_steps:
-            return {"status": "failed", "error": "Workflow không có bước thực thi nào."}
-
         operator_name = wf.get("approved_by") or "system_operator"
 
-        # 1. CHIẾM WORKFLOW-LEVEL LEASE (CHỐNG RACE-CONDITION THỰC SỰ)
+        # 1. KIỂM TRA PROVENANCE & TẢI FROZEN PROPOSAL (FAIL-CLOSED)
+        proposal_id = wf.get("proposal_id")
+        if not proposal_id:
+            err_msg = f"Workflow #{workflow_id[:8]} thiếu proposal_id. Từ chối thực thi để bảo toàn Provenance."
+            logger.error(f"❌ {err_msg}")
+            return {"status": "failed", "error": err_msg}
+
+        prop_res = supabase.table("workflow_proposals").select("*").eq("id", proposal_id).execute()
+        if not prop_res.data:
+            err_msg = f"Không tìm thấy proposal #{proposal_id} tương ứng với workflow #{workflow_id[:8]}."
+            logger.error(f"❌ {err_msg}")
+            return {"status": "failed", "error": err_msg}
+
+        proposal = prop_res.data[0]
+        if proposal.get("status") != "approved":
+            err_msg = f"Proposal #{proposal_id[:8]} chưa ở trạng thái 'approved' (hiện tại: '{proposal.get('status')}')."
+            logger.error(f"❌ {err_msg}")
+            return {"status": "failed", "error": err_msg}
+
+        # Nguồn chân lý tối cao của các bước là frozen_plan đã được đóng băng
+        frozen_plan = proposal.get("frozen_plan") or []
+        if not frozen_plan:
+            err_msg = f"Proposal #{proposal_id[:8]} không có frozen_plan hợp lệ."
+            logger.error(f"❌ {err_msg}")
+            return {"status": "failed", "error": err_msg}
+
+        # Đồng bộ bước runtime từ workflow, nếu rỗng thì khởi tạo từ frozen_plan
+        raw_steps = wf.get("steps") or frozen_plan
+
+        # 2. CHIẾM WORKFLOW-LEVEL LEASE (CHỐNG RACE-CONDITION THỰC SỰ)
         is_claimed, lease_token, _ = await TaskCoordinator.claim_workflow_lease(
             workflow_id=workflow_id,
             operator=operator_name
@@ -157,18 +191,18 @@ class WorkflowExecutorService:
             logger.warning(f"🛑 [WORKFLOW BLOCKED] {lease_token}")
             return {"status": "running", "message": lease_token}
 
-        wf_tag = f"[WF #{workflow_id[:8]}]"
-        now_iso = datetime.now(timezone.utc).isoformat()
+        wf_tag = f"[WF #{workflow_id[:8]} | PROP #{proposal_id[:8]}]"
         final_workflow_status = "failed"
 
         try:
-            # 2. Sắp xếp các bước theo Topological Sorting
+            # 3. Sắp xếp các bước theo Topological Sorting
             try:
                 steps = self._topological_sort(raw_steps)
             except ValueError as cycle_err:
                 err_str = str(cycle_err)
                 final_workflow_status = "failed"
                 await self._record_execution_event(
+                    proposal_id=proposal_id,
                     workflow_id=workflow_id,
                     step_id="dag_sort",
                     event_type="failed",
@@ -225,6 +259,7 @@ class WorkflowExecutorService:
                     self._update_workflow_steps(workflow_id, steps)
                     final_workflow_status = "failed"
                     await self._record_execution_event(
+                        proposal_id=proposal_id,
                         workflow_id=workflow_id,
                         step_id=step_id,
                         event_type="failed",
@@ -256,9 +291,10 @@ class WorkflowExecutorService:
                 step["started_at"] = datetime.now(timezone.utc).isoformat()
                 self._update_workflow_steps(workflow_id, steps)
 
-                # Ghi Audit Event: STARTED
+                # Ghi Audit Event: STARTED (Gắn proposal_id)
                 start_ts = time.time()
                 await self._record_execution_event(
+                    proposal_id=proposal_id,
                     workflow_id=workflow_id,
                     step_id=step_id,
                     event_type="started",
@@ -294,7 +330,6 @@ class WorkflowExecutorService:
                 # 1. TRƯỜNG HỢP WAITING_POLL (DIỆT TẬN GỐC LỖI REQUEST #NONE)
                 if status_res == "waiting_poll":
                     req_id = step_result.get("request_id")
-                    # Chặn đứng Request #None!
                     if not req_id or str(req_id).strip() in ["", "None", "null", "undefined"]:
                         err_msg = f"Bước '{step_name}' trả về waiting_poll nhưng thiếu request_id hợp lệ!"
                         logger.error(f"❌ {wf_tag} {err_msg}")
@@ -310,6 +345,7 @@ class WorkflowExecutorService:
                             }).eq("id", execution_task_id).execute()
 
                         await self._record_execution_event(
+                            proposal_id=proposal_id,
                             workflow_id=workflow_id,
                             step_id=step_id,
                             event_type="failed",
@@ -324,7 +360,6 @@ class WorkflowExecutorService:
                     step["outputs"] = step_result
                     self._update_workflow_steps(workflow_id, steps)
 
-                    # Cập nhật bot_automation_tasks để Cronjob nhận diện
                     if execution_task_id:
                         updated_payload = {
                             **task_payload,
@@ -339,6 +374,7 @@ class WorkflowExecutorService:
                         }).eq("id", execution_task_id).execute()
 
                     await self._record_execution_event(
+                        proposal_id=proposal_id,
                         workflow_id=workflow_id,
                         step_id=step_id,
                         event_type="waiting",
@@ -365,6 +401,7 @@ class WorkflowExecutorService:
                         }).eq("id", execution_task_id).execute()
 
                     await self._record_execution_event(
+                        proposal_id=proposal_id,
                         workflow_id=workflow_id,
                         step_id=step_id,
                         event_type="failed",
@@ -391,6 +428,7 @@ class WorkflowExecutorService:
                         }).eq("id", execution_task_id).execute()
 
                     await self._record_execution_event(
+                        proposal_id=proposal_id,
                         workflow_id=workflow_id,
                         step_id=step_id,
                         event_type="succeeded",
@@ -403,7 +441,6 @@ class WorkflowExecutorService:
             logger.info(f"🎉 {wf_tag} Toàn bộ {len(steps)} bước đã hoàn tất thành công rực rỡ!")
             final_workflow_status = "success"
 
-            # Đánh dấu ticket completed
             ticket_id = wf.get("ticket_id")
             if ticket_id:
                 try:
@@ -429,33 +466,57 @@ class WorkflowExecutorService:
             )
 
     async def retry_workflow_step(self, workflow_id: str, target_step_id: str) -> Dict[str, Any]:
-        """Cho phép Retry một bước bị lỗi và tiếp tục các bước hạ nguồn."""
+        """
+        PHA G: RETRY THÔNG MINH
+        - Reset target_step_id về 'ready'.
+        - Tìm và reset TOÀN BỘ các bước hạ nguồn phụ thuộc (downstream dependents) về 'waiting_dependency'.
+        - Tuyệt đối không chạy lại các bước thành công độc lập thượng nguồn (upstream).
+        - Ghi nhận event 'retried' có proposal_id.
+        """
         supabase = get_supabase_client()
         res = supabase.table("automation_workflows").select("*").eq("id", workflow_id).execute()
         if not res.data:
             return {"status": "failed", "error": "Không tìm thấy workflow."}
 
         wf = res.data[0]
-        steps = wf.get("steps") or []
+        proposal_id = wf.get("proposal_id")
+        steps: List[Dict[str, Any]] = wf.get("steps") or []
 
-        found = False
-        for s in steps:
-            if s.get("step_id") == target_step_id:
-                s["status"] = "ready"
-                s["error_message"] = None
-                found = True
-            elif found and s.get("status") == "failed":
-                s["status"] = "waiting_dependency"
-
-        if not found:
+        step_ids = {s.get("step_id") for s in steps}
+        if target_step_id not in step_ids:
             return {"status": "failed", "error": f"Không tìm thấy bước '{target_step_id}'."}
 
+        # Thuật toán duyệt BFS tìm toàn bộ downstream steps phụ thuộc vào target_step_id
+        downstream: Set[str] = set()
+        queue = [target_step_id]
+        while queue:
+            curr = queue.pop(0)
+            for s in steps:
+                sid = s.get("step_id")
+                if curr in (s.get("depends_on") or []) and sid not in downstream:
+                    downstream.add(sid)
+                    queue.append(sid)
+
+        # Cập nhật trạng thái các bước
+        for s in steps:
+            sid = s.get("step_id")
+            if sid == target_step_id:
+                s["status"] = "ready"
+                s["error_message"] = None
+                s["execution_task_id"] = None
+            elif sid in downstream:
+                s["status"] = "waiting_dependency"
+                s["error_message"] = None
+                s["execution_task_id"] = None
+
         self._update_workflow_steps(workflow_id, steps)
+
         await self._record_execution_event(
+            proposal_id=proposal_id,
             workflow_id=workflow_id,
             step_id=target_step_id,
             event_type="retried",
-            actor="admin_operator"
+            actor=wf.get("approved_by") or "admin_operator"
         )
         return await self.execute_approved_workflow(workflow_id)
 

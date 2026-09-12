@@ -14,10 +14,11 @@ DEFAULT_LEASE_DURATION_SECONDS = 600
 
 class TaskCoordinator:
     """
-    Bộ điều phối thực thi tác vụ & quy trình tập trung (Single Coordinator):
-    - Quản lý Atomic Lease và Heartbeat ở cả 2 cấp: Task-level và Workflow-level.
-    - Ngăn chặn 100% việc chạy trùng lặp (Duplicate Execution) giữa Web Console, Retry và Cronjobs.
-    - Tự động thu hồi (Recovery) các tác vụ bị treo (Stale tasks).
+    Bộ điều phối thực thi tác vụ & quy trình tập trung (Safety Coordinator):
+    - PHA G: Atomic Lease Claiming với Optimistic Concurrency Control (OCC) chống Race Condition.
+    - Cưỡng chế Fail-Closed: Chặn đứng 100% tranh chấp khi Admin click đúp hoặc Cron chạy trùng.
+    - Heartbeat nghiêm ngặt: Ném ngoại lệ dừng khẩn cấp worker nếu bị cướp quyền sở hữu lease.
+    - Release có điều kiện: Chỉ giải phóng lease và update status khi lease_token khớp tuyệt đối.
     """
 
     @staticmethod
@@ -35,7 +36,7 @@ class TaskCoordinator:
         bot_type: str,
         lease_duration_seconds: int = DEFAULT_LEASE_DURATION_SECONDS
     ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
-        """Chiếm quyền thực thi tác vụ Bot đơn lẻ (Atomic Task Lease Claim)."""
+        """Chiếm quyền thực thi tác vụ Bot đơn lẻ (Atomic Task Lease Claim với OCC)."""
         supabase = get_supabase_client()
         now = cls._get_now_utc()
         now_iso = now.isoformat()
@@ -47,10 +48,10 @@ class TaskCoordinator:
         task = res.data[0]
         exec_status = task.get("execution_status")
         payload = task.get("payload_data") or {}
-        lease_info = payload.get("execution_lease")
+        lease_info = payload.get("execution_lease") or {}
 
-        # Kiểm tra nếu task đang chạy và lease còn hạn
-        if exec_status == "running" and lease_info:
+        # 1. Kiểm tra nếu task đang chạy và lease còn hạn
+        if exec_status == "running" and lease_info.get("is_active") is True:
             expires_at_str = lease_info.get("expires_at")
             if expires_at_str:
                 try:
@@ -63,6 +64,7 @@ class TaskCoordinator:
                 except Exception as parse_err:
                     logger.debug(f"Lỗi parse expires_at: {parse_err}")
 
+        # 2. Tạo Lease Token mới
         lease_token = str(uuid.uuid4())
         expires_at = now + timedelta(seconds=lease_duration_seconds)
         
@@ -76,11 +78,22 @@ class TaskCoordinator:
         }
         payload["execution_lease"] = new_lease
 
-        supabase.table("bot_automation_tasks").update({
+        # 3. Conditional Update chống race condition
+        up_query = supabase.table("bot_automation_tasks").update({
             "execution_status": "running",
             "payload_data": payload,
             "executed_at": now_iso
-        }).eq("id", task_id).execute()
+        }).eq("id", task_id)
+
+        # Nếu task có updated_at hoặc executed_at cũ, dùng làm chốt kiểm soát OCC
+        if task.get("executed_at"):
+            up_query = up_query.eq("executed_at", task["executed_at"])
+
+        up_res = up_query.execute()
+        if not up_res.data:
+            msg = "Xung đột tranh chấp Task: Một tiến trình khác vừa chiếm lease thành công."
+            logger.warning(f"🛑 [TASK OCC REJECTED] #{task_id[:8]}: {msg}")
+            return False, msg, None
 
         task["payload_data"] = payload
         task["execution_status"] = "running"
@@ -94,7 +107,7 @@ class TaskCoordinator:
         lease_token: str,
         extend_seconds: int = DEFAULT_LEASE_DURATION_SECONDS
     ) -> bool:
-        """Cập nhật nhịp tim (Heartbeat) và gia hạn Lease cho Bot Task."""
+        """Cập nhật nhịp tim và gia hạn Lease cho Bot Task (Fail-Closed)."""
         supabase = get_supabase_client()
         now = cls._get_now_utc()
         now_iso = now.isoformat()
@@ -107,8 +120,8 @@ class TaskCoordinator:
         payload = res.data[0].get("payload_data") or {}
         lease_info = payload.get("execution_lease") or {}
 
-        if lease_info.get("token") != lease_token:
-            logger.warning(f"⚠️ Không thể cập nhật heartbeat cho task #{task_id[:8]}: Sai lease token.")
+        if lease_info.get("token") != lease_token or lease_info.get("is_active") is not True:
+            logger.warning(f"⚠️ Mất quyền sở hữu task #{task_id[:8]}: Token không khớp hoặc lease đã inactive.")
             return False
 
         lease_info["heartbeat_at"] = now_iso
@@ -129,9 +142,18 @@ class TaskCoordinator:
         current_step: Optional[str] = None,
         last_error_step: Optional[str] = None
     ) -> bool:
-        """Giải phóng Lease cho Bot Task."""
+        """Giải phóng Lease cho Bot Task (Chỉ giải phóng khi token khớp)."""
         supabase = get_supabase_client()
         now_iso = cls._get_now_utc().isoformat()
+
+        # Kiểm tra token hiện hành trên DB
+        res = supabase.table("bot_automation_tasks").select("payload_data").eq("id", task_id).execute()
+        if res.data:
+            curr_payload = res.data[0].get("payload_data") or {}
+            curr_lease = curr_payload.get("execution_lease") or {}
+            if curr_lease.get("token") and curr_lease.get("token") != lease_token:
+                logger.warning(f"⚠️ [TASK RELEASE SKIPPED] Token #{lease_token[:8]} không khớp token hiện tại của task #{task_id[:8]}.")
+                return False
 
         if "execution_lease" in payload_data:
             payload_data["execution_lease"]["released_at"] = now_iso
@@ -157,7 +179,7 @@ class TaskCoordinator:
             return False
 
     # =========================================================================
-    # 2. WORKFLOW-LEVEL LEASE (BẢNG automation_workflows - PHA F MỚI)
+    # 2. WORKFLOW-LEVEL LEASE (BẢNG automation_workflows - PHA G MỚI)
     # =========================================================================
 
     @classmethod
@@ -168,8 +190,9 @@ class TaskCoordinator:
         lease_duration_seconds: int = DEFAULT_LEASE_DURATION_SECONDS
     ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         """
-        Chiếm quyền thực thi toàn bộ Workflow DAG (Workflow-Level Atomic Lease).
-        Chặn đứng race-condition khi admin bấm chạy đúp hoặc cronjob can thiệp.
+        PHA G: Chiếm quyền thực thi Workflow DAG với Optimistic Concurrency Control (OCC).
+        - Ngăn chặn triệt để click đúp trên UI hoặc tranh chấp giữa Cronjob và Admin.
+        - Điều kiện bắt buộc: Workflow chưa running hoặc lease cũ đã hết hạn.
         """
         supabase = get_supabase_client()
         now = cls._get_now_utc()
@@ -181,10 +204,11 @@ class TaskCoordinator:
 
         wf = res.data[0]
         current_status = wf.get("status")
+        expected_updated_at = wf.get("updated_at")
         ai_analysis = wf.get("ai_analysis") or {}
         lease_info = ai_analysis.get("execution_lease") or {}
 
-        # Nếu workflow đang ở trạng thái 'running' và lease vẫn còn hạn
+        # 1. Kiểm tra nếu workflow đang 'running' và lease vẫn còn hiệu lực
         if current_status == "running" and lease_info.get("is_active") is True:
             expires_at_str = lease_info.get("expires_at")
             if expires_at_str:
@@ -198,7 +222,7 @@ class TaskCoordinator:
                 except Exception as parse_err:
                     logger.debug(f"Lỗi parse expires_at workflow: {parse_err}")
 
-        # Cấp phát Lease mới cho Workflow
+        # 2. Cấp phát Lease Token mới
         lease_token = str(uuid.uuid4())
         expires_at = now + timedelta(seconds=lease_duration_seconds)
 
@@ -212,11 +236,23 @@ class TaskCoordinator:
         }
         ai_analysis["execution_lease"] = new_lease
 
-        supabase.table("automation_workflows").update({
+        # 3. Conditional Update bằng OCC dựa trên updated_at
+        update_query = supabase.table("automation_workflows").update({
             "status": "running",
             "ai_analysis": ai_analysis,
             "updated_at": now_iso
-        }).eq("id", workflow_id).execute()
+        }).eq("id", workflow_id)
+
+        if expected_updated_at:
+            update_query = update_query.eq("updated_at", expected_updated_at)
+
+        up_res = update_query.execute()
+
+        # Nếu res.data rỗng ➔ Đã có tiến trình khác chen ngang cập nhật trước!
+        if not up_res.data:
+            msg = "Xung đột tranh chấp Workflow Lease: Tiến trình khác vừa kích hoạt workflow trước tích tắc."
+            logger.warning(f"🛑 [WORKFLOW OCC REJECTED] #{workflow_id[:8]}: {msg}")
+            return False, msg, None
 
         wf["ai_analysis"] = ai_analysis
         wf["status"] = "running"
@@ -230,28 +266,39 @@ class TaskCoordinator:
         lease_token: str,
         extend_seconds: int = DEFAULT_LEASE_DURATION_SECONDS
     ) -> bool:
-        """Gia hạn nhịp tim cho Workflow đang thực thi tác vụ dài."""
+        """
+        Gia hạn nhịp tim cho Workflow đang thực thi tác vụ dài.
+        FAIL-CLOSED: Nếu mất quyền sở hữu lease, ném RuntimeError để dừng khẩn cấp!
+        """
         supabase = get_supabase_client()
         now = cls._get_now_utc()
         now_iso = now.isoformat()
         expires_at = now + timedelta(seconds=extend_seconds)
 
-        res = supabase.table("automation_workflows").select("ai_analysis").eq("id", workflow_id).execute()
+        res = supabase.table("automation_workflows").select("ai_analysis, status").eq("id", workflow_id).execute()
         if not res.data:
-            return False
+            raise RuntimeError(f"Workflow #{workflow_id[:8]} không tồn tại khi gia hạn heartbeat.")
 
-        ai_analysis = res.data[0].get("ai_analysis") or {}
+        wf = res.data[0]
+        ai_analysis = wf.get("ai_analysis") or {}
         lease_info = ai_analysis.get("execution_lease") or {}
 
-        if lease_info.get("token") != lease_token:
-            return False
+        # Nếu token không khớp hoặc lease đã bị tắt ➔ BỊ CƯỚP QUYỀN HOẶC TIMEOUT
+        if lease_info.get("token") != lease_token or lease_info.get("is_active") is not True:
+            err_msg = (
+                f"Mất quyền sở hữu Workflow Lease #{lease_token[:8]} tại Workflow #{workflow_id[:8]}! "
+                f"Lease hiện hành trên CSDL là: #{str(lease_info.get('token'))[:8]} (is_active={lease_info.get('is_active')})."
+            )
+            logger.error(f"❌ [HEARTBEAT LEASE LOST] {err_msg}")
+            raise RuntimeError(err_msg)
 
         lease_info["heartbeat_at"] = now_iso
         lease_info["expires_at"] = expires_at.isoformat()
         ai_analysis["execution_lease"] = lease_info
 
         supabase.table("automation_workflows").update({
-            "ai_analysis": ai_analysis
+            "ai_analysis": ai_analysis,
+            "updated_at": now_iso
         }).eq("id", workflow_id).execute()
         return True
 
@@ -262,7 +309,10 @@ class TaskCoordinator:
         lease_token: str,
         final_status: Optional[str] = None
     ) -> bool:
-        """Giải phóng Lease khi Workflow hoàn tất (kể cả thành công, thất bại hay waiting_poll)."""
+        """
+        Giải phóng Lease khi Workflow kết thúc.
+        CHỈ giải phóng và cập nhật status KHI VÀ CHỈ KHI lease_token khớp chính xác!
+        """
         supabase = get_supabase_client()
         now_iso = cls._get_now_utc().isoformat()
 
@@ -274,10 +324,17 @@ class TaskCoordinator:
         ai_analysis = wf.get("ai_analysis") or {}
         lease_info = ai_analysis.get("execution_lease") or {}
 
-        if lease_info.get("token") == lease_token:
-            lease_info["is_active"] = False
-            lease_info["released_at"] = now_iso
-            ai_analysis["execution_lease"] = lease_info
+        # KHÓA BẢO VỆ: Nếu token không khớp, tuyệt đối không được giải phóng hay ghi đè status!
+        if lease_info.get("token") != lease_token:
+            logger.warning(
+                f"⚠️ [LEASE RELEASE SKIPPED] Bỏ qua release cho Workflow #{workflow_id[:8]} "
+                f"vì token #{lease_token[:8]} không khớp token hiện tại #{str(lease_info.get('token'))[:8]}."
+            )
+            return False
+
+        lease_info["is_active"] = False
+        lease_info["released_at"] = now_iso
+        ai_analysis["execution_lease"] = lease_info
 
         update_payload: Dict[str, Any] = {
             "ai_analysis": ai_analysis,
@@ -288,7 +345,7 @@ class TaskCoordinator:
 
         try:
             supabase.table("automation_workflows").update(update_payload).eq("id", workflow_id).execute()
-            logger.info(f"🏁 [WORKFLOW LEASE RELEASED] Workflow #{workflow_id[:8]} đã giải phóng lease #{lease_token[:8]}.")
+            logger.info(f"🏁 [WORKFLOW LEASE RELEASED] Workflow #{workflow_id[:8]} đã giải phóng lease #{lease_token[:8]} an toàn (status='{final_status}').")
             return True
         except Exception as e:
             logger.error(f"❌ Lỗi giải phóng workflow lease: {e}")
