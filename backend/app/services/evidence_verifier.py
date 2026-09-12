@@ -180,6 +180,25 @@ class EvidenceVerifierService:
             entity.evidence = entity_valid_spans
             verified_entities.append(entity)
 
+        typed_entities = TypedEntities()
+        for entity in verified_entities:
+            if not entity.is_verified:
+                continue
+            if entity.type == "school_name" and isinstance(entity.raw_value, str):
+                typed_entities.school_name = entity.raw_value
+            elif entity.type == "courses" and isinstance(entity.raw_value, list):
+                typed_entities.courses = [str(value) for value in entity.raw_value]
+            elif entity.type == "repositories" and isinstance(entity.raw_value, list):
+                typed_entities.repositories = [str(value) for value in entity.raw_value]
+            elif entity.type == "repository_url" and isinstance(entity.raw_value, str):
+                typed_entities.repository_url = entity.raw_value
+            elif entity.type == "users" and isinstance(entity.raw_value, list):
+                typed_entities.users = entity.raw_value
+            elif entity.type == "target_email" and isinstance(entity.raw_value, str):
+                typed_entities.target_email = entity.raw_value
+            elif entity.type == "git_role" and isinstance(entity.raw_value, str):
+                typed_entities.git_role = entity.raw_value
+
         # Quyết định Outcome sau khi đã kiểm chứng
         current_outcome = assessment.outcome
         if current_outcome != "no_action":
@@ -197,8 +216,10 @@ class EvidenceVerifierService:
             model_name=assessment.model_name,
             prompt_version=assessment.prompt_version,
             intents=verified_intents,
+            # Raw/legacy entities remain display-only.  Planning uses the
+            # verified typed object created above.
             entities=assessment.entities,
-            typed_entities=assessment.typed_entities,
+            typed_entities=typed_entities,
             extracted_entities=verified_entities,
             missing_requirements=missing_reqs,
             warnings=warnings,
@@ -331,6 +352,8 @@ def load_verified_assessment(
                 verified_typed.courses = [str(c) for c in val]
             elif e_type == "repositories" and isinstance(val, list):
                 verified_typed.repositories = [str(r) for r in val]
+            elif e_type == "repository_url" and isinstance(val, str):
+                verified_typed.repository_url = val
             elif e_type == "users" and isinstance(val, list):
                 verified_typed.users = val
             elif e_type == "target_email" and isinstance(val, str):
@@ -338,20 +361,9 @@ def load_verified_assessment(
             elif e_type == "git_role" and isinstance(val, str):
                 verified_typed.git_role = val
 
-    # Backward compatibility fallback cho legacy entities (nếu chưa có extracted_entities)
+    # Legacy entities are display-only.  They must never become verified data:
+    # this would recreate a hallucinated action target after deserialisation.
     legacy_entities = structured_fact.get("entities", {})
-    if not verified_typed.school_name and legacy_entities.get("school_name"):
-        verified_typed.school_name = legacy_entities.get("school_name")
-    if not verified_typed.courses and legacy_entities.get("courses"):
-        verified_typed.courses = legacy_entities.get("courses", [])
-    if not verified_typed.repositories and legacy_entities.get("repositories"):
-        verified_typed.repositories = legacy_entities.get("repositories", [])
-    if not verified_typed.users and legacy_entities.get("users"):
-        verified_typed.users = legacy_entities.get("users", [])
-    if not verified_typed.target_email and legacy_entities.get("target_email"):
-        verified_typed.target_email = legacy_entities.get("target_email")
-    if not verified_typed.git_role and legacy_entities.get("git_role"):
-        verified_typed.git_role = legacy_entities.get("git_role")
 
     # 4. Xác định Outcome cuối cùng
     orig_outcome = structured_fact.get("outcome", "needs_information")
@@ -369,7 +381,7 @@ def load_verified_assessment(
         model_name=assessment_record.get("model_name"),
         prompt_version=assessment_record.get("prompt_version", "v1.1.0"),
         intents=deserialized_intents,
-        entities=legacy_entities,
+        entities={},
         typed_entities=verified_typed,
         extracted_entities=deserialized_entities,
         missing_requirements=missing_requirements,

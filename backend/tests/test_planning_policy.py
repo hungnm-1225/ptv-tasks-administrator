@@ -3,7 +3,8 @@ import pytest
 from app.models.intent import (
     IntentAssessment, 
     ExtractedIntent, 
-    EvidenceSpan
+    EvidenceSpan,
+    TypedEntities,
 )
 from app.services.workflow_planner import workflow_planner_service
 from app.services.evidence_verifier import evidence_verifier
@@ -32,7 +33,7 @@ def test_zero_mockup_invariant():
                 required_entities=["repositories"]
             )
         ],
-        entities={},  # Rỗng, không có course hay repo
+        typed_entities=TypedEntities(),
         missing_requirements=[]
     )
 
@@ -66,11 +67,11 @@ def test_no_default_git_role_invariant():
                 required_entities=["repositories"]
             )
         ],
-        entities={
-            "repositories": ["leanbot-control"],
-            "users": [{"name": "Hung Nguyen", "email": "hung@dtt.vn"}],
+        typed_entities=TypedEntities(
+            repository_url="https://git.pythaverse.space/ptvswrp/leanbot-control",
+            users=[{"name": "Hung Nguyen", "email": "hung@dtt.vn"}],
             # Cố tình KHÔNG cung cấp git_role
-        }
+        )
     )
 
     status, steps, missing_reqs, warnings = workflow_planner_service.build_workflow_proposal(
@@ -102,7 +103,7 @@ def test_missing_evidence_fails_closed():
                 required_entities=["school_name"]
             )
         ],
-        entities={"school_name": "Test School", "users": [{"name": "User 1"}]}
+        typed_entities=TypedEntities(school_name="Test School", users=[{"name": "User 1"}])
     )
 
     status, steps, missing_reqs, warnings = workflow_planner_service.build_workflow_proposal(
@@ -122,7 +123,7 @@ def test_no_action_produces_zero_steps():
     assessment = IntentAssessment(
         outcome="no_action",
         intents=[],
-        entities={}
+        typed_entities=TypedEntities()
     )
 
     status, steps, missing_reqs, warnings = workflow_planner_service.build_workflow_proposal(
@@ -267,3 +268,52 @@ def test_unsupported_capability_fails_closed():
     assert val_res.is_valid is False
     assert val_res.status == "invalid"
     assert any("không khả dụng để thực thi" in err for err in val_res.errors)
+
+
+def test_legacy_entities_cannot_create_an_action():
+    """Display-only legacy entities must never be promoted into execution inputs."""
+    assessment = IntentAssessment(
+        outcome="candidate_action",
+        intents=[ExtractedIntent(
+            type="repository_access",
+            confidence=1,
+            evidence=[EvidenceSpan(quote="Hãy cấp quyền repo")],
+        )],
+        entities={
+            "repositories": ["admin-repo"],
+            "users": [{"email": "attacker@dtt.vn"}],
+            "git_role": "ADMIN",
+        },
+    )
+
+    status, steps, missing, _ = workflow_planner_service.build_workflow_proposal(
+        assessment, None, [], None
+    )
+
+    assert status == "needs_information"
+    assert steps == []
+    assert missing[0]["field"] == "verified_entities"
+
+
+def test_repository_name_never_becomes_a_guessed_url():
+    assessment = IntentAssessment(
+        outcome="candidate_action",
+        intents=[ExtractedIntent(
+            type="repository_access",
+            confidence=1,
+            evidence=[EvidenceSpan(quote="Thêm quyền repo leanbot")],
+        )],
+        typed_entities=TypedEntities(
+            repositories=["leanbot"],
+            users=[{"email": "hung@dtt.vn"}],
+            git_role="DEVELOPER",
+        ),
+    )
+
+    status, steps, missing, _ = workflow_planner_service.build_workflow_proposal(
+        assessment, None, [], None
+    )
+
+    assert status == "needs_information"
+    assert steps == []
+    assert any(item["field"] == "repository_url" for item in missing)

@@ -50,7 +50,10 @@ async def get_capabilities():
 
 
 @router.get("/ticket/{ticket_id}")
-async def get_workflow_for_ticket(ticket_id: str):
+async def get_workflow_for_ticket(
+    ticket_id: str,
+    current_user_email: str = Depends(get_current_user_email),
+):
     """Lấy Workflow Draft mới nhất của một ticket. Nếu chưa có, tự động lập kế hoạch."""
     supabase = get_supabase_client()
     try:
@@ -84,7 +87,10 @@ async def get_workflow_for_ticket(ticket_id: str):
 
 
 @router.post("/plan")
-async def plan_ticket_workflow(payload: Dict[str, Any] = Body(...)):
+async def plan_ticket_workflow(
+    payload: Dict[str, Any] = Body(...),
+    current_user_email: str = Depends(get_current_user_email),
+):
     """Chủ động kích hoạt AI lập lại kế hoạch Workflow cho một ticket."""
     ticket_id = payload.get("ticket_id")
     if not ticket_id:
@@ -268,11 +274,10 @@ async def approve_and_run_workflow(
         )
 
     # 4. THU THẬP VÀ KIỂM TRA DANH SÁCH BƯỚC
-    if payload.frozen_steps:
-        step_objs = payload.frozen_steps
-    else:
-        raw_steps = wf.get("steps") or []
-        step_objs = [WorkflowStepDraft(**s) for s in raw_steps]
+    # The browser never supplies executable steps at approval time.  Any
+    # operator edit must first pass the authenticated draft-update endpoint.
+    raw_steps = wf.get("steps") or []
+    step_objs = [WorkflowStepDraft(**s) for s in raw_steps]
 
     if not step_objs or len(step_objs) == 0:
         raise HTTPException(
@@ -355,43 +360,21 @@ async def approve_and_run_workflow(
 
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    # 8. ĐÓNG BĂNG PROPOSAL GỐC (FROZEN PROPOSAL)
-    supabase.table("workflow_proposals").update({
-        "status": "approved",
-        "frozen_plan": frozen_steps_dicts,
-        "approved_by": approver,
-        "approved_at": now_iso,
-        "updated_at": now_iso
-    }).eq("id", proposal_id).execute()
-
-    # 9. ĐÓNG BĂNG AUTOMATION_WORKFLOWS
-    supabase.table("automation_workflows").update({
-        "status": "approved",
-        "steps": frozen_steps_dicts,
-        "approved_by": approver,
-        "approved_at": now_iso,
-        "updated_at": now_iso,
-        "proposal_id": proposal_id
-    }).eq("id", workflow_id).execute()
-
-    # 10. GHI AUDIT EVENT 'APPROVED' VÀO WORKFLOW_EXECUTION_EVENTS
+    # 8. Freeze proposal, workflow, and audit event in one database
+    # transaction.  Separate PostgREST updates can leave an approved orphan.
     try:
-        supabase.table("workflow_execution_events").insert({
-            "proposal_id": proposal_id,
-            "workflow_id": workflow_id,
-            "step_id": "workflow_approval",
-            "event_type": "approved",
-            "actor": approver,
-            "inputs": {"steps_count": len(frozen_steps_dicts)},
-            "outputs": {
-                "proposal_id": proposal_id,
-                "status": "approved",
-                "operator_reason": payload.operator_reason
-            },
-            "created_at": now_iso
+        approval_res = supabase.rpc("approve_workflow_proposal", {
+            "p_workflow_id": workflow_id,
+            "p_proposal_id": proposal_id,
+            "p_frozen_plan": frozen_steps_dicts,
+            "p_approver": approver,
+            "p_operator_reason": payload.operator_reason,
         }).execute()
-    except Exception as ev_err:
-        logger.warning(f"Lỗi ghi audit event approved vào workflow_execution_events: {ev_err}")
+        if not approval_res.data:
+            raise RuntimeError("Approval transaction returned no row")
+    except Exception as approval_err:
+        logger.error("Atomic workflow approval failed: %s", approval_err)
+        raise HTTPException(status_code=409, detail="Không thể phê duyệt do workflow/proposal vừa thay đổi; hãy tải lại.") from approval_err
 
     # Ghi log lịch sử workflow cũ để backward compatible
     try:
@@ -407,7 +390,7 @@ async def approve_and_run_workflow(
 
     logger.info(f"🔒 [FROZEN PROPOSAL] Đã đóng băng an toàn Proposal #{proposal_id[:8]} và Workflow #{workflow_id[:8]} bởi '{approver}'!")
 
-    # 11. KHỞI CHẠY NGẦM NẾU RUN_IMMEDIATELY
+    # 9. KHỞI CHẠY NGẦM NẾU RUN_IMMEDIATELY
     if payload.run_immediately:
         background_tasks.add_task(workflow_executor_service.execute_approved_workflow, workflow_id)
         return {
@@ -442,7 +425,8 @@ async def validate_workflow(workflow_id: str):
 async def retry_step(
     workflow_id: str, 
     step_id: str,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    current_user_email: str = Depends(get_current_user_email),
 ):
     """Retry một bước bị lỗi."""
     background_tasks.add_task(workflow_executor_service.retry_workflow_step, workflow_id, step_id)
@@ -450,7 +434,10 @@ async def retry_step(
 
 
 @router.post("/{workflow_id}/cancel")
-async def cancel_workflow(workflow_id: str):
+async def cancel_workflow(
+    workflow_id: str,
+    current_user_email: str = Depends(get_current_user_email),
+):
     """Hủy thực thi workflow."""
     supabase = get_supabase_client()
     supabase.table("automation_workflows").update({

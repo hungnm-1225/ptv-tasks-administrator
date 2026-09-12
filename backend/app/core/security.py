@@ -1,12 +1,12 @@
 # backend/app/core/security.py
-import os
 import jwt
 from typing import Optional
-from fastapi import HTTPException, Security, status, Depends
+from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.core.config import settings
 
 security_bearer = HTTPBearer(auto_error=False)
+_jwks_client: Optional[jwt.PyJWKClient] = None
 
 
 def verify_dtt_domain_email(email: str) -> bool:
@@ -22,21 +22,53 @@ async def get_current_user_email(
     credentials: Optional[HTTPAuthorizationCredentials] = Security(security_bearer),
 ) -> str:
     """
-    PHA F: Xác thực JWT token thực thụ và cưỡng chế whitelist domain @dtt.vn.
-    Tuyệt đối không tin tưởng email do client tự khai báo trong body payload!
+    Verifies a JWT issued by the configured identity provider before returning an
+    approver identity.  This is deliberately fail-closed: an unconfigured
+    verifier is not an invitation to accept an unsigned token.
     """
     if not credentials or not credentials.credentials:
-        # Hỗ trợ môi trường Hermetic Test
-        if os.getenv("TESTING") == "true" or os.getenv("ENV") == "test":
-            return "hung.nguyenmanh@dtt.vn"
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Yêu cầu cung cấp Authorization Bearer token hợp lệ.",
         )
 
+    if not settings.JWT_ISSUER or not settings.JWT_AUDIENCE:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="JWT verifier is not configured.",
+        )
+
+    algorithms = list(settings.JWT_ALGORITHMS or [])
+    verification_key = settings.JWT_PUBLIC_KEY
+    if not verification_key and any(algorithm.startswith("HS") for algorithm in algorithms):
+        verification_key = settings.JWT_SECRET_KEY or settings.SUPABASE_JWT_SECRET
+    global _jwks_client
+    if not verification_key and settings.JWT_JWKS_URL:
+        if _jwks_client is None:
+            _jwks_client = jwt.PyJWKClient(settings.JWT_JWKS_URL)
+        try:
+            verification_key = _jwks_client.get_signing_key_from_jwt(credentials.credentials).key
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Unable to resolve JWT signing key.",
+            ) from exc
+    if not verification_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="JWT verification key is not configured.",
+        )
+
     token = credentials.credentials
     try:
-        payload = jwt.decode(token, options={"verify_signature": False})
+        payload = jwt.decode(
+            token,
+            key=verification_key,
+            algorithms=algorithms,
+            audience=settings.JWT_AUDIENCE,
+            issuer=settings.JWT_ISSUER,
+            options={"require": ["exp", "iss", "aud", "sub"]},
+        )
         email = str(payload.get("email") or payload.get("preferred_username") or "").strip()
         
         if not verify_dtt_domain_email(email):

@@ -34,9 +34,7 @@ class WorkflowDraftUpdate(BaseModel):
 
 
 class WorkflowApprovalRequest(BaseModel):
-    approved_by: str = Field(default="hung.nguyenmanh@dtt.vn")
     run_immediately: bool = Field(default=True)
-    frozen_steps: Optional[List[WorkflowStepDraft]] = None
     operator_reason: Optional[str] = Field(None, description="Lý do phê duyệt nếu có sai khác so với proposal gốc") # << BỔ SUNG
 
 
@@ -89,5 +87,4 @@ class WorkflowValidationResult(BaseModel):
     errors: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     stats: Dict[str, Any] = Field(default_factory=dict)
-
 

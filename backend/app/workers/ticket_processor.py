@@ -64,7 +64,8 @@ def create_or_get_ticket_revision(
     now_iso = datetime.now(timezone.utc).isoformat()
     updated_at_val = source_updated_at or now_iso
 
-    # 1. Gọi RPC Atomic trên CSDL PostgreSQL
+    # The RPC is the only allocator.  A Python MAX(revision_no)+1 fallback
+    # reintroduces the race that the database lock exists to prevent.
     try:
         rpc_res = supabase.rpc("create_or_get_inbox_ticket_revision", {
             "p_ticket_id": ticket_id,
@@ -81,56 +82,10 @@ def create_or_get_ticket_revision(
             logger.info(f"{log_prefix} Ticket #{ticket_id[:8]} -> Revision #{rec['id'][:8]} (rev_no={rec['revision_no']})")
             return rec["id"], rec["revision_no"], is_new
     except Exception as rpc_err:
-        logger.warning(f"⚠️ Lỗi gọi RPC create_or_get_inbox_ticket_revision (sử dụng fallback): {rpc_err}")
+        logger.error("Revision allocation RPC failed for ticket #%s", ticket_id[:8])
+        raise RuntimeError("Atomic ticket revision allocation failed") from rpc_err
 
-    # 2. Fallback dự phòng an toàn (nếu RPC chưa được nạp vào DB)
-    existing_rev = supabase.table("inbox_ticket_revisions")\
-        .select("id, revision_no")\
-        .eq("ticket_id", ticket_id)\
-        .eq("content_hash", content_hash)\
-        .limit(1)\
-        .execute()
-
-    if existing_rev.data:
-        rec = existing_rev.data[0]
-        return rec["id"], rec["revision_no"], False
-
-    max_rev_res = supabase.table("inbox_ticket_revisions")\
-        .select("revision_no")\
-        .eq("ticket_id", ticket_id)\
-        .order("revision_no", desc=True)\
-        .limit(1)\
-        .execute()
-
-    next_rev_no = (max_rev_res.data[0]["revision_no"] + 1) if max_rev_res.data else 1
-
-    try:
-        new_rev = supabase.table("inbox_ticket_revisions").insert({
-            "ticket_id": ticket_id,
-            "revision_no": next_rev_no,
-            "content_hash": content_hash,
-            "raw_content": raw_content or "",
-            "attachments": attachments or [],
-            "source_updated_at": updated_at_val,
-            "created_at": now_iso
-        }).execute()
-
-        if new_rev.data:
-            rec = new_rev.data[0]
-            return rec["id"], next_rev_no, True
-    except Exception as insert_err:
-        logger.warning(f"⚠️ Xung đột race-condition fallback: {insert_err}")
-        check = supabase.table("inbox_ticket_revisions")\
-            .select("id, revision_no")\
-            .eq("ticket_id", ticket_id)\
-            .eq("content_hash", content_hash)\
-            .limit(1)\
-            .execute()
-        if check.data:
-            return check.data[0]["id"], check.data[0]["revision_no"], False
-
-    logger.error(f"❌ Không thể tạo revision cho ticket #{ticket_id}!")
-    return None, 0, False
+    raise RuntimeError("Atomic ticket revision allocation returned no revision")
 
 
 async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:

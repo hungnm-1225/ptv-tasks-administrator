@@ -1,7 +1,7 @@
 # 🚀 BÁCH KHOA TOÀN THƯ KIẾN TRÚC HỆ THỐNG PTV-TASKS-ADMINISTRATOR
 ## Pythaverse Central Admin & Automation Hub (Enterprise Single Source of Truth)
 
-> **Tài liệu Kỹ Thuật Độc Quyền & Tối Cao:** Bản đặc tả kiến trúc toàn diện này chuẩn hóa và hệ thống lại 100% mã nguồn, sơ đồ luồng dữ liệu, cấu trúc cơ sở dữ liệu 20 bảng, các gói dịch vụ RPA, ma trận bộ nhớ đệm RAM, kiến trúc AI Workflow tất định điều khiển bởi Chính sách (Registry-Driven Policy Engine), chuỗi liên kết bằng chứng bất biến (Immutable Provenance Chain) và giao diện người dùng của dự án **`ptv-tasks-administrator`**. Mọi kỹ sư phần mềm, chuyên gia tự động hóa hoặc AI Coder mới chỉ cần đọc tài liệu này là có thể nắm bắt trọn vẹn toàn bộ hệ sinh thái mà không bao giờ gặp tình trạng suy đoán, hallucination hay làm sai lệch nghiệp vụ.
+> **Tài liệu kiến trúc:** Tài liệu này mô tả mã nguồn, luồng dữ liệu, schema và các safety invariant hiện hành của **`ptv-tasks-administrator`**. AI có thể đưa ra đề xuất sai; vì vậy một workflow chỉ trở thành executable khi evidence thuộc đúng revision được kiểm chứng, policy chấp nhận và người dùng đã xác thực phê duyệt. Phần “Giới hạn vận hành” bên dưới là một phần của contract, không phải ngoại lệ.
 
 ---
 
@@ -103,7 +103,7 @@
 5. **Real JWT Identity Enforcement (Chống Mạo Danh Người Phê Duyệt):**
    - Bỏ qua trường `approved_by` do Frontend gửi lên trong payload body. Danh tính người duyệt được giải mã trực tiếp từ Bearer JWT Token qua dependency `get_current_user_email` và bắt buộc thuộc whitelist domain `@dtt.vn`.
 6. **Optimistic Concurrency Control (OCC) Lease & Single-Instance Concurrency:**
-   - Chiếm Lease độc quyền cấp Workflow qua `TaskCoordinator.claim_workflow_lease()` sử dụng kiểm soát đồng thời lạc quan (OCC) trên `updated_at`, triệt tiêu 100% race condition giữa double-click Web Console, Admin Dispatch, Retry và Cronjobs.
+   - Chiếm Lease độc quyền cấp Workflow qua `TaskCoordinator.claim_workflow_lease()` sử dụng kiểm soát đồng thời lạc quan (OCC) trên `updated_at`. Heartbeat và release cũng kiểm tra phiên bản trước khi ghi; xung đột được xử lý fail-closed.
    - Hàm `update_workflow_heartbeat()` ném `RuntimeError` dừng khẩn cấp worker nếu bị cướp lease. Hàm `release_workflow_lease()` chỉ cập nhật status khi token khớp chính xác.
 
 ---
@@ -280,7 +280,7 @@ ptv-tasks-administrator/
 
 ### 5.6. Bộ Điều Phối Workers & Atomic Intake (`ticket_processor.py`)
 - **`compute_canonical_content_hash()`:** Chuẩn hóa text kết hợp băm danh sách canonical attachments snapshot (filename, url, size). File đính kèm đổi ➔ Hash đổi.
-- **`create_or_get_ticket_revision()`:** Gọi trực tiếp PostgreSQL RPC `create_or_get_inbox_ticket_revision` (dùng khóa `FOR UPDATE`), đảm bảo `revision_no` tăng tuần tự nguyên tử, dẹp sạch 100% race condition `uq_ticket_revision`.
+  - **`create_or_get_ticket_revision()`:** Chỉ gọi PostgreSQL RPC `create_or_get_inbox_ticket_revision` (khóa ticket bằng `FOR UPDATE`). Nếu RPC không tồn tại hoặc lỗi, intake thất bại có thể retry; backend không dùng fallback `MAX(revision_no)+1`.
 - **`process_ticket_revision()`:** Truyền tường minh `source_revision_id=revision_id` vào AI Facts Extraction và `workflow_planner_service.plan_workflow_for_ticket(ticket_id, revision_id)`.
 
 ---
@@ -313,6 +313,13 @@ SELECT * FROM create_or_get_inbox_ticket_revision(
 ---
 
 ## 🧭 PHẦN VII: CẨM NANG VẬN HÀNH & HƯỚNG DẪN TEST DÀNH CHO KỸ SƯ
+
+### Giới hạn vận hành quan trọng
+
+- File đính kèm chỉ có thể làm cơ sở cho action khi extraction snapshot thuộc đúng revision và quote/offset của nó đã được kiểm chứng. Nếu không, workflow phải là `needs_information`.
+- Planner không được tự dựng repo URL, Git role, email đích, course hay số lượng user. Thiếu giá trị verified là thiếu thông tin.
+- Backend phải cấu hình JWT issuer, audience và secret/public key/JWKS tương ứng với Supabase Auth trước khi bật approval production.
+- Workflow legacy thiếu `proposal_id` phải được lập kế hoạch và phê duyệt lại, không được execute tự động.
 
 ### 1. Chạy Hermetic Pytest Suite
 ```powershell

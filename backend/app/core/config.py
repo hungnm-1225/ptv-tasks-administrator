@@ -51,6 +51,17 @@ class Settings(BaseSettings):
     ALLOWED_DOMAIN: str = "dtt.vn"
     VAULT_SECRET_KEY: str = ""
 
+    # --- WORKFLOW APPROVAL AUTHENTICATION ---
+    # Production must provide a verification key and issuer/audience values.
+    # The backend intentionally has no unsigned-token or test-environment bypass.
+    JWT_ISSUER: str = ""
+    JWT_AUDIENCE: str = ""
+    JWT_ALGORITHMS: List[str] = ["HS256"]
+    JWT_PUBLIC_KEY: str = ""
+    JWT_SECRET_KEY: str = ""
+    JWT_JWKS_URL: str = ""
+    SUPABASE_JWT_SECRET: str = ""
+
     # --- SUPABASE POSTGRESQL & STORAGE ---
     SUPABASE_URL: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""

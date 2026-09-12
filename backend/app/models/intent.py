@@ -28,7 +28,7 @@ class ExtractedIntent(BaseModel):
 
 class ExtractedEntity(BaseModel):
     """Thực thể nghiệp vụ được trích xuất kèm bằng chứng xác thực."""
-    type: Literal["school_name", "courses", "repositories", "users", "target_email", "git_role", "other"] = Field(
+    type: Literal["school_name", "courses", "repositories", "repository_url", "users", "target_email", "git_role", "other"] = Field(
         description="Loại thực thể nghiệp vụ"
     )
     raw_value: Any = Field(description="Giá trị thực tế trích xuất được")
@@ -42,6 +42,7 @@ class TypedEntities(BaseModel):
     school_name: Optional[str] = None
     courses: List[str] = Field(default_factory=list)
     repositories: List[str] = Field(default_factory=list)
+    repository_url: Optional[str] = None
     users: List[Dict[str, Any]] = Field(default_factory=list)
     target_email: Optional[str] = None
     git_role: Optional[str] = None

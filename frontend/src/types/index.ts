@@ -425,9 +425,7 @@ export interface WorkflowProposal {
 
 // BỔ SUNG: Payload gửi lên khi Admin bấm Phê duyệt (Approve)
 export interface WorkflowApprovalRequest {
-  approved_by?: string;
   run_immediately?: boolean;
-  frozen_steps?: WorkflowStep[];
   operator_reason?: string;
 }
 

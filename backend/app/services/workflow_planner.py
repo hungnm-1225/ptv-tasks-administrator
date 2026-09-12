@@ -11,7 +11,8 @@ from app.models.intent import (
     IntentAssessment,
     VerifiedIntentAssessment,
     ExtractedIntent,
-    EvidenceSpan
+    EvidenceSpan,
+    TypedEntities,
 )
 from app.models.workflow import (
     WorkflowStepDraft,
@@ -177,7 +178,18 @@ class WorkflowPlannerService:
         if assessment.outcome == "no_action":
             return "no_action", [], [], ["Không có hành vi tự động hóa nào được yêu cầu."]
 
-        entities = assessment.entities or {}
+        # The planner may consume only entity values that survived evidence
+        # verification.  `entities` is legacy/display data and is untrusted.
+        typed_entities = assessment.typed_entities
+        if not isinstance(typed_entities, TypedEntities):
+            return "needs_information", [], [
+                {
+                    "field": "verified_entities",
+                    "message": "Thiếu thực thể đã được kiểm chứng cho revision hiện tại."
+                }
+            ], warnings
+
+        entities = typed_entities.model_dump()
         raw_users = entities.get("users", [])
         if not isinstance(raw_users, list):
             raw_users = []
@@ -242,11 +254,11 @@ class WorkflowPlannerService:
                     })
                     intent_missing = True
 
-                elif req == "users_or_file" and (operation_context["context"]["total_count"] == 0 and not attachment_url):
+                elif req == "users_or_file" and operation_context["context"]["total_count"] == 0:
                     missing_requirements.append({
                         "field": "users_or_file",
                         "intent": intent_type,
-                        "message": "Thiếu danh sách người dùng hoặc file COF/Excel đính kèm."
+                        "message": "Thiếu danh sách người dùng đã được kiểm chứng. File đính kèm chỉ được dùng sau khi có evidence snapshot hợp lệ."
                     })
                     intent_missing = True
 
@@ -266,11 +278,11 @@ class WorkflowPlannerService:
                     })
                     intent_missing = True
 
-                elif req == "repositories" and not entities.get("repositories"):
+                elif req == "repositories" and not entities.get("repository_url"):
                     missing_requirements.append({
-                        "field": "repositories",
+                        "field": "repository_url",
                         "intent": intent_type,
-                        "message": "Thiếu tên Repository Git cần cấp quyền."
+                        "message": "Thiếu URL Repository Git đã được kiểm chứng; hệ thống không tự suy diễn URL từ tên repo."
                     })
                     intent_missing = True
 
@@ -331,9 +343,9 @@ class WorkflowPlannerService:
                         else:
                             step_inputs[in_key] = student_emails
                     elif in_expr == "context.repo_url":
-                        repos = entities.get("repositories", [])
-                        repo_name = repos[0] if repos else "unknown"
-                        step_inputs[in_key] = f"https://git.pythaverse.space/ptvswrp/{repo_name}"
+                        # Never manufacture an execution target from a repo
+                        # name.  The URL must be present in verified entities.
+                        step_inputs[in_key] = entities.get("repository_url")
                     else:
                         val = self._resolve_context_value(in_expr, operation_context)
                         step_inputs[in_key] = val
@@ -520,16 +532,19 @@ class WorkflowPlannerService:
         )
 
         # 4. Phân giải thực thể trường học (Entity Resolution)
-        meta = ticket.get("metadata") or {}
-        excel_summary = meta.get("excel_summary") or {}
-        attachments = ticket.get("attachments") or []
+        # Planning is bound to the immutable revision, never mutable ticket
+        # metadata or the ticket's newest attachments.
+        revision_res = supabase.table("inbox_ticket_revisions")\
+            .select("attachments")\
+            .eq("id", target_revision_id)\
+            .limit(1)\
+            .execute()
+        revision = revision_res.data[0] if revision_res.data else {}
+        attachments = revision.get("attachments") or []
         attachment_url = attachments[0].get("url") if attachments else None
 
-        detected_school_str = (
-            assessment.entities.get("school_name") or
-            meta.get("school_name") or
-            excel_summary.get("school_name")
-        )
+        typed_entities = assessment.typed_entities or TypedEntities()
+        detected_school_str = typed_entities.school_name
         best_school, candidates = self.resolve_school_entities(detected_school_str)
 
         # 5. Thực thi Deterministic Planning Core
@@ -570,7 +585,7 @@ class WorkflowPlannerService:
             "missing_requirements": missing_reqs,
             "detected_school": best_school.model_dump() if best_school else None,
             "school_candidates": [c.model_dump() for c in candidates],
-            "detected_courses": assessment.entities.get("courses", []),
+            "detected_courses": typed_entities.courses,
             "detected_actions": [s.capability_id for s in steps],
             "warnings": all_warnings + val_result.errors,
             "evidence_quotes": assessment.raw_evidence_quotes,

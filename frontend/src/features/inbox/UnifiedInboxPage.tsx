@@ -398,9 +398,7 @@ export const UnifiedInboxPage: React.FC = () => {
         {
           method: 'POST',
           body: JSON.stringify({
-            approved_by: currentOperatorEmail,
             run_immediately: true,
-            frozen_steps: activeWorkflow.steps,
           }),
         }
       );

@@ -275,7 +275,7 @@ class TaskCoordinator:
         now_iso = now.isoformat()
         expires_at = now + timedelta(seconds=extend_seconds)
 
-        res = supabase.table("automation_workflows").select("ai_analysis, status").eq("id", workflow_id).execute()
+        res = supabase.table("automation_workflows").select("ai_analysis, status, updated_at").eq("id", workflow_id).execute()
         if not res.data:
             raise RuntimeError(f"Workflow #{workflow_id[:8]} không tồn tại khi gia hạn heartbeat.")
 
@@ -296,10 +296,15 @@ class TaskCoordinator:
         lease_info["expires_at"] = expires_at.isoformat()
         ai_analysis["execution_lease"] = lease_info
 
-        supabase.table("automation_workflows").update({
+        update_query = supabase.table("automation_workflows").update({
             "ai_analysis": ai_analysis,
             "updated_at": now_iso
-        }).eq("id", workflow_id).execute()
+        }).eq("id", workflow_id).eq("updated_at", wf.get("updated_at"))
+        update_res = update_query.execute()
+        if not update_res.data:
+            raise RuntimeError(
+                f"Mất quyền sở hữu Workflow Lease #{lease_token[:8]} khi heartbeat: workflow đã bị cập nhật bởi tiến trình khác."
+            )
         return True
 
     @classmethod
@@ -316,7 +321,7 @@ class TaskCoordinator:
         supabase = get_supabase_client()
         now_iso = cls._get_now_utc().isoformat()
 
-        res = supabase.table("automation_workflows").select("ai_analysis, status").eq("id", workflow_id).execute()
+        res = supabase.table("automation_workflows").select("ai_analysis, status, updated_at").eq("id", workflow_id).execute()
         if not res.data:
             return False
 
@@ -344,7 +349,16 @@ class TaskCoordinator:
             update_payload["status"] = final_status
 
         try:
-            supabase.table("automation_workflows").update(update_payload).eq("id", workflow_id).execute()
+            update_res = supabase.table("automation_workflows").update(update_payload)\
+                .eq("id", workflow_id)\
+                .eq("updated_at", wf.get("updated_at"))\
+                .execute()
+            if not update_res.data:
+                logger.warning(
+                    "[LEASE RELEASE SKIPPED] Workflow #%s changed after token verification.",
+                    workflow_id[:8],
+                )
+                return False
             logger.info(f"🏁 [WORKFLOW LEASE RELEASED] Workflow #{workflow_id[:8]} đã giải phóng lease #{lease_token[:8]} an toàn (status='{final_status}').")
             return True
         except Exception as e:

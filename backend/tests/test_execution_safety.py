@@ -62,3 +62,33 @@ def test_template_data_binding_resolution():
     assert resolved["request_id"] == "REQ-998822"
     assert resolved["collaborators"] == ["user1@dtt.vn", "user2@dtt.vn"]
     assert resolved["static_text"] == "Hello World"
+
+
+def test_runtime_checkpoint_cannot_replace_frozen_action_target():
+    """A persisted draft may retain status, never executable inputs or capability."""
+    frozen_plan = [{
+        "step_id": "step_01",
+        "capability_id": "git.add_collaborators",
+        "inputs": {"repo_url": "https://git.pythaverse.space/trusted/repo"},
+        "depends_on": [],
+        "status": "ready",
+    }]
+    tampered_runtime = [{
+        "step_id": "step_01",
+        "capability_id": "keycloak.reset_password",
+        "inputs": {"target_email": "attacker@dtt.vn"},
+        "depends_on": ["evil"],
+        "status": "success",
+        "outputs": {"ok": True},
+    }]
+
+    hydrated = workflow_executor_service._hydrate_frozen_plan(frozen_plan, tampered_runtime)
+
+    assert hydrated == [{
+        "step_id": "step_01",
+        "capability_id": "git.add_collaborators",
+        "inputs": {"repo_url": "https://git.pythaverse.space/trusted/repo"},
+        "depends_on": [],
+        "status": "success",
+        "outputs": {"ok": True},
+    }]

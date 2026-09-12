@@ -179,8 +179,9 @@ class WorkflowExecutorService:
             logger.error(f"❌ {err_msg}")
             return {"status": "failed", "error": err_msg}
 
-        # Đồng bộ bước runtime từ workflow, nếu rỗng thì khởi tạo từ frozen_plan
-        raw_steps = wf.get("steps") or frozen_plan
+        # The proposal is the execution contract.  Runtime state is merged
+        # from the workflow only for fields that cannot change the action.
+        raw_steps = self._hydrate_frozen_plan(frozen_plan, wf.get("steps") or [])
 
         # 2. CHIẾM WORKFLOW-LEVEL LEASE (CHỐNG RACE-CONDITION THỰC SỰ)
         is_claimed, lease_token, _ = await TaskCoordinator.claim_workflow_lease(
@@ -480,7 +481,15 @@ class WorkflowExecutorService:
 
         wf = res.data[0]
         proposal_id = wf.get("proposal_id")
-        steps: List[Dict[str, Any]] = wf.get("steps") or []
+        if not proposal_id:
+            return {"status": "failed", "error": "Workflow thiếu proposal provenance."}
+        proposal_res = supabase.table("workflow_proposals").select("status, frozen_plan").eq("id", proposal_id).execute()
+        if not proposal_res.data or proposal_res.data[0].get("status") != "approved":
+            return {"status": "failed", "error": "Proposal chưa được phê duyệt hoặc không tồn tại."}
+        steps = self._hydrate_frozen_plan(
+            proposal_res.data[0].get("frozen_plan") or [],
+            wf.get("steps") or [],
+        )
 
         step_ids = {s.get("step_id") for s in steps}
         if target_step_id not in step_ids:
@@ -554,6 +563,37 @@ class WorkflowExecutorService:
             }).eq("id", workflow_id).execute()
         except Exception as e:
             logger.warning(f"Lỗi cập nhật workflow steps: {e}")
+
+    @staticmethod
+    def _hydrate_frozen_plan(
+        frozen_plan: List[Dict[str, Any]], runtime_steps: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Merge checkpoint fields into the immutable approved instruction set.
+
+        A draft/runtime row must never be able to replace a capability, target
+        input, or dependency after approval.  It may only preserve execution
+        progress so polling/resume does not repeat an already successful step.
+        """
+        runtime_by_id = {
+            step.get("step_id"): step
+            for step in runtime_steps
+            if isinstance(step, dict) and step.get("step_id")
+        }
+        mutable_fields = {
+            "status", "execution_task_id", "outputs", "error_message",
+            "started_at", "completed_at",
+        }
+        hydrated: List[Dict[str, Any]] = []
+        for frozen in frozen_plan:
+            if not isinstance(frozen, dict) or not frozen.get("step_id"):
+                continue
+            merged = dict(frozen)
+            runtime = runtime_by_id.get(frozen["step_id"], {})
+            for field in mutable_fields:
+                if field in runtime:
+                    merged[field] = runtime[field]
+            hydrated.append(merged)
+        return hydrated
 
 
 workflow_executor_service = WorkflowExecutorService()
