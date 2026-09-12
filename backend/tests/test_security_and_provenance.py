@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 
 from app.core.config import settings
-from app.core.security import _resolved_audience, _resolved_issuer, get_current_user_email
+from app.core.security import _resolved_audience, _resolved_issuer, _resolved_jwks_url, get_current_user_email
 
 
 def _set_test_jwt_config(monkeypatch):
@@ -65,3 +65,4 @@ def test_supabase_defaults_derive_issuer_and_audience(monkeypatch):
 
     assert _resolved_issuer() == "https://project-ref.supabase.co/auth/v1"
     assert _resolved_audience() == "authenticated"
+    assert _resolved_jwks_url() == "https://project-ref.supabase.co/auth/v1/.well-known/jwks.json"

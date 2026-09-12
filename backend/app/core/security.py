@@ -1,12 +1,12 @@
 # backend/app/core/security.py
 import jwt
-from typing import Optional
+from typing import Dict, Optional
 from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.core.config import settings
 
 security_bearer = HTTPBearer(auto_error=False)
-_jwks_client: Optional[jwt.PyJWKClient] = None
+_jwks_clients: Dict[str, jwt.PyJWKClient] = {}
 
 
 def verify_dtt_domain_email(email: str) -> bool:
@@ -33,6 +33,59 @@ def _resolved_audience() -> str:
     return settings.JWT_AUDIENCE or "authenticated"
 
 
+def _resolved_jwks_url() -> str:
+    """Use an explicit key-set URL or the standard Supabase Auth endpoint."""
+    if settings.JWT_JWKS_URL:
+        return settings.JWT_JWKS_URL
+    if settings.SUPABASE_URL:
+        return f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json"
+    return ""
+
+
+def _verification_key_for_token(token: str, algorithms: list[str]):
+    """Select a verifier from the token's permitted algorithm, never its claims.
+
+    HS tokens can only be checked with the secret held by the backend.  RS/ES
+    tokens use the issuer's JWKS, whose `kid` is selected by PyJWT.
+    """
+    try:
+        algorithm = jwt.get_unverified_header(token).get("alg")
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="JWT header is invalid.") from exc
+
+    if algorithm not in algorithms:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"JWT algorithm '{algorithm}' is not allowed by backend configuration.",
+        )
+    if algorithm.startswith("HS"):
+        key = settings.JWT_SECRET_KEY or settings.SUPABASE_JWT_SECRET
+        if not key:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="JWT verification key is not configured. Set SUPABASE_JWT_SECRET for HS256 tokens.",
+            )
+        return key
+
+    if settings.JWT_PUBLIC_KEY:
+        return settings.JWT_PUBLIC_KEY
+
+    jwks_url = _resolved_jwks_url()
+    if not jwks_url:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="JWT verification key is not configured. Set JWT_PUBLIC_KEY or JWT_JWKS_URL.",
+        )
+    try:
+        client = _jwks_clients.setdefault(jwks_url, jwt.PyJWKClient(jwks_url))
+        return client.get_signing_key_from_jwt(token).key
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unable to resolve the JWT signing key from Supabase JWKS.",
+        ) from exc
+
+
 async def get_current_user_email(
     credentials: Optional[HTTPAuthorizationCredentials] = Security(security_bearer),
 ) -> str:
@@ -55,28 +108,9 @@ async def get_current_user_email(
             detail="JWT verifier is not configured.",
         )
 
-    algorithms = list(settings.JWT_ALGORITHMS or [])
-    verification_key = settings.JWT_PUBLIC_KEY
-    if not verification_key and any(algorithm.startswith("HS") for algorithm in algorithms):
-        verification_key = settings.JWT_SECRET_KEY or settings.SUPABASE_JWT_SECRET
-    global _jwks_client
-    if not verification_key and settings.JWT_JWKS_URL:
-        if _jwks_client is None:
-            _jwks_client = jwt.PyJWKClient(settings.JWT_JWKS_URL)
-        try:
-            verification_key = _jwks_client.get_signing_key_from_jwt(credentials.credentials).key
-        except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Unable to resolve JWT signing key.",
-            ) from exc
-    if not verification_key:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="JWT verification key is not configured. Set SUPABASE_JWT_SECRET or JWT_JWKS_URL on the backend.",
-        )
-
     token = credentials.credentials
+    algorithms = list(settings.JWT_ALGORITHMS or [])
+    verification_key = _verification_key_for_token(token, algorithms)
     try:
         payload = jwt.decode(
             token,

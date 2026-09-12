@@ -56,7 +56,9 @@ class Settings(BaseSettings):
     # The backend intentionally has no unsigned-token or test-environment bypass.
     JWT_ISSUER: str = ""
     JWT_AUDIENCE: str = ""
-    JWT_ALGORITHMS: List[str] = ["HS256"]
+    # Supabase projects can use legacy HS256 secrets or asymmetric Signing
+    # Keys (typically ES256/RS256).  The verifier still pins this allow-list.
+    JWT_ALGORITHMS: List[str] = ["HS256", "RS256", "ES256"]
     JWT_PUBLIC_KEY: str = ""
     JWT_SECRET_KEY: str = ""
     JWT_JWKS_URL: str = ""
