@@ -319,6 +319,7 @@ SELECT * FROM create_or_get_inbox_ticket_revision(
 - File đính kèm chỉ có thể làm cơ sở cho action khi extraction snapshot thuộc đúng revision và quote/offset của nó đã được kiểm chứng. Nếu không, workflow phải là `needs_information`.
 - Planner không được tự dựng repo URL, Git role, email đích, course hay số lượng user. Thiếu giá trị verified là thiếu thông tin.
 - Backend phải cấu hình JWT issuer, audience và secret/public key/JWKS tương ứng với Supabase Auth trước khi bật approval production.
+- Với Supabase Auth mặc định, backend tự suy ra issuer từ `SUPABASE_URL` và audience `authenticated`; cần thêm `SUPABASE_JWT_SECRET` vào environment group của Render. Xem `backend/.env.example`; không dùng `SUPABASE_SERVICE_ROLE_KEY` thay cho JWT secret.
 - Workflow legacy thiếu `proposal_id` phải được lập kế hoạch và phê duyệt lại, không được execute tự động.
 
 ### 1. Chạy Hermetic Pytest Suite

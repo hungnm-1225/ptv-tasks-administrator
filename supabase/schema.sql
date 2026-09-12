@@ -183,6 +183,9 @@ BEGIN
 END;
 $$;
 
+REVOKE ALL ON FUNCTION create_or_get_inbox_ticket_revision(UUID, VARCHAR, TEXT, JSONB, TIMESTAMPTZ) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION create_or_get_inbox_ticket_revision(UUID, VARCHAR, TEXT, JSONB, TIMESTAMPTZ) TO service_role;
+
 CREATE TABLE IF NOT EXISTS ticket_ai_assessments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     ticket_revision_id UUID NOT NULL REFERENCES inbox_ticket_revisions(id) ON DELETE CASCADE,
@@ -436,6 +439,9 @@ BEGIN
     RETURN QUERY SELECT p_workflow_id, p_proposal_id;
 END;
 $$;
+
+REVOKE ALL ON FUNCTION approve_workflow_proposal(UUID, UUID, JSONB, VARCHAR, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION approve_workflow_proposal(UUID, UUID, JSONB, VARCHAR, TEXT) TO service_role;
 CREATE INDEX IF NOT EXISTS idx_execution_events_workflow_id ON workflow_execution_events(workflow_id);
 CREATE INDEX IF NOT EXISTS idx_execution_events_step_id     ON workflow_execution_events(step_id);
 CREATE INDEX IF NOT EXISTS idx_execution_events_created     ON workflow_execution_events(created_at DESC);

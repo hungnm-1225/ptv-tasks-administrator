@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 
 from app.core.config import settings
-from app.core.security import get_current_user_email
+from app.core.security import _resolved_audience, _resolved_issuer, get_current_user_email
 
 
 def _set_test_jwt_config(monkeypatch):
@@ -56,3 +56,12 @@ def test_approval_identity_accepts_only_signed_configured_issuer(monkeypatch):
     )
 
     assert asyncio.run(get_current_user_email(_credentials(token))) == "hung@dtt.vn"
+
+
+def test_supabase_defaults_derive_issuer_and_audience(monkeypatch):
+    monkeypatch.setattr(settings, "JWT_ISSUER", "")
+    monkeypatch.setattr(settings, "JWT_AUDIENCE", "")
+    monkeypatch.setattr(settings, "SUPABASE_URL", "https://project-ref.supabase.co/")
+
+    assert _resolved_issuer() == "https://project-ref.supabase.co/auth/v1"
+    assert _resolved_audience() == "authenticated"

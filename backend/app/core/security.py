@@ -18,6 +18,21 @@ def verify_dtt_domain_email(email: str) -> bool:
     return domain == allowed
 
 
+def _resolved_issuer() -> str:
+    """Use explicit IdP configuration, or the standard Supabase issuer."""
+    if settings.JWT_ISSUER:
+        return settings.JWT_ISSUER.rstrip("/")
+    if settings.SUPABASE_URL:
+        return f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1"
+    return ""
+
+
+def _resolved_audience() -> str:
+    # Supabase access tokens for signed-in users use `authenticated` unless
+    # the project is deliberately configured with a different audience.
+    return settings.JWT_AUDIENCE or "authenticated"
+
+
 async def get_current_user_email(
     credentials: Optional[HTTPAuthorizationCredentials] = Security(security_bearer),
 ) -> str:
@@ -32,7 +47,9 @@ async def get_current_user_email(
             detail="Yêu cầu cung cấp Authorization Bearer token hợp lệ.",
         )
 
-    if not settings.JWT_ISSUER or not settings.JWT_AUDIENCE:
+    issuer = _resolved_issuer()
+    audience = _resolved_audience()
+    if not issuer:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="JWT verifier is not configured.",
@@ -56,7 +73,7 @@ async def get_current_user_email(
     if not verification_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="JWT verification key is not configured.",
+            detail="JWT verification key is not configured. Set SUPABASE_JWT_SECRET or JWT_JWKS_URL on the backend.",
         )
 
     token = credentials.credentials
@@ -65,8 +82,8 @@ async def get_current_user_email(
             token,
             key=verification_key,
             algorithms=algorithms,
-            audience=settings.JWT_AUDIENCE,
-            issuer=settings.JWT_ISSUER,
+            audience=audience,
+            issuer=issuer,
             options={"require": ["exp", "iss", "aud", "sub"]},
         )
         email = str(payload.get("email") or payload.get("preferred_username") or "").strip()

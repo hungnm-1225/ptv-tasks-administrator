@@ -1,6 +1,8 @@
 -- Strict provenance hardening.  This migration owns all database-side
 -- allocation and conditional state transitions used by the workflow service.
 
+-- Do not silently delete historical records to make this index fit.  The
+-- preflight query in docs must return no rows before applying this migration.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ticket_revision_content_hash
 ON inbox_ticket_revisions(ticket_id, content_hash);
 
@@ -52,6 +54,12 @@ BEGIN
 END;
 $$;
 
+-- These functions are backend-only command interfaces.  Browser users must
+-- pass FastAPI authentication/validation; they must never call RPC approval
+-- directly with a self-chosen approver or plan.
+REVOKE ALL ON FUNCTION create_or_get_inbox_ticket_revision(UUID, VARCHAR, TEXT, JSONB, TIMESTAMPTZ) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION create_or_get_inbox_ticket_revision(UUID, VARCHAR, TEXT, JSONB, TIMESTAMPTZ) TO service_role;
+
 CREATE OR REPLACE FUNCTION approve_workflow_proposal(
     p_workflow_id UUID,
     p_proposal_id UUID,
@@ -100,6 +108,9 @@ BEGIN
     RETURN QUERY SELECT p_workflow_id, p_proposal_id;
 END;
 $$;
+
+REVOKE ALL ON FUNCTION approve_workflow_proposal(UUID, UUID, JSONB, VARCHAR, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION approve_workflow_proposal(UUID, UUID, JSONB, VARCHAR, TEXT) TO service_role;
 
 -- Existing rows are immutable history.  They may be inspected but a legacy
 -- workflow without proposal provenance may not execute until re-approved.
