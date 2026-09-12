@@ -1521,7 +1521,7 @@ export const UnifiedInboxPage: React.FC = () => {
                       <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">
                         Không Có Hành Động Tự Động Hóa Nào Được Kích Hoạt
                       </h4>
-                      <p className="text-xs text-slate-500 max-w-md mx-auto">
+                      <p className="text-xs text-slate-500 mx-auto">
                         Email này được phân loại là bản tin, thông báo tự động hoặc không chứa yêu cầu can thiệp hệ sinh thái.
                       </p>
                     </div>
