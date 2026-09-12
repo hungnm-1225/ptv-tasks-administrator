@@ -54,7 +54,7 @@ async def get_workflow_for_ticket(
     ticket_id: str,
     current_user_email: str = Depends(get_current_user_email),
 ):
-    """Lấy Workflow Draft mới nhất của một ticket. Nếu chưa có, tự động lập kế hoạch."""
+    """Return a provenance-linked draft or replace a legacy draft safely."""
     supabase = get_supabase_client()
     try:
         res = supabase.table("automation_workflows")\
@@ -65,7 +65,25 @@ async def get_workflow_for_ticket(
             .execute()
 
         if res.data and len(res.data) > 0:
-            return res.data[0]
+            existing = res.data[0]
+            if existing.get("proposal_id") and existing.get("status") != "requires_reapproval":
+                return existing
+
+            # A workflow generated before provenance enforcement cannot be
+            # approved safely.  Do not send it back to the UI where approval
+            # will inevitably fail; create a revision-bound replacement.
+            logger.info(
+                "Re-planning legacy workflow #%s for ticket #%s because proposal provenance is absent.",
+                str(existing.get("id", ""))[:8],
+                ticket_id[:8],
+            )
+            new_wf = await workflow_planner_service.plan_workflow_for_ticket(ticket_id)
+            if not new_wf:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Workflow cũ không có provenance và chưa thể tạo proposal mới từ revision hiện tại.",
+                )
+            return new_wf
 
         # Chưa có workflow -> Kích hoạt Planner tự động
         logger.info(f"✨ Chưa có workflow cho ticket #{ticket_id[:8]}, đang tự động lập plan...")
