@@ -61,6 +61,7 @@ import {
   CourseItem
 } from '../../types';
 import { toast } from 'sonner';
+import * as XLSX from 'xlsx';
 import { WorkflowBuilder } from './components/WorkflowBuilder';
 import { WorkflowValidationPanel } from './components/WorkflowValidationPanel';
 
@@ -142,6 +143,8 @@ export const UnifiedInboxPage: React.FC = () => {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [expandedContent, setExpandedContent] = useState<Record<string, boolean>>({});
   const [previewFile, setPreviewFile] = useState<{ filename: string; url: string } | null>(null);
+  const [spreadsheetPreview, setSpreadsheetPreview] = useState<{ sheetName: string; rows: string[][] } | null>(null);
+  const [spreadsheetPreviewError, setSpreadsheetPreviewError] = useState<string | null>(null);
 
   // Metadata Phả hệ & Khóa học
   const [schoolsList, setSchoolsList] = useState<HierarchySchoolItem[]>([]);
@@ -212,6 +215,32 @@ export const UnifiedInboxPage: React.FC = () => {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // This is deliberately a review-only preview. Attachment values are not
+  // promoted to workflow facts until immutable extraction snapshots exist.
+  useEffect(() => {
+    let cancelled = false;
+    const loadSpreadsheet = async () => {
+      setSpreadsheetPreview(null);
+      setSpreadsheetPreviewError(null);
+      if (!previewFile || !/\.xlsx?$/i.test(previewFile.filename)) return;
+      try {
+        const response = await fetch(previewFile.url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const workbook = XLSX.read(await response.arrayBuffer(), { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        if (!sheetName) throw new Error('Không có worksheet');
+        const rows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[sheetName], { header: 1, defval: '' })
+          .slice(0, 100)
+          .map(row => row.slice(0, 30).map(value => String(value ?? '')));
+        if (!cancelled) setSpreadsheetPreview({ sheetName, rows });
+      } catch {
+        if (!cancelled) setSpreadsheetPreviewError('Không thể đọc trực tiếp bảng tính này. Bạn vẫn có thể mở hoặc tải file để đối chiếu.');
+      }
+    };
+    loadSpreadsheet();
+    return () => { cancelled = true; };
+  }, [previewFile]);
 
   const filteredSchools = useMemo(() => {
     const q = schoolSearchQuery.trim().toLowerCase();
@@ -923,8 +952,8 @@ export const UnifiedInboxPage: React.FC = () => {
                 {attachments.length > 0 && (
                   <div className="flex flex-wrap gap-2 pt-0.5">
                     {attachments.map((file: any, idx: number) => {
-                      const isExcel = file.filename?.endsWith('.xlsx') || file.filename?.endsWith('.xls');
-                      const isImage = file.filename?.endsWith('.png') || file.filename?.endsWith('.jpg') || file.filename?.endsWith('.jpeg');
+                      const isExcel = /\.xlsx?$/i.test(file.filename || '');
+                      const isImage = /\.(png|jpe?g|webp|gif)$/i.test(file.filename || '');
 
                       return (
                         <button
@@ -1513,6 +1542,23 @@ export const UnifiedInboxPage: React.FC = () => {
                           </div>
                         )}
                       </div>
+
+                      {(activeWorkflow.steps || []).length > 0 && (
+                        <div className="rounded-2xl border border-sky-200 bg-sky-50/70 p-3.5 dark:border-sky-900/60 dark:bg-slate-900">
+                          <p className="mb-2 text-[10px] font-extrabold uppercase tracking-wider text-sky-800 dark:text-sky-300">
+                            Các bước đã đủ căn cứ để đề xuất (chưa thể chạy)
+                          </p>
+                          <ul className="space-y-1.5">
+                            {activeWorkflow.steps.map((step) => (
+                              <li key={step.step_id} className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-sky-700" />
+                                <span>{step.name}</span>
+                              </li>
+                            ))}
+                          </ul>
+                          <p className="mt-2 text-[11px] text-slate-500">Bổ sung các mục màu vàng, sau đó đánh giá lại để tạo proposal đầy đủ trước khi duyệt.</p>
+                        </div>
+                      )}
                     </div>
                   ) : activeWorkflow.status === 'no_action' ? (
                     /* ⚪ TRẠNG THÁI 3: NO_ACTION (KHÔNG THỰC HIỆN TỰ ĐỘNG) */
@@ -1693,10 +1739,34 @@ export const UnifiedInboxPage: React.FC = () => {
             <div className="flex items-center justify-center min-h-[250px] max-h-[60vh] overflow-auto bg-slate-50 dark:bg-slate-800/40 rounded-2xl p-4">
               {previewFile.filename.match(/\.(png|jpe?g|webp|gif)$/i) ? (
                 <img src={previewFile.url} alt={previewFile.filename} className="max-h-[55vh] object-contain rounded-xl shadow-sm" />
+              ) : previewFile.filename.match(/\.pdf$/i) ? (
+                <iframe title={`Xem trước ${previewFile.filename}`} src={previewFile.url} className="w-full h-[55vh] rounded-xl bg-white" />
+              ) : previewFile.filename.match(/\.xlsx?$/i) && spreadsheetPreview ? (
+                <div className="w-full self-stretch overflow-auto">
+                  <p className="mb-3 text-[11px] font-bold text-slate-500">Sheet: {spreadsheetPreview.sheetName}</p>
+                  <table className="w-full border-collapse text-left text-xs">
+                    <tbody>
+                      {spreadsheetPreview.rows.map((row, rowIndex) => (
+                        <tr key={rowIndex} className={rowIndex === 0 ? 'bg-slate-200 dark:bg-slate-700 font-bold' : 'border-t border-slate-200 dark:border-slate-700'}>
+                          {row.map((cell, cellIndex) => <td key={cellIndex} className="max-w-64 truncate px-2 py-1.5 text-slate-700 dark:text-slate-200">{cell}</td>)}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="mt-3 text-[11px] text-slate-500">Chỉ hiển thị tối đa 100 hàng và 30 cột của sheet đầu tiên; dữ liệu này không được dùng tự động để thực thi workflow.</p>
+                </div>
+              ) : previewFile.filename.match(/\.(docx?|pptx?)$/i) ? (
+                <div className="text-center space-y-3">
+                  <FileText className="w-12 h-12 text-sky-700 mx-auto" />
+                  <p className="text-xs text-slate-600 dark:text-slate-400 font-medium">Tài liệu Office cần trình xem của trình duyệt hoặc ứng dụng phù hợp.</p>
+                  <a href={`https://view.officeapps.live.com/op/view.aspx?src=${encodeURIComponent(previewFile.url)}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-sky-700 text-white text-xs font-bold hover:bg-sky-800 transition">
+                    <ExternalLink className="w-4 h-4" /> Mở bằng Office Viewer
+                  </a>
+                </div>
               ) : (
                 <div className="text-center space-y-3">
                   <FileSpreadsheetIcon className="w-12 h-12 text-emerald-600 mx-auto" />
-                  <p className="text-xs text-slate-600 dark:text-slate-400 font-medium">File tài liệu hoặc bảng tính không thể hiển thị trực tiếp.</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400 font-medium">{spreadsheetPreviewError || 'Định dạng này chưa có trình xem trực tiếp.'}</p>
                   <a
                     href={previewFile.url}
                     target="_blank"

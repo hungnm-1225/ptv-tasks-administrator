@@ -208,7 +208,9 @@ class WorkflowPlannerService:
                 "total_count": len(raw_users),
                 "student_emails": student_emails,
                 "collaborators": student_emails,
-                "role": "teacher" if has_teacher else "student",
+                # Unknown is intentional: never silently enrol a user as a
+                # student just because their role was not stated in the ticket.
+                "role": "teacher" if has_teacher else None,
                 "target_role": entities.get("git_role"),
                 "target_email": (
                     student_emails[0] if student_emails else entities.get("target_email")

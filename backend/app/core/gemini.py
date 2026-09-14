@@ -15,6 +15,7 @@ load_dotenv()
 import google.generativeai as genai
 from app.core.supabase import get_supabase_client
 from app.services.cof_excel_service import COFExcelService
+from app.services.request_fact_normalizer import augment_assessment_with_request_facts
 from app.models.intent import (
     IntentAssessment, 
     VerifiedIntentAssessment,
@@ -316,6 +317,13 @@ class AIEngine:
             missing_requirements=parsed_data.get("missing_requirements", []),
             warnings=parsed_data.get("warnings", []),
             raw_evidence_quotes=raw_evidence_quotes
+        )
+
+        # Exact-pattern facts cover structured lists that models frequently
+        # summarize correctly but fail to emit as typed entities.  They remain
+        # subject to the same Evidence Verifier below.
+        raw_assessment = augment_assessment_with_request_facts(
+            raw_assessment, raw_content, source_revision_id
         )
 
         # 3. CHỐT CHẶN AN TOÀN: ĐỐI SOÁT BẰNG CHỨNG THỰC TẾ QUA EVIDENCE VERIFIER
