@@ -12,7 +12,6 @@ from app.core.playwright_manager import acquire_playwright_slot, LOW_RAM_CHROMIU
 
 logger = logging.getLogger(__name__)
 
-# Giả lập Header Browser thật để vượt qua Nginx/WAF Anti-Bot
 BROWSER_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
@@ -70,13 +69,14 @@ class KeycloakService:
         return None
 
     # =========================================================================
-    # 🔍 BỘ CHUẨN HÓA DANH TÍNH: EMAIL / USERNAME ➔ 100% USERNAMES CHO GIT
+    # 🔍 BỘ CHUẨN HÓA & SÀNG LỌC DANH TÍNH CHẶT CHẼ (ZERO-ASSUMPTION)
     # =========================================================================
     async def resolve_identifiers_to_usernames(self, raw_identifiers: List[str]) -> Dict[str, Any]:
         """
-        Nhận danh sách Email/Username lẫn lộn, truy vấn Keycloak để chuyển đổi 100% thành USERNAME.
-        - Chạy bằng REST API siêu tốc (vài trăm mili-giây, không tốn slot Playwright).
-        - Trả về: danh sách usernames sạch, bảng ánh xạ và danh sách chưa nhận diện.
+        SÀNG LỌC TUYỆT ĐỐI QUA KEYCLOAK IDP:
+        - Bắt buộc kiểm tra tài khoản CÓ TỒN TẠI trên Keycloak hay không.
+        - Tìm thấy ➔ Trích xuất CANONICAL USERNAME chính xác.
+        - KHÔNG tìm thấy ➔ Bỏ vào danh sách 'not_found_in_keycloak' và LOẠI BỎ NGAY, không đoán mò!
         """
         cleaned_inputs = []
         for raw in raw_identifiers:
@@ -86,26 +86,23 @@ class KeycloakService:
 
         if not cleaned_inputs:
             return {
-                "resolved_usernames": [],
+                "valid_usernames": [],
                 "mapping": {},
-                "unresolved": [],
+                "not_found_in_keycloak": [],
                 "details": "Danh sách đầu vào rỗng."
             }
 
-        logger.info(f"🔄 [Keycloak Identity Resolver] Bắt đầu chuẩn hóa {len(cleaned_inputs)} định danh sang USERNAME...")
+        logger.info(f"🔄 [Keycloak Gateway] Bắt đầu thẩm định {len(cleaned_inputs)} tài khoản...")
 
         async with httpx.AsyncClient(verify=False, headers=BROWSER_HEADERS, timeout=15.0) as client:
             token = await self._get_admin_token(client)
             if not token:
-                logger.warning("⚠️ Không lấy được Keycloak Token để chuẩn hóa. Dùng fallback cắt tên email.")
-                # Fallback khẩn cấp nếu Keycloak tạm thời mất mạng:
-                # Nếu là email: lấy phần trước dấu '@', nếu là username giữ nguyên
-                fallback_usernames = [x.split("@")[0] if "@" in x else x for x in cleaned_inputs]
+                logger.error("❌ Không lấy được Keycloak Token để thẩm định danh tính!")
                 return {
-                    "resolved_usernames": fallback_usernames,
-                    "mapping": {x: (x.split("@")[0] if "@" in x else x) for x in cleaned_inputs},
-                    "unresolved": [],
-                    "details": "Fallback cục bộ (Không lấy được Keycloak Token)."
+                    "valid_usernames": [],
+                    "mapping": {},
+                    "not_found_in_keycloak": cleaned_inputs,
+                    "details": "Lỗi kết nối máy chủ Keycloak."
                 }
 
             auth_headers = {
@@ -115,73 +112,68 @@ class KeycloakService:
             }
             base_api = f"{self.raw_server_url}/auth/admin/realms/{self.target_realm}"
 
-            resolved_usernames: List[str] = []
+            valid_usernames: List[str] = []
             mapping: Dict[str, str] = {}
-            unresolved: List[str] = []
+            not_found_in_keycloak: List[str] = []
 
-            async def _resolve_single(ident: str):
+            async def _check_user_exists(ident: str):
                 try:
                     users = []
-                    # 1. Nếu có ký tự @ thì ưu tiên tìm theo Email
+                    # 1. Tìm theo Email chính xác
                     if "@" in ident:
                         resp = await client.get(f"{base_api}/users?email={ident}&exact=true", headers=auth_headers)
                         if resp.status_code == 200 and isinstance(resp.json(), list) and resp.json():
                             users = resp.json()
 
-                    # 2. Nếu không có @ hoặc tìm theo email không thấy, tìm theo Username
+                    # 2. Tìm theo Username chính xác
                     if not users:
                         resp = await client.get(f"{base_api}/users?username={ident}&exact=true", headers=auth_headers)
                         if resp.status_code == 200 and isinstance(resp.json(), list) and resp.json():
                             users = resp.json()
 
-                    # 3. Tìm kiếm mờ nới lỏng (loose search) nếu exact chưa ra
-                    if not users and "@" in ident:
+                    # 3. Tìm kiếm tổng quát nếu chưa thấy
+                    if not users:
                         resp = await client.get(f"{base_api}/users?search={ident}", headers=auth_headers)
                         if resp.status_code == 200 and isinstance(resp.json(), list):
                             for u in resp.json():
-                                if (u.get("email") or "").lower() == ident or (u.get("username") or "").lower() == ident:
+                                if (u.get("username") or "").lower() == ident or (u.get("email") or "").lower() == ident:
                                     users = [u]
                                     break
 
-                    if users:
-                        canonical_username = users[0].get("username")
-                        if canonical_username:
-                            return ident, canonical_username, True
-                    
-                    # Nếu là username sẵn rồi thì dù Keycloak không tìm thấy vẫn có thể là local user trên Git
-                    if "@" not in ident:
-                        return ident, ident, True
+                    # NẾU TỒN TẠI TRÊN KEYCLOAK
+                    if users and users[0].get("username"):
+                        canonical_username = users[0]["username"].strip()
+                        return ident, canonical_username, True
 
+                    # HOÀN TOÀN KHÔNG TỒN TẠI
                     return ident, None, False
 
                 except Exception as ex:
-                    logger.error(f"Lỗi khi tra cứu Keycloak cho {ident}: {ex}")
-                    return ident, (ident.split("@")[0] if "@" in ident else ident), False
+                    logger.error(f"Lỗi khi tra cứu Keycloak cho '{ident}': {ex}")
+                    return ident, None, False
 
             # Thực thi tra cứu song song siêu tốc
-            tasks = [_resolve_single(i) for i in cleaned_inputs]
+            tasks = [_check_user_exists(i) for i in cleaned_inputs]
             results = await asyncio.gather(*tasks)
 
-            for original, resolved, is_found in results:
-                if resolved:
-                    resolved_usernames.append(resolved)
-                    mapping[original] = resolved
-                    if not is_found and "@" in original:
-                        unresolved.append(original)
+            for original, resolved_username, exists in results:
+                if exists and resolved_username:
+                    valid_usernames.append(resolved_username)
+                    mapping[original] = resolved_username
                 else:
-                    unresolved.append(original)
+                    not_found_in_keycloak.append(original)
 
             logger.info(
-                f"✅ [Keycloak Resolver] Hoàn tất chuẩn hóa: "
-                f"{len(resolved_usernames)}/{len(cleaned_inputs)} USERNAMES hợp lệ. "
-                f"(Chưa nhận diện: {len(unresolved)})"
+                f"🛡️ [Keycloak Gateway] Kết quả thẩm định: "
+                f"{len(valid_usernames)} tài khoản HỢP LỆ, "
+                f"{len(not_found_in_keycloak)} tài khoản KHÔNG TỒN TẠI ({not_found_in_keycloak})"
             )
 
             return {
-                "resolved_usernames": list(dict.fromkeys(resolved_usernames)),  # Bỏ trùng lặp
+                "valid_usernames": list(dict.fromkeys(valid_usernames)),
                 "mapping": mapping,
-                "unresolved": unresolved,
-                "details": f"Đã chuẩn hóa {len(resolved_usernames)} USERNAMES thành công qua Keycloak."
+                "not_found_in_keycloak": not_found_in_keycloak,
+                "details": f"Đã xác thực thành công {len(valid_usernames)}/{len(cleaned_inputs)} tài khoản trên Keycloak."
             }
 
     async def execute_via_rest_api(
