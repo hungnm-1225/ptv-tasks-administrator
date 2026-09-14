@@ -1,11 +1,5 @@
 # backend/app/services/request_fact_normalizer.py
-"""Deterministic, evidence-backed facts for common Unified Inbox requests.
-
-- Lọc sạch email người gửi (sender), chỉ lấy danh sách tài khoản được yêu cầu.
-- Chuẩn hóa Unicode dấu gạch ngang (en-dash, em-dash).
-- Bóc tách chính xác tên và email giáo viên từ danh sách liệt kê.
-- Mặc định git_role = 'GUEST' nếu không có yêu cầu đặc biệt.
-"""
+"""Deterministic, evidence-backed facts for common Unified Inbox requests."""
 import re
 from typing import List, Optional
 
@@ -53,11 +47,10 @@ def augment_assessment_with_request_facts(
     source_revision_id: Optional[str],
     sender_email: Optional[str] = None
 ) -> IntentAssessment:
-    """Trích xuất sự thật vận hành có bằng chứng, bảo vệ chống thêm nhầm người gửi."""
     content = raw_content or ""
-    sender_clean = sender_email.strip().toLowerCase() if sender_email else ""
+    # SỬA LỖI PYTHON: Dùng .lower() thay vì .toLowerCase()
+    sender_clean = sender_email.strip().lower() if sender_email else ""
 
-    # 1. Nhận diện các ý định hành động
     account_evidence = _first_phrase_span(
         content,
         [r"(?:create|creation of|set up|setup)\s+(?:the\s+)?accounts?", r"tạo\s+(?:mới\s+)?tài\s+khoản"],
@@ -74,7 +67,6 @@ def augment_assessment_with_request_facts(
         source_revision_id,
     )
 
-    # 2. Định vị vùng danh sách tài khoản (Cắt bỏ phần header/lời chào để tránh vơ người gửi)
     list_anchor_match = re.search(
         r"(?:listed below|dưới đây|following teachers?|following users?|danh sách.*?:)", 
         content, 
@@ -83,7 +75,6 @@ def augment_assessment_with_request_facts(
     search_start_pos = list_anchor_match.end() if list_anchor_match else 0
     body_to_search = content[search_start_pos:]
 
-    # 3. Bóc tách danh sách người dùng thực sự được yêu cầu
     emails_in_list = list(EMAIL_RE.finditer(body_to_search))
     users = []
     spans = []
@@ -93,14 +84,13 @@ def augment_assessment_with_request_facts(
 
     for match in emails_in_list:
         email_str = match.group(0).strip()
-        # LOẠI TRỪ NGAY LẬP TỨC: Nếu email trùng với người gửi ticket thì bỏ qua!
+        # LOẠI TRỪ NGAY NẾU LÀ EMAIL CỦA SENDER
         if sender_clean and email_str.lower() == sender_clean:
             continue
 
         real_start = search_start_pos + match.start()
         real_end = search_start_pos + match.end()
 
-        # Tìm họ tên nằm ở dòng ngay trước email
         before_text = content[:real_start].rstrip()
         lines = [line.strip(" -\t*#") for line in before_text.splitlines() if line.strip(" -\t*#")]
         candidate_name = lines[-1] if lines else ""
@@ -117,7 +107,6 @@ def augment_assessment_with_request_facts(
     if users:
         _append_entity(assessment, ExtractedEntity(type="users", raw_value=users, confidence=1.0, evidence=spans))
 
-    # 4. Bóc tách khóa học & Chuẩn hóa tên khóa học
     raw_courses = [m.group(0).strip() for m in COURSE_RE.finditer(content)]
     normalized_courses = list(dict.fromkeys(
         re.sub(r"\s*[–—\-]\s*", " ", c) for c in raw_courses
@@ -127,7 +116,6 @@ def augment_assessment_with_request_facts(
         course_spans = [_span(content, m.start(), m.end(), source_revision_id) for m in COURSE_RE.finditer(content)]
         _append_entity(assessment, ExtractedEntity(type="courses", raw_value=normalized_courses, confidence=1.0, evidence=course_spans))
 
-    # 5. Khởi tạo thực thể Git Repositories và mặc định vai trò GUEST
     if repo_evidence:
         _append_entity(assessment, ExtractedEntity(
             type="repositories",
@@ -142,7 +130,6 @@ def augment_assessment_with_request_facts(
             evidence=[repo_evidence]
         ))
 
-    # 6. Gắn intent có bằng chứng
     if account_evidence and users:
         _append_intent(assessment, "create_accounts", account_evidence)
     if course_evidence and users and normalized_courses:
@@ -150,7 +137,8 @@ def augment_assessment_with_request_facts(
     if repo_evidence and users:
         _append_intent(assessment, "repository_access", repo_evidence)
 
+    # SỬA LỖI PYDANTIC: Dùng 'candidate_action' thay vì 'actionable'
     if any((account_evidence, course_evidence, repo_evidence)):
-        assessment.outcome = "actionable"
+        assessment.outcome = "candidate_action"
 
     return assessment

@@ -260,7 +260,8 @@ async def re_assess_ticket_intent(ticket_id: str):
         subject=ticket.get("subject", ""),
         raw_content=raw_content,
         source=ticket.get("source", "gmail"),
-        source_revision_id=revision_id
+        source_revision_id=revision_id,
+        sender_email=ticket.get("sender_email")
     )
 
     # 3. GHI NHẬN BẢN ĐÁNH GIÁ MỚI VÀO ticket_ai_assessments
