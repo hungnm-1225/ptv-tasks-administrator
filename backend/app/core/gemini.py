@@ -34,12 +34,17 @@ logger = logging.getLogger(__name__)
 
 # Danh sách model Gemini sắp xếp theo độ sẵn sàng cao nhất
 GEMINI_MODELS = [
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-8b",
     "gemini-3.8-flash",
     "gemini-3.7-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-pro-preview",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-3-flash-preview",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
 ]
 
 BRAIN_DIR = os.path.join(os.path.dirname(__file__), "../brain")
