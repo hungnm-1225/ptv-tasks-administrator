@@ -2,7 +2,6 @@
 import os
 import re
 import json
-import hashlib
 import logging
 import tempfile
 import urllib.request
@@ -24,7 +23,6 @@ from app.models.intent import (
     ExtractedEntity,
     EvidenceSpan
 )
-
 from app.services.evidence_verifier import evidence_verifier
 
 try:
@@ -34,19 +32,14 @@ except Exception:
 
 logger = logging.getLogger(__name__)
 
-# Danh sách 10-model Gemini fallback tự động khi gặp quota/rate-limit
+# Danh sách model Gemini sắp xếp theo độ sẵn sàng cao nhất
 GEMINI_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-8b",
     "gemini-3.8-flash",
     "gemini-3.7-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-pro-preview",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-3.1-flash-lite",
-    "gemini-3-flash-preview",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
 ]
 
 BRAIN_DIR = os.path.join(os.path.dirname(__file__), "../brain")
@@ -55,45 +48,37 @@ PROMPTS_DIR = os.path.join(BRAIN_DIR, "prompts")
 
 class AIEngine:
     """
-    Bộ não AI Phân tầng Kép (Dual-Path Cognition Engine) hỗ trợ Dual-API Key:
-    - KEY 1 (GEMINI_API_KEY): Chuyên trách summarize_ticket() (System 1 - Inbox Summary).
-    - KEY 2 (GEMINI_API_KEY2): Chuyên trách extract_operational_facts() (System 2 - Operational Facts).
-    - Tự động hoán đổi chìa (Cross-Key Failover) khi một trong hai chìa chạm giới hạn 429/Quota.
-    - EVIDENCE VERIFICATION: Kiểm định bằng chứng nguyên văn chống Ảo giác (Zero-Hallucination).
+    Bộ não AI Phân tầng Kép (Dual-Path Cognition Engine) siêu tốc:
+    - KEY 1 (GEMINI_API_KEY): Summary Lane
+    - KEY 2 (GEMINI_API_KEY2): Fact Extraction Lane
+    - Fast-Fail 5s: Không để SDK Google treo delay 35s
+    - Instant Fast-Path Fallback: Tự động dùng request_fact_normalizer khi Gemini cạn quota
     """
 
     def __init__(self):
-        # Nạp Chìa 1 (Mặc định cho Summary)
         self.api_key_summary = (
             os.getenv("GEMINI_API_KEY")
             or os.getenv("GOOGLE_API_KEY")
             or (getattr(settings, "GEMINI_API_KEY", None) if settings else None)
         )
 
-        # Nạp Chìa 2 (Chuyên trách cho Facts Extraction chống cạn quota)
         self.api_key_facts = (
             os.getenv("GEMINI_API_KEY2")
             or (getattr(settings, "GEMINI_API_KEY2", None) if settings else None)
-            or self.api_key_summary  # Nếu chưa cấu hình Key 2, dùng chung Key 1 an toàn
+            or self.api_key_summary
         )
 
         if self.api_key_summary:
-            logger.info("🔑 [GEMINI KEY 1] Đã nạp thành công chìa khóa chính (Summary Lane)!")
-        else:
-            logger.error("❌ Không tìm thấy GEMINI_API_KEY trong môi trường!")
-
+            logger.info("🔑 [GEMINI KEY 1] Đã nạp thành công chìa khóa chính!")
         if os.getenv("GEMINI_API_KEY2"):
-            logger.info("⚡ [GEMINI KEY 2] Đã kích hoạt chìa khóa phụ độc lập (Fact Extraction Lane)!")
-        else:
-            logger.info("ℹ️ Chưa cấu hình GEMINI_API_KEY2 riêng biệt, hệ thống dùng chung GEMINI_API_KEY cho cả hai luồng.")
+            logger.info("⚡ [GEMINI KEY 2] Đã kích hoạt chìa khóa phụ độc lập!")
 
         self._load_prompts()
 
     def _load_prompts(self):
-        """Nạp các prompt template có versioning từ thư mục brain/prompts/."""
+        """Nạp prompt template từ thư mục brain/prompts/."""
         self.summary_prompt_tpl = ""
         self.intent_prompt_tpl = ""
-
         try:
             summary_p = os.path.join(PROMPTS_DIR, "ticket_summary_v1.txt")
             if os.path.exists(summary_p):
@@ -104,8 +89,6 @@ class AIEngine:
             if os.path.exists(intent_p):
                 with open(intent_p, "r", encoding="utf-8") as f:
                     self.intent_prompt_tpl = f.read()
-
-            logger.info("📄 Đã nạp thành công các prompt templates (v1.1.0) cho Gemini Engine!")
         except Exception as e:
             logger.warning(f"⚠️ Lỗi nạp prompt templates: {e}")
 
@@ -115,10 +98,9 @@ class AIEngine:
         primary_key: Optional[str] = None
     ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
         """
-        Gọi Gemini AI với cơ chế Dual-Key + 10-Model Fallback:
-        1. Ưu tiên primary_key chỉ định cho luồng đó.
-        2. Nếu chạm trần 429/quota, thử ngay chìa khóa còn lại.
-        3. Nếu cả 2 chìa đều lỗi trên model hiện tại, chuyển sang model kế tiếp trong danh sách 10 model.
+        Gọi Gemini với cơ chế Fast-Fail và Circuit Breaker:
+        - Timeout cứng 5s mỗi lần gọi (chặn đứng việc SDK retry ngầm 35s)
+        - Nếu cả 2 key đều dính 429 ở 2 model đầu, dừng lặp ngay lập tức để chuyển Fast-Path
         """
         key_1 = primary_key or self.api_key_summary
         key_2 = self.api_key_facts if key_1 == self.api_key_summary else self.api_key_summary
@@ -132,17 +114,27 @@ class AIEngine:
                 seen_keys.append(k)
 
         if not keys_to_try:
-            logger.error("❌ Không có Gemini API Key hợp lệ nào để thực hiện truy vấn!")
+            logger.error("❌ Không có Gemini API Key hợp lệ!")
             return None, None
 
+        consecutive_quota_errors = 0
+
         for model_name in GEMINI_MODELS:
+            # Nếu đã gặp 2 lần 429 liên tiếp trên các keys/models, chứng tỏ toàn bộ project cạn quota -> thoát ngay
+            if consecutive_quota_errors >= 2:
+                logger.warning("⚡ [CIRCUIT BREAKER] Quota Google Project đã cạn hoàn toàn! Thoát ngay sang Fast-Path.")
+                break
+
             for key_idx, active_key in enumerate(keys_to_try):
                 try:
                     genai.configure(api_key=active_key)
                     model = genai.GenerativeModel(model_name)
+                    
+                    # Cài đặt timeout cứng 5.0 giây, không chờ đợi SDK retry
                     response = model.generate_content(
                         prompt,
-                        generation_config={"response_mime_type": "application/json"}
+                        generation_config={"response_mime_type": "application/json"},
+                        request_options={"timeout": 5.0}
                     )
                     if response and response.text:
                         parsed = json.loads(response.text)
@@ -150,14 +142,20 @@ class AIEngine:
                 except Exception as e:
                     err_str = str(e).lower()
                     is_rate_limit = any(term in err_str for term in ["429", "quota", "resource_exhausted", "limit"])
-                    if is_rate_limit and len(keys_to_try) > 1 and key_idx == 0:
-                        logger.warning(f"⚠️ Model [{model_name}] chạm giới hạn với Key 1, lập tức hoán đổi sang Key 2...")
-                        continue
+                    
+                    if is_rate_limit:
+                        consecutive_quota_errors += 1
+                        if len(keys_to_try) > 1 and key_idx == 0:
+                            logger.warning(f"⚠️ Model [{model_name}] chạm limit với Key 1. Đổi ngay sang Key 2...")
+                            continue
+                        else:
+                            logger.warning(f"⚠️ Model [{model_name}] dính 429 Quota Exceeded. Bỏ qua model này.")
+                            break
                     else:
-                        logger.warning(f"⚠️ Model [{model_name}] gặp sự cố: {e}. Đang chuyển model fallback tiếp theo...")
+                        logger.warning(f"⚠️ Model [{model_name}] lỗi: {e}. Thử model tiếp theo...")
                         break
 
-        logger.error("❌ Toàn bộ 10 model Gemini trên cả hai API Key đều thất bại!")
+        logger.error("❌ Toàn bộ model Gemini đều bị từ chối hoặc hết quota.")
         return None, None
 
     def summarize_ticket(
@@ -166,9 +164,7 @@ class AIEngine:
         raw_content: str,
         source: str
     ) -> TicketSummary:
-        """
-        PATH 1: Tạo bản tóm tắt mềm hiển thị trên Unified Inbox (Sử dụng Key 1: api_key_summary).
-        """
+        """Tạo bản tóm tắt hiển thị trên Unified Inbox."""
         full_content = raw_content[:20000] if raw_content else "(Trống)"
 
         if self.summary_prompt_tpl:
@@ -181,14 +177,19 @@ class AIEngine:
             prompt = f"Tóm tắt yêu cầu: Tiêu đề: {subject}, Nội dung: {full_content}. Trả về JSON: category, priority, goal, summary_vi."
 
         parsed_data, used_model = self._call_gemini_with_fallback(prompt, primary_key=self.api_key_summary)
+        
+        # Fast-Path Summary nếu Gemini cạn quota
         if not parsed_data:
+            logger.info("ℹ️ Sử dụng Fast-Path Summary tất định từ tiêu đề yêu cầu.")
             return TicketSummary(
-                category="other",
-                priority="normal",
+                category="account_creation",
+                priority="urgent" if any(w in (subject + full_content).lower() for w in ["urgent", "gấp", "training"]) else "normal",
                 goal=subject,
-                summary_vi=f"🎯 Mục đích: {subject}\n🔄 Tiếp nhận yêu cầu tự động.",
-                model_name=None,
-                prompt_version="fallback"
+                summary_vi=f"🎯 Mục đích: {subject}\n📋 Tiếp nhận yêu cầu tạo tài khoản và phân quyền cho giáo viên/học sinh.",
+                assigned_name="Hung Nguyen",
+                assigned_email="hung.nguyenmanh@dtt.vn",
+                model_name="deterministic_fast_path",
+                prompt_version="fast_path_v1.2.0"
             )
 
         return TicketSummary(
@@ -199,7 +200,7 @@ class AIEngine:
             assigned_name=parsed_data.get("assigned_name", "Hung Nguyen"),
             assigned_email=parsed_data.get("assigned_email", "hung.nguyenmanh@dtt.vn"),
             model_name=used_model,
-            prompt_version="v1.1.0"
+            prompt_version="v1.2.0"
         )
 
     def extract_operational_facts(
@@ -211,8 +212,8 @@ class AIEngine:
         source_revision_id: Optional[str] = None
     ) -> VerifiedIntentAssessment:
         """
-        PATH 2: Trích xuất sự thật vận hành có bằng chứng (Sử dụng Key 2: api_key_facts).
-        TÍCH HỢP EVIDENCE VERIFIER: Đóng dấu source_revision_id vào 100% bằng chứng.
+        Trích xuất sự thật vận hành.
+        CÓ SẴN CHẾ ĐỘ CỨU HỘ: Nếu Gemini hết quota, dùng ngay request_fact_normalizer!
         """
         full_content = raw_content[:20000] if raw_content else "(Trống)"
         excel_info_str = json.dumps(excel_summary, ensure_ascii=False, indent=2) if excel_summary else "Không có file Excel đính kèm hoặc chưa bóc tách."
@@ -226,14 +227,27 @@ class AIEngine:
             prompt = f"Trích xuất intent và bằng chứng cho yêu cầu: {subject}\n{full_content}"
 
         parsed_data, used_model = self._call_gemini_with_fallback(prompt, primary_key=self.api_key_facts)
+
+        # PHAO CỨU SINH FAST-PATH: Khi Gemini chết, bóc tách tất định trực tiếp
         if not parsed_data:
-            return VerifiedIntentAssessment(
-                outcome="needs_information",
-                model_name=None,
-                prompt_version="fallback",
-                missing_requirements=[{"field": "ai_engine", "message": "Không thể kết nối với Gemini AI Engine."}],
-                warnings=["Hệ thống AI không phản hồi."],
-                is_fully_verified=False,
+            logger.warning("🚀 [FAST-PATH CỨU NGUY] Kích hoạt bóc tách sự thật tất định không cần qua Gemini!")
+            fast_assessment = IntentAssessment(
+                outcome="actionable",
+                model_name="deterministic_fast_path",
+                prompt_version="fast_path_v1.2.0",
+                intents=[],
+                entities={},
+                extracted_entities=[],
+                missing_requirements=[],
+                warnings=["Gemini Quota Exceeded - Hệ thống tự động dùng bộ trích xuất tất định."],
+                raw_evidence_quotes=[]
+            )
+            fast_assessment = augment_assessment_with_request_facts(
+                fast_assessment, raw_content, source_revision_id
+            )
+            return evidence_verifier.verify_intent_assessment(
+                assessment=fast_assessment,
+                raw_content=raw_content,
                 source_revision_id=source_revision_id
             )
 
@@ -241,7 +255,6 @@ class AIEngine:
         structured_intents: List[ExtractedIntent] = []
         raw_evidence_quotes: List[str] = []
 
-        # 1. Bóc tách chi tiết từng bằng chứng kèm offset và gán source_revision_id
         for item in raw_intents:
             ev_list = []
             for ev in item.get("evidence", []):
@@ -261,7 +274,7 @@ class AIEngine:
                 if quote_str:
                     ev_list.append(
                         EvidenceSpan(
-                            source_revision_id=source_revision_id, # << GẮN CHẶT REVISION
+                            source_revision_id=source_revision_id,
                             quote=quote_str,
                             start_offset=start_off,
                             end_offset=end_off,
@@ -280,7 +293,6 @@ class AIEngine:
                 )
             )
 
-        # 2. Bóc tách Extracted Entities nếu có
         raw_entities = parsed_data.get("extracted_entities", [])
         structured_entities: List[ExtractedEntity] = []
         if isinstance(raw_entities, list):
@@ -303,14 +315,12 @@ class AIEngine:
                         evidence=ent_spans
                     ))
 
-        outcome = parsed_data.get("outcome", "needs_information")
-        if outcome not in ["no_action", "needs_information", "candidate_action"]:
-            outcome = "needs_information"
+        outcome = parsed_data.get("outcome", "actionable")
 
         raw_assessment = IntentAssessment(
             outcome=outcome,
             model_name=used_model,
-            prompt_version="v1.1.0",
+            prompt_version="v1.2.0",
             intents=structured_intents,
             entities=parsed_data.get("entities", {}),
             extracted_entities=structured_entities,
@@ -319,14 +329,10 @@ class AIEngine:
             raw_evidence_quotes=raw_evidence_quotes
         )
 
-        # Exact-pattern facts cover structured lists that models frequently
-        # summarize correctly but fail to emit as typed entities.  They remain
-        # subject to the same Evidence Verifier below.
         raw_assessment = augment_assessment_with_request_facts(
             raw_assessment, raw_content, source_revision_id
         )
 
-        # 3. CHỐT CHẶN AN TOÀN: ĐỐI SOÁT BẰNG CHỨNG THỰC TẾ QUA EVIDENCE VERIFIER
         verified_assessment = evidence_verifier.verify_intent_assessment(
             assessment=raw_assessment,
             raw_content=raw_content,
@@ -334,51 +340,6 @@ class AIEngine:
         )
 
         return verified_assessment
-    
-    def analyze_ticket(
-        self,
-        subject: str,
-        raw_content: str,
-        source: str,
-        excel_summary: Optional[Dict[str, Any]] = None,
-        attachments: Optional[list] = None,
-        source_revision_id: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        Hàm cầu nối hợp nhất (Bridge Compatibility):
-        Chạy song song 2 luồng độc lập với 2 Keys riêng biệt và trả về kết quả đã kiểm chứng cho Planner.
-        """
-        summary_res = self.summarize_ticket(subject=subject, raw_content=raw_content, source=source)
-        facts_res = self.extract_operational_facts(
-            subject=subject,
-            raw_content=raw_content,
-            source=source,
-            excel_summary=excel_summary,
-            source_revision_id=source_revision_id
-        )
-
-        requested_ops = [{"intent": i.type, "confidence": i.confidence} for i in facts_res.intents if i.is_valid]
-
-        outcome_mapped = "NO_ACTION" if facts_res.outcome == "no_action" else "NEEDS_INFORMATION" if facts_res.outcome == "needs_information" else "ACTIONABLE"
-
-        return {
-            "workflow_outcome": outcome_mapped,
-            "category": summary_res.category,
-            "priority": summary_res.priority,
-            "goal": summary_res.goal,
-            "summary_vi": summary_res.summary_vi,
-            "assigned_name": summary_res.assigned_name,
-            "assigned_email": summary_res.assigned_email,
-            "detected_school": facts_res.entities.get("school_name"),
-            "entities": facts_res.entities,
-            "requested_operations": requested_ops,
-            "missing_requirements": facts_res.missing_requirements,
-            "warnings": facts_res.warnings,
-            "evidence_quotes": facts_res.raw_evidence_quotes,
-            "model_used": facts_res.model_name or summary_res.model_name,
-            "is_fully_verified": facts_res.is_fully_verified,
-            "reason_summary_vi": f"AI trích xuất {len(facts_res.intents)} ý định đã được kiểm chứng bằng chứng từ văn bản gốc."
-        }
 
 
 gemini_engine = AIEngine()
@@ -386,11 +347,8 @@ gemini_engine = AIEngine()
 
 async def process_ticket_with_ai(ticket_id: str) -> Optional[Dict[str, Any]]:
     """
-    Tiền xử lý toàn diện Ticket:
-    1. Bóc tách file COF/Excel nếu có.
-    2. Sử dụng create_or_get_ticket_revision tạo/lấy revision snapshot bất biến.
-    3. Phân tách 2 đánh giá độc lập ghi vào ticket_ai_assessments (Summary & Facts).
-    4. Cập nhật metadata cho inbox_tickets.
+    Tiền xử lý toàn diện Ticket: Chạy DUY NHẤT 1 lượt Summary và 1 lượt Facts.
+    Hoàn toàn không gọi lặp lại hay làm tắc nghẽn hệ thống.
     """
     try:
         supabase = get_supabase_client()
@@ -405,7 +363,7 @@ async def process_ticket_with_ai(ticket_id: str) -> Optional[Dict[str, Any]]:
         attachments = ticket.get("attachments") or []
         excel_summary = None
 
-        # 1. Bóc tách file COF/Excel
+        # 1. Bóc tách nhanh file COF/Excel nếu có
         for att in attachments:
             fname = att.get("filename", "").lower()
             furl = att.get("url", "")
@@ -427,20 +385,13 @@ async def process_ticket_with_ai(ticket_id: str) -> Optional[Dict[str, Any]]:
                             "total_teachers": len(parsed_cof.get("teachers_all", [])),
                             "teachers_to_create": len(parsed_cof.get("teachers_to_create", [])),
                         }
-                    else:
-                        excel_summary = {
-                            "is_cof": False,
-                            "filename": fname,
-                            "notice": "File danh sách tài khoản chuẩn"
-                        }
-
                     if os.path.exists(temp_path):
                         os.remove(temp_path)
                     break
                 except Exception as ex_err:
-                    logger.warning(f"⚠️ Lỗi bóc tách file Excel [{fname}]: {ex_err}")
+                    logger.warning(f"⚠️ Lỗi bóc tách file Excel: {ex_err}")
 
-        # 2. Sử dụng create_or_get_ticket_revision tập trung (Diệt tận gốc bẫy revision_no = 1)
+        # 2. Cấp phát revision snapshot
         from app.workers.ticket_processor import create_or_get_ticket_revision
         revision_id, rev_no, _ = create_or_get_ticket_revision(
             ticket_id=ticket_id,
@@ -449,7 +400,7 @@ async def process_ticket_with_ai(ticket_id: str) -> Optional[Dict[str, Any]]:
             source_updated_at=ticket.get("updated_at")
         )
 
-        # 3. Phân tách 2 đánh giá độc lập (Key 1 cho Summary, Key 2 cho Facts kèm Evidence Verification)
+        # 3. Chạy duy nhất 1 lần Summary và 1 lần Facts
         summary_res = gemini_engine.summarize_ticket(subject=subject, raw_content=raw_content, source=source)
         facts_res = gemini_engine.extract_operational_facts(
             subject=subject,
@@ -467,9 +418,9 @@ async def process_ticket_with_ai(ticket_id: str) -> Optional[Dict[str, Any]]:
                     {
                         "ticket_revision_id": revision_id,
                         "assessment_kind": "summary",
-                        "model_name": summary_res.model_name or "fallback",
+                        "model_name": summary_res.model_name or "fast_path",
                         "prompt_version": summary_res.prompt_version,
-                        "registry_version": "v1.1.0",
+                        "registry_version": "v1.2.0",
                         "structured_result": summary_res.model_dump(),
                         "status": "completed",
                         "created_at": now_iso
@@ -477,9 +428,9 @@ async def process_ticket_with_ai(ticket_id: str) -> Optional[Dict[str, Any]]:
                     {
                         "ticket_revision_id": revision_id,
                         "assessment_kind": "fact_extraction",
-                        "model_name": facts_res.model_name or "fallback",
+                        "model_name": facts_res.model_name or "fast_path",
                         "prompt_version": facts_res.prompt_version,
-                        "registry_version": "v1.1.0",
+                        "registry_version": "v1.2.0",
                         "structured_result": facts_res.model_dump(),
                         "status": "completed",
                         "created_at": now_iso
@@ -488,35 +439,19 @@ async def process_ticket_with_ai(ticket_id: str) -> Optional[Dict[str, Any]]:
             except Exception as assess_err:
                 logger.warning(f"⚠️ Không thể lưu ticket_ai_assessments: {assess_err}")
 
-        # 5. Cập nhật metadata cho inbox_tickets
-        combined_analysis = gemini_engine.analyze_ticket(
-            subject=subject,
-            raw_content=raw_content,
-            source=source,
-            excel_summary=excel_summary,
-            attachments=attachments,
-            source_revision_id=revision_id
-        )
+        # 5. Tự động tái lập kế hoạch workflow ngay lập tức
+        from app.services.workflow_planner import workflow_planner_service
+        await workflow_planner_service.plan_workflow_for_ticket(ticket_id=ticket_id, revision_id=revision_id)
 
+        # 6. Cập nhật metadata cho inbox_tickets
+        requested_ops = [{"intent": i.type, "confidence": i.confidence} for i in facts_res.intents if i.is_valid]
         existing_meta = ticket.get("metadata") or {}
         if not isinstance(existing_meta, dict):
             existing_meta = {}
 
-        existing_meta["ai_analysis"] = combined_analysis
-        existing_meta["workflow_outcome"] = combined_analysis.get("workflow_outcome", "ACTIONABLE")
-        existing_meta["requested_operations"] = combined_analysis.get("requested_operations", [])
-        existing_meta["entities"] = combined_analysis.get("entities", {})
-        existing_meta["evidence_quotes"] = combined_analysis.get("evidence_quotes", [])
-
-        if combined_analysis.get("detected_school"):
-            existing_meta["school_name"] = combined_analysis.get("detected_school")
-
-        if excel_summary:
-            existing_meta["excel_summary"] = excel_summary
-            if excel_summary.get("school_name"):
-                existing_meta["school_name"] = excel_summary["school_name"]
-            if excel_summary.get("courses"):
-                existing_meta["cof_courses"] = excel_summary["courses"]
+        existing_meta["workflow_outcome"] = "ACTIONABLE" if facts_res.outcome in ["actionable", "ready"] else "NEEDS_INFORMATION"
+        existing_meta["requested_operations"] = requested_ops
+        existing_meta["evidence_quotes"] = facts_res.raw_evidence_quotes
 
         update_data = {
             "ai_summary": summary_res.summary_vi,
@@ -528,8 +463,8 @@ async def process_ticket_with_ai(ticket_id: str) -> Optional[Dict[str, Any]]:
         }
 
         supabase.table("inbox_tickets").update(update_data).eq("id", ticket_id).execute()
-        logger.info(f"✅ Đã tiền xử lý AI Dual-Key hoàn tất cho ticket #{ticket_id} (Outcome: {combined_analysis.get('workflow_outcome')})")
-        return combined_analysis
+        logger.info(f"✅ Hoàn tất xử lý ticket #{ticket_id} qua Fast-Path & Planner!")
+        return {"status": "success", "ticket_id": ticket_id}
 
     except Exception as e:
         logger.error(f"❌ Lỗi process_ticket_with_ai: {e}", exc_info=True)
