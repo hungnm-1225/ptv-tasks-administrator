@@ -279,8 +279,9 @@ class WorkflowPlannerService:
                     intent_missing = True
 
                 elif req == "repositories" and not entities.get("repository_url"):
+                    missing_field = "repositories" if not entities.get("repositories") else "repository_url"
                     missing_requirements.append({
-                        "field": "repository_url",
+                        "field": missing_field,
                         "intent": intent_type,
                         "message": "Thiếu URL Repository Git đã được kiểm chứng; hệ thống không tự suy diễn URL từ tên repo."
                     })
