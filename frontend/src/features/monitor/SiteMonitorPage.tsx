@@ -26,10 +26,13 @@ import { toast } from 'sonner';
 // ─── Types ──────────────────────────────────────────────────────────────────
 interface HourlyHistoryItem {
   hour: string;
-  status: 'UP' | 'DOWN' | 'DEGRADED';
-  latency_ms?: number;
+  status: 'UP' | 'DOWN' | 'WARNING' | 'DEGRADED';
+  latency_ms?: number | null;
   incident_duration?: string;
+  http_code?: number;
+  has_data?: boolean;
 }
+
 
 interface MonitoredSite {
   id: string;
@@ -97,7 +100,7 @@ function formatDate(isoOrTs: string | number): string {
   } catch { return String(isoOrTs); }
 }
 
-// ─── ĐỒ THỊ ĐƯỜNG PING & TÍN HIỆU SẬP (INTERACTIVE SVG LATENCY LINE CHART) ──
+// ─── ĐỒ THỊ PING NHẤP NHÔ & VÙNG SẬP ĐỎ LÒM (DOWNDETECTOR & JANITOR AI STYLE) ──
 interface UptimeLineChartProps {
   siteId: string;
   history?: HourlyHistoryItem[];
@@ -120,128 +123,199 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
     y: number;
   } | null>(null);
 
-  // Chuẩn hóa 24 điểm dữ liệu theo 24 giờ
+  // 1. Dữ liệu 24 giờ thực tế - TUYỆT ĐỐI KHÔNG DÙNG FAKE FALLBACK 150MS!
   const points: HourlyHistoryItem[] = useMemo(() => {
     if (history && history.length === 24) return history;
     const nowHour = new Date().getHours();
     return Array.from({ length: 24 }, (_, i) => {
       const h = (nowHour - (23 - i) + 24) % 24;
+      const isCurrent = i === 23;
       return {
         hour: `${h.toString().padStart(2, '0')}:00`,
         status: 'UP' as const,
-        latency_ms: currentLatency > 0 ? currentLatency : 150,
+        latency_ms: isCurrent && currentLatency > 0 ? currentLatency : null,
+        has_data: isCurrent && currentLatency > 0,
       };
     });
   }, [history, currentLatency]);
 
   if (loading && history.length === 0) {
     return (
-      <div className="h-14 w-full rounded-xl bg-slate-100 dark:bg-slate-800/50 animate-pulse flex items-center justify-center">
-        <span className="text-[11px] text-slate-400 font-mono">Đang tải biểu đồ độ trễ...</span>
+      <div className="h-16 w-full rounded-xl bg-slate-100 dark:bg-slate-800/50 animate-pulse flex items-center justify-center">
+        <span className="text-[11px] text-slate-400 font-mono">Đang tải biểu đồ độ trễ hạ tầng...</span>
       </div>
     );
   }
 
-  // Kích thước khung vẽ SVG
-  const width = 480;
-  const height = 54;
-  const paddingX = 8;
+  // 2. Kích thước khung vẽ SVG
+  const width = 500;
+  const height = 68;
+  const paddingX = 10;
   const paddingTop = 8;
-  const paddingBottom = 10;
+  const paddingBottom = 12;
 
-  // Tính dải min/max latency để scale tọa độ Y
-  const latencies = points.map(p => p.latency_ms || 100);
-  const minLat = Math.min(...latencies, 50);
-  const maxLat = Math.max(...latencies, 400);
+  // 3. Tính dải động Min/Max Latency từ các điểm đo thật
+  const validLatencies = points
+    .map(p => p.latency_ms)
+    .filter((l): l is number => typeof l === 'number' && l > 0);
 
-  // Tạo tọa độ (x, y) cho từng điểm giờ
+  const minLat = validLatencies.length > 0 ? Math.min(...validLatencies) : 50;
+  const maxLat = validLatencies.length > 0 ? Math.max(...validLatencies, minLat + 100) : 400;
+
+  // 4. Tính toán tọa độ (x, y) - Tạo đỉnh sóng chân thực
   const coords = points.map((p, i) => {
     const x = paddingX + (i / 23) * (width - paddingX * 2);
-    const lat = p.status === 'DOWN' ? maxLat : (p.latency_ms || minLat);
-    const normalized = (lat - minLat) / (maxLat - minLat || 1);
-    // Latency càng cao thì Y càng gần đỉnh (giá trị số Y càng nhỏ)
-    const y = height - paddingBottom - normalized * (height - paddingTop - paddingBottom);
+    let y: number;
+
+    if (p.status === 'DOWN') {
+      // Khi SẬP: Điểm bắn vọt lên đỉnh cao nhất giống Downdetector báo động đỏ!
+      y = paddingTop + 2;
+    } else if (p.latency_ms && p.latency_ms > 0) {
+      // Khi bình thường: Scale nhấp nhô theo tỷ lệ Ping
+      const normalized = (p.latency_ms - minLat) / (maxLat - minLat || 1);
+      // Giới hạn trong khoảng [paddingTop + 6, height - paddingBottom]
+      y = (height - paddingBottom) - normalized * (height - paddingTop - paddingBottom - 8);
+    } else {
+      // Khi chưa có mẫu đo: Nằm êm đềm ở đường đáy cơ sở
+      y = height - paddingBottom;
+    }
+
     return { x, y, item: p, index: i };
   });
 
-  // Vẽ đường cong Bezier mềm mại (SVG path)
-  let linePath = `M ${coords[0].x} ${coords[0].y}`;
-  for (let i = 0; i < coords.length - 1; i++) {
-    const current = coords[i];
-    const next = coords[i + 1];
-    const cpX1 = current.x + (next.x - current.x) / 2;
-    const cpY1 = current.y;
-    const cpX2 = current.x + (next.x - current.x) / 2;
-    const cpY2 = next.y;
-    linePath += ` C ${cpX1} ${cpY1}, ${cpX2} ${cpY2}, ${next.x} ${next.y}`;
-  }
+  // 5. Thuật toán Cardinal Spline tạo đường cong uốn lượn mềm mại như Janitor AI
+  const getSplinePath = (pts: typeof coords) => {
+    if (pts.length < 2) return '';
+    let path = `M ${pts[0].x} ${pts[0].y}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[Math.max(0, i - 1)];
+      const p1 = pts[i];
+      const p2 = pts[i + 1];
+      const p3 = pts[Math.min(pts.length - 1, i + 2)];
 
-  // Vẽ vùng nền Gradient dưới đường cong
+      // Hệ số nội suy mượt mà
+      const cp1x = p1.x + (p2.x - p0.x) / 5.5;
+      const cp1y = p1.y + (p2.y - p0.y) / 5.5;
+      const cp2x = p2.x - (p3.x - p1.x) / 5.5;
+      const cp2y = p2.y - (p3.y - p1.y) / 5.5;
+
+      path += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+    }
+    return path;
+  };
+
+  const linePath = getSplinePath(coords);
   const areaPath = `${linePath} L ${coords[coords.length - 1].x} ${height} L ${coords[0].x} ${height} Z`;
 
+  // Kiểm tra xem có khung giờ nào bị DOWN không
   const hasAnyDown = points.some(p => p.status === 'DOWN');
 
   return (
     <div className="space-y-1.5 select-none relative">
-      <div className="relative w-full h-14 overflow-visible">
+      <div className="relative w-full h-16 overflow-visible">
         <svg
           viewBox={`0 0 ${width} ${height}`}
           className="w-full h-full overflow-visible"
           preserveAspectRatio="none"
         >
           <defs>
-            {/* Gradient màu cho line bình thường (Xanh) */}
-            <linearGradient id={`grad-up-${siteId}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#10b981" stopOpacity="0.25" />
-              <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
+            {/* 🌈 GRADIENT ĐA SẮC THEO TRỤC X: ĐOẠN NÀO DOWN THÌ ĐỎ LÒM, BÌNH THƯỜNG MÀU XANH */}
+            <linearGradient id={`gradient-x-${siteId}`} x1="0%" y1="0%" x2="100%" y2="0%">
+              {points.map((p, idx) => {
+                const offset = `${((idx / 23) * 100).toFixed(1)}%`;
+                let stopColor = '#10b981'; // Xanh Emerald mát mắt
+                if (p.status === 'DOWN') {
+                  stopColor = '#f43f5e'; // Đỏ rực cảnh báo sự cố!
+                } else if (p.status === 'WARNING' || (p.latency_ms && p.latency_ms > 450)) {
+                  stopColor = '#f59e0b'; // Vàng cam khi giật lag
+                }
+                return <stop key={idx} offset={offset} stopColor={stopColor} />;
+              })}
             </linearGradient>
 
-            {/* Gradient màu khi có sự cố sập (Đỏ) */}
-            <linearGradient id={`grad-down-${siteId}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.3" />
-              <stop offset="100%" stopColor="#f43f5e" stopOpacity="0.0" />
+            {/* Mặt nạ làm mờ Area Fill từ trên xuống đáy */}
+            <linearGradient id={`fade-mask-${siteId}`} x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="#ffffff" stopOpacity="0.45" />
+              <stop offset="60%" stopColor="#ffffff" stopOpacity="0.15" />
+              <stop offset="100%" stopColor="#ffffff" stopOpacity="0.0" />
             </linearGradient>
+
+            <mask id={`area-mask-${siteId}`}>
+              <rect x="0" y="0" width={width} height={height} fill={`url(#fade-mask-${siteId})`} />
+            </mask>
           </defs>
 
-          {/* Vùng bóng đổ mờ dưới đường biểu đồ */}
-          <path
-            d={areaPath}
-            fill={hasAnyDown ? `url(#grad-down-${siteId})` : `url(#grad-up-${siteId})`}
+          {/* DẢI CỘT ĐỎ LÒM NỀN PHÍA SAU CHO CÁC KHUNG GIỜ SẬP (DOWNTIME ZONES) */}
+          {coords.map((c, i) => {
+            if (c.item.status !== 'DOWN') return null;
+            const colWidth = (width - paddingX * 2) / 23;
+            return (
+              <rect
+                key={`down-band-${i}`}
+                x={c.x - colWidth / 2}
+                y="0"
+                width={colWidth}
+                height={height}
+                className="fill-rose-500/15 dark:fill-rose-500/25 animate-pulse pointer-events-none"
+              />
+            );
+          })}
+
+          {/* ĐƯỜNG CHỈ TIÊU CƠ SỞ (BASELINE DASHED LINE NHƯ ẢNH MẪU CỦA ANH) */}
+          <line
+            x1={paddingX}
+            y1={height - paddingBottom}
+            x2={width - paddingX}
+            y2={height - paddingBottom}
+            stroke="currentColor"
+            className="text-slate-200 dark:text-slate-800"
+            strokeWidth="1"
+            strokeDasharray="4 4"
           />
 
-          {/* Sợi dây biểu đồ chính */}
+          {/* VÙNG ĐỔ BÓNG NỀN GRADIENT MỀM MẠI (AREA FILL NHƯ JANITOR AI) */}
+          <path
+            d={areaPath}
+            fill={`url(#gradient-x-${siteId})`}
+            mask={`url(#area-mask-${siteId})`}
+          />
+
+          {/* ĐƯỜNG CONG PING CHÍNH (UỐN LƯỢN & ĐỔI MÀU TỨC THÌ TẠI ĐIỂM SẬP) */}
           <path
             d={linePath}
             fill="none"
-            stroke={hasAnyDown ? '#f43f5e' : '#10b981'}
-            strokeWidth="2"
+            stroke={`url(#gradient-x-${siteId})`}
+            strokeWidth="2.5"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
 
-          {/* Các điểm nút (Nodes) tương tác từng giờ */}
+          {/* CÁC ĐIỂM NÚT (DATA NODES) TƯƠNG TÁC THỜI GIAN THỰC */}
           {coords.map((c, i) => {
             const isDown = c.item.status === 'DOWN';
+            const isHovered = hoveredPoint?.index === i;
             return (
               <g key={i}>
-                {/* Vùng đệm bắt sự kiện hover rộng hơn */}
+                {/* Vùng cảm ứng hover rộng rãi */}
                 <circle
                   cx={c.x}
                   cy={c.y}
-                  r="6"
+                  r="8"
                   className="fill-transparent cursor-pointer"
                   onMouseEnter={() => setHoveredPoint(c)}
                   onMouseLeave={() => setHoveredPoint(null)}
                 />
 
-                {/* Điểm hiển thị thực tế */}
+                {/* Điểm nút hiển thị thực */}
                 <circle
                   cx={c.x}
                   cy={c.y}
-                  r={isDown ? '3.5' : '2'}
-                  className={`pointer-events-none transition-all duration-150 ${isDown
-                    ? 'fill-rose-500 stroke-white dark:stroke-slate-900 stroke-2'
-                    : 'fill-emerald-500 opacity-70 hover:opacity-100'
+                  r={isDown ? (isHovered ? '4.5' : '3.5') : (isHovered ? '3.5' : '2')}
+                  className={`pointer-events-none transition-all duration-200 ${isDown
+                    ? 'fill-rose-500 stroke-white dark:stroke-slate-900 stroke-2 ring-4 ring-rose-500/30'
+                    : c.item.has_data
+                      ? 'fill-emerald-500 dark:fill-emerald-400'
+                      : 'fill-slate-300 dark:fill-slate-700 opacity-40'
                     }`}
                 />
               </g>
@@ -249,7 +323,7 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
           })}
         </svg>
 
-        {/* Tooltip định vị thông minh: Chống tràn mép sidebar & format siêu gọn */}
+        {/* TOOLTIP HIỆN PING & THÔNG TIN SỰ CỐ SIÊU CHI TIẾT */}
         {hoveredPoint && (
           <div
             className={`absolute bottom-full mb-1 z-30 pointer-events-none transition-transform duration-75 ${hoveredPoint.index < 3
@@ -264,16 +338,25 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
                 : undefined
             }
           >
-            <div className="bg-slate-900/95 dark:bg-slate-950 text-white text-[11px] font-mono rounded-lg px-2.5 py-1.5 shadow-2xl border border-slate-700 whitespace-nowrap flex items-center gap-1.5 backdrop-blur-md">
-              <span className="font-semibold text-slate-300">{hoveredPoint.item.hour}</span>
-              <span className="text-slate-500">—</span>
-              {hoveredPoint.item.status === 'DOWN' ? (
-                <span className="text-rose-400 font-bold">
-                  🔴 Lỗi {hoveredPoint.item.incident_duration ? `(${hoveredPoint.item.incident_duration})` : ''}
-                </span>
-              ) : (
-                <span className="text-emerald-400 font-bold">
-                  🟢 Ổn định {hoveredPoint.item.latency_ms ? `(${hoveredPoint.item.latency_ms}ms)` : ''}
+            <div className="bg-slate-900/95 dark:bg-slate-950 text-white text-[11px] font-mono rounded-xl px-3 py-2 shadow-2xl border border-slate-700 whitespace-nowrap flex flex-col gap-0.5 backdrop-blur-md">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-300">{hoveredPoint.item.hour}</span>
+                <span className="text-slate-600">|</span>
+                {hoveredPoint.item.status === 'DOWN' ? (
+                  <span className="text-rose-400 font-bold flex items-center gap-1">
+                    🔴 SẬP HỆ THỐNG (HTTP {hoveredPoint.item.http_code || 500})
+                  </span>
+                ) : hoveredPoint.item.has_data ? (
+                  <span className="text-emerald-400 font-bold flex items-center gap-1">
+                    🟢 Độ trễ: {hoveredPoint.item.latency_ms}ms
+                  </span>
+                ) : (
+                  <span className="text-slate-400 italic">⚪ Chưa có mẫu đo</span>
+                )}
+              </div>
+              {hoveredPoint.item.incident_duration && (
+                <span className="text-[10px] text-rose-300 font-sans">
+                  Thời lượng sự cố: {hoveredPoint.item.incident_duration}
                 </span>
               )}
             </div>
@@ -281,7 +364,7 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
         )}
       </div>
 
-      {/* Chân biểu đồ hiển thị thời gian & Live Uptime % */}
+      {/* Chân biểu đồ hiển thị dải giờ & Live Uptime */}
       <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500 font-mono pt-1">
         <span>24h trước</span>
         <div className="flex items-center gap-1">
@@ -289,6 +372,11 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
           <span className={`font-bold text-xs ${uptime_pct < 99 ? 'text-amber-500' : 'text-emerald-500'}`}>
             Live Uptime {uptime_pct.toFixed(1)}%
           </span>
+          {hasAnyDown && (
+            <span className="ml-1 text-[9px] font-bold text-rose-500 uppercase tracking-tight bg-rose-100 dark:bg-rose-950/60 px-1.5 py-0.2 rounded">
+              Có sự cố
+            </span>
+          )}
         </div>
         <span>Hiện tại</span>
       </div>

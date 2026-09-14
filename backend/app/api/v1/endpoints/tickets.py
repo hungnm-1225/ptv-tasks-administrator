@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from app.core.supabase import get_supabase_client
 from app.core.gemini import gemini_engine
+from app.services.workflow_planner import workflow_planner_service
 from app.workers.ticket_processor import (
     process_ticket_revision,
     create_or_get_ticket_revision
@@ -167,11 +168,7 @@ async def update_ticket_category(ticket_id: str, payload: Dict[str, Any]):
 
 @router.post("/{ticket_id}/re-summarize")
 async def re_summarize_ticket(ticket_id: str):
-    """
-    Chỉ làm tươi lại bản tóm tắt Inbox (Soft Summary):
-    - Không làm thay đổi kế hoạch Workflow hay Intent vận hành.
-    - Ghi nhận đầy đủ bản đánh giá mới vào ticket_ai_assessments để đảm bảo Provenance!
-    """
+    """Chỉ làm tươi lại bản tóm tắt Inbox (Soft Summary)."""
     supabase = get_supabase_client()
     res = supabase.table("inbox_tickets").select("*").eq("id", ticket_id).execute()
     if not res.data:
@@ -181,7 +178,6 @@ async def re_summarize_ticket(ticket_id: str):
     raw_content = ticket.get("raw_content") or ""
     attachments = ticket.get("attachments") or []
 
-    # 1. Lấy hoặc tạo revision snapshot chuẩn hóa
     revision_id, rev_no, _ = create_or_get_ticket_revision(
         ticket_id=ticket_id,
         raw_content=raw_content,
@@ -192,14 +188,12 @@ async def re_summarize_ticket(ticket_id: str):
     if not revision_id:
         raise HTTPException(status_code=500, detail="Không thể xác định revision để cập nhật tóm tắt.")
 
-    # 2. Gọi AI Tóm tắt mềm
     summary_res = gemini_engine.summarize_ticket(
         subject=ticket.get("subject", ""),
         raw_content=raw_content,
         source=ticket.get("source", "gmail")
     )
 
-    # 3. Ghi vết đánh giá vào ticket_ai_assessments (Bắt buộc theo chuẩn Provenance)
     now_iso = datetime.now(timezone.utc).isoformat()
     try:
         supabase.table("ticket_ai_assessments").insert({
@@ -207,7 +201,7 @@ async def re_summarize_ticket(ticket_id: str):
             "assessment_kind": "summary",
             "model_name": summary_res.model_name or "fallback",
             "prompt_version": summary_res.prompt_version,
-            "registry_version": "v1.1.0",
+            "registry_version": "v1.2.0",
             "structured_result": summary_res.model_dump(),
             "status": "completed",
             "created_at": now_iso
@@ -215,7 +209,6 @@ async def re_summarize_ticket(ticket_id: str):
     except Exception as assess_err:
         print(f"⚠️ Lỗi lưu ticket_ai_assessments trong /re-summarize: {assess_err}")
 
-    # 4. Cập nhật bản tóm tắt hiển thị trên UI
     supabase.table("inbox_tickets").update({
         "ai_summary": summary_res.summary_vi,
         "category": summary_res.category,
@@ -226,7 +219,7 @@ async def re_summarize_ticket(ticket_id: str):
     tickets_cache.invalidate()
     return {
         "status": "success",
-        "message": "Đã cập nhật lại bản tóm tắt AI và lưu lịch sử provenance cho ticket.",
+        "message": "Đã cập nhật lại bản tóm tắt AI.",
         "summary": summary_res.model_dump(),
         "revision_id": revision_id
     }
@@ -235,10 +228,10 @@ async def re_summarize_ticket(ticket_id: str):
 @router.post("/{ticket_id}/re-assess-intent")
 async def re_assess_ticket_intent(ticket_id: str):
     """
-    Đánh giá lại sự thật vận hành & Tái lập Proposal mới:
-    - Bắt buộc gọi Gemini trích xuất lại Intent có bằng chứng.
-    - Sử dụng Một Cửa Tiếp Nhận chuẩn hóa: create_or_get_ticket_revision.
-    - Tạo assessment mới và lưu proposal version mới.
+    ĐÁNH GIÁ LẠI TOÀN DIỆN Ý ĐỊNH & TÁI LẬP WORKFLOW PROPOSAL (FORCE RE-PLAN):
+    - Ép buộc trích xuất sự thật vận hành mới nhất (Fast-Path hoặc Gemini).
+    - Không bị kẹt bởi cache cũ của revision.
+    - Sinh mới Workflow Proposal và trả về trực tiếp kết quả.
     """
     supabase = get_supabase_client()
     res = supabase.table("inbox_tickets").select("*").eq("id", ticket_id).execute()
@@ -249,7 +242,7 @@ async def re_assess_ticket_intent(ticket_id: str):
     raw_content = ticket.get("raw_content") or ""
     attachments = ticket.get("attachments") or []
 
-    # 1. Lấy hoặc tạo revision chuẩn hóa tập trung (Không hard-code revision_no = 1)
+    # 1. Lấy hoặc cấp phát revision
     revision_id, rev_no, _ = create_or_get_ticket_revision(
         ticket_id=ticket_id,
         raw_content=raw_content,
@@ -260,14 +253,60 @@ async def re_assess_ticket_intent(ticket_id: str):
     if not revision_id:
         raise HTTPException(status_code=500, detail="Không thể xác định revision để đánh giá lại ý định.")
 
-    # 2. Kích hoạt Canonical Intake Orchestrator
-    result = await process_ticket_revision(revision_id)
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # 2. BẮT BUỘC TRÍCH XUẤT LẠI SỰ THẬT MỚI (BẢN VÁ FAST-PATH V1.2.0)
+    facts_res = gemini_engine.extract_operational_facts(
+        subject=ticket.get("subject", ""),
+        raw_content=raw_content,
+        source=ticket.get("source", "gmail"),
+        source_revision_id=revision_id
+    )
+
+    # 3. GHI NHẬN BẢN ĐÁNH GIÁ MỚI VÀO ticket_ai_assessments
+    assessment_id = None
+    try:
+        ins_res = supabase.table("ticket_ai_assessments").insert({
+            "ticket_revision_id": revision_id,
+            "assessment_kind": "fact_extraction",
+            "model_name": facts_res.model_name or "fast_path",
+            "prompt_version": facts_res.prompt_version,
+            "registry_version": "v1.2.0",
+            "structured_result": facts_res.model_dump(),
+            "status": "completed",
+            "created_at": now_iso
+        }).execute()
+        if ins_res.data:
+            assessment_id = ins_res.data[0]["id"]
+    except Exception as assess_err:
+        print(f"⚠️ Lỗi ghi nhận ticket_ai_assessments: {assess_err}")
+
+    # 4. KÍCH HOẠT LẬP KẾ HOẠCH WORKFLOW PROPOSAL MỚI NGAY LẬP TỨC
+    new_workflow = await workflow_planner_service.plan_workflow_for_ticket(
+        ticket_id=ticket_id,
+        revision_id=revision_id
+    )
+
+    # 5. Cập nhật metadata cho ticket
+    try:
+        existing_meta = ticket.get("metadata") or {}
+        if not isinstance(existing_meta, dict):
+            existing_meta = {}
+        existing_meta["workflow_outcome"] = "ACTIONABLE" if facts_res.outcome in ["actionable", "ready"] else "NEEDS_INFORMATION"
+        existing_meta["evidence_quotes"] = facts_res.raw_evidence_quotes
+        supabase.table("inbox_tickets").update({
+            "metadata": existing_meta,
+            "updated_at": now_iso
+        }).eq("id", ticket_id).execute()
+    except Exception:
+        pass
+
     tickets_cache.invalidate()
 
     return {
         "status": "success",
-        "message": "✨ Đã đánh giá lại toàn diện ý định và lập Proposal mới thành công!",
-        "result": result
+        "message": "✨ Đã đánh giá lại toàn diện ý định và sinh Proposal mới thành công!",
+        "workflow": new_workflow
     }
 
 
