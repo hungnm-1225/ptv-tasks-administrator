@@ -158,47 +158,79 @@ class AIEngine:
 
         parsed_data, used_model = self._call_gemini_with_fallback(prompt, primary_key=self.api_key_summary)
 
-        # PHAO CỨU SINH FAST-PATH: CATEGORY BẮT BUỘC THUỘC 5 GIÁ TRỊ LITERAL CỦA PYDANTIC
+        # 🧠 BẢN TÓM TẮT TẤT ĐỊNH THÔNG MINH KHI GEMINI AI HẾT QUOTA (KHÔNG HARDCODE BỪA BÃI NỮA!)
         if not parsed_data:
+            text_corpus = f"{subject} {full_content}".lower()
+
+            # 1. Cảnh báo UptimeRobot & Giám sát hạ tầng máy chủ
+            if any(w in text_corpus for w in ["uptimerobot", "monitor is up", "monitor is down", "incident", "downtime", "alert@uptimerobot"]):
+                is_down = "monitor is down" in text_corpus or "incident" in text_corpus
+                status_vi = "⚠️ Cảnh báo sự cố gián đoạn dịch vụ máy chủ (Server Down)" if is_down else "✅ Dịch vụ máy chủ đã phục hồi và hoạt động bình thường (Server Up)"
+                return TicketSummary(
+                    category="bug" if is_down else "other",
+                    priority="urgent" if is_down else "normal",
+                    goal=subject,
+                    summary_vi=f"🎯 Mục đích: {subject}\n🔔 {status_vi} từ hệ thống giám sát UptimeRobot.",
+                    assigned_name="Hung Nguyen",
+                    assigned_email="hung.nguyenmanh@dtt.vn",
+                    model_name="deterministic_fast_path",
+                    prompt_version="fast_path_v1.2.0"
+                )
+
+            # 2. Yêu cầu Ghi danh Khóa học Moodle PLearn
+            if any(w in text_corpus for w in ["enrol", "enroll", "ghi danh", "khóa học", "course content", "swrp"]):
+                return TicketSummary(
+                    category="lms_enroll",
+                    priority="urgent" if any(w in text_corpus for w in ["urgent", "gấp", "training"]) else "normal",
+                    goal=subject,
+                    summary_vi=f"🎯 Mục đích: {subject}\n🎓 Yêu cầu ghi danh và phân quyền khóa học trên Moodle PLearn LMS.",
+                    assigned_name="Hung Nguyen",
+                    assigned_email="hung.nguyenmanh@dtt.vn",
+                    model_name="deterministic_fast_path",
+                    prompt_version="fast_path_v1.2.0"
+                )
+
+            # 3. Yêu cầu Cấp bù Hợp đồng & License
+            if any(w in text_corpus for w in ["license", "hợp đồng", "contract", "order", "bù hợp đồng", "đơn vị trường"]):
+                return TicketSummary(
+                    category="license",
+                    priority="normal",
+                    goal=subject,
+                    summary_vi=f"🎯 Mục đích: {subject}\n📄 Yêu cầu cấp phát License hoặc xử lý hợp đồng School Workspace.",
+                    assigned_name="Hung Nguyen",
+                    assigned_email="hung.nguyenmanh@dtt.vn",
+                    model_name="deterministic_fast_path",
+                    prompt_version="fast_path_v1.2.0"
+                )
+
+            # 4. Yêu cầu Tài khoản & Định danh người dùng
+            if any(w in text_corpus for w in ["tạo tài khoản", "create account", "reset password", "đổi mật khẩu", "mở khóa", "unlock", "cấp tài khoản"]):
+                return TicketSummary(
+                    category="account_keycloak",
+                    priority="urgent" if any(w in text_corpus for w in ["urgent", "gấp"]) else "normal",
+                    goal=subject,
+                    summary_vi=f"🎯 Mục đích: {subject}\n👤 Yêu cầu quản trị định danh hoặc cấp mới tài khoản người dùng.",
+                    assigned_name="Hung Nguyen",
+                    assigned_email="hung.nguyenmanh@dtt.vn",
+                    model_name="deterministic_fast_path",
+                    prompt_version="fast_path_v1.2.0"
+                )
+
+            # 5. Mặc định: Trích xuất trích đoạn sạch từ nội dung thư gốc
+            clean_lines = [line.strip() for line in full_content.splitlines() if line.strip() and not line.startswith(">")]
+            first_line = clean_lines[0] if clean_lines else subject
+            preview = (first_line[:117] + "...") if len(first_line) > 120 else first_line
+
             return TicketSummary(
-                category="account_keycloak", # << ĐÃ SỬA CHUẨN XÁC SANG 'account_keycloak'
-                priority="urgent" if any(w in (subject + full_content).lower() for w in ["urgent", "gấp", "training"]) else "normal",
+                category="other",
+                priority="normal",
                 goal=subject,
-                summary_vi=f"🎯 Mục đích: {subject}\n📋 Yêu cầu tạo tài khoản và phân quyền cho giáo viên/học sinh.",
+                summary_vi=f"🎯 Mục đích: {subject}\n📩 Nội dung: {preview}",
                 assigned_name="Hung Nguyen",
                 assigned_email="hung.nguyenmanh@dtt.vn",
                 model_name="deterministic_fast_path",
                 prompt_version="fast_path_v1.2.0"
             )
-
-        # SANITIZE CHẶT CHẼ: ÉP VỀ ĐÚNG 5 NHÃN NẾU GEMINI TRẢ VỀ TỪ LẠ
-        raw_cat = str(parsed_data.get("category", "other")).lower().strip()
-        if raw_cat in VALID_CATEGORIES:
-            final_cat = raw_cat
-        elif "account" in raw_cat or "user" in raw_cat or "pass" in raw_cat:
-            final_cat = "account_keycloak"
-        elif "course" in raw_cat or "enroll" in raw_cat or "lms" in raw_cat:
-            final_cat = "lms_enroll"
-        elif "license" in raw_cat or "contract" in raw_cat or "order" in raw_cat:
-            final_cat = "license"
-        elif "bug" in raw_cat or "error" in raw_cat or "issue" in raw_cat:
-            final_cat = "bug"
-        else:
-            final_cat = "other"
-
-        raw_pri = str(parsed_data.get("priority", "normal")).lower().strip()
-        final_pri = raw_pri if raw_pri in VALID_PRIORITIES else "normal"
-
-        return TicketSummary(
-            category=final_cat,
-            priority=final_pri,
-            goal=parsed_data.get("goal", subject),
-            summary_vi=parsed_data.get("summary_vi", f"Tóm tắt: {subject}"),
-            assigned_name=parsed_data.get("assigned_name", "Hung Nguyen"),
-            assigned_email=parsed_data.get("assigned_email", "hung.nguyenmanh@dtt.vn"),
-            model_name=used_model,
-            prompt_version="v1.2.0"
-        )
 
     def extract_operational_facts(
         self,
