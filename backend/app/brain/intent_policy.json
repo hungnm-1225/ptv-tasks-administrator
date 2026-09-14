@@ -1,7 +1,7 @@
 {
     "policy_version": "v1.2.0",
     "updated_at": "2026-09-14",
-    "_comment": "backend/app/brain/intent_policy.json - Hardened for Real-world Automation",
+    "_comment": "backend/app/brain/intent_policy.json - Cleaned & De-duplicated",
     "intents": {
         "create_accounts": {
             "name": "Tạo mới tài khoản School Workspace",
@@ -21,12 +21,11 @@
                     "capability_id": "workspace.bulk_account_creation",
                     "name": "Nộp batch tạo tài khoản School Workspace",
                     "inputs_mapping": {
-                        "school_identifier": "resolved_school.name",
+                        "school_name": "resolved_school.name",
                         "school_id": "resolved_school.id",
                         "attachment_url": "context.attachment_url",
                         "total_count": "context.total_count",
-                        "users": "context.users",
-                        "student_emails": "context.student_emails"
+                        "users": "context.users"
                     },
                     "depends_on": []
                 },
@@ -34,7 +33,6 @@
                     "capability_id": "workspace.poll_account_batch",
                     "name": "Kiểm tra tiến độ & Lấy kết quả tài khoản",
                     "inputs_mapping": {
-                        "school_identifier": "resolved_school.name",
                         "request_id": "{{ step_01.account_batch_request_id }}"
                     },
                     "depends_on": [
@@ -50,8 +48,7 @@
                 "courses"
             ],
             "required_inputs": [
-                "courses",
-                "student_emails"
+                "courses"
             ],
             "min_evidence_quotes": 1,
             "risk_level": "medium_mutation",
@@ -62,7 +59,7 @@
                     "name": "Ghi danh khóa học Moodle PLearn",
                     "inputs_mapping": {
                         "courses": "entities.courses",
-                        "student_emails": "context.student_emails",
+                        "student_emails": "context.user_emails",
                         "role": "context.role"
                     },
                     "depends_on": [
@@ -78,8 +75,7 @@
                 "repositories"
             ],
             "required_inputs": [
-                "repositories",
-                "collaborators"
+                "repositories"
             ],
             "min_evidence_quotes": 1,
             "risk_level": "medium_mutation",
