@@ -25,10 +25,11 @@ BRAIN_DIR = os.path.join(os.path.dirname(__file__), "../brain")
 
 class WorkflowPlannerService:
     """
-    Bộ lập kế hoạch Workflow tất định điều khiển bởi Chính sách (Registry-Driven Policy Engine):
-    - Tra cứu dữ liệu thật từ bảng lms_courses & workspace_courses, triệt tiêu 100% việc bịa đặt URL!
-    - Tự động bắt cặp Git Repo tương ứng theo vai trò (Teacher/All).
-    - Tên trường dữ liệu rõ ràng, chuẩn hóa theo ngữ cảnh giáo viên/học sinh.
+    Bộ lập kế hoạch Workflow tất định bám sát kiến trúc Automation Studio:
+    - Nếu có ghi danh LMS: Tự động gom Git Sync vào trong bước LMS, KHÔNG SINH bước Git riêng lẻ!
+    - Chỉ sinh bước Git độc lập khi yêu cầu CHỈ xin quyền Git (không có khóa học).
+    - Phân biệt COF (workspace_courses) vs Freeform (lms_courses).
+    - Không bịa đặt dữ liệu, tra cứu chính xác từ danh mục Course Management.
     """
 
     def __init__(self):
@@ -39,7 +40,6 @@ class WorkflowPlannerService:
         self._load_registries()
 
     def _load_registries(self):
-        """Nạp các file tri thức định nghĩa từ Brain."""
         try:
             cap_file = os.path.join(BRAIN_DIR, "capabilities.json")
             if os.path.exists(cap_file):
@@ -59,11 +59,6 @@ class WorkflowPlannerService:
             if os.path.exists(wf_file):
                 with open(wf_file, "r", encoding="utf-8") as f:
                     self.workflow_rules = json.load(f).get("workflow_archetypes", [])
-
-            logger.info(
-                f"🧠 [REGISTRY ENGINE] Đã nạp {len(self.capabilities_map)} capabilities, "
-                f"{len(self.policy_registry)} policies (v{self.policy_version})!"
-            )
         except Exception as e:
             logger.error(f"❌ Lỗi nạp registries cho WorkflowPlanner: {e}")
 
@@ -107,83 +102,64 @@ class WorkflowPlannerService:
             best_match = candidates[0] if candidates and candidates[0].confidence >= 0.80 else None
             return best_match, candidates
         except Exception as e:
-            logger.warning(f"Lỗi phân giải trường học '{query_name}': {e}")
+            logger.warning(f"Lỗi phân giải trường học: {e}")
             return None, []
 
     @staticmethod
-    def resolve_course_and_git_repo(course_query: str, is_teacher: bool = True) -> Tuple[Optional[Dict[str, Any]], Optional[str], Optional[str]]:
+    def resolve_course_from_db(course_query: str, is_cof: bool = False, is_teacher: bool = True) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """
-        Tra cứu THỰC TẾ trong bảng lms_courses:
-        - Tìm khóa học chuẩn theo tên (SWRP 11, SWRP 8...)
-        - Trích xuất đúng Git Repo tương ứng từ cột git_repos (Ưu tiên repo Giáo viên)
-        - TUYỆT ĐỐI KHÔNG TỰ BỊA URL NẾU DATABASE CHƯA CÓ!
+        Tra cứu khóa học từ Course Management:
+        - is_cof = True  -> Tra cứu bảng 'workspace_courses'
+        - is_cof = False -> Tra cứu bảng 'lms_courses' (kèm Git Repos cấu hình sẵn)
         """
         if not course_query:
             return None, None, None
 
         supabase = get_supabase_client()
-        # Tách số hiệu môn học (Ví dụ 'SWRP 11' -> tìm cả 'SWRP 11' hoặc 'SWRP%11')
         clean_q = re.sub(r"\s+", " ", course_query.strip())
         num_match = re.search(r"\d+", clean_q)
         num_part = num_match.group(0) if num_match else ""
 
         try:
-            # 1. Tìm khóa học trong lms_courses
-            query = supabase.table("lms_courses").select("id, name, code, lms_url, git_repos")
+            target_table = "workspace_courses" if is_cof else "lms_courses"
+            query = supabase.table(target_table).select("*")
             if num_part:
                 query = query.or_(f"name.ilike.%SWRP {num_part}%,name.ilike.%SWRP%{num_part}%,name.ilike.%{clean_q}%")
             else:
                 query = query.ilike("name", f"%{clean_q}%")
-            
+
             res = query.limit(3).execute()
             courses = res.data or []
-
             if not courses:
-                return None, None, None
+                return clean_q, None, None
 
-            best_course = courses[0]
-            matched_name = best_course.get("name")
-            git_repos = best_course.get("git_repos") or []
+            best = courses[0]
+            course_name = best.get("name") or clean_q
+            course_code = best.get("code") or ""
+            git_repos = best.get("git_repos") or []
 
-            # 2. Phân giải Repo thật từ cấu hình git_repos trong DB
-            resolved_repo_url = None
-            resolved_repo_name = None
-
+            # Trích xuất Repo tương ứng
+            resolved_repo = None
             if isinstance(git_repos, list) and git_repos:
-                # Nếu là giáo viên, ưu tiên tìm repo có nhãn Teacher / GV
-                target_tag = "teacher" if is_teacher else "all"
-                
                 for r in git_repos:
                     if isinstance(r, dict):
                         r_name = r.get("name", "") or r.get("repo_name", "")
-                        r_url = r.get("url", "") or r.get("repo_url", "")
                         r_target = str(r.get("target", "") or r.get("role", "")).lower()
-
-                        if is_teacher and ("teacher" in r_target or "gv" in r_name.lower() or "teacher" in r_name.lower()):
-                            resolved_repo_url = r_url or f"https://git.pythaverse.space/pythaverse/{r_name}"
-                            resolved_repo_name = r_name
+                        if is_teacher and ("teacher" in r_target or "gv" in r_name.lower()):
+                            resolved_repo = r.get("url") or f"https://git.pythaverse.space/pythaverse/{r_name}"
                             break
-                        elif not is_teacher and ("all" in r_target or "all" in r_name.lower() or "hs" in r_name.lower()):
-                            resolved_repo_url = r_url or f"https://git.pythaverse.space/pythaverse/{r_name}"
-                            resolved_repo_name = r_name
+                        elif not is_teacher and ("all" in r_target or "hs" in r_name.lower()):
+                            resolved_repo = r.get("url") or f"https://git.pythaverse.space/pythaverse/{r_name}"
                             break
 
-                # Fallback: Lấy repo đầu tiên nếu không khớp tag chính xác
-                if not resolved_repo_url and git_repos:
-                    first_r = git_repos[0]
-                    if isinstance(first_r, dict):
-                        r_name = first_r.get("name") or first_r.get("repo_name")
-                        resolved_repo_url = first_r.get("url") or (f"https://git.pythaverse.space/pythaverse/{r_name}" if r_name else None)
-                        resolved_repo_name = r_name
-                    elif isinstance(first_r, str):
-                        resolved_repo_name = first_r
-                        resolved_repo_url = first_r if first_r.startswith("http") else f"https://git.pythaverse.space/pythaverse/{first_r}"
+                if not resolved_repo and git_repos:
+                    first = git_repos[0]
+                    resolved_repo = first.get("url") if isinstance(first, dict) else str(first)
 
-            return best_course, matched_name, resolved_repo_url
-
+            return course_name, course_code, resolved_repo
         except Exception as e:
-            logger.warning(f"Lỗi tra cứu lms_courses cho '{course_query}': {e}")
-            return None, None, None
+            logger.warning(f"Lỗi tra cứu course DB: {e}")
+            return clean_q, None, None
 
     def _resolve_context_value(self, expression: str, context: Dict[str, Any]) -> Any:
         if str(expression).startswith("{{") and str(expression).endswith("}}"):
@@ -225,23 +201,22 @@ class WorkflowPlannerService:
         user_emails = [u.get("email") for u in raw_users if isinstance(u, dict) and u.get("email")]
         has_teacher = any(isinstance(u, dict) and u.get("role") == "teacher" for u in raw_users)
 
-        detected_courses = entities.get("courses", [])
-        primary_course_query = detected_courses[0] if detected_courses else ""
+        # Kiểm tra xem có intent Ghi danh khóa học không
+        has_course_enroll = any(i.type == "course_access" for i in assessment.intents if i.is_valid)
+        is_cof_ticket = bool(attachment_url and ("cof" in str(attachment_url).lower() or ".xls" in str(attachment_url).lower()))
 
-        # 🔍 TRA CỨU KHÓA HỌC & GIT REPO THẬT TỪ CƠ SỞ DỮ LIỆU
-        course_record, matched_course_name, real_git_repo_url = self.resolve_course_and_git_repo(
-            course_query=primary_course_query,
+        detected_courses = entities.get("courses", [])
+        primary_course = detected_courses[0] if detected_courses else ""
+
+        # Tra cứu thông tin khóa học thật và Git Repo từ Database
+        real_course_name, real_course_code, real_git_repo = self.resolve_course_from_db(
+            course_query=primary_course,
+            is_cof=is_cof_ticket,
             is_teacher=has_teacher
         )
 
-        final_course_display = [matched_course_name] if matched_course_name else detected_courses
+        final_courses = [real_course_name] if real_course_name else []
         final_git_role = entities.get("git_role") or "GUEST"
-
-        # Nếu không tìm thấy Git Repo trong DB, BÁO CẢNH BÁO thay vì tự bịa URL!
-        if not real_git_repo_url and any(i.type == "repository_access" for i in assessment.intents if i.is_valid):
-            warnings.append(
-                f"Khóa học '{primary_course_query}' chưa được liên kết Git Repo trong Course Management. Quản trị viên cần nhập Repo URL thủ công."
-            )
 
         active_school_name = resolved_school.name if resolved_school else entities.get("school_name")
         active_school_id = resolved_school.id if resolved_school else None
@@ -250,9 +225,9 @@ class WorkflowPlannerService:
             "resolved_school": resolved_school,
             "entities": {
                 **entities,
-                "courses": final_course_display,
+                "courses": final_courses,
                 "git_role": final_git_role,
-                "repository_url": real_git_repo_url
+                "repository_url": real_git_repo
             },
             "context": {
                 "school_name": active_school_name,
@@ -264,7 +239,9 @@ class WorkflowPlannerService:
                 "collaborators": user_emails,
                 "role": "teacher" if has_teacher else "student",
                 "target_role": final_git_role,
-                "repo_url": real_git_repo_url,
+                "repo_url": real_git_repo,
+                "sync_git_repo": True, # BẬT MẶC ĐỊNH ĐỒNG BỘ GIT TRONG LMS ENROLL
+                "git_repo_target": real_git_repo,
                 "target_email": user_emails[0] if user_emails else entities.get("target_email")
             }
         }
@@ -274,6 +251,13 @@ class WorkflowPlannerService:
                 continue
 
             intent_type = extracted_intent.type
+
+            # 🛑 QUY TẮC VÀNG: NẾU ĐÃ CÓ BƯỚC COURSE_ACCESS THÌ KHAI TỬ LUÔN BƯỚC REPOSITORY_ACCESS RIÊNG BIỆT!
+            # Vì LMS Enroll đã tự động đảm nhiệm cả luồng đồng bộ Git Repo trong cùng phiên!
+            if intent_type == "repository_access" and has_course_enroll:
+                logger.info("ℹ️ Bỏ qua bước Git riêng biệt vì luồng Ghi danh LMS đã bao gồm tự động đồng bộ Git Repo.")
+                continue
+
             policy = self.policy_registry.get(intent_type)
             if not policy:
                 continue
@@ -296,17 +280,21 @@ class WorkflowPlannerService:
                     elif "{{ step_01." in str(in_expr):
                         first_step_id = intent_step_id_map.get("step_01", "step_01")
                         step_inputs[in_key] = str(in_expr).replace("step_01", first_step_id)
-                    elif in_expr in ["context.student_emails", "context.collaborators", "context.user_emails"]:
+                    elif in_key == "courses":
+                        step_inputs[in_key] = final_courses
+                    elif in_key == "student_emails":
                         if account_batch_poll_step_id:
                             step_inputs[in_key] = f"{{{{ {account_batch_poll_step_id}.created_accounts }}}}"
                         else:
                             step_inputs[in_key] = user_emails
-                    elif in_key == "repo_url" or in_expr == "context.repo_url":
-                        step_inputs[in_key] = real_git_repo_url
-                    elif in_key == "courses" or in_expr == "entities.courses":
-                        step_inputs[in_key] = final_course_display
                     else:
                         step_inputs[in_key] = self._resolve_context_value(in_expr, operation_context)
+
+                # Nếu là bước LMS Enroll, tự động đính kèm cờ đồng bộ Git Repo
+                if cap_id == "lms.direct_enroll":
+                    step_inputs["sync_git_repo"] = True
+                    if real_git_repo:
+                        step_inputs["attached_git_repo"] = real_git_repo
 
                 resolved_deps: List[str] = []
                 for dep in step_cfg.get("depends_on", []):
