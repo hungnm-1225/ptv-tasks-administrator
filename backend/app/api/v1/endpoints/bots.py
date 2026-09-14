@@ -28,11 +28,10 @@ from app.core.cache_policy import BoundedMemoryCache, CacheTier
 
 bots_cache = BoundedMemoryCache(tier=CacheTier.TIER_B_STATUS, max_entries=10, default_ttl=15)
 
-
 from app.core.config import to_vn_time_str
 
 def format_vn_time(val: Any) -> str:
-    """Chuyển đổi mọi định dạng thời gian sang chuỗi giờ Việt Nam chuẩn (GMT+7) qua Single Source of Time."""
+    """Chuyển đổi mọi định dạng thời gian sang chuỗi giờ Việt Nam chuẩn (GMT+7)."""
     return to_vn_time_str(val)
 
 def is_valid_uuid(val: str) -> bool:
@@ -45,13 +44,10 @@ def is_valid_uuid(val: str) -> bool:
 
 def clean_log_message(raw_msg: str, bot_type: str, short_task_id: str) -> str:
     """
-    Thuật toán khử sạch tiền tố trùng lặp trên message:
-    Biến: '[workspace_rpa] [#a18bf554] [workspace_rpa] [#a18bf554]: Request vẫn...'
-    Thành: 'Request vẫn đang xử lý...'
+    Thuật toán khử sạch tiền tố trùng lặp trên message.
     """
     msg = raw_msg.strip()
-    
-    # 1. Xóa lặp lại tag bot_type và task_id ở đầu message
+
     tags_to_strip = [
         rf"\[{re.escape(bot_type)}\]",
         rf"\[#{re.escape(short_task_id)}\]",
@@ -63,15 +59,17 @@ def clean_log_message(raw_msg: str, bot_type: str, short_task_id: str) -> str:
         for pattern in tags_to_strip:
             msg = re.sub(rf"^{pattern}\s*:?\s*", "", msg, flags=re.IGNORECASE).strip()
 
-    # 2. Xóa sạch cụm 'Request #None' hoặc '#None' vô nghĩa
     msg = re.sub(r"Request\s*#None\s*", "Request — ", msg, flags=re.IGNORECASE)
     msg = re.sub(r"#None\s*", "", msg, flags=re.IGNORECASE)
     msg = re.sub(r"\(\s*\)\.", ".", msg)
-    
+
     return msg.strip()
 
 def parse_log_line_with_timestamp(line: str, fallback_time_str: str, bot_type: str = "", short_task_id: str = "") -> Tuple[str, str, str, str]:
-    """Bóc tách: (Timestamp GMT+7, Log Level, Event Taxonomy, Nội dung thông điệp sạch)."""
+    """
+    Bóc tách: (Timestamp GMT+7, Log Level, Event Taxonomy, Nội dung thông điệp sạch).
+    Chống cộng đúp múi giờ nếu chuỗi timestamp đã là giờ Việt Nam.
+    """
     raw = line.strip()
     actual_time = fallback_time_str
     level = "INFO"
@@ -80,10 +78,16 @@ def parse_log_line_with_timestamp(line: str, fallback_time_str: str, bot_type: s
     # Trích xuất Timestamp gốc [YYYY-MM-DD HH:MM:SS]
     ts_match = re.match(r"^\[(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)\]\s*", raw)
     if ts_match:
-        actual_time = to_vn_time_str(ts_match.group(1))
+        ts_raw = ts_match.group(1)
+        # Chỉ chuyển đổi nếu có đánh dấu múi giờ Z hoặc offset; nếu là naive time thì giữ nguyên fallback
+        if "Z" in ts_raw or "+" in ts_raw or "-" in ts_raw[10:]:
+            actual_time = to_vn_time_str(ts_raw)
+        else:
+            # Chuỗi đã ở dạng YYYY-MM-DD HH:MM:SS cục bộ
+            actual_time = ts_raw[:19].replace("T", " ")
         raw = raw[ts_match.end():].strip()
 
-    # Trích xuất Level hoặc Event Taxonomy [LIFECYCLE/STATE/API/PLAYWRIGHT/CHECKPOINT/RETRY/CRON/MEMORY/RESULT/APPROVAL/INFO/SUCCESS/ERROR]
+    # Trích xuất Level hoặc Event Taxonomy
     tag_match = re.match(r"^\[(LIFECYCLE|STATE|API|PLAYWRIGHT|CHECKPOINT|RETRY|CRON|MEMORY|RESULT|APPROVAL|INFO|SUCCESS|ERROR|WARNING|DEBUG|CRITICAL)\]\s*", raw, flags=re.IGNORECASE)
     if tag_match:
         matched_tag = tag_match.group(1).upper()
@@ -96,7 +100,6 @@ def parse_log_line_with_timestamp(line: str, fallback_time_str: str, bot_type: s
             level = "SUCCESS" if matched_tag in ["SUCCESS"] else ("ERROR" if matched_tag in ["ERROR", "CRITICAL"] else matched_tag)
         raw = raw[tag_match.end():].strip()
 
-        # Kiểm tra tag thứ hai kế tiếp nếu có (ví dụ [INFO] [API] hoặc [CHECKPOINT] [TASK...])
         tag2_match = re.match(r"^\[(LIFECYCLE|STATE|API|PLAYWRIGHT|CHECKPOINT|RETRY|CRON|MEMORY|RESULT|APPROVAL|INFO|SUCCESS|ERROR|WARNING)\]\s*", raw, flags=re.IGNORECASE)
         if tag2_match:
             t2 = tag2_match.group(1).upper()
@@ -126,7 +129,6 @@ def parse_log_line_with_timestamp(line: str, fallback_time_str: str, bot_type: s
     return actual_time, level, event_type, clean_msg
 
 
-
 @router.get("/status")
 async def get_bot_workers_status() -> Dict[str, Any]:
     """Kiểm tra trạng thái Real-time chi tiết kèm số lượng task lỗi của từng Worker."""
@@ -136,7 +138,7 @@ async def get_bot_workers_status() -> Dict[str, Any]:
         return cached
 
     supabase = get_supabase_client()
-    
+
     worker_stats = {
         "gmail_sync_worker": {"status": "active", "failed_count": 0, "last_status": "idle"},
         "osticket_sync_worker": {"status": "active", "failed_count": 0, "last_status": "idle"},
@@ -147,13 +149,13 @@ async def get_bot_workers_status() -> Dict[str, Any]:
         "lms_git_worker": {"status": "active", "failed_count": 0, "last_status": "idle"},
         "github_dispatcher": {"status": "active", "failed_count": 0, "last_status": "idle"},
     }
-    
+
     try:
         failed_res = supabase.table("bot_automation_tasks")\
             .select("bot_type")\
             .eq("execution_status", "failed")\
             .execute()
-            
+
         for row in (failed_res.data or []):
             b_type = row.get("bot_type")
             if b_type == "workspace_rpa":
@@ -173,14 +175,14 @@ async def get_bot_workers_status() -> Dict[str, Any]:
 
         bots_cache.set(cache_key, worker_stats, ttl=15)
     except Exception as e:
-        print(f"Error checking detailed worker status: {e}")
-        
+        logger.error(f"Error checking detailed worker status: {e}")
+
     return worker_stats
 
 
 @router.get("/logs")
 async def get_bot_terminal_logs() -> List[Dict[str, Any]]:
-    """Lấy danh sách log thực thi với dòng thời gian chính xác và làm sạch hoàn toàn duplicate tags."""
+    """Lấy danh sách log thực thi: Làm sạch triệt để các khối log bị trùng lặp."""
     cache_key = "bot_terminal_logs"
     cached = bots_cache.get(cache_key)
     if cached is not None:
@@ -188,25 +190,25 @@ async def get_bot_terminal_logs() -> List[Dict[str, Any]]:
 
     supabase = get_supabase_client()
     logs_output = []
-    
+
     try:
         tasks_res = supabase.table("bot_automation_tasks")\
             .select("id, bot_type, approval_status, execution_status, execution_logs, created_at, executed_at")\
             .order("created_at", desc=True)\
             .limit(30)\
             .execute()
-            
+
         tasks = tasks_res.data or []
-        
+
         for t in reversed(tasks):
             t_id_short = str(t.get("id", "")).replace("-", "")[:8]
             b_type = t.get("bot_type") or "Worker"
             e_status = t.get("execution_status") or "queued"
-            
+
             created_time_str = format_vn_time(t.get("created_at"))
             executed_time_str = format_vn_time(t.get("executed_at") or t.get("created_at"))
-            
-            # 1. Dòng khởi tạo trạng thái
+
+            # Dòng thông báo queued
             logs_output.append({
                 "timestamp": created_time_str,
                 "level": "INFO",
@@ -215,27 +217,39 @@ async def get_bot_terminal_logs() -> List[Dict[str, Any]]:
                 "message": f"Task #{t_id_short} queued with status '{t.get('approval_status')}'.",
                 "raw_line": f"[{created_time_str}] [INFO] [{b_type}] [#{t_id_short}]: Task queued with status '{t.get('approval_status')}'."
             })
-            
-            # 2. Chi tiết từng dòng log thực thi
+
+            # Phân tích từng dòng log thực thi (Có cơ chế chống lặp dòng liên tiếp)
             if t.get("execution_logs"):
+                seen_lines = set()
                 for line in t["execution_logs"].split("\n"):
-                    if line.strip():
-                        line_time, line_level, line_event, clean_msg = parse_log_line_with_timestamp(
-                            line, 
-                            fallback_time_str=executed_time_str,
-                            bot_type=b_type,
-                            short_task_id=t_id_short
-                        )
-                        if clean_msg:
-                            logs_output.append({
-                                "timestamp": line_time,
-                                "level": line_level,
-                                "event": line_event,
-                                "worker": b_type,
-                                "task_id": t_id_short,
-                                "message": clean_msg,
-                                "raw_line": f"[{line_time}] [{line_event}] [{line_level}] [{b_type}] [#{t_id_short}]: {clean_msg}"
-                            })
+                    trimmed_line = line.strip()
+                    if not trimmed_line:
+                        continue
+
+                    # Bỏ qua dòng bị trùng lặp hoàn toàn trong cùng một task
+                    line_key = re.sub(r"^\[\d{4}-\d{2}-\d{2}[^\]]+\]\s*", "", trimmed_line).strip()
+                    if line_key in seen_lines and len(line_key) > 10:
+                        continue
+                    seen_lines.add(line_key)
+
+                    line_time, line_level, line_event, clean_msg = parse_log_line_with_timestamp(
+                        trimmed_line,
+                        fallback_time_str=executed_time_str,
+                        bot_type=b_type,
+                        short_task_id=t_id_short
+                    )
+
+                    if clean_msg:
+                        logs_output.append({
+                            "timestamp": line_time,
+                            "level": line_level,
+                            "event": line_event,
+                            "worker": b_type,
+                            "task_id": t_id_short,
+                            "message": clean_msg,
+                            "raw_line": f"[{line_time}] [{line_event}] [{line_level}] [{b_type}] [#{t_id_short}]: {clean_msg}"
+                        })
+
             elif e_status == "success":
                 logs_output.append({
                     "timestamp": executed_time_str,
@@ -254,7 +268,7 @@ async def get_bot_terminal_logs() -> List[Dict[str, Any]]:
                     "message": f"Task #{t_id_short} execution failed.",
                     "raw_line": f"[{executed_time_str}] [ERROR] [{b_type}] [#{t_id_short}]: Execution failed."
                 })
-        
+
         bots_cache.set(cache_key, logs_output, ttl=10)
     except Exception as e:
         now_str = format_vn_time(None)
@@ -275,7 +289,7 @@ async def force_sync_pipeline(sync_type: str, background_tasks: BackgroundTasks)
     """⚡ ÉP QUÉT NGAY LẬP TỨC CHO CÁC LUỒNG INGESTION."""
     now_str = format_vn_time(None)
     bots_cache.invalidate()
-    
+
     if sync_type == "gmail":
         background_tasks.add_task(poll_unread_gmails)
         msg = "Đã kích hoạt quét Gmail @dtt.vn tức thì thành công!"
@@ -317,10 +331,7 @@ async def purge_system_memory():
 
 @router.post("/{task_id}/retry")
 async def retry_bot_task(task_id: str, background_tasks: BackgroundTasks):
-    """
-    Kích hoạt chạy lại cho một Task cụ thể hoặc thử lại tất cả task lỗi của Worker.
-    TẤT CẢ ĐỀU ĐI QUA run_approved_task_worker (SINGLE COORDINATOR).
-    """
+    """Kích hoạt chạy lại cho một Task cụ thể."""
     supabase = get_supabase_client()
     now_str = format_vn_time(None)
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -335,7 +346,7 @@ async def retry_bot_task(task_id: str, background_tasks: BackgroundTasks):
             "github_dispatcher": "github_issue_creator",
             "feedback_sheet_worker": "feedback_doc_triage"
         }
-        
+
         target_bot_type = bot_type_map.get(worker_key)
         if not target_bot_type:
             if worker_key == "gmail_sync_worker":
@@ -368,14 +379,13 @@ async def retry_bot_task(task_id: str, background_tasks: BackgroundTasks):
             short_id = str(t_id).replace("-", "")[:8]
             t_payload = t.get("payload_data") or {}
             t_payload["task_id"] = t_id
-            
+
             supabase.table("bot_automation_tasks").update({
                 "execution_status": "queued",
                 "approval_status": "approved",
                 "execution_logs": f"[{now_iso}] [RETRY] [Task #{short_id}]: Batch retry triggered by Admin\n" + (t.get("execution_logs") or "")
             }).eq("id", t_id).execute()
 
-            # ĐI QUA run_approved_task_worker CHUẨN MỰC
             background_tasks.add_task(
                 run_approved_task_worker,
                 task_id=t_id,
@@ -391,24 +401,22 @@ async def retry_bot_task(task_id: str, background_tasks: BackgroundTasks):
             "timestamp": now_str
         }
 
-    # Nếu truyền vào là 1 Task UUID cụ thể:
     try:
         task_res = supabase.table("bot_automation_tasks").select("*").eq("id", task_id).execute()
         if not task_res.data:
             raise HTTPException(status_code=404, detail="Không tìm thấy task tương ứng trong database.")
-        
+
         task = task_res.data[0]
         short_id = str(task_id).replace("-", "")[:8]
         t_payload = task.get("payload_data") or {}
         t_payload["task_id"] = task_id
-        
+
         supabase.table("bot_automation_tasks").update({
             "execution_status": "queued",
             "approval_status": "approved",
             "execution_logs": f"[{now_iso}] [RETRY] [Task #{short_id}]: Manual retry triggered by Admin\n" + (task.get("execution_logs") or "")
         }).eq("id", task_id).execute()
 
-        # ĐI QUA run_approved_task_worker CHUẨN MỰC
         background_tasks.add_task(
             run_approved_task_worker,
             task_id=task_id,

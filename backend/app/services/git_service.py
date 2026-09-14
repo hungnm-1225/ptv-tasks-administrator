@@ -435,19 +435,26 @@ class GitPlaywrightService:
                     for err_item in all_errors:
                         report_lines.append(f"   • {err_item.get('user')}: {err_item.get('error')}")
 
-                report_lines.append("--------------------------------------------------")
-                report_lines.append(
+                summary_line = (
                     f"Tổng kết: {len(all_added)} Thành công | {len(all_already)} Đã có sẵn | "
                     f"{len(all_not_logged_in)} Chưa login Git | {len(not_found_in_keycloak)} Không có Keycloak"
                 )
+                report_lines.append(summary_line)
 
                 report_text = "\n".join(report_lines)
                 overall_status = "success" if all_added or all_already else "failed"
 
+                # 💡 CHỈ TRẢ 1 DÒNG TÓM TẮT TRONG 'message' ĐỂ KHÔNG BỊ NHÂN ĐÔI VỚI 'execution_logs'
+                short_summary_msg = (
+                    f"Hoàn tất {len(repos_plan)} Repos: {len(all_added)} Thành công, "
+                    f"{len(all_already)} Đã có, {len(all_not_logged_in)} Chưa login Git, "
+                    f"{len(not_found_in_keycloak)} Không có Keycloak."
+                )
+
                 return {
                     "status": overall_status,
-                    "message": report_text,
-                    "execution_logs": report_text,
+                    "message": short_summary_msg,       # 1 dòng tóm tắt ngắn gọn
+                    "execution_logs": report_text,      # Báo cáo chi tiết từng người (chỉ in 1 lần)
                     "breakdown": {
                         "added": all_added,
                         "already_exists": all_already,
