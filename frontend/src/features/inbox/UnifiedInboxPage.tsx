@@ -1628,10 +1628,8 @@ export const UnifiedInboxPage: React.FC = () => {
                           </div>
                           <input
                             type="text"
-                            value={operatorReason}
-                            onChange={(e) => setOperatorReason(e.target.value)}
                             placeholder="Ví dụ: Bổ sung quyền Git theo trao đổi trực tiếp, đổi thứ tự bước..."
-                            className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                            className="w-full px-3.5 py-2 text-xs font-bold text-slate-950 dark:text-white bg-white dark:bg-slate-900 border-2 border-indigo-400 dark:border-indigo-600 rounded-xl outline-none shadow-xs focus:ring-2 focus:ring-indigo-500/20 placeholder:text-slate-400"
                           />
                         </div>
                       )}

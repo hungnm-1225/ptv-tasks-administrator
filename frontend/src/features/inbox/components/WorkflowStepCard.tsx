@@ -18,7 +18,6 @@ import {
   ArrowUp,
   ArrowDown,
   Edit3,
-  Check,
   X,
   Zap,
   ShieldAlert,
@@ -27,7 +26,7 @@ import {
   Plus,
   BookOpen,
   Search,
-  ExternalLink
+  Check
 } from 'lucide-react';
 import { WorkflowStep, CapabilityDefinition, CourseItem, GitRepoConfig } from '../../../types';
 import { fetchApi } from '../../../lib/api';
@@ -59,13 +58,11 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
   const [editingInputKey, setEditingInputKey] = useState<string | null>(null);
   const [tempInputValue, setTempInputValue] = useState<string>('');
 
-  // State nạp danh mục khóa học từ Course Management API (/courses/lms hoặc /courses/workspace)
   const [showCoursePicker, setShowCoursePicker] = useState<boolean>(false);
   const [dbCourses, setDbCourses] = useState<CourseItem[]>([]);
   const [courseSearch, setCourseSearch] = useState<string>('');
   const [loadingCourses, setLoadingCourses] = useState<boolean>(false);
 
-  // State thêm người dùng thủ công
   const [showAddUserModal, setShowAddUserModal] = useState<boolean>(false);
   const [newEmail, setNewEmail] = useState<string>('');
   const [newName, setNewName] = useState<string>('');
@@ -73,7 +70,6 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
 
   const capDef = capabilitiesMap[step.capability_id];
 
-  // ⚡ TẢI DANH SÁCH KHÓA HỌC THẬT TỪ REST API CHUẨN CỦA ANH
   useEffect(() => {
     if (showCoursePicker && dbCourses.length === 0) {
       loadCoursesFromApi();
@@ -83,7 +79,6 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
   const loadCoursesFromApi = async () => {
     setLoadingCourses(true);
     try {
-      // Phân biệt: Có file COF dùng workspace, yêu cầu tự do dùng lms
       const isCof = Boolean(step.inputs?.attachment_url);
       const pane = isCof ? 'workspace' : 'lms';
       const data = await fetchApi<CourseItem[]>(`/courses/${pane}`);
@@ -167,7 +162,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
     setEditingInputKey(null);
   };
 
-  // 🎯 CHỌN KHÓA HỌC ➔ TỰ ĐỘNG BẮT CẶP GIT REPO TƯƠNG ỨNG
+  // 🎯 CHỌN KHÓA HỌC: LƯU VÀO MẢNG KHÓA HỌC & GIỮ NGUYÊN REPO TƯƠNG ỨNG
   const handleSelectCourse = (course: CourseItem) => {
     if (!onUpdateStep) return;
     const currentCourses = Array.isArray(step.inputs?.courses) ? [...step.inputs.courses] : [];
@@ -175,12 +170,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
       currentCourses.push(course.course_name);
     }
 
-    const updatedInputs: Record<string, any> = {
-      ...step.inputs,
-      courses: currentCourses,
-    };
-
-    // Bắt cặp Git Repo theo đúng vai trò hiện hành
+    const currentPairings = { ...(step.inputs?.course_repo_pairings || {}) };
     const currentRole = step.inputs?.role || 'teacher';
     const gitRepos: GitRepoConfig[] = Array.isArray(course.git_repos) ? course.git_repos : [];
 
@@ -192,30 +182,50 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
         matchedRepo = gitRepos.find((r) => r.target === 'all') || gitRepos[0];
       }
       if (matchedRepo?.repo_url) {
-        updatedInputs.attached_git_repo = matchedRepo.repo_url;
+        currentPairings[course.course_name] = matchedRepo.repo_url;
       }
     }
 
-    onUpdateStep(step.step_id, { inputs: updatedInputs });
+    onUpdateStep(step.step_id, {
+      inputs: {
+        ...step.inputs,
+        courses: currentCourses,
+        course_repo_pairings: currentPairings,
+        attached_git_repos: Object.values(currentPairings),
+      },
+    });
     setShowCoursePicker(false);
   };
 
   const handleRemoveCourse = (index: number) => {
     if (!onUpdateStep) return;
     const currentCourses = Array.isArray(step.inputs?.courses) ? [...step.inputs.courses] : [];
+    const removedCourseName = currentCourses[index];
     currentCourses.splice(index, 1);
+
+    const currentPairings = { ...(step.inputs?.course_repo_pairings || {}) };
+    if (removedCourseName && currentPairings[removedCourseName]) {
+      delete currentPairings[removedCourseName];
+    }
+
     onUpdateStep(step.step_id, {
       inputs: {
         ...step.inputs,
         courses: currentCourses,
+        course_repo_pairings: currentPairings,
+        attached_git_repos: Object.values(currentPairings),
       },
     });
   };
 
-  // LỌC SẠCH CÁC TRƯỜNG RÁC / TRÙNG LẶP
+  // 🛑 BỘ LỌC TỐI GIẢN: TRIỆT TIÊU TOÀN BỘ CÁC BIẾN RÁC THÔ THIỂN
   const shouldSkipKey = (key: string) => {
     if (key === 'school_identifier') return true;
     if (key === 'school_id') return true;
+    if (key === 'sync_git_repo') return true; // ĐÃ CHUYỂN THÀNH TOGGLE TRÊN UI
+    if (key === 'attached_git_repo') return true; // ĐÃ GOM VÀO BẢNG REPO
+    if (key === 'attached_git_repos') return true;
+    if (key === 'course_repo_pairings') return true;
     if (step.capability_id === 'workspace.bulk_account_creation' && (key === 'student_emails' || key === 'user_emails')) return true;
     if (step.capability_id === 'workspace.poll_account_batch' && (key === 'school_name' || key === 'school_id')) return true;
     return false;
@@ -225,7 +235,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
     const isBound = typeof val === 'string' && val.includes('{{');
     const isEditing = editingInputKey === key;
 
-    // 🏢 1. TRƯỜNG HỌC (GOM CHUNG TÊN VÀ ID)
+    // 1. TRƯỜNG HỌC
     if (key === 'school_name') {
       const schoolId = step.inputs?.school_id || '';
       return (
@@ -267,7 +277,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
       );
     }
 
-    // 👥 2. DANH SÁCH USERS
+    // 2. DANH SÁCH USERS
     if (key === 'users' && Array.isArray(val)) {
       return (
         <div key={key} className="rounded-xl border border-slate-200 bg-white dark:bg-slate-900 p-3 shadow-2xs space-y-2">
@@ -276,15 +286,6 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
               <Users className="w-3.5 h-3.5 text-indigo-500" />
               <span>Danh Sách Tài Khoản Cần Tạo ({val.length} người):</span>
             </span>
-            {isEditable && (
-              <button
-                type="button"
-                onClick={() => setShowAddUserModal(true)}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition cursor-pointer"
-              >
-                <Plus className="w-3 h-3" /> Thêm Người
-              </button>
-            )}
           </div>
 
           <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
@@ -322,10 +323,11 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
       );
     }
 
-    // 🎓 3. KHÓA HỌC LMS + BẢNG CHỌN DROPDOWN THÔNG MINH TỪ API
+    // 3. KHÓA HỌC LMS & ĐỒNG BỘ GIT REPO THEO TỪNG MÔN
     if (key === 'courses') {
       const coursesList = Array.isArray(val) ? val : [];
-      const attachedRepo = step.inputs?.attached_git_repo;
+      const pairings: Record<string, string> = step.inputs?.course_repo_pairings || {};
+      const isSyncGitEnabled = step.inputs?.sync_git_repo !== false;
 
       const filteredDbCourses = dbCourses.filter((c) =>
         (c.course_name || '').toLowerCase().includes(courseSearch.toLowerCase()) ||
@@ -334,7 +336,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
       );
 
       return (
-        <div key={key} className="rounded-xl border border-slate-200 bg-white dark:bg-slate-900 p-3 shadow-2xs space-y-2">
+        <div key={key} className="rounded-xl border border-slate-200 bg-white dark:bg-slate-900 p-3.5 shadow-2xs space-y-3">
           <div className="flex items-center justify-between">
             <span className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200 uppercase">
               <GraduationCap className="w-4 h-4 text-sky-600" />
@@ -351,48 +353,80 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
             )}
           </div>
 
-          <div className="flex flex-wrap gap-2 pt-1">
+          {/* Danh sách các khóa học + Repo tương ứng của từng khóa */}
+          <div className="space-y-2">
             {coursesList.length === 0 ? (
-              <div className="text-xs text-amber-600 font-semibold italic">
+              <div className="text-xs text-amber-600 font-semibold italic p-2 bg-amber-50 rounded-lg border border-amber-200">
                 ⚠️ Chưa có khóa học nào được chọn. Nhấp "Chọn Khóa Học Từ Danh Mục" để gán khóa học.
               </div>
             ) : (
-              coursesList.map((c: string, cIdx: number) => (
-                <span
-                  key={cIdx}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-extrabold bg-sky-50 text-sky-950 border border-sky-300 shadow-2xs"
-                >
-                  <BookOpen className="w-3.5 h-3.5 text-sky-600" />
-                  <span>{c}</span>
-                  {isEditable && (
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveCourse(cIdx)}
-                      className="text-sky-500 hover:text-rose-600 ml-1 cursor-pointer"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </span>
-              ))
+              coursesList.map((c: string, cIdx: number) => {
+                const repoForThisCourse = pairings[c];
+                return (
+                  <div
+                    key={cIdx}
+                    className="p-2.5 rounded-xl border border-sky-200 bg-sky-50/60 flex flex-col gap-1.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <BookOpen className="w-4 h-4 text-sky-600 shrink-0" />
+                        <span className="text-xs font-extrabold text-slate-950 truncate">{c}</span>
+                      </div>
+                      {isEditable && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveCourse(cIdx)}
+                          className="p-1 text-slate-400 hover:text-rose-600 rounded transition cursor-pointer"
+                          title="Xóa khóa học này"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Hiển thị Repo của riêng khóa học này */}
+                    {repoForThisCourse ? (
+                      <div className="flex items-center gap-2 text-[11px] font-mono text-purple-900 bg-purple-100/70 p-1.5 rounded-lg border border-purple-200">
+                        <GitBranch className="w-3.5 h-3.5 text-purple-700 shrink-0" />
+                        <span className="truncate font-bold">Repo: {repoForThisCourse}</span>
+                        <span className="ml-auto text-[9px] font-sans font-black uppercase text-purple-700 bg-purple-200 px-1.5 py-0.2 rounded shrink-0">
+                          Auto Git
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-slate-400 italic">
+                        (Môn học này không cấu hình Git Repo)
+                      </div>
+                    )}
+                  </div>
+                );
+              })
             )}
           </div>
 
-          {/* Hiển thị Git Repo tự động đi kèm */}
-          {attachedRepo && (
-            <div className="mt-2 p-2.5 bg-purple-50 rounded-xl border border-purple-200 flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2 min-w-0">
-                <GitBranch className="w-4 h-4 text-purple-700 shrink-0" />
-                <span className="font-bold text-purple-950 shrink-0">Git Repo Tương Ứng:</span>
-                <span className="font-mono text-purple-900 font-extrabold truncate">{attachedRepo}</span>
-              </div>
-              <span className="text-[10px] font-black uppercase text-purple-700 bg-purple-200/70 px-2 py-0.5 rounded shrink-0">
-                Tự Động Đồng Bộ
+          {/* TOGGLE THÔNG MINH BẬT/TẮT TỰ ĐỘNG ĐỒNG BỘ GIT REPO */}
+          <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <GitBranch className="w-4 h-4 text-purple-600" />
+              <span className="text-xs font-bold text-slate-800">
+                Tự Động Đồng Bộ Quyền Git Repos Tương Ứng:
               </span>
             </div>
-          )}
 
-          {/* BẢNG CHỌN KHÓA HỌC TỪ COURSE MANAGEMENT */}
+            <button
+              type="button"
+              disabled={!isEditable}
+              onClick={() => handleSaveInput('sync_git_repo', !isSyncGitEnabled)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold transition cursor-pointer ${isSyncGitEnabled
+                ? 'bg-purple-600 text-white shadow-xs'
+                : 'bg-slate-200 text-slate-600'
+                }`}
+            >
+              <span>{isSyncGitEnabled ? 'ĐANG BẬT' : 'ĐANG TẮT'}</span>
+            </button>
+          </div>
+
+          {/* BẢNG CHỌN KHÓA HỌC TỪ DATABASE */}
           {showCoursePicker && (
             <div className="p-3 bg-slate-50 border-2 border-sky-400 rounded-xl shadow-md space-y-2 mt-2">
               <div className="flex items-center justify-between">
@@ -502,7 +536,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
       );
     }
 
-    // 6. CÁC TRƯỜNG DỮ LIỆU ĐƠN GIẢN (ĐEN ĐẬM TEXT-SLATE-950 RÕ NÉT)
+    // 6. CÁC TRƯỜNG DỮ LIỆU ĐƠN GIẢN (ĐEN ĐẬM CHUẨN MỰC)
     return (
       <div key={key} className="rounded-xl border border-slate-200 bg-white dark:bg-slate-900 p-2.5 shadow-2xs">
         {isEditing ? (
