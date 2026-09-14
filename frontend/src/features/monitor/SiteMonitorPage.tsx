@@ -139,6 +139,13 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
     });
   }, [history, currentLatency]);
 
+  const validLatencies = points
+    .map(p => p.latency_ms)
+    .filter((l): l is number => typeof l === 'number' && l > 0 && l < 8000);
+
+  const minLat = validLatencies.length > 0 ? Math.min(...validLatencies) : 50;
+  const maxLat = validLatencies.length > 0 ? Math.max(...validLatencies, minLat + 80) : 400;
+
   if (loading && history.length === 0) {
     return (
       <div className="h-16 w-full rounded-xl bg-slate-100 dark:bg-slate-800/50 animate-pulse flex items-center justify-center">
@@ -153,14 +160,6 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
   const paddingX = 10;
   const paddingTop = 8;
   const paddingBottom = 12;
-
-  // 3. Tính dải động Min/Max Latency từ các điểm đo thật
-  const validLatencies = points
-    .map(p => p.latency_ms)
-    .filter((l): l is number => typeof l === 'number' && l > 0);
-
-  const minLat = validLatencies.length > 0 ? Math.min(...validLatencies) : 50;
-  const maxLat = validLatencies.length > 0 ? Math.max(...validLatencies, minLat + 100) : 400;
 
   // 4. Tính toán tọa độ (x, y) - Tạo đỉnh sóng chân thực
   const coords = points.map((p, i) => {

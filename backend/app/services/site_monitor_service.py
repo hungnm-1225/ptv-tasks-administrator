@@ -97,37 +97,38 @@ _sites_cache: list[dict] = [_make_initial_state(s) for s in DEFAULT_MONITORED_SI
 _site_latency_buffer: Dict[str, List[Dict[str, Any]]] = {}
 
 def record_ping_metric(site_id: str, latency_ms: int, http_code: int, status: str):
-    """Ghi nhận dữ liệu ping thực tế vào RAM ring-buffer và Supabase."""
+    """Chỉ lưu latency_ms dương đối với các lần ping thành công."""
     now_dt = now_vn()
+    # Nếu là sự cố DOWN hoặc Timeout, latency ghi nhận là 0 để không làm méo mó trung bình
+    clean_latency = latency_ms if status == "UP" and latency_ms < 10000 else 0
+
     metric_entry = {
         "site_id": site_id,
-        "latency_ms": latency_ms,
+        "latency_ms": clean_latency,
         "http_code": http_code,
         "status": status,
         "checked_at": now_dt.isoformat(),
         "hour_key": now_dt.strftime("%Y-%m-%d %H"),
     }
     
-    # 1. Ghi vào RAM Ring-buffer (giữ 300 mẫu gần nhất mỗi site để phản hồi tức thì 1ms)
     if site_id not in _site_latency_buffer:
         _site_latency_buffer[site_id] = []
     _site_latency_buffer[site_id].append(metric_entry)
     if len(_site_latency_buffer[site_id]) > 300:
         _site_latency_buffer[site_id].pop(0)
 
-    # 2. Ghi bất đồng bộ an toàn vào Supabase
     db = get_supabase()
     if db:
         try:
             db.table("site_ping_metrics").insert({
                 "site_id": site_id,
-                "latency_ms": latency_ms,
+                "latency_ms": clean_latency,
                 "http_code": http_code,
                 "status": status,
                 "checked_at": now_dt.isoformat()
             }).execute()
         except Exception as e:
-            logger.debug(f"Không thể ghi site_ping_metrics (có thể chưa chạy migration): {e}")
+            logger.debug(f"Không thể ghi site_ping_metrics: {e}")
 
 def record_downtime_event(site_id: str, site_name: str, http_code: int, error_msg: str):
     """Mở sự cố gián đoạn trên Supabase khi phát hiện site sập."""
@@ -218,11 +219,15 @@ def get_hourly_uptime_history(site_id: str, hours: int = 24) -> list[dict]:
                     metrics_by_hour.setdefault(hk, []).append(row["latency_ms"])
         except Exception as e:
             logger.debug(f"Lỗi đọc site_ping_metrics: {e}")
+    
+    site_obj = next((s for s in _sites_cache if s["id"] == site_id), None)
+    baseline_ping = site_obj.get("response_time_ms", 180) if (site_obj and site_obj.get("response_time_ms", 0) > 0) else 180
 
     # Tính trung bình Ping cho mỗi giờ có đo đạc
     for hk, lat_list in metrics_by_hour.items():
-        if lat_list and hk in hour_map:
-            avg_lat = int(sum(lat_list) / len(lat_list))
+        valid_pings = [l for l in lat_list if 0 < l < 10000]
+        if valid_pings and hk in hour_map:
+            avg_lat = int(sum(valid_pings) / len(valid_pings))
             hour_map[hk]["latency_ms"] = avg_lat
             hour_map[hk]["has_data"] = True
 
@@ -239,10 +244,8 @@ def get_hourly_uptime_history(site_id: str, hours: int = 24) -> list[dict]:
                 end_str = event_end.strftime("%Hh%M") if event.get("ended_at") else "nay"
                 dur_str = f"{start_str} - {end_str}"
 
-                # Quét mọi khung giờ nằm trong khoảng thời gian sập
                 for entry in result:
                     entry_dt = datetime.strptime(entry["full_time"], "%Y-%m-%d %H").replace(tzinfo=VN_TZ)
-                    # Nếu khung giờ này giao với khoảng thời gian sự cố diễn ra
                     if entry_dt <= event_end and (entry_dt + timedelta(hours=1)) >= event_start:
                         entry["status"] = "DOWN"
                         entry["latency_ms"] = 0
@@ -251,6 +254,11 @@ def get_hourly_uptime_history(site_id: str, hours: int = 24) -> list[dict]:
                         entry["has_data"] = True
         except Exception as e:
             logger.error(f"Lỗi đối soát downtime events: {e}")
+
+    for entry in result:
+        if entry["status"] != "DOWN" and not entry["has_data"]:
+            entry["latency_ms"] = baseline_ping
+            entry["has_data"] = False
 
     # Đảm bảo giờ hiện tại luôn có ping mới nhất từ cache nếu chưa kịp gom batch
     current_hk = now.strftime("%Y-%m-%d %H")
@@ -300,23 +308,19 @@ class SiteMonitorService:
         }
 
         try:
-            # Ping trực tiếp với timeout 12s, theo dõi redirect
-            async with httpx.AsyncClient(verify=False, timeout=12.0, follow_redirects=True, headers=headers) as client:
-                response = await client.get(url)
+            # Dùng HEAD request để đo đúng network ping, không tốn băng thông tải HTML
+            async with httpx.AsyncClient(verify=False, timeout=8.0, follow_redirects=True, headers=headers) as client:
+                try:
+                    response = await client.head(url)
+                    if response.status_code in (405, 501): # Nếu site chặn HEAD thì fallback sang GET
+                        response = await client.get(url)
+                except Exception:
+                    response = await client.get(url)
+
                 latency = int((time.time() - start) * 1000)
                 site["response_time_ms"] = latency
                 site["http_code"] = response.status_code
                 site["last_checked_at"] = now_vn_str()
-                record_ping_metric(site_id, latency, response.status_code, site["last_status"])
-
-                # [CẬP NHẬT THÊM VÀO KHỐI EXCEPT httpx.ConnectError]
-                record_ping_metric(site_id, 0, 0, "DOWN")
-
-                # [CẬP NHẬT THÊM VÀO KHỐI EXCEPT httpx.TimeoutException]
-                record_ping_metric(site_id, 12000, 0, "DOWN")
-
-                # [CẬP NHẬT THÊM VÀO KHỐI EXCEPT Exception]
-                record_ping_metric(site_id, 0, 0, "DOWN")
 
                 if response.status_code in (200, 201, 301, 302, 307, 308):
                     site["last_status"] = "UP"
@@ -334,6 +338,9 @@ class SiteMonitorService:
                     site["last_status"] = "WARNING"
                     site["details"] = f"Mã HTTP bất thường: {response.status_code}"
 
+                # Ghi nhận metric: nếu status UP thì ghi latency thật, DOWN thì ghi 0
+                record_ping_metric(site_id, latency if site["last_status"] == "UP" else 0, response.status_code, site["last_status"])
+
         except httpx.ConnectError:
             site["http_code"] = 0
             site["response_time_ms"] = 0
@@ -341,14 +348,16 @@ class SiteMonitorService:
             site["last_status"] = "DOWN"
             site["details"] = "Từ chối kết nối (Connection Refused)"
             record_downtime_event(site_id, site_name, 0, site["details"])
+            record_ping_metric(site_id, 0, 0, "DOWN")
 
         except httpx.TimeoutException:
             site["http_code"] = 0
-            site["response_time_ms"] = 12000
+            site["response_time_ms"] = 0
             site["last_checked_at"] = now_vn_str()
             site["last_status"] = "DOWN"
-            site["details"] = "Kết nối quá hạn (Timeout > 12s)"
+            site["details"] = "Kết nối quá hạn (Timeout > 8s)"
             record_downtime_event(site_id, site_name, 0, site["details"])
+            record_ping_metric(site_id, 0, 0, "DOWN")
 
         except Exception as e:
             site["http_code"] = 0
@@ -357,6 +366,7 @@ class SiteMonitorService:
             site["last_status"] = "DOWN"
             site["details"] = f"Lỗi mạng: {str(e)[:60]}"
             record_downtime_event(site_id, site_name, 0, site["details"])
+            record_ping_metric(site_id, 0, 0, "DOWN")
 
         return site
 
