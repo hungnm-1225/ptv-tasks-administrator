@@ -207,11 +207,18 @@ export const UnifiedInboxPage: React.FC = () => {
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (schoolPickerRef.current && !schoolPickerRef.current.contains(event.target as Node)) {
+      const target = event.target as HTMLElement;
+
+      if (schoolPickerRef.current && !schoolPickerRef.current.contains(target)) {
         setIsSchoolPickerOpen(false);
       }
+      if (target.closest('[data-category-dropdown]')) {
+        return;
+      }
+
       setActiveCategoryDropdown(null);
     };
+
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
@@ -677,8 +684,9 @@ export const UnifiedInboxPage: React.FC = () => {
               : 'Khác';
 
     return (
-      <div className="relative inline-block">
+      <div className="relative inline-block" data-category-dropdown="true">
         <button
+          type="button"
           onClick={(e) => {
             e.stopPropagation();
             setActiveCategoryDropdown(isDropdownOpen ? null : ticketId);
@@ -692,6 +700,8 @@ export const UnifiedInboxPage: React.FC = () => {
 
         {isDropdownOpen && (
           <div
+            data-category-dropdown="true"
+            onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
             className="absolute left-0 mt-1.5 w-48 bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100"
           >
@@ -705,7 +715,10 @@ export const UnifiedInboxPage: React.FC = () => {
             ].map((opt) => (
               <button
                 key={opt.id}
-                onClick={() => {
+                type="button"
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
                   handleCategoryChange(ticketId, opt.id);
                   setActiveCategoryDropdown(null);
                 }}
@@ -741,7 +754,7 @@ export const UnifiedInboxPage: React.FC = () => {
   }, [activeWorkflow, validationResult]);
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-16" onClick={() => setActiveCategoryDropdown(null)}>
+    <div className="space-y-6 max-w-7xl mx-auto pb-16">
       {/* Header Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>

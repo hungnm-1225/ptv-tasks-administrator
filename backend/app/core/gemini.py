@@ -32,6 +32,10 @@ except Exception:
 
 logger = logging.getLogger(__name__)
 
+# Danh mục danh bạ Category chuẩn của Pydantic TicketSummary
+VALID_CATEGORIES = {"license", "lms_enroll", "account_keycloak", "bug", "other"}
+VALID_PRIORITIES = {"urgent", "normal", "low", "high"}
+
 GEMINI_MODELS = [
     "gemini-3.8-flash",
     "gemini-3.7-flash",
@@ -154,9 +158,10 @@ class AIEngine:
 
         parsed_data, used_model = self._call_gemini_with_fallback(prompt, primary_key=self.api_key_summary)
 
+        # PHAO CỨU SINH FAST-PATH: CATEGORY BẮT BUỘC THUỘC 5 GIÁ TRỊ LITERAL CỦA PYDANTIC
         if not parsed_data:
             return TicketSummary(
-                category="account_creation",
+                category="account_keycloak", # << ĐÃ SỬA CHUẨN XÁC SANG 'account_keycloak'
                 priority="urgent" if any(w in (subject + full_content).lower() for w in ["urgent", "gấp", "training"]) else "normal",
                 goal=subject,
                 summary_vi=f"🎯 Mục đích: {subject}\n📋 Yêu cầu tạo tài khoản và phân quyền cho giáo viên/học sinh.",
@@ -166,9 +171,27 @@ class AIEngine:
                 prompt_version="fast_path_v1.2.0"
             )
 
+        # SANITIZE CHẶT CHẼ: ÉP VỀ ĐÚNG 5 NHÃN NẾU GEMINI TRẢ VỀ TỪ LẠ
+        raw_cat = str(parsed_data.get("category", "other")).lower().strip()
+        if raw_cat in VALID_CATEGORIES:
+            final_cat = raw_cat
+        elif "account" in raw_cat or "user" in raw_cat or "pass" in raw_cat:
+            final_cat = "account_keycloak"
+        elif "course" in raw_cat or "enroll" in raw_cat or "lms" in raw_cat:
+            final_cat = "lms_enroll"
+        elif "license" in raw_cat or "contract" in raw_cat or "order" in raw_cat:
+            final_cat = "license"
+        elif "bug" in raw_cat or "error" in raw_cat or "issue" in raw_cat:
+            final_cat = "bug"
+        else:
+            final_cat = "other"
+
+        raw_pri = str(parsed_data.get("priority", "normal")).lower().strip()
+        final_pri = raw_pri if raw_pri in VALID_PRIORITIES else "normal"
+
         return TicketSummary(
-            category=parsed_data.get("category", "other"),
-            priority=parsed_data.get("priority", "normal"),
+            category=final_cat,
+            priority=final_pri,
             goal=parsed_data.get("goal", subject),
             summary_vi=parsed_data.get("summary_vi", f"Tóm tắt: {subject}"),
             assigned_name=parsed_data.get("assigned_name", "Hung Nguyen"),
@@ -199,11 +222,11 @@ class AIEngine:
 
         parsed_data, used_model = self._call_gemini_with_fallback(prompt, primary_key=self.api_key_facts)
 
-        # PHAO CỨU SINH FAST-PATH: SỬ DỤNG CHUẨN OUTCOME 'candidate_action'
+        # FAST-PATH AN TOÀN TUYỆT ĐỐI VỚI 'candidate_action'
         if not parsed_data:
             logger.warning("🚀 [FAST-PATH] Kích hoạt trích xuất sự thật tất định không qua Gemini!")
             fast_assessment = IntentAssessment(
-                outcome="candidate_action", # << KHÔNG ĐỂ 'actionable', BẮT BUỘC 'candidate_action'
+                outcome="candidate_action",
                 model_name="deterministic_fast_path",
                 prompt_version="fast_path_v1.2.0",
                 intents=[],
@@ -277,7 +300,6 @@ class AIEngine:
                         evidence=ent_spans
                     ))
 
-        # ĐẢM BẢO CHỈ NHẬN CÁC GIÁ TRỊ LITERAL HỢP LỆ
         parsed_outcome = parsed_data.get("outcome", "candidate_action")
         if parsed_outcome not in ["no_action", "needs_information", "candidate_action"]:
             parsed_outcome = "candidate_action"
