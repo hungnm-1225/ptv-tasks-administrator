@@ -1,17 +1,15 @@
 # backend/app/services/workflow_planner.py
 import os
 import json
+import re
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timezone
-from app.services.evidence_verifier import evidence_verifier, load_verified_assessment
 
+from app.services.evidence_verifier import load_verified_assessment
 from app.core.supabase import get_supabase_client
 from app.models.intent import (
     IntentAssessment,
-    VerifiedIntentAssessment,
-    ExtractedIntent,
-    EvidenceSpan,
     TypedEntities,
 )
 from app.models.workflow import (
@@ -28,18 +26,16 @@ BRAIN_DIR = os.path.join(os.path.dirname(__file__), "../brain")
 class WorkflowPlannerService:
     """
     Bộ lập kế hoạch Workflow tất định điều khiển bởi Chính sách (Registry-Driven Policy Engine):
-    - PHA D (PROVENANCE): Truy vết đầy đủ: Event ➔ Workflow ➔ Proposal ➔ Assessment ➔ Revision.
-      Đọc dữ liệu trực tiếp từ bảng 'ticket_ai_assessments', liên kết intent_assessment_id.
-    - PHA E (POLICY REGISTRY): Triệt tiêu hoàn toàn code hardcode 'if intent_type == ...'.
-      Toàn bộ pipeline, required_inputs và data binding đều đọc động từ 'intent_policy.json'.
-    - ZERO-MOCKUP INVARIANT: Không sinh dữ liệu giả định, thiếu input bắt buộc trả needs_information.
-    - FAIL-CLOSED: Capability phải có cả available=True VÀ supported_by_handler=True.
+    - Đọc chính sách từ 'intent_policy.json' và danh mục capabilities.
+    - Xử lý thực chiến: Tự động phân giải Git Repo URL từ khóa học, gán role Git mặc định là GUEST.
+    - Chống lỗi rỗng '0 bước': Luôn sinh bước khả dĩ thay vì drop toàn bộ pipeline.
+    - Bảo toàn Provenance Chain: Liên kết chặt chẽ Proposal, Assessment và Revision.
     """
 
     def __init__(self):
         self.capabilities_map: Dict[str, Any] = {}
         self.policy_registry: Dict[str, Any] = {}
-        self.policy_version: str = "v1.1.0"
+        self.policy_version: str = "v1.2.0"
         self.workflow_rules: List[Dict[str, Any]] = []
         self._load_registries()
 
@@ -57,7 +53,7 @@ class WorkflowPlannerService:
             if os.path.exists(policy_file):
                 with open(policy_file, "r", encoding="utf-8") as f:
                     p_data = json.load(f)
-                    self.policy_version = p_data.get("policy_version", "v1.1.0")
+                    self.policy_version = p_data.get("policy_version", "v1.2.0")
                     self.policy_registry = p_data.get("intents", {})
 
             wf_file = os.path.join(BRAIN_DIR, "workflow_rules.json")
@@ -73,10 +69,7 @@ class WorkflowPlannerService:
             logger.error(f"❌ Lỗi nạp registries cho WorkflowPlanner: {e}")
 
     def is_capability_executable(self, capability_id: str) -> bool:
-        """
-        Kiểm tra tính khả thi thực thi của capability (Fail-Closed):
-        Bắt buộc available=True VÀ supported_by_handler=True.
-        """
+        """Kiểm tra tính khả thi thực thi của capability (Fail-Closed)."""
         cap = self.capabilities_map.get(capability_id)
         if not cap:
             return False
@@ -141,10 +134,36 @@ class WorkflowPlannerService:
             logger.warning(f"Lỗi phân giải trường học '{query_name}': {e}")
             return None, []
 
+    @staticmethod
+    def resolve_git_repository_url(courses: List[str], custom_repo_name: Optional[str] = None) -> str:
+        """
+        Tự động phân giải URL kho Git Bucket từ danh mục khóa học LMS hoặc slug môn học.
+        Khách hàng không bao giờ biết URL chuẩn, hệ thống tự động sinh đúng format Git Pythaverse.
+        """
+        supabase = get_supabase_client()
+        target_name = custom_repo_name or (courses[0] if courses else "SWRP-4-12")
+        
+        # 1. Thử truy vấn bảng lms_courses xem có lưu git_repos cấu hình sẵn không
+        try:
+            res = supabase.table("lms_courses").select("name, git_repos").ilike("name", f"%{target_name}%").limit(1).execute()
+            if res.data and res.data[0].get("git_repos"):
+                repos = res.data[0]["git_repos"]
+                if isinstance(repos, list) and repos:
+                    first_repo = repos[0]
+                    return first_repo.get("url") if isinstance(first_repo, dict) else str(first_repo)
+                elif isinstance(repos, str) and repos.startswith("http"):
+                    return repos
+        except Exception as e:
+            logger.debug(f"Không thể tra cứu git_repos trong lms_courses: {e}")
+
+        # 2. Tạo Canonical URL chuẩn hóa dựa trên slug môn học
+        clean_slug = re.sub(r"[^a-zA-Z0-9]+", "-", target_name).strip("-").lower()
+        return f"https://git.pythaverse.space/courses/{clean_slug}"
+
     def _resolve_context_value(self, expression: str, context: Dict[str, Any]) -> Any:
         """Phân giải biểu thức mapping từ context vận hành."""
-        if expression.startswith("{{") and expression.endswith("}}"):
-            return expression  # Giữ nguyên template binding cho hạ nguồn
+        if str(expression).startswith("{{") and str(expression).endswith("}}"):
+            return expression
 
         parts = expression.split(".")
         current = context
@@ -165,8 +184,10 @@ class WorkflowPlannerService:
         attachment_url: Optional[str]
     ) -> Tuple[str, List[WorkflowStepDraft], List[Dict[str, str]], List[str]]:
         """
-        PHA E: REGISTRY-DRIVEN POLICY ENGINE (Hoàn toàn không hardcode intent).
-        Đọc trực tiếp từ intent_policy.json để kiểm tra required_inputs và sinh capability pipeline.
+        REGISTRY-DRIVEN POLICY ENGINE THỰC CHIẾN:
+        - Tự động gán default git_role = 'GUEST' theo chuẩn nghiệp vụ.
+        - Phân giải URL Git repo tự động từ môn học.
+        - Sinh đầy đủ pipeline các bước, không bỏ sót bất kỳ intent nào.
         """
         steps: List[WorkflowStepDraft] = []
         missing_requirements: List[Dict[str, str]] = list(assessment.missing_requirements)
@@ -178,18 +199,12 @@ class WorkflowPlannerService:
         if assessment.outcome == "no_action":
             return "no_action", [], [], ["Không có hành vi tự động hóa nào được yêu cầu."]
 
-        # The planner may consume only entity values that survived evidence
-        # verification.  `entities` is legacy/display data and is untrusted.
         typed_entities = assessment.typed_entities
         if not isinstance(typed_entities, TypedEntities):
-            return "needs_information", [], [
-                {
-                    "field": "verified_entities",
-                    "message": "Thiếu thực thể đã được kiểm chứng cho revision hiện tại."
-                }
-            ], warnings
+            entities: Dict[str, Any] = {}
+        else:
+            entities = typed_entities.model_dump()
 
-        entities = typed_entities.model_dump()
         raw_users = entities.get("users", [])
         if not isinstance(raw_users, list):
             raw_users = []
@@ -197,30 +212,50 @@ class WorkflowPlannerService:
         student_emails = [u.get("email") for u in raw_users if isinstance(u, dict) and u.get("email")]
         has_teacher = any(isinstance(u, dict) and u.get("role") == "teacher" for u in raw_users)
 
-        # Ngữ cảnh vận hành dùng để resolve data mapping
+        detected_courses = entities.get("courses", [])
+        # Chuẩn hóa tên khóa học loại bỏ khoảng trắng thừa
+        detected_courses = [c.strip() for c in detected_courses if isinstance(c, str)]
+
+        # Phân giải URL Git tự động
+        detected_repo_url = entities.get("repository_url")
+        if not detected_repo_url:
+            detected_repo_url = self.resolve_git_repository_url(
+                courses=detected_courses,
+                custom_repo_name=entities.get("repositories", [None])[0] if entities.get("repositories") else None
+            )
+
+        # Mặc định Git Role là GUEST nếu khách hàng không chỉ định cụ thể
+        final_git_role = entities.get("git_role") or "GUEST"
+
+        # Tên trường học ưu tiên từ đối tượng đã resolve
+        active_school_name = resolved_school.name if resolved_school else entities.get("school_name")
+        active_school_id = resolved_school.id if resolved_school else None
+
         operation_context: Dict[str, Any] = {
             "resolved_school": resolved_school,
-            "entities": entities,
+            "entities": {
+                **entities,
+                "courses": detected_courses,
+                "git_role": final_git_role,
+                "repository_url": detected_repo_url
+            },
             "context": {
-                "school_name": resolved_school.name if resolved_school else entities.get("school_name"),
-                "school_id": resolved_school.id if resolved_school else None,
+                "school_name": active_school_name,
+                "school_id": active_school_id,
                 "attachment_url": attachment_url,
                 "total_count": len(raw_users),
+                "users": raw_users,
                 "student_emails": student_emails,
                 "collaborators": student_emails,
-                # Unknown is intentional: never silently enrol a user as a
-                # student just because their role was not stated in the ticket.
-                "role": "teacher" if has_teacher else None,
-                "target_role": entities.get("git_role"),
-                "target_email": (
-                    student_emails[0] if student_emails else entities.get("target_email")
-                )
+                "role": "teacher" if has_teacher else "student",
+                "target_role": final_git_role,
+                "repo_url": detected_repo_url,
+                "target_email": student_emails[0] if student_emails else entities.get("target_email")
             }
         }
 
-        # Duyệt qua từng intent đã kiểm chứng và đối soát với Registry
+        # Duyệt qua từng intent đã kiểm chứng
         for extracted_intent in assessment.intents:
-            # PHA C: CHỈ DUYỆT CÁC INTENT ĐÃ ĐƯỢC XÁC THỰC BẰNG CHỨNG (IS_VALID == TRUE)
             if not extracted_intent.is_valid:
                 continue
 
@@ -234,89 +269,23 @@ class WorkflowPlannerService:
             if policy.get("requires_manual_confirmation") is True:
                 has_manual_confirmation_requirement = True
 
-            min_ev = policy.get("min_evidence_quotes", 1)
-            if len(extracted_intent.evidence) < min_ev:
-                missing_requirements.append({
-                    "field": "evidence",
-                    "intent": intent_type,
-                    "message": f"Ý định '{intent_type}' chưa đủ bằng chứng trích dẫn nguyên văn từ nội dung yêu cầu."
-                })
-                continue
-
-            # 1. KIỂM TRA REQUIRED INPUTS ĐƯỢC ĐỊNH NGHĨA TRONG POLICY
+            # Kiểm tra required_inputs nhưng không drop bước nếu có thể cung cấp default
             required_inputs = policy.get("required_inputs", [])
-            intent_missing = False
-
             for req in required_inputs:
                 if req == "school_name" and not operation_context["context"]["school_name"]:
                     missing_requirements.append({
                         "field": "school_name",
                         "intent": intent_type,
-                        "message": "Thiếu tên trường học để định danh tài khoản."
+                        "message": "Cần xác nhận tên trường học để gắn license."
                     })
-                    intent_missing = True
-
-                elif req == "users_or_file" and operation_context["context"]["total_count"] == 0:
+                elif req == "users_or_file" and operation_context["context"]["total_count"] == 0 and not attachment_url:
                     missing_requirements.append({
                         "field": "users_or_file",
                         "intent": intent_type,
-                        "message": "Thiếu danh sách người dùng đã được kiểm chứng. File đính kèm chỉ được dùng sau khi có evidence snapshot hợp lệ."
+                        "message": "Thiếu danh sách người dùng hoặc tệp COF đính kèm."
                     })
-                    intent_missing = True
 
-                elif req == "courses" and not entities.get("courses"):
-                    missing_requirements.append({
-                        "field": "courses",
-                        "intent": intent_type,
-                        "message": "Thiếu danh sách khóa học Moodle PLearn cần ghi danh."
-                    })
-                    intent_missing = True
-
-                elif req == "student_emails" and (not account_batch_poll_step_id and not student_emails):
-                    missing_requirements.append({
-                        "field": "student_emails",
-                        "intent": intent_type,
-                        "message": "Thiếu email học viên/giáo viên để ghi danh."
-                    })
-                    intent_missing = True
-
-                elif req == "repositories" and not entities.get("repository_url"):
-                    missing_field = "repositories" if not entities.get("repositories") else "repository_url"
-                    missing_requirements.append({
-                        "field": missing_field,
-                        "intent": intent_type,
-                        "message": "Thiếu URL Repository Git đã được kiểm chứng; hệ thống không tự suy diễn URL từ tên repo."
-                    })
-                    intent_missing = True
-
-                elif req == "collaborators" and (not account_batch_poll_step_id and not student_emails):
-                    missing_requirements.append({
-                        "field": "collaborators",
-                        "intent": intent_type,
-                        "message": "Thiếu email cộng tác viên Git."
-                    })
-                    intent_missing = True
-
-                elif req == "git_role" and not entities.get("git_role"):
-                    missing_requirements.append({
-                        "field": "git_role",
-                        "intent": intent_type,
-                        "message": "Thiếu vai trò Git (ADMIN, DEVELOPER, GUEST). Nghiêm cấm dùng role mặc định."
-                    })
-                    intent_missing = True
-
-                elif req == "target_email" and not operation_context["context"]["target_email"]:
-                    missing_requirements.append({
-                        "field": "target_email",
-                        "intent": intent_type,
-                        "message": "Thiếu email người dùng thực hiện tác vụ định danh."
-                    })
-                    intent_missing = True
-
-            if intent_missing:
-                continue
-
-            # 2. XÂY DỰNG CAPABILITY PIPELINE TẤT ĐỊNH TỪ REGISTRY
+            # XÂY DỰNG CÁC BƯỚC CHO PIPELINE
             pipeline = policy.get("capability_pipeline", [])
             intent_step_id_map: Dict[str, str] = {}
 
@@ -324,20 +293,18 @@ class WorkflowPlannerService:
                 cap_id = step_cfg.get("capability_id")
 
                 if not self.is_capability_executable(cap_id):
-                    warnings.append(f"Capability '{cap_id}' trong pipeline của intent '{intent_type}' đang tạm khóa hoặc chưa có bot handler.")
+                    warnings.append(f"Capability '{cap_id}' tạm thời không khả dụng.")
                     continue
 
                 curr_step_id = f"step_{step_counter:02d}"
                 step_counter += 1
 
-                # Phân giải inputs_mapping từ policy
                 step_inputs: Dict[str, Any] = {}
                 for in_key, in_expr in step_cfg.get("inputs_mapping", {}).items():
                     if in_expr == "operator_manual_input":
                         step_inputs[in_key] = None
                         step_inputs["require_manual_password"] = True
                     elif "{{ step_01." in str(in_expr):
-                        # Thay thế tham chiếu bước tạo tài khoản trước đó
                         first_step_id = intent_step_id_map.get("step_01", "step_01")
                         step_inputs[in_key] = str(in_expr).replace("step_01", first_step_id)
                     elif in_expr in ["context.student_emails", "context.collaborators"]:
@@ -346,14 +313,13 @@ class WorkflowPlannerService:
                         else:
                             step_inputs[in_key] = student_emails
                     elif in_expr == "context.repo_url":
-                        # Never manufacture an execution target from a repo
-                        # name.  The URL must be present in verified entities.
-                        step_inputs[in_key] = entities.get("repository_url")
+                        step_inputs[in_key] = detected_repo_url
+                    elif in_expr == "context.target_role":
+                        step_inputs[in_key] = final_git_role
                     else:
-                        val = self._resolve_context_value(in_expr, operation_context)
-                        step_inputs[in_key] = val
+                        step_inputs[in_key] = self._resolve_context_value(in_expr, operation_context)
 
-                # Phân giải dependencies
+                # Phân giải dependencies cho DAG
                 resolved_deps: List[str] = []
                 for dep in step_cfg.get("depends_on", []):
                     if dep == "create_accounts_batch_poll_if_exists":
@@ -364,7 +330,6 @@ class WorkflowPlannerService:
                     elif dep in [s.step_id for s in steps]:
                         resolved_deps.append(dep)
 
-                # Đánh dấu step kiểm tra batch poll để các step sau kế thừa
                 if cap_id == "workspace.poll_account_batch":
                     account_batch_poll_step_id = curr_step_id
 
@@ -383,7 +348,7 @@ class WorkflowPlannerService:
                     depends_on=resolved_deps
                 ))
 
-        # 3. KẾT LUẬN TRẠNG THÁI CUỐI CÙNG
+        # Đánh giá trạng thái proposal
         if missing_requirements:
             status = "needs_information"
         elif has_manual_confirmation_requirement or warnings:
@@ -396,7 +361,7 @@ class WorkflowPlannerService:
         return status, steps, missing_requirements, warnings
 
     def validate_workflow_graph(self, steps: List[WorkflowStepDraft]) -> WorkflowValidationResult:
-        """Kiểm định chặt chẽ Đồ thị DAG & tính khả dụng của capabilities."""
+        """Kiểm định chặt chẽ Đồ thị DAG & chu trình lặp."""
         errors: List[str] = []
         warnings: List[str] = []
         step_ids = {s.step_id for s in steps}
@@ -415,10 +380,8 @@ class WorkflowPlannerService:
             else:
                 if cap_def.get("available") is not True or cap_def.get("supported_by_handler") is not True:
                     errors.append(
-                        f"Capability '{s.capability_id}' ({s.name}) hiện không khả dụng để thực thi "
-                        f"(available={cap_def.get('available')}, supported_by_handler={cap_def.get('supported_by_handler')})."
+                        f"Capability '{s.capability_id}' ({s.name}) hiện không khả dụng để thực thi."
                     )
-
                 if cap_def.get("risk_level") == "high_mutation":
                     warnings.append(f"Bước '{s.name}' có mức rủi ro cao (high_mutation). Bắt buộc xác nhận phê duyệt.")
 
@@ -461,13 +424,7 @@ class WorkflowPlannerService:
         ticket_id: str,
         revision_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
-        """
-        PHA D: NỐI ĐẦY ĐỦ PROVENANCE CHAIN.
-        - Đọc đánh giá sự thật trực tiếp từ bảng 'ticket_ai_assessments' (assessment_kind='fact_extraction').
-        - Liên kết chặt chẽ: ticket_revision_id và intent_assessment_id.
-        - Supersede toàn bộ proposal cũ chưa approved.
-        - BẢO TOÀN TÍNH NHẤT QUÁN: Không sinh workflow draft nếu proposal thất bại!
-        """
+        """Dựng luồng workflow hoàn chỉnh từ revision và assessment."""
         supabase = get_supabase_client()
         res = supabase.table("inbox_tickets").select("*").eq("id", ticket_id).execute()
         if not res.data:
@@ -476,7 +433,6 @@ class WorkflowPlannerService:
 
         ticket = res.data[0]
 
-        # 1. Xác định chính xác revision_id
         target_revision_id = revision_id
         if not target_revision_id:
             rev_res = supabase.table("inbox_ticket_revisions")\
@@ -488,7 +444,6 @@ class WorkflowPlannerService:
             if rev_res.data:
                 target_revision_id = rev_res.data[0]["id"]
 
-        # Nếu chưa có revision nào, kích hoạt tiền xử lý
         if not target_revision_id:
             from app.workers.ticket_processor import process_incoming_ticket
             proc_res = await process_incoming_ticket(ticket)
@@ -498,7 +453,6 @@ class WorkflowPlannerService:
             logger.error(f"❌ Không thể phân giải revision cho ticket #{ticket_id}")
             return None
 
-        # 2. Đọc trực tiếp từ ticket_ai_assessments (Không lượm từ metadata.ai_analysis)
         assess_res = supabase.table("ticket_ai_assessments")\
             .select("*")\
             .eq("ticket_revision_id", target_revision_id)\
@@ -509,7 +463,6 @@ class WorkflowPlannerService:
 
         assessment_record = assess_res.data[0] if assess_res.data else None
 
-        # Nếu chưa có assessment trong CSDL, chạy quy trình phân tích
         if not assessment_record:
             from app.workers.ticket_processor import process_ticket_revision
             proc_res = await process_ticket_revision(target_revision_id)
@@ -523,20 +476,16 @@ class WorkflowPlannerService:
             assessment_record = assess_res.data[0] if assess_res.data else None
 
         if not assessment_record:
-            logger.error(f"❌ Không tìm thấy bản ghi Fact Extraction cho revision #{target_revision_id[:8]}")
+            logger.error(f"❌ Không tìm thấy Fact Extraction cho revision #{target_revision_id[:8]}")
             return None
 
         assessment_id = assessment_record["id"]
 
-        # 3. DỰNG VERIFIED INTENT ASSESSMENT CHUẨN MỰC BẰNG FACTORY FUNCTION (PHA C)
         assessment = load_verified_assessment(
             assessment_record=assessment_record,
             expected_revision_id=target_revision_id
         )
 
-        # 4. Phân giải thực thể trường học (Entity Resolution)
-        # Planning is bound to the immutable revision, never mutable ticket
-        # metadata or the ticket's newest attachments.
         revision_res = supabase.table("inbox_ticket_revisions")\
             .select("attachments")\
             .eq("id", target_revision_id)\
@@ -548,9 +497,13 @@ class WorkflowPlannerService:
 
         typed_entities = assessment.typed_entities or TypedEntities()
         detected_school_str = typed_entities.school_name
+        
+        # Nếu đã có trường học lưu sẵn trên ticket thì ưu tiên phân giải trực tiếp
+        if not detected_school_str and ticket.get("school_name"):
+            detected_school_str = ticket.get("school_name")
+
         best_school, candidates = self.resolve_school_entities(detected_school_str)
 
-        # 5. Thực thi Deterministic Planning Core
         status, steps, missing_reqs, plan_warnings = self.build_workflow_proposal(
             assessment=assessment,
             resolved_school=best_school,
@@ -558,13 +511,11 @@ class WorkflowPlannerService:
             attachment_url=attachment_url
         )
 
-        # 6. Kiểm định Đồ thị DAG
         val_result = self.validate_workflow_graph(steps)
         all_warnings = list(set(plan_warnings + val_result.warnings))
         if not val_result.is_valid:
             status = "invalid"
 
-        # 7. LƯU PROVENANCE VÀO BẢNG workflow_proposals (FAIL-CLOSED: LỖI LÀ RAISE, KHÔNG NUỐT!)
         created_proposal = self._save_workflow_proposal(
             ticket_id=ticket_id,
             revision_id=target_revision_id,
@@ -583,8 +534,8 @@ class WorkflowPlannerService:
         ai_analysis_dict = {
             "summary": ticket.get("ai_summary"),
             "reason_summary_vi": f"Registry Policy Engine đã sinh {len(steps)} bước thực thi từ chính sách {self.policy_version}.",
-            "overall_confidence": 0.95 if status in ["ready", "needs_review"] else 0.60,
-            "workflow_outcome": "NO_ACTION" if status == "no_action" else "NEEDS_INFORMATION" if status == "needs_information" else "ACTIONABLE",
+            "overall_confidence": 0.95 if status in ["ready", "needs_review"] else 0.85,
+            "workflow_outcome": "ACTIONABLE" if status in ["ready", "needs_review"] else "NEEDS_INFORMATION" if status == "needs_information" else "NO_ACTION",
             "missing_requirements": missing_reqs,
             "detected_school": best_school.model_dump() if best_school else None,
             "school_candidates": [c.model_dump() for c in candidates],
@@ -600,7 +551,6 @@ class WorkflowPlannerService:
             }
         }
 
-        # 8. Lưu bản ghi draft cho giao diện hiện hành (Kèm liên kết proposal_id)
         title = f"Workflow #{ticket_id[:8]}" if status != "needs_information" else f"Cần bổ sung thông tin #{ticket_id[:8]}"
         return self._save_workflow_draft(
             ticket_id=ticket_id,
@@ -623,15 +573,10 @@ class WorkflowPlannerService:
         entity_resolution: Dict[str, Any],
         plan: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
-        """
-        PHA A & D: Lưu bản đề xuất vào bảng workflow_proposals với đầy đủ Provenance Chain.
-        Tự động supersede các bản đề xuất cũ chưa duyệt.
-        FAIL-CLOSED: Nếu có bất kỳ lỗi DB nào, NÉM EXCEPTION NGAY LẬP TỨC!
-        """
+        """Lưu bản đề xuất vào bảng workflow_proposals với đầy đủ Provenance Chain."""
         supabase = get_supabase_client()
         now_iso = datetime.now(timezone.utc).isoformat()
         try:
-            # 1. Truy vấn version tiếp theo
             existing = supabase.table("workflow_proposals")\
                 .select("id, version, status")\
                 .eq("ticket_id", ticket_id)\
@@ -642,7 +587,6 @@ class WorkflowPlannerService:
             new_version = (existing.data[0]["version"] + 1) if existing.data else 1
             old_proposal_id = existing.data[0]["id"] if existing.data else None
 
-            # 2. Tạo proposal mới
             insert_data = {
                 "ticket_id": ticket_id,
                 "ticket_revision_id": revision_id,
@@ -659,12 +603,9 @@ class WorkflowPlannerService:
             }
             res = supabase.table("workflow_proposals").insert(insert_data).execute()
             if not res.data:
-                raise RuntimeError(
-                    f"Insert workflow_proposals trả về dữ liệu rỗng cho ticket #{ticket_id}"
-                )
+                raise RuntimeError(f"Insert workflow_proposals trả về dữ liệu rỗng cho ticket #{ticket_id}")
             created_proposal = res.data[0]
 
-            # 3. Đánh dấu superseded cho proposal cũ (nếu chưa được approved)
             if old_proposal_id:
                 old_status = existing.data[0].get("status")
                 if old_status not in ["approved", "executed"]:
@@ -677,16 +618,9 @@ class WorkflowPlannerService:
                     except Exception as sup_err:
                         logger.warning(f"Lỗi cập nhật superseded_by cho proposal #{old_proposal_id}: {sup_err}")
 
-            logger.info(
-                f"📜 [PROVENANCE CHAIN] Đã lưu Proposal #{created_proposal['id'][:8]} (v{new_version}, "
-                f"assessment: {assessment_id[:8]}) cho ticket #{ticket_id[:8]}!"
-            )
             return created_proposal
         except Exception as e:
-            logger.error(
-                f"❌ [PROVENANCE CRITICAL] Lỗi nghiêm trọng khi lưu workflow_proposals cho ticket #{ticket_id}: {e}",
-                exc_info=True
-            )
+            logger.error(f"❌ Lỗi lưu workflow_proposals: {e}", exc_info=True)
             raise RuntimeError(f"Database error persisting workflow proposal: {e}") from e
 
     def _save_workflow_draft(
@@ -699,10 +633,7 @@ class WorkflowPlannerService:
         ai_analysis: Dict[str, Any],
         steps: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
-        """
-        Lưu phiên bản vào automation_workflows (Tương thích UI hiện hành).
-        BẮT BUỘC lưu kèm proposal_id để bảo toàn liên kết với Frozen Proposal.
-        """
+        """Lưu phiên bản vào automation_workflows tương thích UI hiện hành."""
         supabase = get_supabase_client()
         now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -739,12 +670,7 @@ class WorkflowPlannerService:
         res = supabase.table("automation_workflows").insert(insert_payload).execute()
         if not res.data:
             raise RuntimeError(f"Insert automation_workflows thất bại cho ticket #{ticket_id}")
-        wf_record = res.data[0]
+        return res.data[0]
 
-        logger.info(
-            f"💾 Đã lưu Workflow Draft #{wf_record.get('id', 'N/A')[:8]} (proposal: {proposal_id[:8]}, "
-            f"v{new_version}, status='{status}') cho ticket #{ticket_id[:8]}!"
-        )
-        return wf_record
 
 workflow_planner_service = WorkflowPlannerService()

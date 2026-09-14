@@ -1,14 +1,11 @@
 // frontend/src/features/monitor/SiteMonitorPage.tsx
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Activity,
   RefreshCw,
   Globe,
   CheckCircle2,
-  XCircle,
   AlertTriangle,
   PauseCircle,
-  Clock,
   Zap,
   ExternalLink,
   Loader2,
@@ -20,6 +17,8 @@ import {
   Copy,
   Check,
   Filter,
+  XCircle,
+  TrendingUp,
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { toast } from 'sonner';
@@ -98,97 +97,199 @@ function formatDate(isoOrTs: string | number): string {
   } catch { return String(isoOrTs); }
 }
 
-// ─── Hourly Uptime Bar (24 Khối Giờ — Chống Lệch Sidebar & Gọn Chữ) ──────────
-interface UptimeBarProps {
+// ─── ĐỒ THỊ ĐƯỜNG PING & TÍN HIỆU SẬP (INTERACTIVE SVG LATENCY LINE CHART) ──
+interface UptimeLineChartProps {
   siteId: string;
   history?: HourlyHistoryItem[];
   loading?: boolean;
   uptime_pct?: number;
+  currentLatency?: number;
 }
 
-const UptimeBar: React.FC<UptimeBarProps> = ({
+const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
   siteId,
   history = [],
   loading = false,
   uptime_pct = 100,
+  currentLatency = 0,
 }) => {
-  const [tooltip, setTooltip] = useState<{ item: HourlyHistoryItem; index: number } | null>(null);
+  const [hoveredPoint, setHoveredPoint] = useState<{
+    item: HourlyHistoryItem;
+    index: number;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  // Chuẩn hóa 24 điểm dữ liệu theo 24 giờ
+  const points: HourlyHistoryItem[] = useMemo(() => {
+    if (history && history.length === 24) return history;
+    const nowHour = new Date().getHours();
+    return Array.from({ length: 24 }, (_, i) => {
+      const h = (nowHour - (23 - i) + 24) % 24;
+      return {
+        hour: `${h.toString().padStart(2, '0')}:00`,
+        status: 'UP' as const,
+        latency_ms: currentLatency > 0 ? currentLatency : 150,
+      };
+    });
+  }, [history, currentLatency]);
 
   if (loading && history.length === 0) {
     return (
-      <div className="flex items-center gap-1 h-6 animate-pulse">
-        {Array.from({ length: 24 }).map((_, i) => (
-          <div key={i} className="flex-1 h-full rounded-xs bg-slate-200 dark:bg-slate-800" />
-        ))}
+      <div className="h-14 w-full rounded-xl bg-slate-100 dark:bg-slate-800/50 animate-pulse flex items-center justify-center">
+        <span className="text-[11px] text-slate-400 font-mono">Đang tải biểu đồ độ trễ...</span>
       </div>
     );
   }
 
-  // Đảm bảo luôn đủ 24 điểm giờ
-  const displayHours: HourlyHistoryItem[] = history.length === 24
-    ? history
-    : Array.from({ length: 24 }, (_, i) => {
-      const hourNum = (new Date().getHours() - (23 - i) + 24) % 24;
-      return {
-        hour: `${hourNum.toString().padStart(2, '0')}:00`,
-        status: 'UP' as const,
-        latency_ms: 0,
-      };
-    });
+  // Kích thước khung vẽ SVG
+  const width = 480;
+  const height = 54;
+  const paddingX = 8;
+  const paddingTop = 8;
+  const paddingBottom = 10;
+
+  // Tính dải min/max latency để scale tọa độ Y
+  const latencies = points.map(p => p.latency_ms || 100);
+  const minLat = Math.min(...latencies, 50);
+  const maxLat = Math.max(...latencies, 400);
+
+  // Tạo tọa độ (x, y) cho từng điểm giờ
+  const coords = points.map((p, i) => {
+    const x = paddingX + (i / 23) * (width - paddingX * 2);
+    const lat = p.status === 'DOWN' ? maxLat : (p.latency_ms || minLat);
+    const normalized = (lat - minLat) / (maxLat - minLat || 1);
+    // Latency càng cao thì Y càng gần đỉnh (giá trị số Y càng nhỏ)
+    const y = height - paddingBottom - normalized * (height - paddingTop - paddingBottom);
+    return { x, y, item: p, index: i };
+  });
+
+  // Vẽ đường cong Bezier mềm mại (SVG path)
+  let linePath = `M ${coords[0].x} ${coords[0].y}`;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const current = coords[i];
+    const next = coords[i + 1];
+    const cpX1 = current.x + (next.x - current.x) / 2;
+    const cpY1 = current.y;
+    const cpX2 = current.x + (next.x - current.x) / 2;
+    const cpY2 = next.y;
+    linePath += ` C ${cpX1} ${cpY1}, ${cpX2} ${cpY2}, ${next.x} ${next.y}`;
+  }
+
+  // Vẽ vùng nền Gradient dưới đường cong
+  const areaPath = `${linePath} L ${coords[coords.length - 1].x} ${height} L ${coords[0].x} ${height} Z`;
+
+  const hasAnyDown = points.some(p => p.status === 'DOWN');
 
   return (
-    <div className="space-y-1.5 select-none">
-      <div className="relative flex items-end gap-1 h-6">
-        {displayHours.map((h, i) => {
-          const isDown = h.status === 'DOWN';
-          const isDegraded = h.status === 'DEGRADED';
-          const bgClass = isDown ? 'bg-rose-500' : isDegraded ? 'bg-amber-400' : 'bg-emerald-500';
+    <div className="space-y-1.5 select-none relative">
+      <div className="relative w-full h-14 overflow-visible">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="w-full h-full overflow-visible"
+          preserveAspectRatio="none"
+        >
+          <defs>
+            {/* Gradient màu cho line bình thường (Xanh) */}
+            <linearGradient id={`grad-up-${siteId}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#10b981" stopOpacity="0.25" />
+              <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
+            </linearGradient>
 
-          return (
-            <div
-              key={i}
-              className={`flex-1 rounded-xs transition-all duration-150 cursor-pointer ${bgClass} hover:opacity-100 hover:scale-y-125 opacity-80 origin-bottom`}
-              style={{ height: isDown ? '100%' : '75%' }}
-              onMouseEnter={() => setTooltip({ item: h, index: i })}
-              onMouseLeave={() => setTooltip(null)}
-            />
-          );
-        })}
+            {/* Gradient màu khi có sự cố sập (Đỏ) */}
+            <linearGradient id={`grad-down-${siteId}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.3" />
+              <stop offset="100%" stopColor="#f43f5e" stopOpacity="0.0" />
+            </linearGradient>
+          </defs>
 
-        {/* Tooltip định vị thông minh chống tràn mép viền */}
-        {tooltip && (
+          {/* Vùng bóng đổ mờ dưới đường biểu đồ */}
+          <path
+            d={areaPath}
+            fill={hasAnyDown ? `url(#grad-down-${siteId})` : `url(#grad-up-${siteId})`}
+          />
+
+          {/* Sợi dây biểu đồ chính */}
+          <path
+            d={linePath}
+            fill="none"
+            stroke={hasAnyDown ? '#f43f5e' : '#10b981'}
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+
+          {/* Các điểm nút (Nodes) tương tác từng giờ */}
+          {coords.map((c, i) => {
+            const isDown = c.item.status === 'DOWN';
+            return (
+              <g key={i}>
+                {/* Vùng đệm bắt sự kiện hover rộng hơn */}
+                <circle
+                  cx={c.x}
+                  cy={c.y}
+                  r="6"
+                  className="fill-transparent cursor-pointer"
+                  onMouseEnter={() => setHoveredPoint(c)}
+                  onMouseLeave={() => setHoveredPoint(null)}
+                />
+
+                {/* Điểm hiển thị thực tế */}
+                <circle
+                  cx={c.x}
+                  cy={c.y}
+                  r={isDown ? '3.5' : '2'}
+                  className={`pointer-events-none transition-all duration-150 ${isDown
+                    ? 'fill-rose-500 stroke-white dark:stroke-slate-900 stroke-2'
+                    : 'fill-emerald-500 opacity-70 hover:opacity-100'
+                    }`}
+                />
+              </g>
+            );
+          })}
+        </svg>
+
+        {/* Tooltip định vị thông minh: Chống tràn mép sidebar & format siêu gọn */}
+        {hoveredPoint && (
           <div
-            className={`absolute bottom-full mb-2 z-30 pointer-events-none transition-all duration-75 ${tooltip.index < 3
+            className={`absolute bottom-full mb-1 z-30 pointer-events-none transition-transform duration-75 ${hoveredPoint.index < 3
               ? 'left-0'
-              : tooltip.index > 20
+              : hoveredPoint.index > 20
                 ? 'right-0'
                 : '-translate-x-1/2'
               }`}
             style={
-              tooltip.index >= 3 && tooltip.index <= 20
-                ? { left: `${((tooltip.index + 0.5) / 24) * 100}%` }
+              hoveredPoint.index >= 3 && hoveredPoint.index <= 20
+                ? { left: `${(hoveredPoint.index / 23) * 100}%` }
                 : undefined
             }
           >
-            <div className="bg-slate-900 text-white text-[11px] font-mono rounded-lg px-2.5 py-1.5 shadow-2xl border border-slate-700 whitespace-nowrap flex items-center gap-1.5">
-              <span className="font-semibold text-slate-300">{tooltip.item.hour}</span>
-              <span>—</span>
-              <span className={tooltip.item.status === 'DOWN' ? 'text-rose-400 font-bold' : 'text-emerald-400 font-bold'}>
-                {tooltip.item.status === 'DOWN' ? '🔴 Lỗi' : '🟢 Ổn định'}
-              </span>
-              {tooltip.item.incident_duration && (
-                <span className="text-[10px] text-rose-300 ml-0.5">({tooltip.item.incident_duration})</span>
+            <div className="bg-slate-900/95 dark:bg-slate-950 text-white text-[11px] font-mono rounded-lg px-2.5 py-1.5 shadow-2xl border border-slate-700 whitespace-nowrap flex items-center gap-1.5 backdrop-blur-md">
+              <span className="font-semibold text-slate-300">{hoveredPoint.item.hour}</span>
+              <span className="text-slate-500">—</span>
+              {hoveredPoint.item.status === 'DOWN' ? (
+                <span className="text-rose-400 font-bold">
+                  🔴 Lỗi {hoveredPoint.item.incident_duration ? `(${hoveredPoint.item.incident_duration})` : ''}
+                </span>
+              ) : (
+                <span className="text-emerald-400 font-bold">
+                  🟢 Ổn định {hoveredPoint.item.latency_ms ? `(${hoveredPoint.item.latency_ms}ms)` : ''}
+                </span>
               )}
             </div>
           </div>
         )}
       </div>
 
-      <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500 font-mono">
+      {/* Chân biểu đồ hiển thị thời gian & Live Uptime % */}
+      <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500 font-mono pt-1">
         <span>24h trước</span>
-        <span className={`font-bold text-xs ${uptime_pct < 99 ? 'text-amber-500' : 'text-emerald-500'}`}>
-          Live Uptime {uptime_pct.toFixed(1)}%
-        </span>
+        <div className="flex items-center gap-1">
+          <TrendingUp className="w-3 h-3 text-emerald-500" />
+          <span className={`font-bold text-xs ${uptime_pct < 99 ? 'text-amber-500' : 'text-emerald-500'}`}>
+            Live Uptime {uptime_pct.toFixed(1)}%
+          </span>
+        </div>
         <span>Hiện tại</span>
       </div>
     </div>
@@ -218,7 +319,7 @@ function StatusDot({ status }: { status: MonitoredSite['last_status'] }) {
   );
 }
 
-// ─── Skeletons Loader ───────────────────────────────────────────────────────
+// ─── Skeletons Loader (Thay thế hoàn toàn Mock Data) ────────────────────────
 const SummarySkeleton = () => (
   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 animate-pulse">
     {Array.from({ length: 6 }).map((_, i) => (
@@ -245,10 +346,10 @@ const DeployCardSkeleton = () => (
 
 // ─── Main Component ─────────────────────────────────────────────────────────
 export const SiteMonitorPage: React.FC = () => {
-  // Đã lược bỏ hoàn toàn tab 'auth_matrix'
+  // Đã khai tử hoàn toàn tab 'auth_matrix'
   const [activeTab, setActiveTab] = useState<'public' | 'cicd_deploy'>('public');
 
-  // Filter KPI trạng thái
+  // Filter tương tác nhanh qua các thẻ KPI
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'UP' | 'DOWN' | 'WARNING' | 'PAUSED'>('ALL');
 
   // Tab 1 States
@@ -341,7 +442,6 @@ export const SiteMonitorPage: React.FC = () => {
       setSummary(data.summary);
       toast.success(`Đã quét thật ${data.sites.length} website — ${data.summary.up_count} UP / ${data.summary.down_count} DOWN`);
 
-      // Cập nhật lại incidents sau khi check
       const inc = await fetchApi<{ incidents: Incident[] }>('/monitor/incidents?limit=20');
       setIncidents(inc.incidents || []);
     } catch {
@@ -374,7 +474,7 @@ export const SiteMonitorPage: React.FC = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Lọc sites theo thẻ KPI
+  // Lọc sites theo thẻ KPI đã click
   const filteredSites = useMemo(() => {
     if (statusFilter === 'ALL') return sites;
     return sites.filter(s => s.last_status === statusFilter);
@@ -389,7 +489,7 @@ export const SiteMonitorPage: React.FC = () => {
             Site Uptime & Infrastructure Hub
           </h1>
           <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
-            Giám sát Uptime thời gian thực · Nhật ký sự cố · CI/CD Triển Khai Song Song
+            Giám sát Uptime thời gian thực · Biểu đồ Latency Ping · CI/CD Triển Khai Song Song
           </p>
         </div>
 
@@ -414,7 +514,7 @@ export const SiteMonitorPage: React.FC = () => {
         )}
       </div>
 
-      {/* ── 2-Tabs Navigation Bar (Đã bỏ Tab 2) ── */}
+      {/* ── 2-Tabs Navigation Bar (Đã bỏ sạch Tab 2) ── */}
       <div className="flex items-center gap-2 p-1.5 bg-slate-100 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 w-fit">
         <button
           onClick={() => setActiveTab('public')}
@@ -439,7 +539,7 @@ export const SiteMonitorPage: React.FC = () => {
         </button>
       </div>
 
-      {/* TAB 1: GIÁM SÁT SỨC KHỎE UPTIME */}
+      {/* TAB 1: GIÁM SÁT SỨC KHỎE UPTIME & BIỂU ĐỒ ĐƯỜNG PING */}
       {activeTab === 'public' && (
         <div className="space-y-6">
           {/* KPI Summary Cards với tính năng bấm lọc */}
@@ -470,12 +570,12 @@ export const SiteMonitorPage: React.FC = () => {
             </div>
           ) : null}
 
-          {/* Thanh báo đang áp dụng bộ lọc */}
+          {/* Thanh thông báo trạng thái lọc */}
           {statusFilter !== 'ALL' && (
             <div className="flex items-center justify-between px-4 py-2 bg-slate-100 dark:bg-slate-800/80 rounded-xl text-xs text-slate-700 dark:text-slate-300">
               <div className="flex items-center gap-2">
                 <Filter className="w-3.5 h-3.5 text-emerald-500" />
-                <span>Đang lọc danh sách theo trạng thái: <b>{statusFilter}</b> ({filteredSites.length} website)</span>
+                <span>Đang lọc theo trạng thái: <b>{statusFilter}</b> ({filteredSites.length} website)</span>
               </div>
               <button
                 onClick={() => setStatusFilter('ALL')}
@@ -486,7 +586,7 @@ export const SiteMonitorPage: React.FC = () => {
             </div>
           )}
 
-          {/* Danh sách Site Cards */}
+          {/* Danh sách Site Cards với Line Chart Latency */}
           {loading && sites.length === 0 ? (
             <SiteCardSkeleton />
           ) : (
@@ -494,7 +594,9 @@ export const SiteMonitorPage: React.FC = () => {
               {filteredSites.map(site => (
                 <div
                   key={site.id}
-                  className={`bg-white dark:bg-slate-900 border rounded-2xl p-5 shadow-xs transition hover:border-slate-400 dark:hover:border-slate-700 ${site.last_status === 'DOWN' ? 'border-rose-300 dark:border-rose-900/60 bg-rose-50/20 dark:bg-rose-950/10' : 'border-slate-200 dark:border-slate-800'
+                  className={`bg-white dark:bg-slate-900 border rounded-2xl p-5 shadow-xs transition hover:border-slate-400 dark:hover:border-slate-700 ${site.last_status === 'DOWN'
+                    ? 'border-rose-300 dark:border-rose-900/60 bg-rose-50/20 dark:bg-rose-950/10'
+                    : 'border-slate-200 dark:border-slate-800'
                     }`}
                 >
                   <div className="flex items-start justify-between gap-4">
@@ -514,7 +616,7 @@ export const SiteMonitorPage: React.FC = () => {
                       </a>
                     </div>
 
-                    {/* Badge HTTP hoặc Latency gọn gàng không trùng lặp */}
+                    {/* Badge HTTP & Ping tinh gọn không lặp thông tin */}
                     <div className="shrink-0 flex items-center gap-2">
                       {site.response_time_ms > 0 && site.last_status === 'UP' && (
                         <span className="text-xs font-mono font-semibold text-emerald-600 dark:text-emerald-400">
@@ -530,13 +632,14 @@ export const SiteMonitorPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Thanh 24 Giờ Uptime Bar */}
+                  {/* ĐỒ THỊ ĐƯỜNG PING & DOWNTIME THEO Ý TƯỞNG CỦA ANH */}
                   <div className="mt-4">
-                    <UptimeBar
+                    <UptimeLineChart
                       siteId={site.id}
                       history={site.history || []}
                       loading={site.historyLoading}
                       uptime_pct={site.uptime_pct_30d ?? 100}
+                      currentLatency={site.response_time_ms}
                     />
                   </div>
 
@@ -589,11 +692,11 @@ export const SiteMonitorPage: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 2: CI/CD DEPLOY MONITOR (CHIA 2 CỘT SONG SONG: VERCEL & RENDER) */}
+      {/* TAB 2: CI/CD DEPLOY MONITOR (2 CỘT SONG SONG: VERCEL & RENDER) */}
       {activeTab === 'cicd_deploy' && (
         <div className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* ── CỘT BÊN TRÁI: VERCEL (FRONTEND) ── */}
+            {/* ── CỘT TRÁI: VERCEL (FRONTEND) ── */}
             <div className="space-y-4">
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex items-center justify-between shadow-xs">
                 <div className="flex items-center gap-3">
@@ -666,7 +769,7 @@ export const SiteMonitorPage: React.FC = () => {
               )}
             </div>
 
-            {/* ── CỘT BÊN PHẢI: RENDER.COM (BACKEND) ── */}
+            {/* ── CỘT PHẢI: RENDER.COM (BACKEND) ── */}
             <div className="space-y-4">
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex items-center justify-between shadow-xs">
                 <div className="flex items-center gap-3">

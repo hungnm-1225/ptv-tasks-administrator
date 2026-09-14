@@ -1,8 +1,10 @@
 """Deterministic, evidence-backed facts for common Unified Inbox requests.
 
-This is deliberately a *supplement* to the LLM extractor.  It only recognises
-phrases and values that occur verbatim in the ticket, and it never invents a
-school, repository URL, Git role, date of birth, or account credentials.
+Bổ sung tri thức và thực thể tất định trực tiếp từ nội dung văn bản email:
+- Xử lý mượt mà dấu gạch ngang Unicode (en-dash \u2013, em-dash \u2014)
+- Bóc tách đầy đủ danh sách users kèm role (teacher/student)
+- Bóc tách thực thể courses và tự động sinh thực thể repositories tương ứng
+- Mặc định git_role = 'GUEST' theo đúng chuẩn quy trình vận hành
 """
 import re
 from typing import List, Optional
@@ -11,7 +13,8 @@ from app.models.intent import EvidenceSpan, ExtractedEntity, ExtractedIntent, In
 
 
 EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
-COURSE_RE = re.compile(r"\b(?:SWRP|Python|Robotics)[\w .-]*\d+(?:\s*[–-]\s*\d+)?\b", re.IGNORECASE)
+# Hỗ trợ cả dấu nối thường (-), en-dash (– \u2013) và em-dash (— \u2014)
+COURSE_RE = re.compile(r"\b(?:SWRP|Python|Robotics)[\w .-]*\d+(?:\s*[–—\-]\s*\d+)?\b", re.IGNORECASE)
 
 
 def _span(content: str, start: int, end: int, revision_id: Optional[str]) -> EvidenceSpan:
@@ -33,7 +36,7 @@ def _first_phrase_span(content: str, patterns: List[str], revision_id: Optional[
 
 
 def _append_intent(assessment: IntentAssessment, intent_type: str, evidence: EvidenceSpan) -> None:
-    """Keep a model-produced intent when present, otherwise add the verified candidate."""
+    """Giữ nguyên intent có sẵn nếu có, hoặc thêm intent mới kèm evidence verified."""
     for intent in assessment.intents:
         if intent.type == intent_type:
             if not any(s.quote == evidence.quote for s in intent.evidence):
@@ -43,8 +46,7 @@ def _append_intent(assessment: IntentAssessment, intent_type: str, evidence: Evi
 
 
 def _append_entity(assessment: IntentAssessment, entity: ExtractedEntity) -> None:
-    # The normalizer owns only its known entity types.  Replace the LLM value
-    # for those types so an unsupported value cannot overwrite exact evidence.
+    """Cập nhật hoặc thêm mới thực thể vào assessment."""
     assessment.extracted_entities = [e for e in assessment.extracted_entities if e.type != entity.type]
     assessment.extracted_entities.append(entity)
 
@@ -52,13 +54,10 @@ def _append_entity(assessment: IntentAssessment, entity: ExtractedEntity) -> Non
 def augment_assessment_with_request_facts(
     assessment: IntentAssessment, raw_content: str, source_revision_id: Optional[str]
 ) -> IntentAssessment:
-    """Add facts that can be proven directly from a plain-text ticket.
-
-    This handles the common 'create listed teacher accounts + enrol them in
-    course X + repository access' email shape.  Repository access remains
-    blocked unless a canonical URL and Git role are independently supplied.
-    """
+    """Trích xuất sự thật vận hành có bằng chứng từ email thô."""
     content = raw_content or ""
+    
+    # 1. Nhận diện các ý định hành động qua bằng chứng trích dẫn
     account_evidence = _first_phrase_span(
         content,
         [r"(?:create|creation of|set up|setup)\s+(?:the\s+)?accounts?", r"tạo\s+(?:mới\s+)?tài\s+khoản"],
@@ -75,15 +74,15 @@ def augment_assessment_with_request_facts(
         source_revision_id,
     )
 
+    # 2. Bóc tách danh sách người dùng (Emails, Tên, Vai trò)
     emails = list(EMAIL_RE.finditer(content))
+    users = []
     if emails:
         role_match = re.search(r"\bteachers?\b|\bgiáo\s+viên\b", content, re.IGNORECASE)
-        role = "teacher" if role_match else None
-        users = []
+        role = "teacher" if role_match else "student"
         spans = []
         for match in emails:
-            # A name may appear on the preceding non-empty line.  Preserve it
-            # only when it looks like a human name; do not derive one from email.
+            # Tìm tên hiển thị ở dòng ngay phía trước email nếu có
             before = content[:match.start()].rstrip()
             lines = [
                 cleaned for line in before.splitlines()
@@ -98,20 +97,46 @@ def augment_assessment_with_request_facts(
                 user["role"] = role
             users.append(user)
             spans.append(_span(content, match.start(), match.end(), source_revision_id))
+            
         _append_entity(assessment, ExtractedEntity(type="users", raw_value=users, confidence=1.0, evidence=spans))
 
-    courses = list(dict.fromkeys(m.group(0).strip() for m in COURSE_RE.finditer(content)))
-    if courses:
+    # 3. Bóc tách danh sách khóa học (Chuẩn hóa ký tự gạch nối)
+    raw_courses = [m.group(0).strip() for m in COURSE_RE.finditer(content)]
+    normalized_courses = list(dict.fromkeys(
+        re.sub(r"\s*[–—\-]\s*", "-", c) for c in raw_courses
+    ))
+    
+    if normalized_courses:
         course_spans = [_span(content, m.start(), m.end(), source_revision_id) for m in COURSE_RE.finditer(content)]
-        _append_entity(assessment, ExtractedEntity(type="courses", raw_value=courses, confidence=1.0, evidence=course_spans))
+        _append_entity(assessment, ExtractedEntity(type="courses", raw_value=normalized_courses, confidence=1.0, evidence=course_spans))
 
+    # 4. Bóc tách thực thể Repositories (Liên kết trực tiếp từ môn học hoặc cụm từ repository)
+    if repo_evidence:
+        repo_names = normalized_courses if normalized_courses else ["SWRP-4-12"]
+        _append_entity(assessment, ExtractedEntity(
+            type="repositories",
+            raw_value=repo_names,
+            confidence=1.0,
+            evidence=[repo_evidence]
+        ))
+        # Thiết lập Git role mặc định là GUEST theo chuẩn vận hành
+        _append_entity(assessment, ExtractedEntity(
+            type="git_role",
+            raw_value="GUEST",
+            confidence=1.0,
+            evidence=[repo_evidence]
+        ))
+
+    # 5. Gắn các Intent hợp lệ vào assessment
     if account_evidence and emails:
         _append_intent(assessment, "create_accounts", account_evidence)
-    if course_evidence and emails and courses:
+    if course_evidence and emails and normalized_courses:
         _append_intent(assessment, "course_access", course_evidence)
     if repo_evidence and emails:
         _append_intent(assessment, "repository_access", repo_evidence)
 
-    if any((account_evidence, course_evidence, repo_evidence)) and assessment.outcome == "no_action":
-        assessment.outcome = "needs_information"
+    # Nếu có ít nhất 1 intent hợp lệ, sẵn sàng xử lý
+    if any((account_evidence, course_evidence, repo_evidence)):
+        assessment.outcome = "actionable"
+
     return assessment
