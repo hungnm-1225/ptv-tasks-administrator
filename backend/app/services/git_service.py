@@ -14,6 +14,7 @@ from app.core.playwright_manager import (
     setup_low_ram_routes,
     wait_for_dom_and_spinners
 )
+from app.services.keycloak_service import keycloak_service
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +22,10 @@ logger = logging.getLogger(__name__)
 class GitPlaywrightService:
     """
     Playwright Worker tự động hóa trên Pythaverse Git (GitBucket - git.pythaverse.space):
-    - Đăng nhập SSO qua Pythaverse eID (Keycloak OpenID Connect) DUY NHẤT 1 LẦN TRONG SUỐT PHIÊN.
+    - Tích hợp trạm chuẩn hóa Keycloak IDP: Chuyển đổi toàn bộ Email ➔ USERNAME trước khi vào Git.
+    - Đăng nhập SSO qua Pythaverse eID (Keycloak OIDC) DUY NHẤT 1 LẦN TRONG SUỐT PHIÊN.
     - Hỗ trợ thêm nhiều thành viên vào NHIỀU REPOSITORIES CÙNG LÚC (Single-Session Multi-Repo).
-    - Tự động gán vai trò: ADMIN, DEVELOPER, GUEST (mặc định GUEST).
-    - Tự động nhận diện JIT Provisioning (bỏ qua an toàn các tài khoản chưa kích hoạt SSO).
+    - Tự động gán vai trò: ADMIN, DEVELOPER, GUEST.
     - Tối ưu hóa bộ nhớ nghiêm ngặt cho máy chủ Render 512MB RAM.
     """
 
@@ -32,7 +33,7 @@ class GitPlaywrightService:
         self.base_url = (getattr(settings, "GIT_SERVER_URL", None) or "https://git.pythaverse.space").rstrip("/")
 
     def _determine_headless(self, override_headless: Optional[bool] = None) -> bool:
-        """Xác định chế độ chạy ẩn danh (Headless) dựa theo tham số hoặc môi trường."""
+        """Xác định chế độ chạy ẩn danh (Headless)."""
         if override_headless is not None:
             return override_headless
         if os.getenv("GIT_HEADED", "").lower() in ["1", "true", "yes"]:
@@ -73,6 +74,48 @@ class GitPlaywrightService:
                 cleaned.append(clean)
         return cleaned
 
+    async def _normalize_payload_users_via_keycloak(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        BƯỚC CHUẨN HÓA CỐT TỬ:
+        Thu thập toàn bộ email/username trong payload, gọi Keycloak REST API để đổi thành USERNAME.
+        """
+        all_raw_users = []
+
+        if payload.get("repos_plan") and isinstance(payload.get("repos_plan"), list):
+            for item in payload["repos_plan"]:
+                all_raw_users.extend(self._sanitize_users(item.get("users", [])))
+        else:
+            all_raw_users.extend(
+                self._sanitize_users(payload.get("users", payload.get("collaborators", payload.get("emails", []))))
+            )
+
+        all_raw_users = list(dict.fromkeys(all_raw_users))
+        if not all_raw_users:
+            return payload
+
+        # Gọi Keycloak REST API để phân giải
+        norm_result = await keycloak_service.resolve_identifiers_to_usernames(all_raw_users)
+        mapping = norm_result.get("mapping", {})
+
+        # Cập nhật ngược lại vào payload với USERNAMES đã chuẩn hóa
+        if payload.get("repos_plan") and isinstance(payload.get("repos_plan"), list):
+            for item in payload["repos_plan"]:
+                orig_users = self._sanitize_users(item.get("users", []))
+                resolved = [mapping.get(u, u.split("@")[0] if "@" in u else u) for u in orig_users]
+                item["users"] = list(dict.fromkeys(resolved))
+        else:
+            orig_users = self._sanitize_users(payload.get("users", payload.get("collaborators", payload.get("emails", []))))
+            resolved = [mapping.get(u, u.split("@")[0] if "@" in u else u) for u in orig_users]
+            clean_usernames = list(dict.fromkeys(resolved))
+            payload["users"] = clean_usernames
+            if "collaborators" in payload:
+                payload["collaborators"] = clean_usernames
+            if "emails" in payload:
+                payload["emails"] = clean_usernames
+
+        logger.info(f"✨ [Git Payload Normalized] Đã thay thế danh sách bằng 100% USERNAMES: {norm_result.get('resolved_usernames', [])}")
+        return payload
+
     async def _login_git_oidc(self, page: Page) -> bool:
         """Đăng nhập Pythaverse Git qua cổng Keycloak SSO OIDC (Chỉ chạy 1 lần)."""
         try:
@@ -86,12 +129,10 @@ class GitPlaywrightService:
             logger.info("🔑 Đang mở cổng đăng nhập Pythaverse Git...")
             await page.goto(f"{self.base_url}/signin", wait_until="domcontentloaded", timeout=40000)
 
-            # Kiểm tra nếu phiên đăng nhập cũ vẫn còn hiệu lực
             if "signin" not in page.url and await page.locator("a[href*='/signout'], img.avatar-mini").count() > 0:
                 logger.info(f"✅ Đã có phiên đăng nhập Pythaverse Git sẵn có! (URL: {page.url})")
                 return True
 
-            # 1. Bấm nút "Sign in with Pythaverse eID" từ form OIDC
             oidc_submit_btn = page.locator("form[action*='/signin/oidc'] input[type='submit'], input[value*='Sign in with Pythaverse eID'], a:has-text('Pythaverse eID')").first
             if await oidc_submit_btn.count() > 0:
                 logger.info("👉 Bấm nút 'Sign in with Pythaverse eID'...")
@@ -103,7 +144,6 @@ class GitPlaywrightService:
 
             await page.wait_for_load_state("domcontentloaded")
 
-            # 2. Điền form đăng nhập Keycloak SSO nếu xuất hiện
             username_input = page.locator("input#username, input[name='username'], #username").first
             if await username_input.count() > 0 and await username_input.is_visible():
                 logger.info(f"🔐 Đang điền tài khoản quản trị Git trên Keycloak: {admin_user}")
@@ -119,7 +159,6 @@ class GitPlaywrightService:
 
             await page.wait_for_load_state("domcontentloaded")
 
-            # 3. Xác nhận đã vào trong GitBucket
             user_avatar = page.locator("a.dropdown-toggle[title*='Signed'], img.avatar-mini, a[href*='/signout']").first
             try:
                 await user_avatar.wait_for(state="visible", timeout=15000)
@@ -138,15 +177,15 @@ class GitPlaywrightService:
             return False
 
     async def _process_single_repo(
-        self, 
-        page: Page, 
-        raw_repo_url: str, 
-        users: List[str], 
+        self,
+        page: Page,
+        raw_repo_url: str,
+        users: List[str],
         target_role: str
     ) -> Dict[str, Any]:
-        """Thực thi thêm danh sách thành viên vào 1 Repo trong cùng 1 Browser Page."""
+        """Thực thi thêm danh sách USERNAME vào 1 Repo trong cùng 1 Browser Page."""
         settings_url = self._clean_repo_url(raw_repo_url)
-        logger.info(f"📂 Đang truy cập trang quản lý Collaborators: {settings_url} | Role: [{target_role}] | Users: {len(users)}")
+        logger.info(f"📂 Đang truy cập Collaborators: {settings_url} | Role: [{target_role}] | Usernames: {len(users)}")
 
         repo_res: Dict[str, Any] = {
             "repo_url": raw_repo_url,
@@ -168,8 +207,8 @@ class GitPlaywrightService:
                 return repo_res
 
             await wait_for_dom_and_spinners(
-                page, 
-                "input#userName-collaborator, #collaborator-list, input[value='Apply changes']", 
+                page,
+                "input#userName-collaborator, #collaborator-list, input[value='Apply changes']",
                 min_pacing_ms=300
             )
 
@@ -186,72 +225,72 @@ class GitPlaywrightService:
 
             new_changes_count = 0
 
-            for idx, user_item in enumerate(users, 1):
-                logger.info(f"  [{idx}/{len(users)}] 🔍 Đang xử lý: '{user_item}'...")
+            for idx, username_item in enumerate(users, 1):
+                logger.info(f"  [{idx}/{len(users)}] 🔍 Đang gán USERNAME: '{username_item}'...")
 
-                # Kiểm tra xem user này đã có sẵn trong danh sách hiển thị chưa
-                existing_card = page.locator("#collaborator-list li").filter(has_text=user_item).first
+                # 1. Kiểm tra xem username đã có sẵn chưa
+                existing_card = page.locator("#collaborator-list li").filter(has_text=username_item).first
                 if await existing_card.count() > 0:
-                    logger.info(f"  ℹ️ '{user_item}' đã có trong danh sách. Kiểm tra Role [{target_role}]...")
+                    logger.info(f"  ℹ️ '{username_item}' đã có trong danh sách. Kiểm tra Role [{target_role}]...")
                     target_label = existing_card.locator(f"label:has(input[value='{target_role}'])").first
                     if await target_label.count() > 0 and not ("active" in (await target_label.get_attribute("class") or "")):
                         await target_label.click(force=True)
                         new_changes_count += 1
-                    repo_res["already_exists"].append(user_item)
+                    repo_res["already_exists"].append(username_item)
                     continue
 
-                # Nhập username / email
+                # 2. Điền username chính xác (không sợ lỗi autocomplete nữa)
                 await user_input.click(force=True)
                 await user_input.fill("")
-                await user_input.press_sequentially(user_item, delay=35)
+                await user_input.fill(username_item)
 
-                # Chờ gợi ý từ Dropdown Typeahead
+                # Chờ gợi ý nhẹ, nếu có thì click, không có thì Enter luôn vì Username là chính xác tuyệt đối
                 dropdown_item = page.locator("ul.typeahead.dropdown-menu li a").first
                 try:
-                    await dropdown_item.wait_for(state="visible", timeout=2200)
+                    await dropdown_item.wait_for(state="visible", timeout=1200)
                     await dropdown_item.click(force=True)
                 except Exception:
                     await user_input.press("Enter")
 
-                await page.wait_for_timeout(250)
+                await page.wait_for_timeout(200)
                 await add_btn.click(force=True)
-                await page.wait_for_timeout(500)
+                await page.wait_for_timeout(400)
 
-                # Kiểm tra phản hồi lỗi từ GitBucket
+                # 3. Bắt thông báo lỗi từ GitBucket nếu có
                 err_msg = (await error_span.inner_text()).strip() if await error_span.count() > 0 else ""
 
                 if err_msg:
                     if "already" in err_msg.lower():
-                        repo_res["already_exists"].append(user_item)
+                        repo_res["already_exists"].append(username_item)
                     elif "not exist" in err_msg.lower() or "not found" in err_msg.lower():
-                        logger.warning(f"  ⚠️ '{user_item}' chưa kích hoạt SSO trên Git: {err_msg}")
+                        logger.warning(f"  ⚠️ '{username_item}' chưa kích hoạt SSO trên Git: {err_msg}")
                         repo_res["skipped"].append({
-                            "user": user_item,
-                            "reason": f"{err_msg} (Chưa từng đăng nhập SSO vào git.pythaverse.space)"
+                            "user": username_item,
+                            "reason": f"{err_msg} (Tài khoản Keycloak chưa từng đăng nhập vào GitBucket)"
                         })
                     else:
-                        logger.warning(f"  ⚠️ Lỗi khi thêm '{user_item}': {err_msg}")
-                        repo_res["errors"].append({"user": user_item, "error": err_msg})
+                        logger.warning(f"  ⚠️ Lỗi khi thêm '{username_item}': {err_msg}")
+                        repo_res["errors"].append({"user": username_item, "error": err_msg})
 
                     await user_input.fill("")
                     continue
 
-                # Thẻ mới luôn nằm ở CUỐI CÙNG (.last)
+                # 4. Gán Role chính xác cho thẻ mới nằm cuối cùng
                 last_li = page.locator("#collaborator-list li").last
                 if await last_li.count() > 0:
                     role_btn = last_li.locator(f"label:has(input[value='{target_role}'])").first
                     if await role_btn.count() > 0:
                         await role_btn.click(force=True)
                     new_changes_count += 1
-                    repo_res["added"].append(user_item)
-                    logger.info(f"  ✅ Đã thêm '{user_item}' vào {raw_repo_url} với Role [{target_role}]!")
+                    repo_res["added"].append(username_item)
+                    logger.info(f"  ✅ Đã thêm '{username_item}' vào {raw_repo_url} với Role [{target_role}]!")
                 else:
-                    repo_res["added"].append(user_item)
+                    repo_res["added"].append(username_item)
                     new_changes_count += 1
 
                 await user_input.fill("")
 
-            # Bấm Apply changes để lưu cho repo này
+            # 5. Lưu thay đổi
             if new_changes_count > 0:
                 logger.info(f"💾 Đang lưu thay đổi cho Repo: {raw_repo_url}...")
                 apply_btn = page.locator("input[type='submit'][value='Apply changes'], button:has-text('Apply changes')").first
@@ -275,16 +314,9 @@ class GitPlaywrightService:
             return repo_res
 
     async def _internal_add_collaborators(self, payload: Dict[str, Any], is_headless: bool) -> Dict[str, Any]:
-        """
-        Bộ điều phối đa nhiệm: Nhận 1 repo hoặc NHIỀU REPOS, chỉ đăng nhập 1 lần duy nhất!
-        Hỗ trợ:
-        1. `repos_plan`: List[{"repo_url": str, "role": str, "users": List[str]}]
-        2. `repo_urls` + `users` + `role`: List repos dùng chung danh sách users & role
-        3. `repo_url` + `users` + `role`: 1 repo truyền thống
-        """
+        """Bộ điều phối đa nhiệm: Duyệt tất cả Repos với danh sách USERNAMES sạch."""
         repos_plan: List[Dict[str, Any]] = []
 
-        # TH1: Kế hoạch phân bổ chi tiết (từ LMS Auto-Sync hoặc Studio Multi-Plan)
         if payload.get("repos_plan") and isinstance(payload.get("repos_plan"), list):
             for item in payload["repos_plan"]:
                 r_url = item.get("repo_url", "").strip()
@@ -293,24 +325,22 @@ class GitPlaywrightService:
                 if r_url and r_users:
                     repos_plan.append({"repo_url": r_url, "users": r_users, "role": r_role})
 
-        # TH2: Multi-Repos dùng chung users & role
         elif payload.get("repo_urls") and isinstance(payload.get("repo_urls"), list):
-            shared_users = self._sanitize_users(payload.get("users", payload.get("collaborators", payload.get("emails", []))))
+            shared_users = self._sanitize_users(payload.get("users", []))
             shared_role = (payload.get("role") or "GUEST").upper()
             for u in payload["repo_urls"]:
                 if str(u).strip():
                     repos_plan.append({"repo_url": str(u).strip(), "users": shared_users, "role": shared_role})
 
-        # TH3: Đơn lẻ 1 repo (tương thích ngược)
         elif payload.get("repo_url"):
-            shared_users = self._sanitize_users(payload.get("users", payload.get("collaborators", payload.get("emails", []))))
+            shared_users = self._sanitize_users(payload.get("users", []))
             shared_role = (payload.get("role") or "GUEST").upper()
             repos_plan.append({"repo_url": payload["repo_url"].strip(), "users": shared_users, "role": shared_role})
 
         if not repos_plan:
-            return {"status": "failed", "error": "Không có Repository hoặc người dùng hợp lệ để thực thi."}
+            return {"status": "failed", "error": "Không có Repository hoặc User hợp lệ để thực thi."}
 
-        logger.info(f"🚀 BẮT ĐẦU CHUỖI GÁN COLLABORATOR CHO {len(repos_plan)} REPOS TRONG 1 PHIÊN DUY NHẤT (Headless: {is_headless})")
+        logger.info(f"🚀 BẮT ĐẦU CHUỖI GÁN COLLABORATOR CHO {len(repos_plan)} REPOS (Headless: {is_headless})")
 
         browser: Optional[Browser] = None
         context: Optional[BrowserContext] = None
@@ -337,11 +367,11 @@ class GitPlaywrightService:
                 page = await context.new_page()
                 page.set_default_timeout(35000)
 
-                # 🔑 ĐĂNG NHẬP ĐÚNG 1 LẦN CHO TẤT CẢ REPOS
+                # 🔑 ĐĂNG NHẬP 1 LẦN DUY NHẤT
                 if not await self._login_git_oidc(page):
                     return {"status": "failed", "error": "Không thể đăng nhập Pythaverse Git qua Pythaverse eID SSO."}
 
-                # 🔁 DUYỆT TỪNG REPOSITORY
+                # 🔁 DUYỆT TỪNG REPOSITORY VỚI USERNAMES SẠCH
                 for r_idx, plan in enumerate(repos_plan, 1):
                     logger.info(f"\n========================================================")
                     logger.info(f"👉 XỬ LÝ REPO [{r_idx}/{len(repos_plan)}]: {plan['repo_url']}")
@@ -353,9 +383,8 @@ class GitPlaywrightService:
                         target_role=plan["role"]
                     )
                     all_results.append(res)
-                    await page.wait_for_timeout(600)
+                    await page.wait_for_timeout(500)
 
-                # Tổng kết tổng hợp
                 total_repos = len(all_results)
                 successful_repos = sum(1 for r in all_results if r.get("status") in ["success", "partial_success"])
                 overall_status = "success" if successful_repos == total_repos else ("partial_success" if successful_repos > 0 else "failed")
@@ -366,7 +395,7 @@ class GitPlaywrightService:
 
                 return {
                     "status": overall_status,
-                    "message": f"Hoàn tất xử lý {total_repos} Repos. Đã thêm: {total_added} lượt, Đã có sẵn: {total_already} lượt, Bỏ qua (chưa SSO): {total_skipped}.",
+                    "message": f"Hoàn tất xử lý {total_repos} Repos bằng USERNAME. Đã thêm: {total_added}, Đã có sẵn: {total_already}, Bỏ qua (chưa SSO): {total_skipped}.",
                     "details": all_results
                 }
 
@@ -381,17 +410,19 @@ class GitPlaywrightService:
                 gc.collect()
 
     async def add_collaborators_pipeline(self, payload: Dict[str, Any], headless: Optional[bool] = None) -> Dict[str, Any]:
-        """Cổng tiếp nhận chính: Chạy trên Làn VIP (lane='admin') với Dynamic Timeout."""
+        """Cổng tiếp nhận chính: Chuẩn hóa Keycloak trước ➔ Chiếm slot VIP ➔ Thực thi Git."""
+        # 1. BƯỚC TIỀN XỬ LÝ NGOÀI SEMAPHORE: Chuẩn hóa 100% email sang USERNAME
+        normalized_payload = await self._normalize_payload_users_via_keycloak(payload)
+
         is_headless = self._determine_headless(headless)
-        
-        # Tính timeout động dựa trên số lượng repo (tối thiểu 180s, mỗi repo thêm 60s)
-        repo_count = len(payload.get("repos_plan") or payload.get("repo_urls") or [1])
+        repo_count = len(normalized_payload.get("repos_plan") or normalized_payload.get("repo_urls") or [1])
         timeout_seconds = max(180.0, float(repo_count * 60.0))
 
+        # 2. Chiếm slot Semaphore chạy Chromium
         async with acquire_playwright_slot("Git Add Collaborators", timeout=timeout_seconds, lane="admin"):
             try:
                 return await asyncio.wait_for(
-                    self._internal_add_collaborators(payload, is_headless=is_headless),
+                    self._internal_add_collaborators(normalized_payload, is_headless=is_headless),
                     timeout=timeout_seconds
                 )
             except asyncio.TimeoutError:

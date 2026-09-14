@@ -1,6 +1,8 @@
+# backend/app/services/keycloak_service.py
 import logging
 import re
 import gc
+import asyncio
 import httpx
 from email.utils import parseaddr
 from typing import List, Dict, Any, Optional
@@ -18,7 +20,7 @@ BROWSER_HEADERS = {
 }
 
 def clean_email_identifier(raw: Any) -> str:
-    """Bóc tách email sạch từ chuỗi 'Họ Tên <email@dtt.vn>' hoặc 'email@dtt.vn'"""
+    """Bóc tách email hoặc username sạch từ chuỗi thô."""
     if not raw or not isinstance(raw, str):
         return ""
     _, parsed_email = parseaddr(raw)
@@ -47,7 +49,7 @@ class KeycloakService:
             f"{self.raw_server_url}/auth/realms/master/protocol/openid-connect/token",
             f"{self.raw_server_url}/realms/master/protocol/openid-connect/token"
         ]
-        
+
         for token_url in urls_to_try:
             try:
                 res = await client.post(
@@ -67,6 +69,121 @@ class KeycloakService:
                 logger.debug(f"Thử token tại {token_url} thất bại: {e}")
         return None
 
+    # =========================================================================
+    # 🔍 BỘ CHUẨN HÓA DANH TÍNH: EMAIL / USERNAME ➔ 100% USERNAMES CHO GIT
+    # =========================================================================
+    async def resolve_identifiers_to_usernames(self, raw_identifiers: List[str]) -> Dict[str, Any]:
+        """
+        Nhận danh sách Email/Username lẫn lộn, truy vấn Keycloak để chuyển đổi 100% thành USERNAME.
+        - Chạy bằng REST API siêu tốc (vài trăm mili-giây, không tốn slot Playwright).
+        - Trả về: danh sách usernames sạch, bảng ánh xạ và danh sách chưa nhận diện.
+        """
+        cleaned_inputs = []
+        for raw in raw_identifiers:
+            c = clean_email_identifier(raw)
+            if c and c not in cleaned_inputs:
+                cleaned_inputs.append(c)
+
+        if not cleaned_inputs:
+            return {
+                "resolved_usernames": [],
+                "mapping": {},
+                "unresolved": [],
+                "details": "Danh sách đầu vào rỗng."
+            }
+
+        logger.info(f"🔄 [Keycloak Identity Resolver] Bắt đầu chuẩn hóa {len(cleaned_inputs)} định danh sang USERNAME...")
+
+        async with httpx.AsyncClient(verify=False, headers=BROWSER_HEADERS, timeout=15.0) as client:
+            token = await self._get_admin_token(client)
+            if not token:
+                logger.warning("⚠️ Không lấy được Keycloak Token để chuẩn hóa. Dùng fallback cắt tên email.")
+                # Fallback khẩn cấp nếu Keycloak tạm thời mất mạng:
+                # Nếu là email: lấy phần trước dấu '@', nếu là username giữ nguyên
+                fallback_usernames = [x.split("@")[0] if "@" in x else x for x in cleaned_inputs]
+                return {
+                    "resolved_usernames": fallback_usernames,
+                    "mapping": {x: (x.split("@")[0] if "@" in x else x) for x in cleaned_inputs},
+                    "unresolved": [],
+                    "details": "Fallback cục bộ (Không lấy được Keycloak Token)."
+                }
+
+            auth_headers = {
+                **BROWSER_HEADERS,
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            }
+            base_api = f"{self.raw_server_url}/auth/admin/realms/{self.target_realm}"
+
+            resolved_usernames: List[str] = []
+            mapping: Dict[str, str] = {}
+            unresolved: List[str] = []
+
+            async def _resolve_single(ident: str):
+                try:
+                    users = []
+                    # 1. Nếu có ký tự @ thì ưu tiên tìm theo Email
+                    if "@" in ident:
+                        resp = await client.get(f"{base_api}/users?email={ident}&exact=true", headers=auth_headers)
+                        if resp.status_code == 200 and isinstance(resp.json(), list) and resp.json():
+                            users = resp.json()
+
+                    # 2. Nếu không có @ hoặc tìm theo email không thấy, tìm theo Username
+                    if not users:
+                        resp = await client.get(f"{base_api}/users?username={ident}&exact=true", headers=auth_headers)
+                        if resp.status_code == 200 and isinstance(resp.json(), list) and resp.json():
+                            users = resp.json()
+
+                    # 3. Tìm kiếm mờ nới lỏng (loose search) nếu exact chưa ra
+                    if not users and "@" in ident:
+                        resp = await client.get(f"{base_api}/users?search={ident}", headers=auth_headers)
+                        if resp.status_code == 200 and isinstance(resp.json(), list):
+                            for u in resp.json():
+                                if (u.get("email") or "").lower() == ident or (u.get("username") or "").lower() == ident:
+                                    users = [u]
+                                    break
+
+                    if users:
+                        canonical_username = users[0].get("username")
+                        if canonical_username:
+                            return ident, canonical_username, True
+                    
+                    # Nếu là username sẵn rồi thì dù Keycloak không tìm thấy vẫn có thể là local user trên Git
+                    if "@" not in ident:
+                        return ident, ident, True
+
+                    return ident, None, False
+
+                except Exception as ex:
+                    logger.error(f"Lỗi khi tra cứu Keycloak cho {ident}: {ex}")
+                    return ident, (ident.split("@")[0] if "@" in ident else ident), False
+
+            # Thực thi tra cứu song song siêu tốc
+            tasks = [_resolve_single(i) for i in cleaned_inputs]
+            results = await asyncio.gather(*tasks)
+
+            for original, resolved, is_found in results:
+                if resolved:
+                    resolved_usernames.append(resolved)
+                    mapping[original] = resolved
+                    if not is_found and "@" in original:
+                        unresolved.append(original)
+                else:
+                    unresolved.append(original)
+
+            logger.info(
+                f"✅ [Keycloak Resolver] Hoàn tất chuẩn hóa: "
+                f"{len(resolved_usernames)}/{len(cleaned_inputs)} USERNAMES hợp lệ. "
+                f"(Chưa nhận diện: {len(unresolved)})"
+            )
+
+            return {
+                "resolved_usernames": list(dict.fromkeys(resolved_usernames)),  # Bỏ trùng lặp
+                "mapping": mapping,
+                "unresolved": unresolved,
+                "details": f"Đã chuẩn hóa {len(resolved_usernames)} USERNAMES thành công qua Keycloak."
+            }
+
     async def execute_via_rest_api(
         self,
         identifiers: List[str],
@@ -77,7 +194,7 @@ class KeycloakService:
         custom_password: Optional[str],
         temporary: bool
     ) -> Optional[Dict[str, Any]]:
-        """Thực thi qua REST API với Browser Headers"""
+        """Thực thi cập nhật tài khoản qua REST API với Browser Headers"""
         async with httpx.AsyncClient(verify=False, headers=BROWSER_HEADERS) as client:
             token = await self._get_admin_token(client)
             if not token:
@@ -100,10 +217,9 @@ class KeycloakService:
                 if not clean_id:
                     continue
 
-                # 1. Tìm User theo email hoặc username
                 search_res = await client.get(f"{base_api}/users?email={clean_id}&exact=true", headers=auth_headers)
                 users = search_res.json() if search_res.status_code == 200 and isinstance(search_res.json(), list) else []
-                
+
                 if not users:
                     search_res = await client.get(f"{base_api}/users?username={clean_id}&exact=true", headers=auth_headers)
                     users = search_res.json() if search_res.status_code == 200 and isinstance(search_res.json(), list) else []
@@ -118,7 +234,6 @@ class KeycloakService:
                 logs = []
 
                 try:
-                    # 2. Cập nhật Status & Email Verified
                     user_payload = {}
                     if desired_enabled is not None:
                         user_payload["enabled"] = desired_enabled
@@ -133,7 +248,6 @@ class KeycloakService:
                         if put_res.status_code not in [200, 204]:
                             raise Exception(f"Lỗi cập nhật user ({put_res.status_code}): {put_res.text}")
 
-                    # 3. Đổi Mật Khẩu (Chỉ khi được yêu cầu)
                     if should_reset_pass:
                         if custom_password:
                             pass_val = custom_password
@@ -151,7 +265,7 @@ class KeycloakService:
                         )
                         if pass_res.status_code not in [200, 204]:
                             raise Exception(f"Lỗi reset password ({pass_res.status_code}): {pass_res.text}")
-                        
+
                         logs.append(f"Reset pass ({pass_val}) [Temporary={temporary}]")
 
                     if not logs:
@@ -183,7 +297,7 @@ class KeycloakService:
         custom_password: Optional[str],
         temporary: bool
     ) -> Dict[str, Any]:
-        """Chạy Chromium thật để xử lý trên giao diện Keycloak"""
+        """Chạy Chromium thật để xử lý trên giao diện Keycloak khi REST API bị chặn"""
         logger.info("🚀 Kích hoạt Playwright Keycloak RPA Engine...")
         results = []
         success_count = 0
@@ -312,11 +426,10 @@ class KeycloakService:
         }
 
     # =========================================================================
-    # 🎯 ROUTER ĐIỀU PHỐI CHÍNH (PARSER THÔNG MINH ĐA PHÂN HỆ)
+    # 🎯 ROUTER ĐIỀU PHỐI CHÍNH
     # =========================================================================
     async def execute_account_action(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Hàm Async chính thức - Bóc tách chính xác mọi flag hành động"""
-        # 1. Trích xuất danh sách User / Email
         raw_list = payload.get("identifiers") or payload.get("emails") or payload.get("users") or []
         if isinstance(raw_list, str):
             raw_list = [raw_list]
@@ -329,17 +442,15 @@ class KeycloakService:
         if not raw_list:
             return {"status": "failed", "message": "Không tìm thấy email/username trong payload"}
 
-        # 2. Bóc tách danh sách Actions (Hỗ trợ cả mảng 'actions' và chuỗi 'action')
         actions_list: List[str] = []
         raw_actions = payload.get("actions")
         if isinstance(raw_actions, list):
             actions_list.extend(raw_actions)
-        
+
         single_action = payload.get("action") or payload.get("action_type")
         if single_action:
             actions_list.append(single_action)
 
-        # 3. Phân giải trạng thái Hoạt động (Enabled / Disabled)
         desired_enabled: Optional[bool] = None
         if "disable_account" in actions_list or "disable_user" in actions_list:
             desired_enabled = False
@@ -350,28 +461,25 @@ class KeycloakService:
         elif payload.get("target_status") == "enabled":
             desired_enabled = True
 
-        # 4. Phân giải Xác thực Email (Email Verified)
         desired_email_verified: Optional[bool] = None
         if "mark_email_verified" in actions_list or "bulk_verify" in actions_list or "bulk_both" in actions_list:
             desired_email_verified = True
         elif "mark_email_unverified" in actions_list:
             desired_email_verified = False
 
-        # 5. Phân giải Đổi Mật Khẩu (Reset Password)
         should_reset_pass = False
         if any(a in ["reset_password", "bulk_reset_pass", "bulk_both"] for a in actions_list):
             should_reset_pass = True
 
         password_option = payload.get("password_option") or "custom"
         custom_pass = (
-            payload.get("temporary_password") 
-            or payload.get("new_password") 
-            or payload.get("temp_pass") 
+            payload.get("temporary_password")
+            or payload.get("new_password")
+            or payload.get("temp_pass")
             or payload.get("custom_password")
         )
         temporary = payload.get("force_change_on_first_login", payload.get("temporary", False))
 
-        # 6. Chạy Tầng 1: REST API trước
         res = await self.execute_via_rest_api(
             identifiers=raw_list,
             desired_enabled=desired_enabled,
@@ -382,7 +490,6 @@ class KeycloakService:
             temporary=temporary
         )
 
-        # 7. Fallback sang Tầng 2: Playwright nếu cần
         if res is None:
             res = await self.execute_via_playwright_rpa(
                 identifiers=raw_list,
@@ -394,7 +501,6 @@ class KeycloakService:
                 temporary=temporary
             )
 
-        # 8. Format Logs đẹp mắt
         success_count = res.get("success_count", 0)
         total = res.get("total", len(raw_list))
         details = res.get("details", [])
