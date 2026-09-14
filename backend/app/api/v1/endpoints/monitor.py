@@ -1,25 +1,17 @@
 # backend/app/api/v1/endpoints/monitor.py
-import time
 from fastapi import APIRouter, HTTPException
 from typing import Optional, Dict, Any, List
 from app.services.site_monitor_service import (
     SiteMonitorService,
-    get_uptime_history,
     get_hourly_uptime_history,
     get_incident_log,
-    get_supabase
 )
+from app.core.cache_policy import BoundedMemoryCache, CacheTier
 
 router = APIRouter()
 
-# =============================================================================
-# ⚡ IN-MEMORY CACHE CHO SITE MONITOR (TIER B STATUS - BUDGET <= 40MB)
-# =============================================================================
-from app.core.cache_policy import BoundedMemoryCache, CacheTier
-
+# In-Memory Cache Tier B Status (RAM Budget <= 40MB)
 monitor_cache = BoundedMemoryCache(tier=CacheTier.TIER_B_STATUS, max_entries=10, default_ttl=30)
-
-
 
 # ── TAB 1: Public Sites ──────────────────────────────────────────────────────
 @router.get("/sites")
@@ -38,6 +30,7 @@ async def get_monitored_sites():
 
 @router.post("/check-now")
 async def check_all_now():
+    """Bắt buộc quét mới tức thì toàn bộ site, vô hiệu hóa cache."""
     monitor_cache.invalidate()
     sites = await SiteMonitorService.check_all_sites()
     summary = SiteMonitorService.get_summary_stats()
@@ -52,30 +45,21 @@ async def check_single_site(site_id: str):
     res = await SiteMonitorService.check_single_site(site)
     return {"site": res}
 
-@router.get("/sites/{site_id}/history")
-async def get_site_history(site_id: str, days: int = 45):
-    cache_key = f"history_{site_id}_{days}"
-    cached = monitor_cache.get(cache_key)
-    if cached is not None:
-        return {"history": cached}
-
-    hist = get_uptime_history(site_id, days)
-    monitor_cache.set(cache_key, hist, ttl=60)
-    return {"history": hist}
-
 @router.get("/sites/{site_id}/hourly")
 async def get_site_hourly_history(site_id: str, hours: int = 24):
+    """Lấy dữ liệu 24 giờ của site đối soát từ Supabase."""
     cache_key = f"hourly_{site_id}_{hours}"
     cached = monitor_cache.get(cache_key)
     if cached is not None:
         return {"history": cached}
 
     hourly = get_hourly_uptime_history(site_id, hours)
-    monitor_cache.set(cache_key, hourly, ttl=60)
+    monitor_cache.set(cache_key, hourly, ttl=30)
     return {"history": hourly}
 
 @router.get("/incidents")
-async def get_incidents(limit: int = 50):
+async def get_incidents(limit: int = 20):
+    """Lấy danh sách các sự cố sập thực tế gần đây."""
     cache_key = f"incidents_{limit}"
     cached = monitor_cache.get(cache_key)
     if cached is not None:
@@ -85,44 +69,9 @@ async def get_incidents(limit: int = 50):
     monitor_cache.set(cache_key, inc, ttl=30)
     return {"incidents": inc}
 
-# ── TAB 2: Authenticated Matrix ──────────────────────────────────────────────
-@router.get("/auth-matrix")
-async def get_auth_matrix():
-    """Lấy ma trận xác thực 16 tài khoản (Có RAM Cache)."""
-    cache_key = "auth_matrix_list"
-    cached = monitor_cache.get(cache_key)
-    if cached is not None:
-        return {"credentials": cached}
-
-    db = get_supabase()
-    if not db:
-        return {"credentials": []}
-    resp = db.table("site_monitor_credentials").select("id, site_id, role_label, username, expected_path, last_status, last_latency_ms, last_checked_at, details").eq("is_active", True).execute()
-    data = resp.data or []
-    mapped = [{
-        "id": d.get("id"),
-        "site_id": d.get("site_id"),
-        "role_label": d.get("role_label"),
-        "username": d.get("username"),
-        "expected_path": d.get("expected_path"),
-        "status": d.get("last_status", "UNKNOWN"),
-        "latency_ms": d.get("last_latency_ms", 0),
-        "last_checked_at": d.get("last_checked_at"),
-        "details": d.get("details", "")
-    } for d in data]
-    
-    monitor_cache.set(cache_key, mapped, ttl=60)
-    return {"credentials": mapped}
-
-@router.post("/auth-matrix/check-now")
-async def check_auth_matrix_now():
-    monitor_cache.invalidate()
-    results = await SiteMonitorService.get_and_check_auth_matrix()
-    return {"results": results}
-
-# ── TAB 3: CI/CD Deploys & Logs ──────────────────────────────────────────────
+# ── TAB 2: CI/CD Deploys & Logs ──────────────────────────────────────────────
 @router.get("/deployments/vercel")
-async def get_vercel_deploys(limit: int = 5):
+async def get_vercel_deploys(limit: int = 10):
     cache_key = f"vercel_deploys_{limit}"
     cached = monitor_cache.get(cache_key)
     if cached is not None:
@@ -133,7 +82,7 @@ async def get_vercel_deploys(limit: int = 5):
     return {"deployments": deploys}
 
 @router.get("/deployments/render")
-async def get_render_deploys(limit: int = 5):
+async def get_render_deploys(limit: int = 10):
     cache_key = f"render_deploys_{limit}"
     cached = monitor_cache.get(cache_key)
     if cached is not None:
@@ -156,6 +105,6 @@ async def get_deploy_logs(provider: str, deploy_id: str):
         logs = await SiteMonitorService.get_render_logs(deploy_id)
     else:
         raise HTTPException(status_code=400, detail="Provider không hỗ trợ")
-        
+
     monitor_cache.set(cache_key, logs, ttl=120)
     return {"logs": logs}

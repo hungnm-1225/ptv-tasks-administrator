@@ -8,39 +8,28 @@ import {
   XCircle,
   AlertTriangle,
   PauseCircle,
-  ToggleLeft,
-  ToggleRight,
-  Bell,
-  BellOff,
   Clock,
   Zap,
   ExternalLink,
   Loader2,
   Wifi,
   WifiOff,
-  ChevronDown,
-  ChevronUp,
-  ShieldCheck,
-  Key,
   Server,
   GitBranch,
   Terminal,
   Copy,
   Check,
-  Search,
   Filter,
-  Lock,
-  Layers
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { toast } from 'sonner';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
-interface DayHistory {
-  date: string;
+interface HourlyHistoryItem {
+  hour: string;
   status: 'UP' | 'DOWN' | 'DEGRADED';
-  incidents: number;
-  downtime_s: number;
+  latency_ms?: number;
+  incident_duration?: string;
 }
 
 interface MonitoredSite {
@@ -54,14 +43,12 @@ interface MonitoredSite {
   http_code: number;
   response_time_ms: number;
   last_checked_at: string | null;
-  login_status: string;
   details: string;
   uptime_pct_24h: number;
-  uptime_pct_7d: number;
   uptime_pct_30d: number;
   total_incidents: number;
   is_down_since: string | null;
-  history?: DayHistory[];
+  history?: HourlyHistoryItem[];
   historyLoading?: boolean;
 }
 
@@ -88,19 +75,6 @@ interface Incident {
   is_ongoing: boolean;
 }
 
-interface AuthCredentialCheck {
-  id?: string;
-  site_id: string;
-  role_label: string;
-  expected_path: string;
-  status: 'PASS' | 'FAIL' | 'WARNING' | 'UNKNOWN' | 'CHECKING';
-  latency_ms: number;
-  last_checked_at: string | null;
-  details: string;
-  token_acquired?: boolean;
-  route_accessible?: boolean;
-}
-
 interface DeploymentItem {
   id: string;
   name: string;
@@ -114,14 +88,6 @@ interface DeploymentItem {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-function formatDuration(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
-  const h = Math.floor(seconds / 3600);
-  const m = Math.round((seconds % 3600) / 60);
-  return m > 0 ? `${h}h ${m}m` : `${h}h`;
-}
-
 function formatDate(isoOrTs: string | number): string {
   try {
     const d = typeof isoOrTs === 'number' ? new Date(isoOrTs) : new Date(isoOrTs);
@@ -132,109 +98,95 @@ function formatDate(isoOrTs: string | number): string {
   } catch { return String(isoOrTs); }
 }
 
-// ─── Hourly Uptime Bar (24 Cục — Mỗi cục là 1 Giờ) ──────────────────────────
-interface HourlyHistoryItem {
-  hour: string;
-  status: 'UP' | 'DOWN' | 'DEGRADED';
-  latency_ms?: number;
-}
-
+// ─── Hourly Uptime Bar (24 Khối Giờ — Chống Lệch Sidebar & Gọn Chữ) ──────────
 interface UptimeBarProps {
-  siteId?: string;
-  history?: any[];
+  siteId: string;
+  history?: HourlyHistoryItem[];
   loading?: boolean;
   uptime_pct?: number;
 }
 
 const UptimeBar: React.FC<UptimeBarProps> = ({
   siteId,
-  history,
+  history = [],
   loading = false,
   uptime_pct = 100,
 }) => {
-  const [hours, setHours] = useState<HourlyHistoryItem[]>(() => {
-    if (history && history.length > 0) return history;
-    return [];
-  });
-  const [tooltip, setTooltip] = useState<{ item: HourlyHistoryItem; x: number } | null>(null);
+  const [tooltip, setTooltip] = useState<{ item: HourlyHistoryItem; index: number } | null>(null);
 
-  useEffect(() => {
-    if (history && history.length > 0) {
-      setHours(history);
-      return;
-    }
-
-    if (siteId) {
-      fetchApi<{ history: HourlyHistoryItem[] }>(`/monitor/sites/${siteId}/hourly?hours=24`)
-        .then(res => {
-          setHours(res.history || []);
-        })
-        .catch(() => {
-          const list: HourlyHistoryItem[] = Array.from({ length: 24 }, (_, i) => ({
-            hour: `${(new Date().getHours() - (23 - i) + 24) % 24}:00`,
-            status: 'UP',
-            latency_ms: 180,
-          }));
-          setHours(list);
-        });
-    } else {
-      const list: HourlyHistoryItem[] = Array.from({ length: 24 }, (_, i) => ({
-        hour: `${(new Date().getHours() - (23 - i) + 24) % 24}:00`,
-        status: 'UP',
-        latency_ms: 180,
-      }));
-      setHours(list);
-    }
-  }, [siteId, history]);
-
-  if (loading && hours.length === 0) {
+  if (loading && history.length === 0) {
     return (
-      <div className="flex items-center gap-1 h-7">
+      <div className="flex items-center gap-1 h-6 animate-pulse">
         {Array.from({ length: 24 }).map((_, i) => (
-          <div key={i} className="flex-1 h-full rounded-xs bg-paper-2 dark:bg-ink animate-pulse" />
+          <div key={i} className="flex-1 h-full rounded-xs bg-slate-200 dark:bg-slate-800" />
         ))}
       </div>
     );
   }
 
-  const displayHours = hours.length > 0 ? hours.slice(-24) : Array.from({ length: 24 }, (_, i) => ({
-    hour: `${(new Date().getHours() - (23 - i) + 24) % 24}:00`,
-    status: 'UP' as const,
-    latency_ms: 180,
-  }));
+  // Đảm bảo luôn đủ 24 điểm giờ
+  const displayHours: HourlyHistoryItem[] = history.length === 24
+    ? history
+    : Array.from({ length: 24 }, (_, i) => {
+      const hourNum = (new Date().getHours() - (23 - i) + 24) % 24;
+      return {
+        hour: `${hourNum.toString().padStart(2, '0')}:00`,
+        status: 'UP' as const,
+        latency_ms: 0,
+      };
+    });
 
   return (
-    <div className="space-y-1.5">
-      <div className="relative flex items-end gap-1 h-7 group">
-        {displayHours.map((h, i) => (
-          <div
-            key={i}
-            className={`flex-1 rounded-xs transition-all duration-150 cursor-pointer ${h.status === 'DOWN' ? 'bg-rose-500' : h.status === 'DEGRADED' ? 'bg-amber-400' : 'bg-emerald-500'
-              } hover:opacity-100 hover:scale-y-125 opacity-85 origin-bottom`}
-            style={{ height: h.status === 'DOWN' ? '100%' : '80%' }}
-            onMouseEnter={() => setTooltip({ item: h, x: i })}
-            onMouseLeave={() => setTooltip(null)}
-          />
-        ))}
+    <div className="space-y-1.5 select-none">
+      <div className="relative flex items-end gap-1 h-6">
+        {displayHours.map((h, i) => {
+          const isDown = h.status === 'DOWN';
+          const isDegraded = h.status === 'DEGRADED';
+          const bgClass = isDown ? 'bg-rose-500' : isDegraded ? 'bg-amber-400' : 'bg-emerald-500';
 
+          return (
+            <div
+              key={i}
+              className={`flex-1 rounded-xs transition-all duration-150 cursor-pointer ${bgClass} hover:opacity-100 hover:scale-y-125 opacity-80 origin-bottom`}
+              style={{ height: isDown ? '100%' : '75%' }}
+              onMouseEnter={() => setTooltip({ item: h, index: i })}
+              onMouseLeave={() => setTooltip(null)}
+            />
+          );
+        })}
+
+        {/* Tooltip định vị thông minh chống tràn mép viền */}
         {tooltip && (
           <div
-            className="absolute bottom-full mb-2 z-30 pointer-events-none"
-            style={{ left: `${(tooltip.x / 24) * 100}%`, transform: 'translateX(-50%)' }}
+            className={`absolute bottom-full mb-2 z-30 pointer-events-none transition-all duration-75 ${tooltip.index < 3
+              ? 'left-0'
+              : tooltip.index > 20
+                ? 'right-0'
+                : '-translate-x-1/2'
+              }`}
+            style={
+              tooltip.index >= 3 && tooltip.index <= 20
+                ? { left: `${((tooltip.index + 0.5) / 24) * 100}%` }
+                : undefined
+            }
           >
-            <div className="bg-ink text-white text-[11px] font-mono rounded-lg px-3 py-1.5 shadow-xl border border-rule-2 whitespace-nowrap">
-              <span className="text-primary-ink font-semibold">{tooltip.item.hour}: </span>
+            <div className="bg-slate-900 text-white text-[11px] font-mono rounded-lg px-2.5 py-1.5 shadow-2xl border border-slate-700 whitespace-nowrap flex items-center gap-1.5">
+              <span className="font-semibold text-slate-300">{tooltip.item.hour}</span>
+              <span>—</span>
               <span className={tooltip.item.status === 'DOWN' ? 'text-rose-400 font-bold' : 'text-emerald-400 font-bold'}>
-                {tooltip.item.status === 'DOWN' ? '🔴 Gián đoạn' : '🟢 Hoạt động ổn định'}
+                {tooltip.item.status === 'DOWN' ? '🔴 Lỗi' : '🟢 Ổn định'}
               </span>
+              {tooltip.item.incident_duration && (
+                <span className="text-[10px] text-rose-300 ml-0.5">({tooltip.item.incident_duration})</span>
+              )}
             </div>
           </div>
         )}
       </div>
 
-      <div className="flex items-center justify-between text-[10px] text-ink-3 font-mono">
+      <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500 font-mono">
         <span>24h trước</span>
-        <span className="font-bold text-xs text-emerald-600 dark:text-emerald-400">
+        <span className={`font-bold text-xs ${uptime_pct < 99 ? 'text-amber-500' : 'text-emerald-500'}`}>
           Live Uptime {uptime_pct.toFixed(1)}%
         </span>
         <span>Hiện tại</span>
@@ -243,7 +195,7 @@ const UptimeBar: React.FC<UptimeBarProps> = ({
   );
 };
 
-// ─── Status Badge ────────────────────────────────────────────────────────────
+// ─── Status Dot ─────────────────────────────────────────────────────────────
 function StatusDot({ status }: { status: MonitoredSite['last_status'] }) {
   const map = {
     UP: { pulse: 'bg-emerald-500', ring: 'ring-emerald-500/30', label: 'Đang hoạt động' },
@@ -261,32 +213,54 @@ function StatusDot({ status }: { status: MonitoredSite['last_status'] }) {
         )}
         <span className={`relative inline-flex rounded-full w-2.5 h-2.5 ${cfg.pulse}`} />
       </span>
-      <span className="text-xs font-semibold text-ink-2 dark:text-primary-ink">{cfg.label}</span>
+      <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">{cfg.label}</span>
     </span>
   );
 }
 
+// ─── Skeletons Loader ───────────────────────────────────────────────────────
+const SummarySkeleton = () => (
+  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 animate-pulse">
+    {Array.from({ length: 6 }).map((_, i) => (
+      <div key={i} className="bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 h-20" />
+    ))}
+  </div>
+);
+
+const SiteCardSkeleton = () => (
+  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 animate-pulse">
+    {Array.from({ length: 4 }).map((_, i) => (
+      <div key={i} className="bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 h-44" />
+    ))}
+  </div>
+);
+
+const DeployCardSkeleton = () => (
+  <div className="space-y-3 animate-pulse">
+    {Array.from({ length: 3 }).map((_, i) => (
+      <div key={i} className="bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 rounded-xl p-4 h-24" />
+    ))}
+  </div>
+);
+
 // ─── Main Component ─────────────────────────────────────────────────────────
 export const SiteMonitorPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'public' | 'auth_matrix' | 'cicd_deploy'>('public');
+  // Đã lược bỏ hoàn toàn tab 'auth_matrix'
+  const [activeTab, setActiveTab] = useState<'public' | 'cicd_deploy'>('public');
 
-  // ⚡ KHỞI TẠO STATE NGAY TỪ LOCALSTORAGE (0MS TUYỆT ĐỐI)
+  // Filter KPI trạng thái
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'UP' | 'DOWN' | 'WARNING' | 'PAUSED'>('ALL');
+
   // Tab 1 States
-  const [sites, setSites] = useState<MonitoredSite[]>(MOCK_SITES);
-  const [summary, setSummary] = useState<MonitorSummary | null>(MOCK_SUMMARY);
+  const [sites, setSites] = useState<MonitoredSite[]>([]);
+  const [summary, setSummary] = useState<MonitorSummary | null>(null);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
-  const [lastRefreshed, setLastRefreshed] = useState('');
 
-  // Tab 2 States (Auth Matrix)
-  const [authChecks, setAuthChecks] = useState<AuthCredentialCheck[]>(MOCK_AUTH_CHECKS);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [runningAuthCheck, setRunningAuthCheck] = useState(false);
-  const [authFilterSite, setAuthFilterSite] = useState<string>('ALL');
-
-  // Tab 3 States (CI/CD Deployments & Logs)
-  const [deployments, setDeployments] = useState<DeploymentItem[]>(MOCK_DEPLOYMENTS);
+  // Tab 2 (CI/CD Deploys) States
+  const [vercelDeploys, setVercelDeploys] = useState<DeploymentItem[]>([]);
+  const [renderDeploys, setRenderDeploys] = useState<DeploymentItem[]>([]);
   const [deployLoading, setDeployLoading] = useState(true);
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [currentLogs, setCurrentLogs] = useState('');
@@ -294,94 +268,66 @@ export const SiteMonitorPage: React.FC = () => {
   const [selectedDeployTitle, setSelectedDeployTitle] = useState('');
   const [copied, setCopied] = useState(false);
 
-  // ⚡ 1. TẢI TAB 1 TRỰC TIẾP TỪ API
+  // ⚡ 1. TẢI TAB GIÁM SÁT CÔNG KHAI TỪ SERVER
   const loadPublicSites = useCallback(async (forceSpinner = false) => {
-    if (forceSpinner) {
-      setLoading(true);
-    }
+    if (forceSpinner) setLoading(true);
     try {
       const data = await fetchApi<{ summary: MonitorSummary; sites: MonitoredSite[] }>('/monitor/sites');
-      const enriched = data.sites.map(s => ({ ...s, history: [], historyLoading: true }));
-      setSites(enriched);
+      const baseSites = data.sites.map(s => ({ ...s, history: [], historyLoading: true }));
+      setSites(baseSites);
       setSummary(data.summary);
-      setLastRefreshed(new Date().toLocaleTimeString('vi-VN'));
 
-      enriched.forEach(async (site) => {
+      // Tải song song 24h history cho từng site
+      baseSites.forEach(async (site) => {
         try {
-          const h = await fetchApi<{ history: DayHistory[] }>(`/monitor/sites/${site.id}/history?days=45`);
+          const h = await fetchApi<{ history: HourlyHistoryItem[] }>(`/monitor/sites/${site.id}/hourly?hours=24`);
           setSites(prev => prev.map(s => s.id === site.id ? { ...s, history: h.history, historyLoading: false } : s));
         } catch {
           setSites(prev => prev.map(s => s.id === site.id ? { ...s, history: [], historyLoading: false } : s));
         }
       });
     } catch {
-      setSites(MOCK_SITES);
-      setSummary(MOCK_SUMMARY);
-      setLastRefreshed(new Date().toLocaleTimeString('vi-VN'));
+      toast.error('Không thể kết nối đến máy chủ giám sát.');
     } finally {
       setLoading(false);
     }
 
     try {
-      const inc = await fetchApi<{ incidents: Incident[] }>('/monitor/incidents?limit=50');
+      const inc = await fetchApi<{ incidents: Incident[] }>('/monitor/incidents?limit=20');
       setIncidents(inc.incidents || []);
     } catch {
       setIncidents([]);
     }
   }, []);
 
-  // ⚡ 2. TẢI TAB 2 (AUTH MATRIX) TRỰC TIẾP TỪ API
-  const loadAuthMatrix = useCallback(async (forceSpinner = false) => {
-    if (forceSpinner) {
-      setAuthLoading(true);
-    }
-    try {
-      const data = await fetchApi<{ credentials: AuthCredentialCheck[] }>('/monitor/auth-matrix');
-      const creds = data.credentials || [];
-      setAuthChecks(creds);
-    } catch {
-      setAuthChecks(MOCK_AUTH_CHECKS);
-    } finally {
-      setAuthLoading(false);
-    }
-  }, []);
-
-  // ⚡ 3. TẢI TAB 3 (CI/CD DEPLOYS) TRỰC TIẾP TỪ API
+  // ⚡ 2. TẢI TAB CI/CD DEPLOYS (VERCEL & RENDER)
   const loadDeployments = useCallback(async (forceSpinner = false) => {
-    if (forceSpinner) {
-      setDeployLoading(true);
-    }
+    if (forceSpinner) setDeployLoading(true);
     try {
       const [vercelRes, renderRes] = await Promise.allSettled([
-        fetchApi<{ deployments: DeploymentItem[] }>('/monitor/deployments/vercel'),
-        fetchApi<{ deployments: DeploymentItem[] }>('/monitor/deployments/render')
+        fetchApi<{ deployments: DeploymentItem[] }>('/monitor/deployments/vercel?limit=10'),
+        fetchApi<{ deployments: DeploymentItem[] }>('/monitor/deployments/render?limit=10'),
       ]);
 
-      const list: DeploymentItem[] = [];
-      if (vercelRes.status === 'fulfilled' && vercelRes.value.deployments) {
-        list.push(...vercelRes.value.deployments);
+      if (vercelRes.status === 'fulfilled') {
+        setVercelDeploys(vercelRes.value.deployments || []);
       }
-      if (renderRes.status === 'fulfilled' && renderRes.value.deployments) {
-        list.push(...renderRes.value.deployments);
+      if (renderRes.status === 'fulfilled') {
+        setRenderDeploys(renderRes.value.deployments || []);
       }
-
-      const finalList = list.length > 0 ? list : MOCK_DEPLOYMENTS;
-      setDeployments(finalList);
     } catch {
-      setDeployments(MOCK_DEPLOYMENTS);
+      toast.error('Lỗi khi tải lịch sử triển khai CI/CD');
     } finally {
       setDeployLoading(false);
     }
   }, []);
 
-  // Auto load on Tab change
   useEffect(() => {
     if (activeTab === 'public') loadPublicSites();
-    if (activeTab === 'auth_matrix') loadAuthMatrix();
     if (activeTab === 'cicd_deploy') loadDeployments();
-  }, [activeTab, loadPublicSites, loadAuthMatrix, loadDeployments]);
+  }, [activeTab, loadPublicSites, loadDeployments]);
 
-  // Check All Public Sites
+  // Quét thủ công tức thì
   const handleCheckAllPublic = async () => {
     setChecking(true);
     setSites(prev => prev.map(s => s.enabled ? { ...s, last_status: 'CHECKING' as const } : s));
@@ -393,32 +339,19 @@ export const SiteMonitorPage: React.FC = () => {
       });
       setSites(updated);
       setSummary(data.summary);
-      setLastRefreshed(new Date().toLocaleTimeString('vi-VN'));
-      toast.success(`Đã kiểm tra ${data.sites.length} website — ${data.summary.up_count} UP / ${data.summary.down_count} DOWN`);
+      toast.success(`Đã quét thật ${data.sites.length} website — ${data.summary.up_count} UP / ${data.summary.down_count} DOWN`);
+
+      // Cập nhật lại incidents sau khi check
+      const inc = await fetchApi<{ incidents: Incident[] }>('/monitor/incidents?limit=20');
+      setIncidents(inc.incidents || []);
     } catch {
-      toast.info('Đang kiểm tra ở chế độ cục bộ');
+      toast.error('Lỗi khi gửi yêu cầu quét website');
     } finally {
       setChecking(false);
     }
   };
 
-  // Run Deep Authenticated Checks
-  const handleRunAuthChecks = async () => {
-    setRunningAuthCheck(true);
-    toast.info('🚀 Đang kiểm tra đăng nhập Keycloak SSO và Route cho 16 tài khoản...');
-    try {
-      const data = await fetchApi<{ results: AuthCredentialCheck[] }>('/monitor/auth-matrix/check-now', { method: 'POST' });
-      const resList = data.results || [];
-      setAuthChecks(resList);
-      toast.success('✅ Đã hoàn tất kiểm tra xác thực chuyên sâu!');
-    } catch {
-      toast.error('Lỗi khi chạy Auth Checks');
-    } finally {
-      setRunningAuthCheck(false);
-    }
-  };
-
-  // View Deploy Logs
+  // Xem Live Deploy Logs
   const handleViewLogs = async (item: DeploymentItem) => {
     setSelectedDeployTitle(`${item.provider.toUpperCase()}: ${item.name} (#${item.id.slice(0, 8)})`);
     setLogModalOpen(true);
@@ -426,9 +359,9 @@ export const SiteMonitorPage: React.FC = () => {
     setCurrentLogs('');
     try {
       const data = await fetchApi<{ logs: string }>(`/monitor/deployments/${item.provider}/${item.id}/logs`);
-      setCurrentLogs(data.logs || 'Không có log chi tiết');
+      setCurrentLogs(data.logs || 'Không có bản ghi log.');
     } catch {
-      setCurrentLogs(`[System Mock Log] Deploy ID: ${item.id}\nProvider: ${item.provider}\nCommit: ${item.commit_msg}\nStatus: ${item.status || item.state}\nBuild succeeded with no runtime warnings.`);
+      setCurrentLogs('Không thể lấy build logs từ nhà cung cấp.');
     } finally {
       setLoadingLogs(false);
     }
@@ -441,10 +374,11 @@ export const SiteMonitorPage: React.FC = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const filteredAuthChecks = authChecks.filter(c => {
-    if (authFilterSite === 'ALL') return true;
-    return c.site_id === authFilterSite;
-  });
+  // Lọc sites theo thẻ KPI
+  const filteredSites = useMemo(() => {
+    if (statusFilter === 'ALL') return sites;
+    return sites.filter(s => s.last_status === statusFilter);
+  }, [sites, statusFilter]);
 
   return (
     <div className="space-y-6 w-full pb-10">
@@ -455,95 +389,78 @@ export const SiteMonitorPage: React.FC = () => {
             Site Uptime & Infrastructure Hub
           </h1>
           <p className="mt-1 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
-            Giám sát đa tầng: Uptime công khai · Xác thực phân quyền 7 Roles · CI/CD Deploy Pipelines
+            Giám sát Uptime thời gian thực · Nhật ký sự cố · CI/CD Triển Khai Song Song
           </p>
         </div>
 
-        {/* Global Action Button per Tab */}
-        {activeTab === 'public' && (
+        {activeTab === 'public' ? (
           <button
             onClick={handleCheckAllPublic}
             disabled={checking || loading}
-            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-rule dark:disabled:bg-rule-2 text-white text-xs font-semibold rounded-xl transition shadow-sm cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold rounded-xl transition shadow-xs cursor-pointer"
           >
             <RefreshCw className={`w-4 h-4 ${checking ? 'animate-spin' : ''}`} />
-            {checking ? 'Đang kiểm tra...' : 'Check Public Uptime'}
+            {checking ? 'Đang ping thực tế...' : 'Quét Toàn Bộ Site Ngay'}
           </button>
-        )}
-
-        {activeTab === 'auth_matrix' && (
-          <button
-            onClick={handleRunAuthChecks}
-            disabled={runningAuthCheck || authLoading}
-            className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-2 disabled:bg-rule dark:disabled:bg-rule-2 text-white text-xs font-semibold rounded-xl transition shadow-sm cursor-pointer"
-          >
-            <Key className={`w-4 h-4 ${runningAuthCheck ? 'animate-spin' : ''}`} />
-            {runningAuthCheck ? 'Đang kiểm tra SSO...' : 'Chạy Kiểm Tra Xác Thực Ngay'}
-          </button>
-        )}
-
-        {activeTab === 'cicd_deploy' && (
+        ) : (
           <button
             onClick={() => loadDeployments(true)}
             disabled={deployLoading}
-            className="flex items-center gap-2 px-4 py-2.5 bg-ink hover:bg-rule-2 dark:bg-rule-2 dark:hover:bg-rule text-white text-xs font-semibold rounded-xl transition shadow-sm cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-white text-xs font-semibold rounded-xl transition shadow-xs cursor-pointer"
           >
             <RefreshCw className={`w-4 h-4 ${deployLoading ? 'animate-spin' : ''}`} />
-            Làm mới CI/CD Deploys
+            Làm Mới CI/CD Pipelines
           </button>
         )}
       </div>
 
-      {/* ── 3-Tabs Navigation Bar ── */}
-      <div className="flex items-center gap-2 p-1.5 bg-paper-2 dark:bg-ink/80 rounded-2xl border border-rule/80 dark:border-rule-2/60 w-fit">
+      {/* ── 2-Tabs Navigation Bar (Đã bỏ Tab 2) ── */}
+      <div className="flex items-center gap-2 p-1.5 bg-slate-100 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 w-fit">
         <button
           onClick={() => setActiveTab('public')}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer ${activeTab === 'public'
-            ? 'bg-white dark:bg-ink text-emerald-600 dark:text-emerald-400 shadow-xs border border-rule/60 dark:border-rule-2'
-            : 'text-ink-2 dark:text-ink-3 hover:text-ink dark:hover:text-primary-ink'
+            ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-xs border border-slate-200/80 dark:border-slate-700'
+            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
         >
           <Globe className="w-4 h-4" />
-          <span>1. Giám Sát Công Khai</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('auth_matrix')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer ${activeTab === 'auth_matrix'
-            ? 'bg-white dark:bg-ink text-accent dark:text-accent-2 shadow-xs border border-rule/60 dark:border-rule-2'
-            : 'text-ink-2 dark:text-ink-3 hover:text-ink dark:hover:text-primary-ink'
-            }`}
-        >
-          <ShieldCheck className="w-4 h-4" />
-          <span>2. Ma Trận Xác Thực & Phân Quyền</span>
+          <span>1. Giám Sát Sức Khỏe Uptime</span>
         </button>
 
         <button
           onClick={() => setActiveTab('cicd_deploy')}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer ${activeTab === 'cicd_deploy'
-            ? 'bg-white dark:bg-ink text-sky-600 dark:text-sky-400 shadow-xs border border-rule/60 dark:border-rule-2'
-            : 'text-ink-2 dark:text-ink-3 hover:text-ink dark:hover:text-primary-ink'
+            ? 'bg-white dark:bg-slate-800 text-sky-600 dark:text-sky-400 shadow-xs border border-slate-200/80 dark:border-slate-700'
+            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
         >
           <GitBranch className="w-4 h-4" />
-          <span>3. CI/CD & Tiến Trình Triển Khai</span>
+          <span>2. CI/CD & Tiến Trình Triển Khai</span>
         </button>
       </div>
 
-      {/* TAB 1: GIÁM SÁT CÔNG KHAI */}
+      {/* TAB 1: GIÁM SÁT SỨC KHỎE UPTIME */}
       {activeTab === 'public' && (
         <div className="space-y-6">
-          {summary && (
+          {/* KPI Summary Cards với tính năng bấm lọc */}
+          {loading && !summary ? (
+            <SummarySkeleton />
+          ) : summary ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
               {[
-                { label: 'Tổng Sites', value: summary.total_sites, icon: <Globe className="w-3.5 h-3.5" />, cls: 'text-slate-700 dark:text-slate-100' },
-                { label: 'Đang UP', value: summary.up_count, icon: <Wifi className="w-3.5 h-3.5" />, cls: 'text-emerald-600 dark:text-emerald-400' },
-                { label: 'Bị DOWN', value: summary.down_count, icon: <WifiOff className="w-3.5 h-3.5" />, cls: summary.down_count > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-ink-3' },
-                { label: 'Cảnh Báo', value: summary.warning_count, icon: <AlertTriangle className="w-3.5 h-3.5" />, cls: summary.warning_count > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-ink-3' },
-                { label: 'Tạm Dừng', value: summary.paused_count, icon: <PauseCircle className="w-3.5 h-3.5" />, cls: 'text-ink-2 dark:text-ink-3' },
-                { label: 'Avg Latency', value: `${summary.avg_latency_ms}ms`, icon: <Zap className="w-3.5 h-3.5" />, cls: 'text-sky-600 dark:text-sky-400' },
-              ].map(({ label, value, icon, cls }) => (
-                <div key={label} className="bg-white dark:bg-ink/80 border border-rule/80 dark:border-rule-2/60 rounded-xl px-4 py-3 text-center space-y-1 shadow-xs">
+                { key: 'ALL', label: 'Tổng Sites', value: summary.total_sites, icon: <Globe className="w-3.5 h-3.5" />, cls: 'text-slate-700 dark:text-slate-200' },
+                { key: 'UP', label: 'Đang UP', value: summary.up_count, icon: <Wifi className="w-3.5 h-3.5" />, cls: 'text-emerald-600 dark:text-emerald-400' },
+                { key: 'DOWN', label: 'Bị DOWN', value: summary.down_count, icon: <WifiOff className="w-3.5 h-3.5" />, cls: summary.down_count > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400' },
+                { key: 'WARNING', label: 'Cảnh Báo', value: summary.warning_count, icon: <AlertTriangle className="w-3.5 h-3.5" />, cls: summary.warning_count > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400' },
+                { key: 'PAUSED', label: 'Tạm Dừng', value: summary.paused_count, icon: <PauseCircle className="w-3.5 h-3.5" />, cls: 'text-slate-500' },
+                { key: null, label: 'Avg Latency', value: `${summary.avg_latency_ms}ms`, icon: <Zap className="w-3.5 h-3.5" />, cls: 'text-sky-600 dark:text-sky-400' },
+              ].map(({ key, label, value, icon, cls }) => (
+                <div
+                  key={label}
+                  onClick={() => key && setStatusFilter(key as any)}
+                  className={`bg-white dark:bg-slate-900 border rounded-xl px-4 py-3 text-center space-y-1 shadow-xs transition ${key ? 'cursor-pointer hover:border-slate-400 dark:hover:border-slate-600' : ''
+                    } ${statusFilter === key ? 'ring-2 ring-emerald-500 border-emerald-500' : 'border-slate-200 dark:border-slate-800'}`}
+                >
                   <div className={`flex items-center justify-center gap-1 text-[10px] font-semibold uppercase tracking-wider ${cls}`}>
                     {icon}<span>{label}</span>
                   </div>
@@ -551,25 +468,40 @@ export const SiteMonitorPage: React.FC = () => {
                 </div>
               ))}
             </div>
+          ) : null}
+
+          {/* Thanh báo đang áp dụng bộ lọc */}
+          {statusFilter !== 'ALL' && (
+            <div className="flex items-center justify-between px-4 py-2 bg-slate-100 dark:bg-slate-800/80 rounded-xl text-xs text-slate-700 dark:text-slate-300">
+              <div className="flex items-center gap-2">
+                <Filter className="w-3.5 h-3.5 text-emerald-500" />
+                <span>Đang lọc danh sách theo trạng thái: <b>{statusFilter}</b> ({filteredSites.length} website)</span>
+              </div>
+              <button
+                onClick={() => setStatusFilter('ALL')}
+                className="text-xs font-semibold text-emerald-600 hover:underline cursor-pointer"
+              >
+                Hiện tất cả
+              </button>
+            </div>
           )}
 
+          {/* Danh sách Site Cards */}
           {loading && sites.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 gap-3 text-ink-3">
-              <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
-              <p className="text-xs font-medium">Đang nạp danh sách website...</p>
-            </div>
+            <SiteCardSkeleton />
           ) : (
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-              {sites.map(site => (
+              {filteredSites.map(site => (
                 <div
                   key={site.id}
-                  className="bg-white dark:bg-ink/80 border border-rule/80 dark:border-rule-2/60 rounded-2xl p-5 shadow-xs hover:border-rule-2 dark:hover:border-rule transition"
+                  className={`bg-white dark:bg-slate-900 border rounded-2xl p-5 shadow-xs transition hover:border-slate-400 dark:hover:border-slate-700 ${site.last_status === 'DOWN' ? 'border-rose-300 dark:border-rose-900/60 bg-rose-50/20 dark:bg-rose-950/10' : 'border-slate-200 dark:border-slate-800'
+                    }`}
                 >
-                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                  <div className="flex items-start justify-between gap-4">
                     <div className="space-y-1 flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <StatusDot status={site.last_status} />
-                        <span className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">{site.name}</span>
+                        <span className="text-sm font-bold text-slate-900 dark:text-white truncate">{site.name}</span>
                       </div>
                       <a
                         href={site.url}
@@ -582,53 +514,73 @@ export const SiteMonitorPage: React.FC = () => {
                       </a>
                     </div>
 
-                    <div className="shrink-0 text-right space-y-1">
-                      {site.http_code > 0 && (
-                        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border bg-emerald-50 text-emerald-700 border-emerald-200/80 dark:bg-emerald-500/10 dark:text-emerald-300">
-                          HTTP {site.http_code}
+                    {/* Badge HTTP hoặc Latency gọn gàng không trùng lặp */}
+                    <div className="shrink-0 flex items-center gap-2">
+                      {site.response_time_ms > 0 && site.last_status === 'UP' && (
+                        <span className="text-xs font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                          <Zap className="w-3 h-3 inline mr-0.5" />{site.response_time_ms}ms
                         </span>
                       )}
-                      {site.response_time_ms > 0 && (
-                        <div className="text-xs font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                          <Zap className="w-3 h-3 inline mr-0.5" />{site.response_time_ms}ms
-                        </div>
-                      )}
+                      <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border ${site.http_code >= 200 && site.http_code < 400
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300'
+                        : 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/10 dark:text-rose-300'
+                        }`}>
+                        {site.http_code > 0 ? `HTTP ${site.http_code}` : 'NO_RESP'}
+                      </span>
                     </div>
                   </div>
 
+                  {/* Thanh 24 Giờ Uptime Bar */}
                   <div className="mt-4">
-                    <UptimeBar siteId={site.id} history={site.history || []} loading={site.historyLoading} uptime_pct={site.uptime_pct_30d ?? 100} />
+                    <UptimeBar
+                      siteId={site.id}
+                      history={site.history || []}
+                      loading={site.historyLoading}
+                      uptime_pct={site.uptime_pct_30d ?? 100}
+                    />
                   </div>
 
-                  <div className="mt-3 pt-3 border-t border-rule dark:border-rule-2/60 flex items-center justify-between text-xs text-ink-2">
-                    <span>{site.details || 'Hoạt động ổn định'}</span>
-                    <span className="font-mono text-[10px]">{site.last_checked_at || 'Vừa xong'}</span>
+                  <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-xs text-slate-500">
+                    <span className="truncate max-w-[70%]">{site.details}</span>
+                    <span className="font-mono text-[10px] shrink-0">{site.last_checked_at || 'Vừa xong'}</span>
                   </div>
                 </div>
               ))}
             </div>
           )}
 
-          {/* Incident Log */}
-          <div className="bg-white dark:bg-ink/80 border border-rule/80 dark:border-rule-2/60 rounded-2xl p-5 shadow-xs">
+          {/* Incident Log (Đọc từ Supabase thật) */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs">
             <div className="flex items-center gap-2 mb-3">
               <AlertTriangle className="w-4 h-4 text-amber-500" />
-              <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">Incident Log (Sự cố gần đây)</h3>
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white">Incident Log (Nhật Ký Sự Cố Gần Đây)</h3>
             </div>
             {incidents.length === 0 ? (
               <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400 py-2">
                 <CheckCircle2 className="w-4 h-4" />
-                <span>Không có sự cố nào được ghi nhận trong 24 giờ. Tất cả hệ thống vận hành trơn tru!</span>
+                <span>Không có sự cố nào được ghi nhận trong 24 giờ. Tất cả hệ thống vận hành ổn định!</span>
               </div>
             ) : (
-              <div className="divide-y divide-slate-100 dark:divide-slate-700 text-xs">
+              <div className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
                 {incidents.map(inc => (
-                  <div key={inc.id} className="py-2.5 flex items-center justify-between">
-                    <div>
-                      <span className="font-semibold text-ink dark:text-primary-ink">{inc.site_name}</span>
-                      <span className="ml-2 text-ink-3">({formatDate(inc.started_at)})</span>
+                  <div key={inc.id} className="py-2.5 flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-rose-500" />
+                      <span className="font-semibold text-slate-900 dark:text-white">{inc.site_name}</span>
+                      <span className="text-slate-400">({formatDate(inc.started_at)})</span>
                     </div>
-                    <span className="text-rose-500 font-semibold">{inc.error_msg || 'Sập tạm thời'}</span>
+                    <div className="flex items-center gap-3 font-mono text-[11px]">
+                      <span className="text-rose-600 dark:text-rose-400 font-medium">{inc.error_msg || 'Sập kết nối'}</span>
+                      {inc.is_ongoing ? (
+                        <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300 font-bold text-[10px]">
+                          Đang diễn ra
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">
+                          Kéo dài: {inc.duration_s ? `${Math.round(inc.duration_s / 60)} phút` : '1 phút'}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -637,210 +589,171 @@ export const SiteMonitorPage: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 2: XÁC THỰC & PHÂN QUYỀN */}
-      {activeTab === 'auth_matrix' && (
-        <div className="space-y-4 max-w-full overflow-hidden">
-          <div className="bg-white dark:bg-ink/80 border border-rule/80 dark:border-rule-2/60 rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3 shadow-xs">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2">
-                <Filter className="w-4 h-4 text-ink-3" />
-                <span className="text-xs font-semibold text-ink-2 dark:text-primary-ink">Lọc Site:</span>
-                <select
-                  value={authFilterSite}
-                  onChange={e => setAuthFilterSite(e.target.value)}
-                  className="text-xs bg-paper-2 dark:bg-ink border border-rule dark:border-rule-2 rounded-lg px-2.5 py-1.5 text-ink-2 dark:text-primary-ink focus:outline-none cursor-pointer"
-                >
-                  <option value="ALL">Tất cả Sites (16 tài khoản)</option>
-                  <option value="pythaverse_main">Pythaverse Main Portal (7 Roles)</option>
-                  <option value="ide">Pythaverse IDE</option>
-                  <option value="avatar">Avatar 3D</option>
-                  <option value="learn">LMS Learn</option>
-                  <option value="learn_s">LMS Learn Staging</option>
-                  <option value="git">Pythaverse Git</option>
-                  <option value="note">Jupyter Note</option>
-                  <option value="contest">Contest & Competitions</option>
-                  <option value="digitaltwin">Digital Twin Simulation</option>
-                  <option value="iot">IoT Pythaverse Hub</option>
-                </select>
-              </div>
-
-              <button
-                onClick={handleRunAuthChecks}
-                disabled={runningAuthCheck || authLoading}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-accent hover:bg-accent-2 disabled:bg-rule dark:disabled:bg-rule-2 text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer"
-              >
-                <Key className={`w-3.5 h-3.5 ${runningAuthCheck ? 'animate-spin' : ''}`} />
-                {runningAuthCheck ? 'Đang quét 16 tài khoản...' : '🚀 Chạy Kiểm Tra Xác Thực Ngay'}
-              </button>
-            </div>
-
-            <div className="flex items-center gap-4 text-xs text-slate-500">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" /> PASS
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" /> WARNING
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block" /> FAIL
-              </span>
-            </div>
-          </div>
-
-          <div className="bg-white dark:bg-ink/80 border border-rule/80 dark:border-rule-2/60 rounded-2xl overflow-hidden shadow-xs">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-left">
-                <thead className="bg-paper-2/90 dark:bg-ink/80 border-b border-rule/80 dark:border-rule-2">
-                  <tr>
-                    <th className="px-4 py-3.5 font-bold text-ink-2 dark:text-primary-ink uppercase tracking-wider w-32">Site ID</th>
-                    <th className="px-4 py-3.5 font-bold text-ink-2 dark:text-primary-ink uppercase tracking-wider w-28">Vai Trò</th>
-                    <th className="px-4 py-3.5 font-bold text-ink-2 dark:text-primary-ink uppercase tracking-wider">Target Route</th>
-                    <th className="px-4 py-3.5 font-bold text-ink-2 dark:text-primary-ink uppercase tracking-wider text-center w-24">Trạng Thái</th>
-                    <th className="px-4 py-3.5 font-bold text-ink-2 dark:text-primary-ink uppercase tracking-wider text-center w-20">Độ Trễ</th>
-                    <th className="px-4 py-3.5 font-bold text-ink-2 dark:text-primary-ink uppercase tracking-wider">Chi Tiết Phản Hồi</th>
-                    <th className="px-4 py-3.5 font-bold text-ink-2 dark:text-primary-ink uppercase tracking-wider w-36 text-right">Thời Điểm Check</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
-                  {filteredAuthChecks.map((item, idx) => (
-                    <tr key={idx} className="hover:bg-paper-2/80 dark:hover:bg-ink/60 transition">
-                      <td className="px-4 py-3 font-mono font-semibold text-accent dark:text-accent-2 whitespace-nowrap">
-                        {item.site_id}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <span className="px-2 py-0.5 rounded-md bg-accent-soft dark:bg-accent-soft border border-accent-soft dark:border-accent text-accent dark:text-accent-2 font-bold text-[11px]">
-                          {item.role_label}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 font-mono text-ink-2 dark:text-primary-ink max-w-[200px] truncate" title={item.expected_path}>
-                        {item.expected_path}
-                      </td>
-                      <td className="px-4 py-3 text-center whitespace-nowrap">
-                        <span className={`inline-flex items-center gap-1 font-bold text-[10px] px-2 py-0.5 rounded-full border ${item.status === 'PASS'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30'
-                          : item.status === 'WARNING'
-                            ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30'
-                            : item.status === 'FAIL'
-                              ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30'
-                              : 'bg-paper-2 text-ink-2 border-rule dark:bg-ink dark:text-ink-3'
-                          }`}>
-                          {item.status === 'PASS' && <CheckCircle2 className="w-3 h-3" />}
-                          {item.status === 'FAIL' && <XCircle className="w-3 h-3" />}
-                          {item.status === 'WARNING' && <AlertTriangle className="w-3 h-3" />}
-                          {item.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 font-mono font-semibold text-ink-2 dark:text-primary-ink text-center whitespace-nowrap">
-                        {item.latency_ms > 0 ? `${item.latency_ms}ms` : '—'}
-                      </td>
-                      <td className="px-4 py-3 text-ink-2 dark:text-primary-ink max-w-[240px] truncate" title={item.details}>
-                        {item.details || '—'}
-                      </td>
-                      <td className="px-4 py-3 text-[11px] text-ink-3 dark:text-ink-2 font-mono whitespace-nowrap text-right">
-                        {item.last_checked_at || 'Chưa check'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 3: CI/CD DEPLOY MONITOR */}
+      {/* TAB 2: CI/CD DEPLOY MONITOR (CHIA 2 CỘT SONG SONG: VERCEL & RENDER) */}
       {activeTab === 'cicd_deploy' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-white dark:bg-ink/80 border border-rule/80 dark:border-rule-2/60 rounded-2xl p-5 shadow-xs flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <Globe className="w-4 h-4 text-black dark:text-white" />
-                  <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">Frontend SPA (Vercel)</h3>
-                </div>
-                <p className="text-xs text-slate-500">Host: ptv-tasks-administrator.vercel.app</p>
-              </div>
-              <span className="px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold rounded-full dark:bg-emerald-500/10 dark:text-emerald-300">
-                READY (Auto-Deploy Active)
-              </span>
-            </div>
-
-            <div className="bg-white dark:bg-ink/80 border border-rule/80 dark:border-rule-2/60 rounded-2xl p-5 shadow-xs flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <Server className="w-4 h-4 text-accent" />
-                  <h3 className="font-bold text-sm text-ink dark:text-primary-ink">Backend FastAPI (Render Docker)</h3>
-                </div>
-                <p className="text-xs text-ink-2">Service: ptv-tasks-backend (Python 3.11 + Chromium)</p>
-              </div>
-              <span className="px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold rounded-full dark:bg-emerald-500/10 dark:text-emerald-300">
-                LIVE (512MB RAM Safeguarded)
-              </span>
-            </div>
-          </div>
-
-          <div className="bg-white dark:bg-ink/80 border border-rule/80 dark:border-rule-2/60 rounded-2xl overflow-hidden shadow-xs">
-            <div className="px-5 py-4 border-b border-rule dark:border-rule-2/60 flex items-center justify-between">
-              <h3 className="font-bold text-sm text-ink dark:text-primary-ink">Lịch Sử Build & Deploy Gần Đây</h3>
-              <span className="text-xs text-ink-3">Hiển thị {deployments.length} bản build mới nhất</span>
-            </div>
-
-            <div className="divide-y divide-rule dark:divide-rule-2/60">
-              {deployments.map(item => (
-                <div key={item.id} className="p-4 flex items-center justify-between flex-wrap gap-3 hover:bg-paper-2/80 dark:hover:bg-ink/60 transition">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className={`px-2 py-0.5 rounded-md font-mono text-[10px] font-bold uppercase ${item.provider === 'vercel'
-                        ? 'bg-black text-white dark:bg-white dark:text-black'
-                        : 'bg-accent text-white'
-                        }`}>
-                        {item.provider}
-                      </span>
-                      <span className="font-bold text-sm text-ink dark:text-primary-ink">{item.name}</span>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${(item.state || item.status) === 'READY' || (item.state || item.status) === 'live'
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300'
-                        : 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/15 dark:text-rose-300'
-                        }`}>
-                        {item.state || item.status || 'SUCCESS'}
-                      </span>
-                    </div>
-
-                    <p className="text-xs text-ink-2 dark:text-primary-ink flex items-center gap-2">
-                      <GitBranch className="w-3.5 h-3.5 text-ink-3" />
-                      <span className="font-medium">{item.commit_msg}</span>
-                      <span className="text-ink-3">by {item.commit_author}</span>
-                    </p>
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* ── CỘT BÊN TRÁI: VERCEL (FRONTEND) ── */}
+            <div className="space-y-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex items-center justify-between shadow-xs">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-black text-white dark:bg-white dark:text-black rounded-xl">
+                    <Globe className="w-5 h-5" />
                   </div>
-
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-ink-3 font-mono">{formatDate(item.created_at)}</span>
-                    <button
-                      onClick={() => handleViewLogs(item)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-ink hover:bg-rule-2 dark:bg-rule-2 dark:hover:bg-rule text-white text-xs font-semibold rounded-xl transition cursor-pointer"
-                    >
-                      <Terminal className="w-3.5 h-3.5" />
-                      <span>Xem Build Logs</span>
-                    </button>
+                  <div>
+                    <h2 className="font-bold text-sm text-slate-900 dark:text-white">Frontend SPA (Vercel)</h2>
+                    <p className="text-[11px] text-slate-500 font-mono">ptv-tasks-administrator.vercel.app</p>
                   </div>
                 </div>
-              ))}
+                <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold rounded-full dark:bg-emerald-500/10 dark:text-emerald-300">
+                  Auto-Deploy Edge
+                </span>
+              </div>
+
+              {deployLoading && vercelDeploys.length === 0 ? (
+                <DeployCardSkeleton />
+              ) : (
+                <div className="space-y-3">
+                  {vercelDeploys.map((item, idx) => {
+                    const isLatest = idx === 0 && (item.state === 'READY' || item.status === 'READY');
+                    return (
+                      <div
+                        key={item.id}
+                        className={`rounded-2xl p-4 border transition ${isLatest
+                          ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-400 dark:border-emerald-600/60 shadow-sm ring-1 ring-emerald-500/30'
+                          : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 opacity-75 hover:opacity-100'
+                          }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-xs text-slate-900 dark:text-white">{item.name}</span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${item.state === 'READY'
+                                ? 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-500/20 dark:text-emerald-300'
+                                : 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-500/20 dark:text-rose-300'
+                                }`}>
+                                {item.state || 'READY'}
+                              </span>
+                              {isLatest && (
+                                <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                  ● Đang chạy hiện tại
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                              <GitBranch className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <span className="font-medium truncate max-w-[280px]">{item.commit_msg}</span>
+                            </p>
+                          </div>
+
+                          <button
+                            onClick={() => handleViewLogs(item)}
+                            className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white text-[11px] font-semibold rounded-lg transition cursor-pointer"
+                          >
+                            <Terminal className="w-3.5 h-3.5" />
+                            <span>Logs</span>
+                          </button>
+                        </div>
+
+                        <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400 font-mono">
+                          <span>by {item.commit_author}</span>
+                          <span>{formatDate(item.created_at)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* ── CỘT BÊN PHẢI: RENDER.COM (BACKEND) ── */}
+            <div className="space-y-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex items-center justify-between shadow-xs">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-indigo-600 text-white rounded-xl">
+                    <Server className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="font-bold text-sm text-slate-900 dark:text-white">Backend FastAPI (Render)</h2>
+                    <p className="text-[11px] text-slate-500 font-mono">ptv-tasks-backend (512MB RAM Budget)</p>
+                  </div>
+                </div>
+                <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold rounded-full dark:bg-emerald-500/10 dark:text-emerald-300">
+                  Docker Live
+                </span>
+              </div>
+
+              {deployLoading && renderDeploys.length === 0 ? (
+                <DeployCardSkeleton />
+              ) : (
+                <div className="space-y-3">
+                  {renderDeploys.map((item, idx) => {
+                    const isLatest = idx === 0 && (item.status === 'live');
+                    return (
+                      <div
+                        key={item.id}
+                        className={`rounded-2xl p-4 border transition ${isLatest
+                          ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-400 dark:border-emerald-600/60 shadow-sm ring-1 ring-emerald-500/30'
+                          : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 opacity-75 hover:opacity-100'
+                          }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-xs text-slate-900 dark:text-white">{item.name}</span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${item.status === 'live'
+                                ? 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-500/20 dark:text-emerald-300'
+                                : 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-500/20 dark:text-rose-300'
+                                }`}>
+                                {item.status || 'live'}
+                              </span>
+                              {isLatest && (
+                                <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                  ● Đang chạy hiện tại
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                              <GitBranch className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <span className="font-medium truncate max-w-[280px]">{item.commit_msg}</span>
+                            </p>
+                          </div>
+
+                          <button
+                            onClick={() => handleViewLogs(item)}
+                            className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white text-[11px] font-semibold rounded-lg transition cursor-pointer"
+                          >
+                            <Terminal className="w-3.5 h-3.5" />
+                            <span>Logs</span>
+                          </button>
+                        </div>
+
+                        <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400 font-mono">
+                          <span>by {item.commit_author}</span>
+                          <span>{formatDate(item.created_at)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal Xem Live Terminal Build/Runtime Logs */}
+      {/* Modal Xem Live Terminal Build Logs */}
       {logModalOpen && (
         <div
           onClick={(e) => { if (e.target === e.currentTarget) setLogModalOpen(false); }}
-          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-white/75 dark:bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-150"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-ink border border-rule-2 rounded-2xl w-full max-w-full sm:max-w-4xl lg:max-w-5xl shadow-2xl overflow-hidden flex flex-col max-h-[88vh] animate-in fade-in zoom-in-95 duration-150 my-auto"
+            className="bg-slate-950 border border-slate-800 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-150"
           >
-            <div className="px-5 py-3.5 bg-ink border-b border-rule-2 flex items-center justify-between">
-              <div className="flex items-center gap-2 text-primary-ink">
+            <div className="px-5 py-3.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-slate-200">
                 <Terminal className="w-4 h-4 text-emerald-400" />
                 <span className="font-bold text-xs font-mono">{selectedDeployTitle}</span>
               </div>
@@ -848,7 +761,7 @@ export const SiteMonitorPage: React.FC = () => {
               <div className="flex items-center gap-2">
                 <button
                   onClick={copyLogsToClipboard}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rule-2 hover:bg-rule-2 text-primary-ink text-xs font-medium transition cursor-pointer"
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition cursor-pointer"
                 >
                   {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                   <span>{copied ? 'Đã chép' : 'Sao chép'}</span>
@@ -856,14 +769,14 @@ export const SiteMonitorPage: React.FC = () => {
 
                 <button
                   onClick={() => setLogModalOpen(false)}
-                  className="p-1 rounded-lg hover:bg-rule-2 text-ink-3 hover:text-white transition cursor-pointer"
+                  className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition cursor-pointer"
                 >
                   <XCircle className="w-5 h-5" />
                 </button>
               </div>
             </div>
 
-            <div className="p-5 flex-1 overflow-y-auto font-mono text-xs leading-relaxed text-primary-ink bg-ink">
+            <div className="p-5 flex-1 overflow-y-auto font-mono text-xs leading-relaxed text-slate-300 bg-slate-950">
               {loadingLogs ? (
                 <div className="flex items-center justify-center py-20 gap-2 text-slate-500">
                   <Loader2 className="w-5 h-5 animate-spin text-emerald-400" />
@@ -879,44 +792,3 @@ export const SiteMonitorPage: React.FC = () => {
     </div>
   );
 };
-
-// ─── Mock Fallback Data ───────────────────────────────────────────────────────
-const MOCK_SITES: MonitoredSite[] = [
-  { id: 'pythaverse_main', name: 'Pythaverse Main Portal', url: 'https://pythaverse.space/', category: 'core', enabled: true, show_live_alert: true, last_status: 'UP', http_code: 200, response_time_ms: 185, last_checked_at: '12:05:10 21/08/2026', login_status: 'PASS', details: 'Main Portal & 7 Roles Accessible', uptime_pct_24h: 100, uptime_pct_7d: 100, uptime_pct_30d: 100, total_incidents: 0, is_down_since: null },
-  { id: 'ide', name: 'Pythaverse IDE', url: 'https://ide.pythaverse.space/#/', category: 'satellite', enabled: true, show_live_alert: true, last_status: 'UP', http_code: 200, response_time_ms: 220, last_checked_at: '12:05:10 21/08/2026', login_status: 'PASS', details: 'Blockly IDE Active', uptime_pct_24h: 100, uptime_pct_7d: 99.8, uptime_pct_30d: 99.9, total_incidents: 1, is_down_since: null },
-  { id: 'avatar', name: 'Avatar 3D Generator', url: 'https://avatar.pythaverse.space/', category: 'satellite', enabled: true, show_live_alert: true, last_status: 'UP', http_code: 200, response_time_ms: 195, last_checked_at: '12:05:10 21/08/2026', login_status: 'PASS', details: '3D Simulation Online', uptime_pct_24h: 100, uptime_pct_7d: 100, uptime_pct_30d: 100, total_incidents: 0, is_down_since: null },
-  { id: 'note', name: 'Jupyter Hub Note', url: 'https://note.pythaverse.space/', category: 'satellite', enabled: true, show_live_alert: true, last_status: 'UP', http_code: 200, response_time_ms: 310, last_checked_at: '12:05:10 21/08/2026', login_status: 'PASS', details: 'Python Kernels Ready', uptime_pct_24h: 100, uptime_pct_7d: 100, uptime_pct_30d: 100, total_incidents: 0, is_down_since: null },
-  { id: 'git', name: 'Pythaverse Git Repos', url: 'https://git.pythaverse.space/dashboard/repos', category: 'satellite', enabled: true, show_live_alert: true, last_status: 'UP', http_code: 200, response_time_ms: 175, last_checked_at: '12:05:10 21/08/2026', login_status: 'PASS', details: 'Gitea SSO Repos Synced', uptime_pct_24h: 100, uptime_pct_7d: 100, uptime_pct_30d: 100, total_incidents: 0, is_down_since: null },
-  { id: 'contest', name: 'Contest & Competitions', url: 'https://contest.pythaverse.space/contest', category: 'satellite', enabled: true, show_live_alert: true, last_status: 'UP', http_code: 200, response_time_ms: 240, last_checked_at: '12:05:10 21/08/2026', login_status: 'PASS', details: 'Leaderboards Live', uptime_pct_24h: 100, uptime_pct_7d: 100, uptime_pct_30d: 100, total_incidents: 0, is_down_since: null },
-  { id: 'digitaltwin', name: 'Digital Twin Simulation', url: 'https://digitaltwin.pythaverse.space/', category: 'satellite', enabled: true, show_live_alert: true, last_status: 'UP', http_code: 200, response_time_ms: 260, last_checked_at: '12:05:10 21/08/2026', login_status: 'PASS', details: 'Simulation Engine Online', uptime_pct_24h: 100, uptime_pct_7d: 100, uptime_pct_30d: 100, total_incidents: 0, is_down_since: null },
-  { id: 'learn', name: 'LMS Learn Portal', url: 'https://learn.pythaverse.space/my/', category: 'satellite', enabled: true, show_live_alert: true, last_status: 'UP', http_code: 200, response_time_ms: 280, last_checked_at: '12:05:10 21/08/2026', login_status: 'PASS', details: 'Moodle WebService OK', uptime_pct_24h: 100, uptime_pct_7d: 100, uptime_pct_30d: 100, total_incidents: 0, is_down_since: null },
-  { id: 'learn_s', name: 'LMS Learn Staging', url: 'https://learn-s.pythaverse.space/my/', category: 'satellite', enabled: true, show_live_alert: false, last_status: 'UP', http_code: 200, response_time_ms: 290, last_checked_at: '12:05:10 21/08/2026', login_status: 'PASS', details: 'Staging LMS Ready', uptime_pct_24h: 100, uptime_pct_7d: 100, uptime_pct_30d: 100, total_incidents: 0, is_down_since: null },
-  { id: 'iot', name: 'IoT Pythaverse Hub', url: 'https://iot.pythaverse.space/', category: 'satellite', enabled: true, show_live_alert: true, last_status: 'UP', http_code: 200, response_time_ms: 190, last_checked_at: '12:05:10 21/08/2026', login_status: 'PASS', details: 'MQTT & WebSocket Live', uptime_pct_24h: 100, uptime_pct_7d: 100, uptime_pct_30d: 100, total_incidents: 0, is_down_since: null },
-];
-
-const MOCK_SUMMARY: MonitorSummary = {
-  total_sites: 10, enabled_sites: 10, up_count: 10, down_count: 0, warning_count: 0, paused_count: 0, avg_latency_ms: 234, last_checked_at: '12:05:10 21/08/2026',
-};
-
-const MOCK_AUTH_CHECKS: AuthCredentialCheck[] = [
-  { site_id: 'pythaverse_main', role_label: 'Admin', expected_path: '/admin-workspace', status: 'UNKNOWN', latency_ms: 245, last_checked_at: '--:--:-- --/--/----', details: 'UNKNOWN' },
-  { site_id: 'pythaverse_main', role_label: 'Sales Admin', expected_path: 'https://pythaverse.space/sales-admin-workspace/dashboard', status: 'UNKNOWN', latency_ms: 260, last_checked_at: '--:--:-- --/--/----', details: 'UNKNOWN' },
-  { site_id: 'pythaverse_main', role_label: 'Distributor', expected_path: '/distributor-workspace', status: 'UNKNOWN', latency_ms: 210, last_checked_at: '--:--:-- --/--/----', details: 'UNKNOWN' },
-  { site_id: 'pythaverse_main', role_label: 'Partner', expected_path: '/partner-workspace', status: 'UNKNOWN', latency_ms: 230, last_checked_at: '--:--:-- --/--/----', details: 'UNKNOWN' },
-  { site_id: 'pythaverse_main', role_label: 'School', expected_path: '/school-workspace', status: 'UNKNOWN', latency_ms: 280, last_checked_at: '--:--:-- --/--/----', details: 'UNKNOWN' },
-  { site_id: 'pythaverse_main', role_label: 'Teacher', expected_path: '/teacher-workspace', status: 'UNKNOWN', latency_ms: 195, last_checked_at: '--:--:-- --/--/----', details: 'UNKNOWN' },
-  { site_id: 'pythaverse_main', role_label: 'Student', expected_path: '/student-workspace', status: 'UNKNOWN', latency_ms: 190, last_checked_at: '--:--:-- --/--/----', details: 'UNKNOWN' },
-  { site_id: 'ide', role_label: 'Student', expected_path: '/#/', status: 'UNKNOWN', latency_ms: 220, last_checked_at: '--:--:-- --/--/----', details: 'UNKNOWN' },
-  { site_id: 'learn', role_label: 'Student', expected_path: '/my/', status: 'UNKNOWN', latency_ms: 310, last_checked_at: '--:--:-- --/--/----', details: 'UNKNOWN' },
-  { site_id: 'learn_s', role_label: 'Student', expected_path: '/my/', status: 'UNKNOWN', latency_ms: 310, last_checked_at: '--:--:-- --/--/----', details: 'UNKNOWN' },
-  { site_id: 'avatar', role_label: 'Student', expected_path: '/my/', status: 'UNKNOWN', latency_ms: 310, last_checked_at: '--:--:-- --/--/----', details: 'UNKNOWN' },
-  { site_id: 'git', role_label: 'Student', expected_path: '/my/', status: 'UNKNOWN', latency_ms: 310, last_checked_at: '--:--:-- --/--/----', details: 'UNKNOWN' },
-  { site_id: 'contest', role_label: 'Student', expected_path: '/my/', status: 'UNKNOWN', latency_ms: 310, last_checked_at: '--:--:-- --/--/----', details: 'UNKNOWN' },
-  { site_id: 'digitaltwin', role_label: 'Student', expected_path: '/my/', status: 'UNKNOWN', latency_ms: 310, last_checked_at: '--:--:-- --/--/----', details: 'UNKNOWN' },
-  { site_id: 'iot', role_label: 'Student', expected_path: '/my/', status: 'UNKNOWN', latency_ms: 310, last_checked_at: '--:--:-- --/--/----', details: 'UNKNOWN' },
-];
-
-const MOCK_DEPLOYMENTS: DeploymentItem[] = [
-  { id: 'dpl_8h129fx82h', name: 'ptv-tasks-administrator', provider: 'vercel', state: 'READY', created_at: Date.now() - 3600000, commit_msg: 'feat: revamp site monitor with 3-tab layout', commit_author: 'Nguyen Manh Hung' },
-  { id: 'srv-cu891238912', name: 'ptv-tasks-backend', provider: 'render', status: 'live', created_at: Date.now() - 7200000, commit_msg: 'refactor: add fernet encrypted credentials check', commit_author: 'Nguyen Manh Hung' },
-];
