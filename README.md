@@ -105,7 +105,7 @@
    - Nghiêm cấm tuyệt đối việc dùng text thân email để đối soát trích dẫn từ file đính kèm khi chưa qua hạ tầng bóc tách bất biến.
 3. **Zero-Mockup Invariant (Cấm Tuyệt Đối Dữ Liệu Bịa Đặt / Fallback Giả Định):**
    - Nghiêm cấm sử dụng bất kỳ giá trị mặc định giả lập nào (`SWRP 4-12`, count=4, mật khẩu `Ptv@2026`).
-   - **Đặc biệt: Khai tử hoàn toàn default Git role `GUEST`**. Yêu cầu cấp quyền Git không nêu rõ vai trò bắt buộc sinh `missing_requirement: git_role`, chuyển trạng thái sang `needs_information` và không tạo bước `git.add_collaborators`.
+   - **Đặc biệt: Khai tử hoàn toàn default Git role `GUEST` và default LMS role `student`**. Yêu cầu cấp quyền Git không nêu rõ vai trò bắt buộc sinh `missing_requirement: git_role`, yêu cầu ghi danh LMS không rõ vai trò không tự gán `student`, lập tức chuyển trạng thái sang `needs_information` và chặn phê duyệt thực thi.
 4. **Dual-Freeze Proposal & Immutable Provenance Linkage:**
    - Khi Admin phê duyệt, hệ thống đóng băng đồng thời cả `workflow_proposals.frozen_plan` và `automation_workflows.steps`.
    - Toàn bộ execution events trong `workflow_execution_events` bắt buộc phải mang theo `proposal_id`. Tuyệt đối không cho phép chỉnh sửa workflow hay proposal sau khi đã ở trạng thái `approved`.
@@ -152,7 +152,7 @@
 - **Lập lịch chạy ngầm:** APScheduler `3.10.x` (`AsyncIOScheduler`) với 6 Crons so le lệch pha.
 - **In-Memory Caching:** Ma trận 8 In-Memory RAM Caches (`BoundedMemoryCache` phân tầng LRU + TTL, phản hồi 1ms, RAM <= 40MB).
 - **Trí tuệ nhân tạo (AI):** `google-generativeai: ^0.8.4` tích hợp Dual-Key Engine (`GEMINI_API_KEY` & `GEMINI_API_KEY2`) kết hợp chuỗi 10 models fallback (`gemini-3.8-flash` ➔ `gemini-3.7-flash` ➔ `gemini-3.5-flash-lite` ➔ `gemini-2.5-flash`...).
-- **Kiểm Thử Hồi Quy:** `pytest: ^9.x` / `pytest-asyncio: ^1.4.x` (Hermetic in-memory test suite, **22/22 green in 1.58s**).
+- **Kiểm Thử Hồi Quy:** `pytest: ^9.x` / `pytest-asyncio: ^1.4.x` (Hermetic in-memory test suite, **23/23 green in 1.58s**).
 
 ### 3. Chi Tiết Frontend Stack
 - **Node.js**: `20.x LTS` / `22.x LTS`
@@ -211,6 +211,7 @@ ptv-tasks-administrator/
 │   │   │   └── template.py                     # TemplateConfig schemas
 │   │   ├── services/                           # Dịch vụ nghiệp vụ & RPA
 │   │   │   ├── evidence_verifier.py            # Deterministic Verifier, Substring Calibration
+│   │   │   ├── request_fact_normalizer.py      # Bổ sung sự thật xác thực từ văn bản gốc (Regex patterns)
 │   │   │   ├── workflow_planner.py             # Registry-Driven Policy Engine, Zero-Mockup Invariant
 │   │   │   ├── workflow_executor.py            # Topological Kahn DAG, Frozen Plan SOT, BFS Retry
 │   │   │   ├── playwright_service.py           # Moodle LMS Enrollment Playwright Service
@@ -238,9 +239,10 @@ ptv-tasks-administrator/
 │   │   │   ├── bot_executor.py                 # Central Worker Router thực thi 19 Capabilities
 │   │   │   └── ticket_processor.py             # Atomic Revision RPC, Canonical Hash, Provenance Pipeline
 │   │   └── main.py                             # Lifespan 6 Crons so le, Polling với Proposal ID audit
-│   ├── tests/                                  # Bộ Kiểm Thử Hermetic Pytest (22/22 Green in 1.58s)
+│   ├── tests/                                  # Bộ Kiểm Thử Hermetic Pytest (23/23 Green in 1.58s)
 │   │   ├── test_capability_contracts.py        # Contract Test 19 capabilities vs bot_executor
 │   │   ├── test_planning_policy.py             # Test Zero-Mockup, EvidenceVerifier, Injection, Offsets
+│   │   ├── test_request_fact_normalizer.py     # Test bóc tách email, role, khóa học, intents nguyên văn
 │   │   ├── test_execution_safety.py            # Test Kahn Topological sort, Masking, Data Binding
 │   │   ├── test_security_and_provenance.py     # Test JWT whitelist @dtt.vn, Immutable Provenance
 │   │   └── test_workflow_legacy_replan.py      # Test Re-plan tự động cho legacy workflow
@@ -379,6 +381,7 @@ ptv-tasks-administrator/
 - `extract_operational_facts(subject, raw_content, source, source_revision_id, attachments)`:
   - Bóc tách sự thật vận hành, trích xuất cấu trúc `extracted_entities` và `requested_operations`.
   - Đóng dấu trực tiếp `source_revision_id` vào từng `EvidenceSpan` kèm trích dẫn nguyên văn `quote` và tọa độ ký tự `[start_offset:end_offset]`.
+  - **Tích hợp `request_fact_normalizer`:** Gọi `augment_assessment_with_request_facts()` bổ trợ tất định trực tiếp từ nội dung văn bản gốc trước khi chuyển sang chốt chặn kiểm chứng `EvidenceVerifierService`.
 
 ---
 
@@ -504,10 +507,21 @@ ptv-tasks-administrator/
   - Intent chỉ được giữ cờ `is_valid = True` khi có ít nhất 1 bằng chứng đã được verified.
   - Tự động dựng đối tượng `TypedEntities` đã kiểm chứng làm cơ sở dữ liệu duy nhất cho Planner.
 
+#### [`request_fact_normalizer.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/request_fact_normalizer.py) (Bổ Sung Sự Thật Xác Thực Từ Văn Bản Gốc)
+- `augment_assessment_with_request_facts(assessment, raw_content, source_revision_id)`:
+  - Module bổ trợ tất định (supplement) cho bộ bóc tách LLM, đảm bảo không bỏ sót các thực thể quan trọng trong email theo mẫu phổ biến.
+  - Trích xuất danh sách email bằng biểu thức chính quy `EMAIL_RE`.
+  - Nhận diện vai trò (`teacher` khi có từ khóa "teacher" / "giáo viên").
+  - Trích xuất danh sách khóa học qua regex `COURSE_RE` (SWRP, Python, Robotics...).
+  - Nhận diện các ý định `create_accounts`, `course_access`, `repository_access` khi có các cụm từ xác thực tương ứng trong văn bản gốc.
+  - Gắn tọa độ ký tự chính xác `[start_offset:end_offset]` và `source_revision_id` vào `EvidenceSpan`.
+  - Ràng buộc an toàn: Hoàn toàn không tự suy diễn trường học, URL repo, mật khẩu hay vai trò Git. Dữ liệu sau đó vẫn bắt buộc phải đi qua chốt chặn `EvidenceVerifierService`.
+
 #### [`workflow_planner.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_planner.py) (Bộ Lập Kế Hoạch Tất Định)
 - `build_workflow_proposal(assessment, resolved_school, candidates, attachment_url)`:
   - Đọc trực tiếp chính sách từ `intent_policy.json`, hoàn toàn không gọi LLM bên trong.
   - Áp dụng **Zero-Mockup Invariant**: Kiểm tra nghiêm ngặt `required_inputs`. Thiếu `school_name`, `users_or_file`, `courses`, `repositories`, `git_role` ➔ Lập tức trả về `status = 'needs_information'` kèm danh sách `missing_requirements`.
+  - **Khai tử default role `student`:** Cấu hình `role = "teacher" if has_teacher else None`. Nếu email yêu cầu không nói rõ vai trò giáo viên thì không tự ý gán `student`, ngăn chặn việc ghi danh nhầm role trên LMS.
   - Dựng các bước theo capability pipeline chuẩn mực, gán tham số và phụ thuộc cha con `depends_on`.
 - `validate_workflow_graph(steps)`:
   - Kiểm tra tính toàn vẹn của đồ thị DAG: Phát hiện chu trình lặp (Cycle Detection), kiểm tra capability có tồn tại trong `capabilities.json` và có `available=true` hay không.
@@ -603,10 +617,11 @@ ptv-tasks-administrator/
 Hệ thống tích hợp bộ kiểm thử an toàn hermetic, chạy siêu tốc **1.58 giây** mà không tốn quota AI và không phụ thuộc dịch vụ ngoài:
 - [`test_capability_contracts.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/tests/test_capability_contracts.py): Kiểm tra hợp đồng giữa 19 capabilities trong `capabilities.json` và code xử lý trong `bot_executor.py`.
 - [`test_planning_policy.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/tests/test_planning_policy.py): Kiểm định Zero-Mockup Invariant, EvidenceVerifier, Injection, Skewed Offset, và loại trừ default Git role `GUEST`.
+- [`test_request_fact_normalizer.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/tests/test_request_fact_normalizer.py): Kiểm tra bóc tách email giáo viên, khóa học và các ý định liên quan trực tiếp từ email thực tế.
 - [`test_execution_safety.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/tests/test_execution_safety.py): Kiểm định thuật toán sắp xếp Tô-pô Kahn, che mờ mật khẩu `[PROTECTED]`, và liên kết dữ liệu dynamic data binding.
 - [`test_security_and_provenance.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/tests/test_security_and_provenance.py): Kiểm định Bearer JWT token whitelist `@dtt.vn` và chuỗi truy vết bất biến `proposal_id`.
 - [`test_workflow_legacy_replan.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/tests/test_workflow_legacy_replan.py): Kiểm định việc tự động tái lập kế hoạch cho các workflow legacy thiếu `proposal_id`.
-- **Kết quả thực tế:** `22 passed in 1.58s` (100% Green).
+- **Kết quả thực tế:** `23 passed in 1.58s` (100% Green).
 
 ---
 
@@ -644,8 +659,14 @@ Hệ thống tích hợp bộ kiểm thử an toàn hermetic, chạy siêu tốc
 - **Drawer Điều Khiển AI 4 Trạng Thái (Bento Grid):**
   1. `NO_ACTION`: Vé thông báo thuần túy, hiển thị lý do không cần tự động hóa.
   2. `NEEDS_INFORMATION`: Hiển thị Checklist thiếu thông tin với các badge màu hổ phách/đỏ cảnh báo (thiếu school, thiếu email, thiếu role git).
+     - **Hiển thị các bước đã đủ căn cứ:** Khi workflow ở trạng thái thiếu thông tin, giao diện bổ sung khối hiển thị *"Các bước đã đủ căn cứ để đề xuất (chưa thể chạy)"* (`activeWorkflow.steps`) với badge màu xanh dương `sky-50/sky-800` để Quản trị viên nắm được tiến trình các bước hợp lệ trong khi chờ người gửi bổ sung dữ kiện còn thiếu.
   3. `READY_FOR_REVIEW`: Hiển thị Trích dẫn bằng chứng nguyên văn (`evidence_quotes`), model AI đã dùng, và đồ thị các bước đề xuất. Cho phép Admin tinh chỉnh bước thủ công (`is_manual`) kèm lý do can thiệp (`operator_reason`).
   4. `EXECUTING / COMPLETED`: Hiển thị tiến độ thực thi thời gian thực từng bước của DAG, nút Thử lại bước lỗi (`retry_step`) và link tải file kết quả.
+- **Trình Xem Trước Tệp Đính Kèm Đa Định Dạng (Attachment Preview Modal):**
+  - Bảng tính Excel (`.xlsx`, `.xls`): Tự động nạp và kết xuất bảng tính trực tiếp trong modal client-side bằng SheetJS (`XLSX.read`), hiển thị tối đa 100 hàng và 30 cột của sheet đầu tiên mà không cần tải file về máy.
+  - Tài liệu PDF (`.pdf`): Nhúng trực tiếp qua thẻ `iframe` trình duyệt.
+  - Tài liệu Office (`.docx`, `.pptx`): Nhúng trực tiếp trình xem Microsoft Office Online Viewer (`view.officeapps.live.com`).
+  - Hình ảnh (`.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`): Hiển thị trực tiếp ảnh phóng to sắc nét.
 - **Các Sub-components Chuyên Biệt:**
   - `WorkflowBuilder.tsx`: Trình dựng và chỉnh sửa đồ thị DAG trực quan.
   - `WorkflowStepCard.tsx`: Thẻ hiển thị chi tiết một bước, input mapping, outputs và trạng thái.
@@ -901,10 +922,10 @@ cd backend
 # Kích hoạt môi trường ảo Python
 .\venv\Scripts\Activate.ps1
 
-# Chạy toàn bộ 22 bài test an toàn với báo cáo chi tiết
+# Chạy toàn bộ 23 bài test an toàn với báo cáo chi tiết
 pytest -v
 ```
-*Kết quả chuẩn mực:* `22 passed in 1.58s` (100% Green).
+*Kết quả chuẩn mực:* `23 passed in 1.58s` (100% Green).
 
 ### 3. Hướng Dẫn Kiểm Tra & Build Ứng Dụng Frontend (Vite Strict Typecheck)
 ```powershell
