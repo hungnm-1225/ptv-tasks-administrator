@@ -60,6 +60,81 @@ const formatVNDateTime = (isoString?: string) => {
   }
 };
 
+const TaskTableSkeleton: React.FC = () => (
+  <div className="overflow-hidden rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs animate-pulse">
+    <div className="overflow-x-auto">
+      <table className="w-full text-left border-collapse min-w-[900px]">
+        <thead>
+          <tr className="border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/75 dark:bg-slate-850/50 text-[10px] font-bold tracking-wider text-slate-500 dark:text-slate-400 uppercase">
+            <th className="py-3.5 px-4 sm:px-6">MÃ TÁC VỤ</th>
+            <th className="py-3.5 px-4">NỘI DUNG NGHIỆP VỤ CỐT LÕI</th>
+            <th className="py-3.5 px-4">NGUỒN YÊU CẦU</th>
+            <th className="py-3.5 px-4">TRẠNG THÁI & TIẾN TRÌNH</th>
+            <th className="py-3.5 px-4">THỜI GIAN</th>
+            <th className="py-3.5 px-4 sm:px-6 text-right">THAO TÁC</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+          {[1, 2, 3, 4, 5].map((row) => (
+            <tr key={row} className="py-4">
+              <td className="py-4 px-4 sm:px-6">
+                <div className="h-4 w-20 rounded bg-slate-200 dark:bg-slate-800" />
+              </td>
+              <td className="py-4 px-4 space-y-1.5">
+                <div className="h-4 w-52 rounded bg-slate-200 dark:bg-slate-800" />
+                <div className="h-3 w-32 rounded bg-slate-100 dark:bg-slate-800/60" />
+              </td>
+              <td className="py-4 px-4">
+                <div className="h-5 w-16 rounded-full bg-slate-200 dark:bg-slate-800" />
+              </td>
+              <td className="py-4 px-4">
+                <div className="h-5 w-24 rounded-full bg-slate-200 dark:bg-slate-800" />
+              </td>
+              <td className="py-4 px-4">
+                <div className="h-3.5 w-24 rounded bg-slate-200 dark:bg-slate-800" />
+              </td>
+              <td className="py-4 px-4 sm:px-6 text-right">
+                <div className="h-7 w-20 rounded-lg bg-slate-200 dark:bg-slate-800 ml-auto" />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+);
+
+const TaskBentoSkeleton: React.FC = () => (
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-pulse">
+    {[1, 2, 3, 4].map((idx) => (
+      <div
+        key={idx}
+        className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-4 shadow-xs"
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+          <div className="flex items-center gap-2">
+            <div className="h-6 w-24 rounded-lg bg-slate-200 dark:bg-slate-800" />
+            <div className="h-5 w-20 rounded-full bg-slate-200 dark:bg-slate-800" />
+          </div>
+          <div className="h-3.5 w-20 rounded bg-slate-100 dark:bg-slate-800" />
+        </div>
+        <div className="space-y-2">
+          <div className="h-5 w-3/4 rounded bg-slate-200 dark:bg-slate-800" />
+          <div className="h-3.5 w-1/2 rounded bg-slate-100 dark:bg-slate-800/70" />
+        </div>
+        <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-850/60 border border-slate-100 dark:border-slate-800 space-y-2">
+          <div className="h-3.5 w-full rounded bg-slate-200/80 dark:bg-slate-800" />
+          <div className="h-3.5 w-4/5 rounded bg-slate-200/60 dark:bg-slate-800/60" />
+        </div>
+        <div className="pt-2 flex items-center justify-between">
+          <div className="h-7 w-24 rounded-lg bg-slate-200 dark:bg-slate-800" />
+          <div className="h-7 w-20 rounded-lg bg-slate-200 dark:bg-slate-800" />
+        </div>
+      </div>
+    ))}
+  </div>
+);
+
 export const TaskManagementPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'all' | 'pending' | 'executed' | 'failed'>('all');
   const [viewMode, setViewMode] = useState<'table' | 'bento'>('table');
@@ -687,10 +762,7 @@ export const TaskManagementPage: React.FC = () => {
 
       {/* 4. Main Data Display: Table or Bento Cards */}
       {loading && tasks.length === 0 ? (
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 text-center space-y-3 animate-pulse">
-          <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mx-auto" />
-          <span className="text-xs font-bold text-slate-500">Đang nạp dữ liệu tiến trình tác vụ...</span>
-        </div>
+        viewMode === 'table' ? <TaskTableSkeleton /> : <TaskBentoSkeleton />
       ) : filteredTasks.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-12 text-center shadow-xs">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-50 dark:bg-slate-800 text-indigo-500 mb-3">

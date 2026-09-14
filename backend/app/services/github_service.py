@@ -79,11 +79,11 @@ class GitHubDispatcherService:
             body = f"Tác vụ được điều phối từ Pythaverse Automation Center.\nPayload: `{payload}`"
 
         if not self.pat:
-            logger.warning("GITHUB_PAT chưa được cấu hình, trả về mock URL.")
+            logger.error("❌ Lỗi: GITHUB_PAT chưa được cấu hình trong Environment.")
             return {
-                "status": "simulated",
-                "issue_url": f"https://github.com/{owner}/{repo}/issues/mock-1",
-                "message": "GITHUB_PAT chưa được cấu hình trong Environment"
+                "status": "failed",
+                "issue_url": None,
+                "message": "Lỗi cấu hình: GITHUB_PAT chưa được thiết lập trong Environment. Không thể tạo GitHub Issue thực tế."
             }
 
         url = f"https://api.github.com/repos/{owner}/{repo}/issues"

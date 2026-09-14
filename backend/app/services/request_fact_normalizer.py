@@ -108,9 +108,7 @@ def augment_assessment_with_request_facts(
         _append_entity(assessment, ExtractedEntity(type="users", raw_value=users, confidence=1.0, evidence=spans))
 
     raw_courses = [m.group(0).strip() for m in COURSE_RE.finditer(content)]
-    normalized_courses = list(dict.fromkeys(
-        re.sub(r"\s*[–—\-]\s*", " ", c) for c in raw_courses
-    ))
+    normalized_courses = list(dict.fromkeys(raw_courses))
     
     if normalized_courses:
         course_spans = [_span(content, m.start(), m.end(), source_revision_id) for m in COURSE_RE.finditer(content)]
@@ -123,12 +121,14 @@ def augment_assessment_with_request_facts(
             confidence=1.0,
             evidence=[repo_evidence]
         ))
-        _append_entity(assessment, ExtractedEntity(
-            type="git_role",
-            raw_value="GUEST",
-            confidence=1.0,
-            evidence=[repo_evidence]
-        ))
+        role_git_match = re.search(r"\b(ADMIN|DEVELOPER|GUEST)\b", content, re.IGNORECASE)
+        if role_git_match:
+            _append_entity(assessment, ExtractedEntity(
+                type="git_role",
+                raw_value=role_git_match.group(1).upper(),
+                confidence=1.0,
+                evidence=[_span(content, role_git_match.start(), role_git_match.end(), source_revision_id)]
+            ))
 
     if account_evidence and users:
         _append_intent(assessment, "create_accounts", account_evidence)

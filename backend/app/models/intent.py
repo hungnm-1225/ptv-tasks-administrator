@@ -75,10 +75,10 @@ class VerifiedIntentAssessment(IntentAssessment):
 class TicketSummary(BaseModel):
     """Bản tóm tắt mềm phục vụ hiển thị trên giao diện Unified Inbox."""
     category: Literal["license", "lms_enroll", "account_keycloak", "bug", "other"] = "other"
-    priority: Literal["critical", "normal"] = "normal"
+    priority: Literal["critical", "normal", "urgent", "low", "high"] = "normal"
     goal: str
     summary_vi: str
-    assigned_name: str = "Hung Nguyen"
-    assigned_email: str = "hung.nguyenmanh@dtt.vn"
+    assigned_name: Optional[str] = None
+    assigned_email: Optional[str] = None
     model_name: Optional[str] = None
     prompt_version: str = "v1"

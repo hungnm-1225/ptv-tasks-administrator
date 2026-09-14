@@ -57,7 +57,7 @@ async def list_tickets(
         return data
     except Exception as e:
         print(f"❌ Lỗi tải tickets: {e}")
-        return []
+        raise HTTPException(status_code=500, detail=f"Lỗi truy vấn CSDL tickets: {str(e)}")
 
 
 # =============================================================================
@@ -199,11 +199,11 @@ async def re_summarize_ticket(ticket_id: str):
         supabase.table("ticket_ai_assessments").insert({
             "ticket_revision_id": revision_id,
             "assessment_kind": "summary",
-            "model_name": summary_res.model_name or "fallback",
+            "model_name": summary_res.model_name or "unknown",
             "prompt_version": summary_res.prompt_version,
             "registry_version": "v1.2.0",
             "structured_result": summary_res.model_dump(),
-            "status": "completed",
+            "status": "failed" if summary_res.model_name == "ai_analysis_failed" else "completed",
             "created_at": now_iso
         }).execute()
     except Exception as assess_err:
@@ -274,7 +274,7 @@ async def re_assess_ticket_intent(ticket_id: str):
             "prompt_version": facts_res.prompt_version,
             "registry_version": "v1.2.0",
             "structured_result": facts_res.model_dump(),
-            "status": "completed",
+            "status": "failed" if facts_res.model_name == "ai_analysis_failed" else "completed",
             "created_at": now_iso
         }).execute()
         if ins_res.data:

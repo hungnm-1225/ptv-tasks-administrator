@@ -127,6 +127,109 @@ const FileSpreadsheetIcon: React.FC<{ className?: string }> = ({ className }) =>
   </svg>
 );
 
+const TicketListSkeleton: React.FC = () => (
+  <div className="space-y-4">
+    {[1, 2, 3].map((idx) => (
+      <div
+        key={idx}
+        className="p-5 sm:p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4 animate-pulse"
+      >
+        {/* Top badges & timestamp */}
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+          <div className="flex items-center gap-2">
+            <div className="h-6 w-20 rounded-lg bg-slate-200 dark:bg-slate-800" />
+            <div className="h-6 w-24 rounded-full bg-slate-200 dark:bg-slate-800" />
+            <div className="h-6 w-28 rounded-lg bg-slate-200 dark:bg-slate-800" />
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="h-4 w-32 rounded bg-slate-100 dark:bg-slate-800" />
+            <div className="h-4 w-16 rounded bg-slate-100 dark:bg-slate-800" />
+          </div>
+        </div>
+
+        {/* Title & Sender */}
+        <div className="space-y-2">
+          <div className="h-6 w-3/4 rounded-lg bg-slate-200 dark:bg-slate-800" />
+          <div className="flex items-center gap-3">
+            <div className="h-4 w-48 rounded bg-slate-100 dark:bg-slate-800" />
+            <div className="h-4 w-36 rounded-md bg-slate-100 dark:bg-slate-800" />
+          </div>
+        </div>
+
+        {/* Content preview box */}
+        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-850/60 border border-slate-100 dark:border-slate-800/80 space-y-2">
+          <div className="h-4 w-full rounded bg-slate-200/80 dark:bg-slate-800" />
+          <div className="h-4 w-5/6 rounded bg-slate-200/60 dark:bg-slate-800/70" />
+        </div>
+
+        {/* Footer action buttons */}
+        <div className="pt-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="h-8 w-24 rounded-xl bg-slate-200 dark:bg-slate-800" />
+            <div className="h-8 w-28 rounded-xl bg-slate-100 dark:bg-slate-800/80" />
+          </div>
+          <div className="h-8 w-20 rounded-xl bg-slate-200 dark:bg-slate-800" />
+        </div>
+      </div>
+    ))}
+  </div>
+);
+
+const WorkflowDrawerSkeleton: React.FC = () => (
+  <div className="space-y-6 animate-pulse pr-1 py-4">
+    {/* Top Bento Grid Skeletons */}
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+      {/* Zone A Skeleton */}
+      <div className="lg:col-span-5 p-5 rounded-2xl bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 space-y-4">
+        <div className="flex justify-between items-center">
+          <div className="h-3.5 w-28 bg-slate-200 dark:bg-slate-700 rounded" />
+          <div className="h-5 w-16 bg-slate-200 dark:bg-slate-700 rounded-md" />
+        </div>
+        <div className="h-5 w-3/4 bg-slate-200 dark:bg-slate-700 rounded" />
+        <div className="h-16 w-full bg-slate-200/60 dark:bg-slate-700/60 rounded-xl" />
+        <div className="space-y-2 pt-2">
+          <div className="h-3 w-20 bg-slate-200 dark:bg-slate-700 rounded" />
+          <div className="h-7 w-full bg-slate-200/50 dark:bg-slate-700/50 rounded-lg" />
+        </div>
+      </div>
+      {/* Zone B Skeleton */}
+      <div className="lg:col-span-7 p-5 rounded-2xl bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 space-y-4">
+        <div className="flex justify-between items-center">
+          <div className="h-3.5 w-32 bg-slate-200 dark:bg-slate-700 rounded" />
+          <div className="h-5 w-24 bg-slate-200 dark:bg-slate-700 rounded-full" />
+        </div>
+        <div className="space-y-2">
+          <div className="h-4 w-1/2 bg-slate-200 dark:bg-slate-700 rounded" />
+          <div className="h-12 w-full bg-slate-200/60 dark:bg-slate-700/60 rounded-xl" />
+        </div>
+        <div className="grid grid-cols-2 gap-3 pt-2">
+          <div className="h-12 bg-slate-200/50 dark:bg-slate-700/50 rounded-xl" />
+          <div className="h-12 bg-slate-200/50 dark:bg-slate-700/50 rounded-xl" />
+        </div>
+      </div>
+    </div>
+    {/* DAG Graph Skeleton */}
+    <div className="p-5 rounded-2xl bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 space-y-4">
+      <div className="flex justify-between items-center">
+        <div className="h-4 w-44 bg-slate-200 dark:bg-slate-700 rounded" />
+        <div className="h-5 w-20 bg-slate-200 dark:bg-slate-700 rounded-md" />
+      </div>
+      <div className="space-y-3 pt-2">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="flex items-center gap-4 p-3.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60">
+            <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 shrink-0" />
+            <div className="space-y-1.5 flex-1">
+              <div className="h-3.5 w-1/3 bg-slate-200 dark:bg-slate-700 rounded" />
+              <div className="h-3 w-1/2 bg-slate-200/60 dark:bg-slate-700/60 rounded" />
+            </div>
+            <div className="h-6 w-16 bg-slate-200 dark:bg-slate-700 rounded-md" />
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+);
+
 export const UnifiedInboxPage: React.FC = () => {
   const navigate = useNavigate();
 
@@ -145,6 +248,7 @@ export const UnifiedInboxPage: React.FC = () => {
   const [previewFile, setPreviewFile] = useState<{ filename: string; url: string } | null>(null);
   const [spreadsheetPreview, setSpreadsheetPreview] = useState<{ sheetName: string; rows: string[][] } | null>(null);
   const [spreadsheetPreviewError, setSpreadsheetPreviewError] = useState<string | null>(null);
+  const [isSpreadsheetLoading, setIsSpreadsheetLoading] = useState<boolean>(false);
 
   // Metadata Phả hệ & Khóa học
   const [schoolsList, setSchoolsList] = useState<HierarchySchoolItem[]>([]);
@@ -231,6 +335,7 @@ export const UnifiedInboxPage: React.FC = () => {
       setSpreadsheetPreview(null);
       setSpreadsheetPreviewError(null);
       if (!previewFile || !/\.xlsx?$/i.test(previewFile.filename)) return;
+      setIsSpreadsheetLoading(true);
       try {
         const response = await fetch(previewFile.url);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -243,6 +348,8 @@ export const UnifiedInboxPage: React.FC = () => {
         if (!cancelled) setSpreadsheetPreview({ sheetName, rows });
       } catch {
         if (!cancelled) setSpreadsheetPreviewError('Không thể đọc trực tiếp bảng tính này. Bạn vẫn có thể mở hoặc tải file để đối chiếu.');
+      } finally {
+        if (!cancelled) setIsSpreadsheetLoading(false);
       }
     };
     loadSpreadsheet();
@@ -895,10 +1002,7 @@ export const UnifiedInboxPage: React.FC = () => {
 
       {/* Ticket List View */}
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-20 space-y-3">
-          <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
-          <p className="text-xs font-medium text-slate-500">Đang đồng bộ danh sách ticket...</p>
-        </div>
+        <TicketListSkeleton />
       ) : filteredTickets.length === 0 ? (
         <div className="p-16 text-center rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-3">
           <Inbox className="w-12 h-12 text-slate-300 mx-auto" />
@@ -1179,10 +1283,7 @@ export const UnifiedInboxPage: React.FC = () => {
             {/* Thân cuộn Bento Console */}
             <div className="flex-1 overflow-y-auto space-y-6 pr-1 py-4">
               {workflowLoading ? (
-                <div className="py-20 flex flex-col items-center justify-center space-y-3">
-                  <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
-                  <p className="text-xs font-medium text-slate-500">Đang đối soát bằng chứng và thiết lập đồ thị DAG...</p>
-                </div>
+                <WorkflowDrawerSkeleton />
               ) : !activeWorkflow ? (
                 <div className="py-16 text-center text-slate-400 text-xs space-y-2">
                   <p>Không tìm thấy dữ liệu workflow cho yêu cầu này.</p>
@@ -1752,6 +1853,23 @@ export const UnifiedInboxPage: React.FC = () => {
                 <img src={previewFile.url} alt={previewFile.filename} className="max-h-[55vh] object-contain rounded-xl shadow-sm" />
               ) : previewFile.filename.match(/\.pdf$/i) ? (
                 <iframe title={`Xem trước ${previewFile.filename}`} src={previewFile.url} className="w-full h-[55vh] rounded-xl bg-white" />
+              ) : previewFile.filename.match(/\.xlsx?$/i) && isSpreadsheetLoading ? (
+                <div className="w-full self-stretch space-y-3 animate-pulse p-2">
+                  <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-48" />
+                  <div className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+                    <div className="h-9 bg-slate-200 dark:bg-slate-700 w-full" />
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {[1, 2, 3, 4, 5, 6].map((idx) => (
+                        <div key={idx} className="h-8 bg-slate-100/60 dark:bg-slate-800/40 w-full flex items-center px-3 gap-3">
+                          <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-1/6" />
+                          <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-1/3" />
+                          <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-1/4" />
+                          <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-1/6" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               ) : previewFile.filename.match(/\.xlsx?$/i) && spreadsheetPreview ? (
                 <div className="w-full self-stretch overflow-auto">
                   <p className="mb-3 text-[11px] font-bold text-slate-500">Sheet: {spreadsheetPreview.sheetName}</p>

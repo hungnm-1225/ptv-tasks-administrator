@@ -9,7 +9,7 @@ def get_supabase_client() -> Client:
     global _supabase_client
     if _supabase_client is None:
         if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
-            # Return dummy/mock if credentials not populated yet
+            # Bắt buộc phải có cấu hình Supabase thực tế (Zero-Mockup Invariant)
             raise ValueError(
                 "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in environment variables."
             )

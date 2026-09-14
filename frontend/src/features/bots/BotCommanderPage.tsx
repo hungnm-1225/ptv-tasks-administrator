@@ -568,9 +568,19 @@ export const BotCommanderPage: React.FC = () => {
             id="terminal-logs-viewport"
             className="p-4 sm:p-5 font-mono text-xs sm:text-[12px] leading-relaxed max-h-[400px] overflow-y-auto space-y-1 select-text scrollbar-thin scrollbar-thumb-slate-800"
           >
-            {filteredLogs.length === 0 ? (
+            {loading && logs.length === 0 ? (
+              <div className="space-y-2 py-4 px-2 animate-pulse font-mono text-xs">
+                <div className="h-3.5 bg-slate-800/90 rounded w-3/4" />
+                <div className="h-3.5 bg-slate-800/60 rounded w-1/2" />
+                <div className="h-3.5 bg-slate-800/80 rounded w-5/6" />
+                <div className="h-3.5 bg-slate-800/50 rounded w-2/3" />
+                <div className="h-3.5 bg-slate-800/70 rounded w-4/5" />
+              </div>
+            ) : filteredLogs.length === 0 ? (
               <div className="text-slate-500 py-8 text-center italic">
-                Không tìm thấy dòng nhật ký nào khớp với bộ lọc &quot;{searchQuery}&quot;
+                {searchQuery
+                  ? `Không tìm thấy dòng nhật ký nào khớp với bộ lọc "${searchQuery}"`
+                  : 'Chưa có nhật ký hoạt động nào'}
               </div>
             ) : (
               filteredLogs.map((log, index) => {

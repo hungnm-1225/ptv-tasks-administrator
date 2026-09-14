@@ -3,25 +3,39 @@
 
 > **Tài liệu này định hình tư duy, vai trò, nguyên tắc làm việc và quy chuẩn kỹ thuật bắt buộc của AI Assistant khi thực thi bất kỳ tác vụ nào trong không gian làm việc `ptv-tasks-administrator`.**  
 > **Kiến trúc sư trưởng & Tác giả sáng lập:** **Nguyễn Mạnh Hùng** (*Lead AI Engineer & Automation Architect – DTT Corporation / Pythaverse Ecosystem*)  
-> **Phiên bản:** `v3.2.0 Enterprise Hardened Edition` | **Cập nhật:** `2026-09-14`
+> **GitHub:** [`https://github.com/hungnm-1225`](https://github.com/hungnm-1225) | **Email:** `hungnm@dtt.vn` / `hung.nguyenmanh@dtt.vn`  
+> **Phiên bản:** `v3.3.0 Enterprise Comprehensive Edition` | **Cập nhật:** `2026-09-14`
 
 ---
 
 ## 1. TỰ ĐỘNG ĐÓNG VAI & PHỐI HỢP NĂNG LỰC CHUYÊN GIA (INTELLIGENT AGENT ROUTING)
 
-Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BUỘC TỰ ĐỘNG** nhận diện miền nghiệp vụ và áp dụng năng lực chuyên gia từ các hồ sơ agent trong `.agent/agents/` mà **KHÔNG CẦN** người dùng phải gõ `@` thủ công. Trước khi phản hồi, bắt buộc xuất thông báo định danh: `🤖 **Applying knowledge of `@[agent-name]`...**`
+Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BUỘC TỰ ĐỘNG** nhận diện miền nghiệp vụ và áp dụng năng lực chuyên gia từ các hồ sơ agent trong [`.agent/agents/`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents) mà **KHÔNG CẦN** người dùng phải gõ `@` thủ công. Trước khi phản hồi, bắt buộc xuất thông báo định danh: `🤖 **Applying knowledge of `@[agent-name]`...**`
 
-| Lĩnh Vực / Phạm Vi Tác Vụ | Agent Chuyên Gia | Hồ Sơ Tham Chiếu | Trọng Tâm Quy Chuẩn Áp Dụng |
+### Ma Trận 20 Agent Chuyên Gia Hệ Thống:
+
+| STT | Agent Chuyên Gia | Hồ Sơ Tham Chiếu | Lĩnh Vực / Phạm Vi Trọng Tâm Áp Dụng |
 |---|---|---|---|
-| **Frontend UI/UX** | `frontend-specialist` | `.agent/agents/frontend-specialist.md` | React 19, TypeScript Strict, Tailwind CSS v4, Bento Grid, Enterprise Pastel OKLCH, Dark/Light theme, Evidence Provenance UI, loại bỏ nhãn song ngữ thừa, responsive 13 trang. |
-| **Backend & REST APIs** | `backend-specialist` | `.agent/agents/backend-specialist.md` | Python 3.11/3.12, FastAPI 0.115, Pydantic v2 validation, Async/Await, Dual-Key Gemini cross-failover, True Topological Sort (Kahn), Safe Job Wrapper, Ma trận 8 RAM Caches 1ms. |
-| **Database & Storage** | `database-architect` | `.agent/agents/database-architect.md` | Supabase PostgreSQL 16 (20 bảng CSDL + Storage Bucket `ticket-attachments`), Revisions, Assessments, Proposals, Append-only Execution Events, RLS Policies `@dtt.vn`, Stored Procedure Atomic Allocation. |
-| **RPA & Web Scraping** | `qa-automation-engineer` | `.agent/agents/qa-automation-engineer.md` | Playwright Async Chromium, Gói `workspace/` modularized 8 modules, Single Playwright Semaphore (1 Slot cho 512MB RAM Render), Re-entrant ContextVar Lock, Zombie process cleanup `gc.collect()`. |
-| **Security & Identity** | `security-auditor` | `.agent/agents/security-auditor.md` | Whitelist Domain `@dtt.vn`, Fernet Credential Vault (`VAULT_SECRET_KEY`), Keycloak Admin REST API + Playwright Fallback, Credential Masking `[PROTECTED]`, Server-Side JWT Approval Gate. |
-| **Điều Phối Đa Nhiệm** | `orchestrator` | `.agent/agents/orchestrator.md` | Phân tích luồng end-to-end, giải quyết xung đột dữ liệu, thiết kế pipeline liên thông đa dịch vụ (Workspace ➔ LMS ➔ Git). |
-| **Gỡ Lỗi & Điều Tra Lỗi** | `debugger` | `.agent/agents/debugger.md` | 4-Phase Systematic Debugging, bắt log thực thi chuẩn hóa GMT+7, cô lập nguyên nhân gốc rễ, Gemini 10-model fallback. |
-| **Tài Liệu Kỹ Thuật** | `documentation-writer` | `.agent/agents/documentation-writer.md` | Chuẩn hóa README, API Docs, cẩm nang kiến trúc, Single Source of Truth cho toàn bộ dự án. |
-| **Lập Kế Hoạch Hệ Thống** | `project-planner` | `.agent/agents/project-planner.md` | Phương pháp luận 4 pha (Analysis, Planning, Solutioning, Implementation), lập bản đồ công việc, duy trì invariants. |
+| **1** | `frontend-specialist` | [frontend-specialist.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/frontend-specialist.md) | React 19, TypeScript Strict, Tailwind CSS v4, Bento Grid, Enterprise Pastel OKLCH, Dark/Light theme, Evidence Provenance UI, loại bỏ nhãn song ngữ thừa, responsive 13 trang, SheetJS Excel Preview modal. |
+| **2** | `backend-specialist` | [backend-specialist.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/backend-specialist.md) | Python 3.11/3.12, FastAPI 0.115, Pydantic v2 validation, Async/Await, Dual-Key Gemini cross-failover, Deterministic Fast-Path Triage, True Topological Sort (Kahn), Safe Job Wrapper, Ma trận 8 RAM Caches 1ms. |
+| **3** | `database-architect` | [database-architect.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/database-architect.md) | Supabase PostgreSQL 16 (20 bảng CSDL + Storage Bucket `ticket-attachments`), Revisions, Assessments, Proposals, Append-only Execution Events, RLS Policies `@dtt.vn`, Stored Procedure Atomic Allocation `FOR UPDATE`. |
+| **4** | `qa-automation-engineer` | [qa-automation-engineer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/qa-automation-engineer.md) | Playwright Async Chromium, Gói `workspace/` modularized 8 modules, Single Playwright Semaphore (1 Slot cho 512MB RAM Render), Re-entrant ContextVar Lock, Zombie process cleanup `gc.collect()`. |
+| **5** | `security-auditor` | [security-auditor.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/security-auditor.md) | Whitelist Domain `@dtt.vn`, Fernet Credential Vault (`VAULT_SECRET_KEY`), Keycloak Admin REST API + Playwright Fallback, Credential Masking `[PROTECTED]`, Server-Side JWT Approval Gate. |
+| **6** | `orchestrator` | [orchestrator.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/orchestrator.md) | Phân tích luồng end-to-end, giải quyết xung đột dữ liệu, thiết kế pipeline liên thông đa dịch vụ (Workspace ➔ LMS ➔ Git ➔ Keycloak). |
+| **7** | `debugger` | [debugger.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/debugger.md) | 4-Phase Systematic Debugging, bắt log thực thi chuẩn hóa GMT+7, cô lập nguyên nhân gốc rễ, Gemini 10-model fallback + Deterministic Fast-Path Triage. |
+| **8** | `documentation-writer` | [documentation-writer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/documentation-writer.md) | Chuẩn hóa README, API Docs, cẩm nang kiến trúc, Single Source of Truth cho toàn bộ dự án, đồng bộ hóa tuyệt đối với mã nguồn. |
+| **9** | `project-planner` | [project-planner.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/project-planner.md) | Phương pháp luận 4 pha (Analysis, Planning, Solutioning, Implementation), lập bản đồ công việc, duy trì invariants. |
+| **10** | `devops-engineer` | [devops-engineer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/devops-engineer.md) | Quản trị CI/CD GitHub Actions, cấu hình Render.com (512MB RAM ASGI), Vercel (Edge CDN Frontend), UptimeRobot (Keep-warm ping & Synthetic monitoring), Dockerfile. |
+| **11** | `performance-optimizer` | [performance-optimizer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/performance-optimizer.md) | Tối ưu hóa bộ nhớ 512MB RAM Render, Ma trận 8 BoundedMemoryCache (LRU + TTL < 40MB), Low-RAM Chromium 18 cờ tối ưu, Dynamic Code Splitting React 19 / Vite 6. |
+| **12** | `penetration-tester` | [penetration-tester.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/penetration-tester.md) | Thử nghiệm xâm nhập, kiểm định phòng thủ Prompt Injection, phá vỡ Offset trích dẫn, chống bypass JWT Token `@dtt.vn`, kiểm định an toàn két sắt Fernet. |
+| **13** | `test-engineer` | [test-engineer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/test-engineer.md) | Thiết kế Hermetic Pytest Suite, Contract Tests 19 Capabilities, Mocking in-memory không tốn Quota AI, kiểm thử hồi quy an toàn. |
+| **14** | `code-archaeologist` | [code-archaeologist.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/code-archaeologist.md) | Truy vết lịch sử commit Git, phân tích mã nguồn cũ, refactoring mã thừa, giải quyết mâu thuẫn giữa các bản nâng cấp. |
+| **15** | `explorer-agent` | [explorer-agent.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/explorer-agent.md) | Thám sát cây thư mục, kiểm kê tệp tin, lập bản đồ phụ thuộc file (`CODEBASE.md`). |
+| **16** | `product-manager` | [product-manager.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/product-manager.md) | Định hình lộ trình tính năng, tối ưu trải nghiệm Admin Hub, quản lý độ ưu tiên các phân hệ Pythaverse. |
+| **17** | `product-owner` | [product-owner.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/product-owner.md) | Thẩm định User Stories tiếp nhận vé, kiểm tra tính đầy đủ của thông tin người gửi, tối ưu tiêu chí nghiệm thu (Acceptance Criteria). |
+| **18** | `seo-specialist` | [seo-specialist.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/seo-specialist.md) | Tối ưu hóa cấu trúc thẻ, metadata, semantic HTML cho Cổng giới thiệu Landing Page (`/landing`). |
+| **19** | `mobile-developer` | [mobile-developer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/mobile-developer.md) | Đảm bảo tính tương thích hiển thị Responsive di động và tablet cho toàn bộ 13 trang quản trị. |
+| **20** | `game-developer` | [game-developer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/game-developer.md) | Tích hợp các tương tác gamification, hiệu ứng Canvas Confetti, phản hồi trực quan (Visual feedback) trong quy trình duyệt vé. |
 
 ---
 
@@ -36,7 +50,7 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
 6. **Support Helpdesk (`support.pythaverse.space`):** osTicket Helpdesk Engine cào dữ liệu định kỳ qua Playwright Headless session và chuyển giao cho Canonical Intake.
 7. **PContest (`contest.pythaverse.space`):** Hệ thống thi đấu trực tuyến và bảng xếp hạng Leaderboard.
 
-### 2.2. Kiến Trúc Dual-Path AI Cognition & Dual-Key Resiliency
+### 2.2. Kiến Trúc Dual-Path AI Cognition & Deterministic Fast-Path Triage
 - **Tách Biệt Nhận Thức Kép (Dual-Path Cognition):**
   - *Luồng Nhận Thức Mềm (`summarize_ticket`):* Chuyên trách tóm tắt nội dung, phân loại danh mục (`category`) và độ ưu tiên (`priority`) để hiển thị trực quan trên Unified Inbox cho con người đọc. **Tuyệt đối không sinh action hay thay đổi dữ liệu.**
   - *Luồng Vận Hành Xác Định (`extract_operational_facts`):* Trích xuất Ý định (Intents) và Thực thể (Entities) bị khóa chặt bởi **Trích dẫn bằng chứng nguyên văn (`evidence_quotes`)** và tọa độ ký tự `[start_offset:end_offset]`. Nếu không có bằng chứng, bắt buộc chuyển sang trạng thái `needs_information`.
@@ -44,12 +58,23 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
   - Key 1 dành riêng cho Tóm tắt Inbox (`api_key_summary`).
   - Key 2 dành riêng cho Bóc tách sự thật vận hành (`api_key_facts`).
   - Khi một Key chạm trần `429` / `quota`, hệ thống tự động hoán đổi chìa chéo (Cross-Key Failover) trước khi kích hoạt danh sách 10 model fallback.
+- **Deterministic Fast-Path Triage v1.2.0 (Phao Cứu Sinh Khi AI Hết Quota):**
+  - Khi toàn bộ 10 model và cả 2 key đều chạm hạn ngạch Quota 429, hệ thống không làm sập tiến trình mà tự động kích hoạt bộ tóm tắt tất định thông minh:
+    1. UptimeRobot alert ➔ Category `bug` hoặc `other`, priority tương ứng.
+    2. Ghi danh khóa học ➔ Category `lms_enroll`.
+    3. Hợp đồng & License ➔ Category `license`.
+    4. Tài khoản & Keycloak ➔ Category `account_keycloak`.
+    5. Khác ➔ Category `other`, trích xuất preview 120 ký tự sạch từ thân email.
 
-### 2.3. Deterministic Planning Module & Policy Registry (`intent_policy.json`)
+### 2.3. Deterministic Planning Module & Multi-Course Git Sync
 - Bộ lập kế hoạch `workflow_planner.py` hoạt động hoàn toàn tất định, **không gọi LLM bên trong**.
 - Ánh xạ trực tiếp Intent ➔ Capability Pipeline thông qua `intent_policy.json`.
-- Ràng buộc nghiêm ngặt: Chỉ những capability có `available=true` và `supported_by_handler=true` mới được phép đưa vào đồ thị thực thi. Bất kỳ capability nào bị khóa đều gây lỗi validation `fail-closed`.
-- **Tuyệt đối xóa sổ toàn bộ giá trị mặc định giả định (Zero-Mockup Invariant):** Không tự gán `SWRP 4-12`, `total_count=4`, mật khẩu `Ptv@2026` hay quyền Git mặc định `GUEST`. Thiếu thông tin bắt buộc phải dừng lại ở `needs_information` kèm bảng Checklist.
+- **Tự Động Phân Giải Khóa Học & Đồng Bộ Git Repos (`resolve_course_from_db`):**
+  - Tự động nhận diện tên viết tắt (`SWRP 11`, `SWRP_11`, `SWRP11`) và tra cứu bảng `lms_courses` / `workspace_courses`.
+  - Tự động ghép cặp Git Repo tương ứng với đối tượng (`teacher` ➔ repo giáo viên `gv`, học sinh ➔ repo học sinh `hs`).
+  - Tự động tích hợp Git Sync vào bước `lms.direct_enroll` (`sync_git_repo = True`), loại bỏ các bước Git riêng lẻ thừa thãi.
+- **Ràng buộc nghiêm ngặt Zero-Mockup Invariant:**
+  - Không tự gán `SWRP 4-12`, `total_count=4`, mật khẩu `Ptv@2026` hay quyền Git mặc định `GUEST`. Thiếu thông tin bắt buộc phải dừng lại ở `needs_information` kèm bảng Checklist.
 
 ### 2.4. True Topological Execution & Concurrency Lease
 - `WorkflowExecutorService` thực thi các bước theo **Thuật toán sắp xếp Tô-pô thực thụ (Kahn's Algorithm - In-degree DAG)**, đảm bảo các bước cha luôn hoàn thành trước khi kích hoạt bước con.
@@ -117,7 +142,7 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
 10. [`reports.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/reports.py): Báo cáo số liệu KPI, Phân bố danh mục ticket, Xu hướng xử lý theo tuần/tháng, Xuất file Excel/CSV.
 
 ### 4.2. 13 Trang Chức Năng Frontend SPA (`frontend/src/features/`)
-1. [`UnifiedInboxPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/inbox/UnifiedInboxPage.tsx): Trung tâm AI Workflow Console V3.1 (Bento Grid, Drawer 4 trạng thái, Thẩm định bằng chứng, Duyệt luồng thực thi).
+1. [`UnifiedInboxPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/inbox/UnifiedInboxPage.tsx): Trung tâm AI Workflow Console V3.1 (Bento Grid, Drawer 4 trạng thái, Trình xem trước tệp đính kèm đa định dạng SheetJS/PDF/Office/Images, Duyệt luồng thực thi).
 2. [`TaskManagementPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/tasks/TaskManagementPage.tsx): Quản lý danh sách tác vụ bot, Phê duyệt từng task, Sửa payload JSON, Xem lịch sử thực thi.
 3. [`WorkBoardPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/board/WorkBoardPage.tsx): Bảng điều khiển Kanban hiện đại (Kéo thả nhiệm vụ, Phân loại, Thẻ màu sắc, Checklist công việc con).
 4. [`AutomationStudioPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/studio/AutomationStudioPage.tsx): Xưởng tự động hóa RPA điều khiển trực tiếp 7 phân hệ (Tạo tài khoản COF, Cấp bù License, Ghi danh LMS, Sync Git).

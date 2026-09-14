@@ -119,7 +119,7 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
             )
 
         # 🟢 TRƯỜNG HỢP 2: TÁC VỤ HOÀN TẤT THÀNH CÔNG (SUCCESS)
-        elif status_res in ["success", "simulated", "completed"] or (execution_result.get("success_count", 0) > 0 and not execution_result.get("failed_count")):
+        elif status_res in ["success", "completed"] or (execution_result.get("success_count", 0) > 0 and not execution_result.get("failed_count")):
             success_msg = execution_result.get("message") or execution_result.get("issue_url") or "Thực thi tác vụ thành công!"
             log_trail += f"[{end_time_str}] [SUCCESS] [{bot_type}] {tag}: {success_msg}\n"
             

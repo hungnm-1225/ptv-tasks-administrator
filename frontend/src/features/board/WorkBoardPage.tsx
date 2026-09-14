@@ -41,6 +41,60 @@ const PRESET_OVERLAYS = [
     { name: 'Xám Khói (Slate)', color: '#334155' }
 ];
 
+const KanbanBoardSkeleton: React.FC = () => {
+    const skeletonCols = [
+        { title: 'Chờ xử lý', color: '#6366f1' },
+        { title: 'Đang thực hiện', color: '#38bdf8' },
+        { title: 'Đang xem xét', color: '#fbbf24' },
+        { title: 'Hoàn thành', color: '#34d399' },
+    ];
+
+    return (
+        <div className="flex-1 flex gap-3.5 items-start overflow-x-auto overflow-y-hidden pb-2 min-h-0 scrollbar-thin">
+            {skeletonCols.map((col, idx) => (
+                <div
+                    key={idx}
+                    className="w-72 sm:w-80 shrink-0 p-3 rounded-2xl border border-slate-800 bg-slate-900/70 animate-pulse flex flex-col space-y-3 shadow-xl"
+                    style={{ borderTop: `3px solid ${col.color}` }}
+                >
+                    {/* Header Cột */}
+                    <div className="flex items-center justify-between px-1">
+                        <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: col.color }} />
+                            <div className="h-4 w-28 rounded bg-slate-800" />
+                            <div className="h-4 w-6 rounded-md bg-slate-800" />
+                        </div>
+                        <div className="h-5 w-12 rounded bg-slate-800" />
+                    </div>
+
+                    {/* Danh sách thẻ Card Skeletons */}
+                    <div className="space-y-2.5">
+                        {[1, 2, 3].map((cardIdx) => (
+                            <div
+                                key={cardIdx}
+                                className="p-3.5 rounded-xl border border-slate-800/80 bg-slate-850/90 space-y-2.5 shadow-sm"
+                            >
+                                <div className="flex items-center justify-between">
+                                    <div className="h-4 w-20 rounded bg-slate-800" />
+                                    <div className="h-4 w-12 rounded bg-slate-800" />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <div className="h-3.5 w-full rounded bg-slate-700/60" />
+                                    <div className="h-3.5 w-3/4 rounded bg-slate-800" />
+                                </div>
+                                <div className="pt-2 border-t border-slate-800/60 flex items-center justify-between">
+                                    <div className="h-3 w-16 rounded bg-slate-800" />
+                                    <div className="h-4 w-4 rounded-full bg-slate-800" />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+};
+
 export const WorkBoardPage: React.FC = () => {
     const [boards, setBoards] = useState<BoardItem[]>([]);
     const [trashBoards, setTrashBoards] = useState<BoardItem[]>([]);
@@ -575,8 +629,11 @@ export const WorkBoardPage: React.FC = () => {
                 </div>
 
                 {/* Kanban Board Columns Area (Tự động co theo thẻ, cuộn ngang mượt mà) */}
-                <div className="flex-1 flex gap-3.5 items-start overflow-x-auto overflow-y-hidden pb-2 min-h-0 scrollbar-thin">
-                    {columns.map((col) => {
+                {isLoading ? (
+                    <KanbanBoardSkeleton />
+                ) : (
+                    <div className="flex-1 flex gap-3.5 items-start overflow-x-auto overflow-y-hidden pb-2 min-h-0 scrollbar-thin">
+                        {columns.map((col) => {
                         const colCards = filteredCards.filter((c) => c.column_id === col.id);
                         const isDoneCol = col.column_type === 'done';
                         const isAbortCol = col.column_type === 'abort';
@@ -810,7 +867,7 @@ export const WorkBoardPage: React.FC = () => {
                                                 <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-[10px] text-slate-400">
                                                     <span className="flex items-center gap-1 truncate max-w-[120px]">
                                                         <User className="w-3 h-3" />
-                                                        {card.assigned_name || 'Hùng Nguyễn'}
+                                                        {card.assigned_name || 'Chưa phân công'}
                                                     </span>
                                                     {card.due_date && (
                                                         <span className="flex items-center gap-1 text-slate-300 font-mono">
@@ -846,7 +903,8 @@ export const WorkBoardPage: React.FC = () => {
                             </div>
                         );
                     })}
-                </div>
+                    </div>
+                )}
             </div>
 
             {/* ----------------------------------------------------

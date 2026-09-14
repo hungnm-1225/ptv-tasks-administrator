@@ -191,6 +191,11 @@ class WorkflowPlannerService:
             return "no_action", [], [], ["Không có hành vi tự động hóa nào được yêu cầu."]
 
         typed_entities = assessment.typed_entities
+        if typed_entities is None:
+            missing_requirements.append({
+                "field": "verified_entities",
+                "reason": "Thiếu thực thể đã xác thực (verified_entities). Không thể tạo workflow từ thực thể cũ chưa xác thực."
+            })
         entities: Dict[str, Any] = typed_entities.model_dump() if isinstance(typed_entities, TypedEntities) else {}
 
         raw_users = entities.get("users", [])
@@ -220,9 +225,51 @@ class WorkflowPlannerService:
                 if c_repo:
                     course_repo_pairings[c_name] = c_repo
 
-        final_git_role = entities.get("git_role") or "GUEST"
+        final_git_role = entities.get("git_role")
         active_school_name = resolved_school.name if resolved_school else entities.get("school_name")
         active_school_id = resolved_school.id if resolved_school else None
+
+        # Fail-closed check: Validate required entities for all valid intents
+        for extracted_intent in assessment.intents:
+            if not extracted_intent.is_valid:
+                continue
+
+            if not extracted_intent.evidence:
+                missing_requirements.append({
+                    "field": "evidence",
+                    "reason": f"Intent '{extracted_intent.type}' không có trích dẫn bằng chứng (evidence) xác thực."
+                })
+
+            for req in extracted_intent.required_entities:
+                val = entities.get(req)
+                if not val:
+                    missing_requirements.append({
+                        "field": req,
+                        "reason": f"Thiếu thực thể bắt buộc: {req}"
+                    })
+
+            # Zero-Mockup: Khai tử default Git role GUEST. Yêu cầu Git bắt buộc phải có vai trò và URL
+            if extracted_intent.type == "repository_access":
+                if not entities.get("git_role"):
+                    missing_requirements.append({
+                        "field": "git_role",
+                        "reason": "Yêu cầu cấp quyền Git bắt buộc phải chỉ định vai trò (ADMIN, DEVELOPER,...), không dùng mặc định."
+                    })
+                repo_url = entities.get("repository_url")
+                repos = entities.get("repositories", [])
+                has_valid_repo_url = bool(repo_url and str(repo_url).startswith("http")) or any(isinstance(r, str) and (r.startswith("http://") or r.startswith("https://")) for r in repos)
+                if not has_valid_repo_url:
+                    missing_requirements.append({
+                        "field": "repository_url",
+                        "reason": "Yêu cầu Git bắt buộc phải có URL repository hợp lệ, không tự đoán URL."
+                    })
+
+            # Fail-closed check: School resolution for account creation
+            if extracted_intent.type == "create_accounts" and not resolved_school and not entities.get("school_name"):
+                missing_requirements.append({
+                    "field": "school_name",
+                    "reason": "Chưa xác định hoặc phân giải được trường học tương ứng."
+                })
 
         operation_context: Dict[str, Any] = {
             "resolved_school": resolved_school,
@@ -323,7 +370,16 @@ class WorkflowPlannerService:
                     depends_on=resolved_deps
                 ))
 
-        status = "needs_information" if missing_requirements else "needs_review" if warnings else "ready" if steps else "no_action"
+        if missing_requirements or assessment.outcome == "needs_information":
+            status = "needs_information"
+            steps = []
+        elif warnings:
+            status = "needs_review"
+        elif steps:
+            status = "ready"
+        else:
+            status = "no_action"
+
         return status, steps, missing_requirements, warnings
 
     def validate_workflow_graph(self, steps: List[WorkflowStepDraft]) -> WorkflowValidationResult:
@@ -332,16 +388,36 @@ class WorkflowPlannerService:
         step_ids = {s.step_id for s in steps}
 
         adj: Dict[str, List[str]] = {s.step_id: [] for s in steps}
+        in_degree: Dict[str, int] = {s.step_id: 0 for s in steps}
+
         for s in steps:
             for dep in s.depends_on:
                 if dep not in step_ids:
                     errors.append(f"Bước '{s.name}' ({s.step_id}) phụ thuộc vào bước '{dep}' không tồn tại.")
                 else:
                     adj[dep].append(s.step_id)
+                    in_degree[s.step_id] += 1
 
             cap_def = self.capabilities_map.get(s.capability_id)
-            if cap_def and cap_def.get("risk_level") == "high_mutation":
+            if not cap_def or not cap_def.get("supported_by_handler", True) or not cap_def.get("available", True):
+                errors.append(f"Capability '{s.capability_id}' không khả dụng để thực thi hoặc đang bị vô hiệu hóa.")
+            elif cap_def.get("risk_level") == "high_mutation":
                 warnings.append(f"Bước '{s.name}' có mức rủi ro cao (high_mutation). Bắt buộc xác nhận phê duyệt.")
+
+        # Phát hiện chu trình vòng lặp (Kahn's Algorithm DAG)
+        from collections import deque
+        q = deque([sid for sid, deg in in_degree.items() if deg == 0])
+        visited_count = 0
+        while q:
+            curr = q.popleft()
+            visited_count += 1
+            for nxt in adj.get(curr, []):
+                in_degree[nxt] -= 1
+                if in_degree[nxt] == 0:
+                    q.append(nxt)
+
+        if visited_count < len(steps):
+            errors.append("Phát hiện chu trình vòng lặp (Circular Dependency) trong đồ thị workflow DAG.")
 
         is_valid = len(errors) == 0
         return WorkflowValidationResult(

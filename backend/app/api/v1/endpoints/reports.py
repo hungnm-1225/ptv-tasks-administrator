@@ -69,7 +69,7 @@ async def get_reports_summary(
         trend_pct_val = round(((c_this - c_prev) / c_prev) * 100)
         weekly_trend_str = f"+{trend_pct_val}% so với tuần trước" if trend_pct_val >= 0 else f"{trend_pct_val}% so với tuần trước"
     else:
-        weekly_trend_str = f"+{c_this * 10}% so với tuần trước" if c_this > 0 else "0% so với tuần trước"
+        weekly_trend_str = f"+{c_this} ticket mới" if c_this > 0 else "0% so với tuần trước"
 
     pending_tasks_res = supabase.table("bot_automation_tasks").select("id", count="exact").eq("approval_status", "pending").execute()
     pending_approval = pending_tasks_res.count if pending_tasks_res.count else 0
@@ -83,8 +83,10 @@ async def get_reports_summary(
     
     if resolved_this_month > 0:
         auto_rate = min(100, round((bot_success_count / resolved_this_month) * 100))
+    elif bot_success_count > 0:
+        auto_rate = 100
     else:
-        auto_rate = 92 if bot_success_count == 0 else 100
+        auto_rate = 0
 
     twenty_four_hours_ago = (now - timedelta(hours=24)).isoformat()
 
@@ -106,7 +108,7 @@ async def get_reports_summary(
         system_health_subtext = "10/10 Sites & Workers tối ưu (24h)"
     else:
         penalty = (ongoing_or_recent_downtimes * 5.0) + (failed_tasks_24h * 1.5)
-        health_score = max(85.0, round(100.0 - penalty, 1))
+        health_score = max(0.0, round(100.0 - penalty, 1))
         system_health = f"{health_score}%"
         
         reasons = []
@@ -245,7 +247,7 @@ async def get_kpi_export_data(
 
     total_tickets = len(tickets)
     completed_tickets = sum(1 for t in tickets if t.get("status") == "completed")
-    on_time_rate = round((completed_tickets / total_tickets * 100), 1) if total_tickets > 0 else 100.0
+    on_time_rate = round((completed_tickets / total_tickets * 100), 1) if total_tickets > 0 else 0.0
     total_bugs = sum(1 for t in tickets if t.get("category") == "bug")
     
     return {
@@ -256,9 +258,9 @@ async def get_kpi_export_data(
         "on_time_rate": on_time_rate,
         "total_bugs": total_bugs,
         "total_users_created": total_users_created,
-        "osticket_evidence": "\n".join(osticket_links) if osticket_links else "https://support.pythaverse.space/scp/ (Đã xử lý đầy đủ các ticket trong kỳ)",
-        "gmail_evidence": "\n".join(gmail_items) if gmail_items else "Hòm thư Gmail @dtt.vn (Đã hoàn thành các yêu cầu tiếp nhận)",
-        "feedback_evidence": "[PTV TASKFORCE]_Master Feedback Tracking\n" + "\n".join(feedback_items[:15]),
+        "osticket_evidence": "\n".join(osticket_links) if osticket_links else "Không có ticket osTicket nào phát sinh trong kỳ",
+        "gmail_evidence": "\n".join(gmail_items) if gmail_items else "Không có email nào phát sinh trong kỳ",
+        "feedback_evidence": "[PTV TASKFORCE]_Master Feedback Tracking\n" + ("\n".join(feedback_items[:15]) if feedback_items else "Không có phản hồi Google Form nào phát sinh trong kỳ"),
         "tickets_raw": tickets,
         "tasks_raw": tasks
     }

@@ -164,21 +164,21 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                 {
                     "ticket_revision_id": revision_id,
                     "assessment_kind": "summary",
-                    "model_name": summary_res.model_name or "fallback",
+                    "model_name": summary_res.model_name or "unknown",
                     "prompt_version": summary_res.prompt_version,
                     "registry_version": "v1.1.0",
                     "structured_result": summary_res.model_dump(),
-                    "status": "completed",
+                    "status": "failed" if summary_res.model_name == "ai_analysis_failed" else "completed",
                     "created_at": now_iso
                 },
                 {
                     "ticket_revision_id": revision_id,
                     "assessment_kind": "fact_extraction",
-                    "model_name": facts_res.model_name or "fallback",
+                    "model_name": facts_res.model_name or "unknown",
                     "prompt_version": facts_res.prompt_version,
                     "registry_version": "v1.1.0",
                     "structured_result": facts_res.model_dump(),
-                    "status": "completed",
+                    "status": "failed" if facts_res.model_name == "ai_analysis_failed" else "completed",
                     "created_at": now_iso
                 }
             ]).execute()
