@@ -29,8 +29,8 @@ import {
   Search,
   ExternalLink
 } from 'lucide-react';
-import { WorkflowStep, CapabilityDefinition } from '../../../types';
-import { supabase } from '../../../lib/supabase';
+import { WorkflowStep, CapabilityDefinition, CourseItem, GitRepoConfig } from '../../../types';
+import { fetchApi } from '../../../lib/api';
 
 interface WorkflowStepCardProps {
   step: WorkflowStep;
@@ -59,13 +59,13 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
   const [editingInputKey, setEditingInputKey] = useState<string | null>(null);
   const [tempInputValue, setTempInputValue] = useState<string>('');
 
-  // State quản lý Modal chọn khóa học từ DB
+  // State nạp danh mục khóa học từ Course Management API (/courses/lms hoặc /courses/workspace)
   const [showCoursePicker, setShowCoursePicker] = useState<boolean>(false);
-  const [dbCourses, setDbCourses] = useState<any[]>([]);
+  const [dbCourses, setDbCourses] = useState<CourseItem[]>([]);
   const [courseSearch, setCourseSearch] = useState<string>('');
   const [loadingCourses, setLoadingCourses] = useState<boolean>(false);
 
-  // State thêm người dùng
+  // State thêm người dùng thủ công
   const [showAddUserModal, setShowAddUserModal] = useState<boolean>(false);
   const [newEmail, setNewEmail] = useState<string>('');
   const [newName, setNewName] = useState<string>('');
@@ -73,30 +73,25 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
 
   const capDef = capabilitiesMap[step.capability_id];
 
-  // Tải danh sách khóa học thực tế từ Database
+  // ⚡ TẢI DANH SÁCH KHÓA HỌC THẬT TỪ REST API CHUẨN CỦA ANH
   useEffect(() => {
     if (showCoursePicker && dbCourses.length === 0) {
-      loadCoursesFromDb();
+      loadCoursesFromApi();
     }
   }, [showCoursePicker]);
 
-  const loadCoursesFromDb = async () => {
+  const loadCoursesFromApi = async () => {
     setLoadingCourses(true);
     try {
-      // Phân biệt: Có COF dùng workspace_courses, tự do dùng lms_courses
+      // Phân biệt: Có file COF dùng workspace, yêu cầu tự do dùng lms
       const isCof = Boolean(step.inputs?.attachment_url);
-      const tableName = isCof ? 'workspace_courses' : 'lms_courses';
-
-      const { data, error } = await supabase
-        .table(tableName)
-        .select('id, name, code, git_repos')
-        .order('name');
-
-      if (!error && data) {
+      const pane = isCof ? 'workspace' : 'lms';
+      const data = await fetchApi<CourseItem[]>(`/courses/${pane}`);
+      if (Array.isArray(data)) {
         setDbCourses(data);
       }
     } catch (err) {
-      console.error('Lỗi nạp khóa học:', err);
+      console.error('Lỗi nạp khóa học từ API:', err);
     } finally {
       setLoadingCourses(false);
     }
@@ -172,11 +167,12 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
     setEditingInputKey(null);
   };
 
-  const handleSelectCourse = (course: any) => {
+  // 🎯 CHỌN KHÓA HỌC ➔ TỰ ĐỘNG BẮT CẶP GIT REPO TƯƠNG ỨNG
+  const handleSelectCourse = (course: CourseItem) => {
     if (!onUpdateStep) return;
     const currentCourses = Array.isArray(step.inputs?.courses) ? [...step.inputs.courses] : [];
-    if (!currentCourses.includes(course.name)) {
-      currentCourses.push(course.name);
+    if (!currentCourses.includes(course.course_name)) {
+      currentCourses.push(course.course_name);
     }
 
     const updatedInputs: Record<string, any> = {
@@ -184,11 +180,20 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
       courses: currentCourses,
     };
 
-    // Tự động gắn Repo tương ứng của khóa học
-    if (course.git_repos && Array.isArray(course.git_repos) && course.git_repos.length > 0) {
-      const repoItem = course.git_repos[0];
-      const repoUrl = typeof repoItem === 'object' ? (repoItem.url || `https://git.pythaverse.space/pythaverse/${repoItem.name}`) : String(repoItem);
-      updatedInputs.attached_git_repo = repoUrl;
+    // Bắt cặp Git Repo theo đúng vai trò hiện hành
+    const currentRole = step.inputs?.role || 'teacher';
+    const gitRepos: GitRepoConfig[] = Array.isArray(course.git_repos) ? course.git_repos : [];
+
+    if (gitRepos.length > 0) {
+      let matchedRepo: GitRepoConfig | undefined;
+      if (currentRole === 'teacher') {
+        matchedRepo = gitRepos.find((r) => r.target === 'teacher_only') || gitRepos[0];
+      } else {
+        matchedRepo = gitRepos.find((r) => r.target === 'all') || gitRepos[0];
+      }
+      if (matchedRepo?.repo_url) {
+        updatedInputs.attached_git_repo = matchedRepo.repo_url;
+      }
     }
 
     onUpdateStep(step.step_id, { inputs: updatedInputs });
@@ -207,6 +212,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
     });
   };
 
+  // LỌC SẠCH CÁC TRƯỜNG RÁC / TRÙNG LẶP
   const shouldSkipKey = (key: string) => {
     if (key === 'school_identifier') return true;
     if (key === 'school_id') return true;
@@ -219,7 +225,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
     const isBound = typeof val === 'string' && val.includes('{{');
     const isEditing = editingInputKey === key;
 
-    // 1. TRƯỜNG HỌC (GOM CHUNG TÊN & ID)
+    // 🏢 1. TRƯỜNG HỌC (GOM CHUNG TÊN VÀ ID)
     if (key === 'school_name') {
       const schoolId = step.inputs?.school_id || '';
       return (
@@ -261,7 +267,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
       );
     }
 
-    // 2. DANH SÁCH USERS
+    // 👥 2. DANH SÁCH USERS
     if (key === 'users' && Array.isArray(val)) {
       return (
         <div key={key} className="rounded-xl border border-slate-200 bg-white dark:bg-slate-900 p-3 shadow-2xs space-y-2">
@@ -316,14 +322,15 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
       );
     }
 
-    // 3. KHÓA HỌC LMS + BẢNG CHỌN DROPDOWN THÔNG MINH TỪ DATABASE
+    // 🎓 3. KHÓA HỌC LMS + BẢNG CHỌN DROPDOWN THÔNG MINH TỪ API
     if (key === 'courses') {
       const coursesList = Array.isArray(val) ? val : [];
       const attachedRepo = step.inputs?.attached_git_repo;
 
       const filteredDbCourses = dbCourses.filter((c) =>
-        (c.name || '').toLowerCase().includes(courseSearch.toLowerCase()) ||
-        (c.code || '').toLowerCase().includes(courseSearch.toLowerCase())
+        (c.course_name || '').toLowerCase().includes(courseSearch.toLowerCase()) ||
+        (c.sku || '').toLowerCase().includes(courseSearch.toLowerCase()) ||
+        String(c.course_id || '').includes(courseSearch)
       );
 
       return (
@@ -337,7 +344,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
               <button
                 type="button"
                 onClick={() => setShowCoursePicker(true)}
-                className="inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white shadow-xs transition cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white shadow-xs transition cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" /> Chọn Khóa Học Từ Danh Mục
               </button>
@@ -371,21 +378,21 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
             )}
           </div>
 
-          {/* Hiển thị Repo tự động đi kèm */}
+          {/* Hiển thị Git Repo tự động đi kèm */}
           {attachedRepo && (
-            <div className="mt-2 p-2 bg-purple-50 rounded-lg border border-purple-200 flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
-                <GitBranch className="w-3.5 h-3.5 text-purple-700" />
-                <span className="font-bold text-purple-900">Git Repo Tương Ứng:</span>
-                <span className="font-mono text-purple-800 font-extrabold">{attachedRepo}</span>
+            <div className="mt-2 p-2.5 bg-purple-50 rounded-xl border border-purple-200 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2 min-w-0">
+                <GitBranch className="w-4 h-4 text-purple-700 shrink-0" />
+                <span className="font-bold text-purple-950 shrink-0">Git Repo Tương Ứng:</span>
+                <span className="font-mono text-purple-900 font-extrabold truncate">{attachedRepo}</span>
               </div>
-              <span className="text-[10px] font-black uppercase text-purple-700 bg-purple-200/60 px-2 py-0.5 rounded">
+              <span className="text-[10px] font-black uppercase text-purple-700 bg-purple-200/70 px-2 py-0.5 rounded shrink-0">
                 Tự Động Đồng Bộ
               </span>
             </div>
           )}
 
-          {/* BẢNG CHỌN KHÓA HỌC THÔNG MINH (DROPDOWN MODAL TỪ DB) */}
+          {/* BẢNG CHỌN KHÓA HỌC TỪ COURSE MANAGEMENT */}
           {showCoursePicker && (
             <div className="p-3 bg-slate-50 border-2 border-sky-400 rounded-xl shadow-md space-y-2 mt-2">
               <div className="flex items-center justify-between">
@@ -406,14 +413,14 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
                 <input
                   type="text"
                   autoFocus
-                  placeholder="Gõ tìm mã môn, tên môn (VD: SWRP 11, SWRP 8, Python...)"
+                  placeholder="Tìm theo tên môn, mã SKU, ID (VD: SWRP 11, SWRP 8...)"
                   value={courseSearch}
                   onChange={(e) => setCourseSearch(e.target.value)}
-                  className="w-full h-9 pl-8 pr-3 text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded-lg outline-none"
+                  className="w-full h-9 pl-8 pr-3 text-xs font-bold text-slate-950 bg-white border border-slate-300 rounded-lg outline-none"
                 />
               </div>
 
-              <div className="max-h-52 overflow-y-auto divide-y divide-slate-200 border border-slate-200 rounded-lg bg-white">
+              <div className="max-h-56 overflow-y-auto divide-y divide-slate-200 border border-slate-200 rounded-lg bg-white">
                 {loadingCourses ? (
                   <div className="p-4 text-center text-xs text-slate-500">Đang tải danh mục môn học...</div>
                 ) : filteredDbCourses.length === 0 ? (
@@ -421,23 +428,23 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
                 ) : (
                   filteredDbCourses.map((c) => (
                     <div
-                      key={c.id}
+                      key={c.id || c.course_id}
                       onClick={() => handleSelectCourse(c)}
                       className="p-2.5 hover:bg-sky-50 transition cursor-pointer flex items-center justify-between gap-2"
                     >
                       <div className="min-w-0">
                         <div className="text-xs font-extrabold text-slate-950 truncate">
-                          {c.name}
+                          {c.course_name}
                         </div>
                         <div className="text-[10px] text-slate-500 font-mono">
-                          Mã: {c.code || 'N/A'}
+                          ID: #{c.course_id} | SKU: {c.sku || 'N/A'}
                         </div>
                       </div>
 
                       {c.git_repos && Array.isArray(c.git_repos) && c.git_repos.length > 0 && (
                         <span className="shrink-0 text-[10px] font-black text-purple-700 bg-purple-100 px-2 py-0.5 rounded border border-purple-200 flex items-center gap-1">
                           <GitBranch className="w-3 h-3" />
-                          <span>Có Repo</span>
+                          <span>{c.git_repos.length} Repos</span>
                         </span>
                       )}
                     </div>
@@ -495,7 +502,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
       );
     }
 
-    // 6. CÁC TRƯỜNG CÒN LẠI (TƯƠNG PHẢN ĐEN ĐẬM TEXT-SLATE-950 SIÊU NÉT)
+    // 6. CÁC TRƯỜNG DỮ LIỆU ĐƠN GIẢN (ĐEN ĐẬM TEXT-SLATE-950 RÕ NÉT)
     return (
       <div key={key} className="rounded-xl border border-slate-200 bg-white dark:bg-slate-900 p-2.5 shadow-2xs">
         {isEditing ? (
@@ -524,7 +531,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
             <button
               type="button"
               onClick={() => setEditingInputKey(null)}
-              className="h-9 px-2 bg-slate-200 rounded-lg text-xs"
+              className="h-9 px-2 bg-slate-200 rounded-lg text-xs cursor-pointer"
             >
               Hủy
             </button>
@@ -552,7 +559,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
                   setEditingInputKey(key);
                   setTempInputValue(String(val || ''));
                 }}
-                className="p-1 text-indigo-600 hover:bg-indigo-50 rounded"
+                className="p-1 text-indigo-600 hover:bg-indigo-50 rounded cursor-pointer"
               >
                 <Edit3 className="w-3.5 h-3.5" />
               </button>
