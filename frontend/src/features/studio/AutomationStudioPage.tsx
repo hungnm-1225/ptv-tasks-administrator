@@ -1186,11 +1186,10 @@ export const AutomationStudioPage: React.FC = () => {
 
         if (kcPasswordOption === 'email_lowercase') {
           details.push('Đặt lại pass: Sử dụng chính EMAIL tài khoản (viết thường)');
-        } else if (kcPasswordOption === 'default_secure') {
-          details.push('Đặt lại pass: Mật khẩu mặc định hệ thống (Pythaverse@2026)');
         } else {
-          conf.custom_password = kcTempPass;
-          details.push(`Đặt lại pass tùy chỉnh: "${kcTempPass}"`);
+          const finalPass = kcTempPass.trim() || 'Pythaverse@2026';
+          conf.custom_password = finalPass;
+          details.push(`Đặt lại pass: "${finalPass}"`);
         }
         details.push(`Bắt buộc đổi mật khẩu khi đăng nhập: ${kcForceChange ? 'Có' : 'Không'}`);
       }
@@ -2986,70 +2985,73 @@ export const AutomationStudioPage: React.FC = () => {
                       Chọn Quy Chuẩn Mật Khẩu Áp Dụng:
                     </label>
 
-                    {/* 3 Nấc Lựa Chọn Mật Khẩu */}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    {/* GỘP GỌN THÀNH 2 NẤC LỰA CHỌN CÂN ĐỐI */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {/* Nấc 1: Dùng chính email */}
                       <button
                         type="button"
                         onClick={() => setKcPasswordOption('email_lowercase')}
-                        className={`p-3 rounded-xl border text-left transition cursor-pointer ${kcPasswordOption === 'email_lowercase'
-                          ? 'border-amber-500 bg-amber-50/80 dark:bg-amber-950/40 ring-1 ring-amber-500'
-                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
+                        className={`p-3.5 rounded-2xl border text-left transition cursor-pointer ${kcPasswordOption === 'email_lowercase'
+                          ? 'border-amber-500 bg-amber-50/80 dark:bg-amber-950/40 ring-1 ring-amber-500 shadow-xs'
+                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
                           }`}
                       >
                         <div className="flex items-center gap-1.5 font-bold text-xs text-amber-700 dark:text-amber-300">
-                          <AtSign className="w-3.5 h-3.5" />
-                          <span>Dùng Chính Email</span>
+                          <AtSign className="w-4 h-4" />
+                          <span>1. Dùng Chính Email Tài Khoản</span>
                         </div>
-                        <p className="text-[10px] text-slate-500 mt-1">
-                          Lấy email viết thường làm mật khẩu (chuẩn quen thuộc cho HS/GV).
+                        <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                          Tự động lấy email viết thường của từng người làm mật khẩu (chuẩn quen thuộc cho HS/GV).
                         </p>
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={() => setKcPasswordOption('default_secure')}
-                        className={`p-3 rounded-xl border text-left transition cursor-pointer ${kcPasswordOption === 'default_secure'
-                          ? 'border-amber-500 bg-amber-50/80 dark:bg-amber-950/40 ring-1 ring-amber-500'
-                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
-                          }`}
-                      >
-                        <div className="flex items-center gap-1.5 font-bold text-xs text-amber-700 dark:text-amber-300">
-                          <ShieldCheck className="w-3.5 h-3.5" />
-                          <span>Mật Khẩu Mặc Định</span>
-                        </div>
-                        <p className="text-[10px] font-mono text-slate-500 mt-1">
-                          Pythaverse@2026
-                        </p>
-                      </button>
-
+                      {/* Nấc 2: Mật khẩu chung / tùy chỉnh (Đề xuất sẵn Pythaverse@2026) */}
                       <button
                         type="button"
                         onClick={() => setKcPasswordOption('custom')}
-                        className={`p-3 rounded-xl border text-left transition cursor-pointer ${kcPasswordOption === 'custom'
-                          ? 'border-amber-500 bg-amber-50/80 dark:bg-amber-950/40 ring-1 ring-amber-500'
-                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
+                        className={`p-3.5 rounded-2xl border text-left transition cursor-pointer ${kcPasswordOption === 'custom'
+                          ? 'border-amber-500 bg-amber-50/80 dark:bg-amber-950/40 ring-1 ring-amber-500 shadow-xs'
+                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
                           }`}
                       >
-                        <div className="flex items-center gap-1.5 font-bold text-xs text-amber-700 dark:text-amber-300">
-                          <Key className="w-3.5 h-3.5" />
-                          <span>Mật Khẩu Tùy Chỉnh</span>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 font-bold text-xs text-amber-700 dark:text-amber-300">
+                            <Key className="w-4 h-4" />
+                            <span>2. Mật Khẩu Chung / Tùy Chỉnh</span>
+                          </div>
+                          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300">
+                            Gợi ý sẵn
+                          </span>
                         </div>
-                        <p className="text-[10px] text-slate-500 mt-1">
-                          Tự gõ chuỗi mật khẩu riêng theo ý bạn.
+                        <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                          Áp dụng một mật khẩu cố định cho toàn bộ danh sách (mặc định hoặc tự nhập đè).
                         </p>
                       </button>
                     </div>
 
+                    {/* Ô Input hiển thị khi chọn nấc 2, có sẵn Pythaverse@2026 */}
                     {kcPasswordOption === 'custom' && (
-                      <div className="pt-2">
-                        <label className="text-[10px] font-bold uppercase text-slate-500">Nhập Mật Khẩu Mới:</label>
-                        <input
-                          type="text"
-                          value={kcTempPass}
-                          onChange={(e) => setKcTempPass(e.target.value)}
-                          placeholder="Ví dụ: Ptv@2026..."
-                          className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3.5 py-2 font-mono text-xs text-slate-900 dark:text-white"
-                        />
+                      <div className="pt-2 animate-in fade-in duration-150">
+                        <div className="flex items-center justify-between text-[11px] font-bold uppercase text-slate-500 mb-1">
+                          <span>Mật Khẩu Áp Dụng (Có thể sửa tùy ý):</span>
+                          <button
+                            type="button"
+                            onClick={() => setKcTempPass('Pythaverse@2026')}
+                            className="text-amber-600 hover:underline cursor-pointer lowercase text-[10px]"
+                          >
+                            ↺ đặt lại Pythaverse@2026
+                          </button>
+                        </div>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={kcTempPass}
+                            onChange={(e) => setKcTempPass(e.target.value)}
+                            placeholder="Pythaverse@2026"
+                            className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-2.5 font-mono text-xs font-bold text-slate-900 dark:text-white focus:border-amber-500 focus:outline-hidden"
+                          />
+                          <ShieldCheck className="absolute right-3 top-2.5 w-4 h-4 text-emerald-500" />
+                        </div>
                       </div>
                     )}
 
