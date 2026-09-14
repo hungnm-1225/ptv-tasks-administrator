@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.services.workspace_lineage_service import workspace_lineage_service
 from app.services.workspace_playwright_service import workspace_playwright_service
 from app.services.workspace.workspace_scanner_service import workspace_scanner_service
+from app.services.keycloak_service import keycloak_service
 
 router = APIRouter()
 
@@ -350,3 +351,11 @@ async def extract_cof_content(req: ExtractCOFRequest):
         "total_students": total_students,
         "courses": extracted_courses
     }
+@router.post("/keycloak-lookup")
+async def lookup_keycloak_users(payload: Dict[str, Any]):
+    """Endpoint tra cứu thông tin chi tiết tài khoản Keycloak cho Automation Studio."""
+    raw_list = payload.get("identifiers") or payload.get("emails") or []
+    if isinstance(raw_list, str):
+        raw_list = [raw_list]
+    results = await keycloak_service.lookup_user_details(raw_list)
+    return {"users": results}

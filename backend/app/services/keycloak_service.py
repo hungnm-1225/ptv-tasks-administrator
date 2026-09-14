@@ -514,6 +514,77 @@ class KeycloakService:
 
         res["execution_logs"] = "\n".join(log_lines)
         return res
+    # =========================================================================
+    # 🔍 HÀM TRA CỨU CHI TIẾT TÀI KHOẢN (CHO AUTOMATION STUDIO BULK LOOKUP)
+    # =========================================================================
+    async def lookup_user_details(self, identifiers: List[str]) -> List[Dict[str, Any]]:
+        """Tra cứu chi tiết: Họ tên, Username, Email, Enabled, EmailVerified của danh sách tài khoản."""
+        cleaned_inputs = [clean_email_identifier(i) for i in identifiers if clean_email_identifier(i)]
+        cleaned_inputs = list(dict.fromkeys(cleaned_inputs))
+        if not cleaned_inputs:
+            return []
 
+        async with httpx.AsyncClient(verify=False, headers=BROWSER_HEADERS, timeout=15.0) as client:
+            token = await self._get_admin_token(client)
+            if not token:
+                return [{"identifier": i, "exists": False, "error": "Không lấy được Keycloak Token"} for i in cleaned_inputs]
+
+            auth_headers = {
+                **BROWSER_HEADERS,
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            }
+            base_api = f"{self.raw_server_url}/auth/admin/realms/{self.target_realm}"
+
+            async def _get_details(ident: str):
+                try:
+                    users = []
+                    if "@" in ident:
+                        resp = await client.get(f"{base_api}/users?email={ident}&exact=true", headers=auth_headers)
+                        if resp.status_code == 200 and isinstance(resp.json(), list) and resp.json():
+                            users = resp.json()
+
+                    if not users:
+                        resp = await client.get(f"{base_api}/users?username={ident}&exact=true", headers=auth_headers)
+                        if resp.status_code == 200 and isinstance(resp.json(), list) and resp.json():
+                            users = resp.json()
+
+                    if not users and "@" in ident:
+                        resp = await client.get(f"{base_api}/users?search={ident}", headers=auth_headers)
+                        if resp.status_code == 200 and isinstance(resp.json(), list):
+                            for u in resp.json():
+                                if (u.get("email") or "").lower() == ident or (u.get("username") or "").lower() == ident:
+                                    users = [u]
+                                    break
+
+                    if users:
+                        u = users[0]
+                        return {
+                            "identifier": ident,
+                            "exists": True,
+                            "id": u.get("id"),
+                            "username": u.get("username"),
+                            "firstName": u.get("firstName") or "",
+                            "lastName": u.get("lastName") or "",
+                            "email": u.get("email") or "",
+                            "enabled": u.get("enabled", False),
+                            "emailVerified": u.get("emailVerified", False),
+                            "createdTimestamp": u.get("createdTimestamp")
+                        }
+
+                    return {
+                        "identifier": ident,
+                        "exists": False,
+                        "error": "Không tìm thấy trên eID Keycloak"
+                    }
+                except Exception as ex:
+                    return {
+                        "identifier": ident,
+                        "exists": False,
+                        "error": str(ex)
+                    }
+
+            tasks = [_get_details(i) for i in cleaned_inputs]
+            return await asyncio.gather(*tasks)
 
 keycloak_service = KeycloakService()

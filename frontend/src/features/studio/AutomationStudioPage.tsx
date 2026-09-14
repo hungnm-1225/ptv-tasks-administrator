@@ -33,7 +33,9 @@ import {
   AlertCircle,
   FileCheck2,
   Download,
-  Clock
+  Clock,
+  XCircle,
+  AtSign,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { fetchApi } from '../../lib/api';
@@ -431,6 +433,11 @@ export const AutomationStudioPage: React.FC = () => {
   const [kcVerifyAction, setKcVerifyAction] = useState<'verify' | 'unverify'>('verify');
   const [kcEnableStatus, setKcEnableStatus] = useState<boolean>(false);
   const [kcStatusAction, setKcStatusAction] = useState<'enable' | 'disable'>('enable');
+  // 🔑 [PATCH] CÁC STATE MỚI CHO KEYCLOAK PASSWORD OPTION & BULK LOOKUP
+  const [kcActiveMode, setKcActiveMode] = useState<'manage' | 'lookup'>('manage');
+  const [kcPasswordOption, setKcPasswordOption] = useState<'email_lowercase' | 'custom' | 'default_secure'>('email_lowercase');
+  const [kcLookupResults, setKcLookupResults] = useState<any[]>([]);
+  const [isKcLookingUp, setIsKcLookingUp] = useState<boolean>(false);
 
   // 🐙 Pythaverse Git Controls (Hỗ trợ Multi-Repos)
   const [gitSelectedRepos, setGitSelectedRepos] = useState<string[]>([
@@ -733,6 +740,41 @@ export const AutomationStudioPage: React.FC = () => {
         group_name: '',
       },
     ]);
+  };
+
+  // 🔍 [PATCH] HÀM TRA CỨU DANH TÍNH KEYCLOAK (BULK USER LOOKUP)
+  const handleKeycloakLookup = async () => {
+    const rawEmails = kcTargetEmail
+      .split(/[\n,;]+/)
+      .map((e) => e.trim())
+      .filter((e) => e.length > 0);
+
+    if (rawEmails.length === 0) {
+      toast.error('Vui lòng nhập ít nhất 1 email hoặc username vào ô trên để tra cứu!');
+      return;
+    }
+
+    setIsKcLookingUp(true);
+    setKcLookupResults([]);
+
+    try {
+      const res = await fetchApi<{ users: any[] }>('/workspace/keycloak-lookup', {
+        method: 'POST',
+        body: JSON.stringify({ identifiers: rawEmails })
+      });
+
+      if (res?.users) {
+        setKcLookupResults(res.users);
+        const foundCount = res.users.filter((u: any) => u.exists).length;
+        toast.success(`Đã tra cứu xong: ${foundCount}/${res.users.length} tài khoản tồn tại trên Keycloak!`);
+      } else {
+        toast.info('Không nhận được phản hồi từ máy chủ Keycloak.');
+      }
+    } catch (err) {
+      toast.error('Lỗi khi tra cứu Keycloak: ' + (err as Error).message);
+    } finally {
+      setIsKcLookingUp(false);
+    }
   };
 
   const handleRemoveLmsCourseRow = (index: number) => {
@@ -1139,9 +1181,18 @@ export const AutomationStudioPage: React.FC = () => {
 
       if (kcEnableResetPass) {
         actions.push('reset_password');
-        conf.temporary_password = kcTempPass;
+        conf.password_option = kcPasswordOption;
         conf.force_change_on_first_login = kcForceChange;
-        details.push(`Đặt lại pass tạm: "${kcTempPass}" (Bắt buộc đổi: ${kcForceChange ? 'Có' : 'Không'})`);
+
+        if (kcPasswordOption === 'email_lowercase') {
+          details.push('Đặt lại pass: Sử dụng chính EMAIL tài khoản (viết thường)');
+        } else if (kcPasswordOption === 'default_secure') {
+          details.push('Đặt lại pass: Mật khẩu mặc định hệ thống (Pythaverse@2026)');
+        } else {
+          conf.custom_password = kcTempPass;
+          details.push(`Đặt lại pass tùy chỉnh: "${kcTempPass}"`);
+        }
+        details.push(`Bắt buộc đổi mật khẩu khi đăng nhập: ${kcForceChange ? 'Có' : 'Không'}`);
       }
       if (kcEnableVerify) {
         actions.push(kcVerifyAction === 'verify' ? 'mark_email_verified' : 'mark_email_unverified');
@@ -2843,192 +2894,411 @@ export const AutomationStudioPage: React.FC = () => {
         </div>
       )}
 
-      {/* 5. Keycloak IDP Engine Workplace */}
+      {/* 5. 🔑 KEYCLOAK IDP ENGINE WORKPLACE (BẢN PATCH ĐẦY ĐỦ TÙY CHỌN PASS & BULK LOOKUP) */}
       {selectedBotType === 'keycloak_api' && (
         <div className="space-y-5 rounded-[2rem] border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 sm:p-7 shadow-xs">
-          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/80 pb-3">
+          {/* Header & Sub-tab Switcher */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 dark:border-slate-800/80 pb-3">
             <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
-              <Key className="h-4 w-4 text-amber-500" />
-              <span>Quản Trị Danh Tính Keycloak:</span>
+              <Key className="h-4 w-4 text-purple-600" />
+              <span>Quản Trị & Tra Cứu Danh Tính Keycloak eID:</span>
             </div>
-            <span className="rounded-full bg-amber-100 dark:bg-amber-950/70 px-2.5 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">
-              Bảo vệ 3 lớp
-            </span>
+
+            {/* Switcher: Cập nhật vs Tra cứu */}
+            <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-xl">
+              <button
+                type="button"
+                onClick={() => setKcActiveMode('manage')}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${kcActiveMode === 'manage'
+                  ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  }`}
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span>1. Cập Nhật & Đổi Mật Khẩu</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setKcActiveMode('lookup')}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${kcActiveMode === 'lookup'
+                  ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  }`}
+              >
+                <Search className="w-3.5 h-3.5" />
+                <span>2. Tra Cứu Danh Tính eID (Bulk Lookup)</span>
+              </button>
+            </div>
           </div>
 
+          {/* Ô Nhập Danh Sách Email/Username */}
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Email hoặc Username Cần Xử Lý:
-            </label>
+            <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-300">
+              <label>Danh Sách Email hoặc Username Cần Xử Lý (Mỗi dòng 1 tài khoản):</label>
+              <span className="font-mono text-purple-600 font-bold">
+                {kcTargetEmail.split(/[\n,;]+/).filter((x) => x.trim().length > 0).length} tài khoản
+              </span>
+            </div>
             <textarea
               rows={3}
               value={kcTargetEmail}
               onChange={(e) => setKcTargetEmail(e.target.value)}
-              placeholder="Nhập mỗi email/username trên 1 dòng hoặc cách nhau bằng dấu phẩy..."
+              placeholder="Nhập danh sách email hoặc username...&#10;teacher.demo@pythaverse.space&#10;student.demo@pythaverse.space"
               className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 p-3 font-mono text-xs text-slate-900 dark:text-white focus:border-purple-500 focus:bg-white focus:outline-hidden leading-relaxed"
             />
           </div>
 
-          <div className="space-y-3.5">
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-950 text-amber-600">
-                    <Key className="h-4 w-4" />
+          {/* CHẾ ĐỘ 1: CẬP NHẬT & ĐỔI MẬT KHẨU */}
+          {kcActiveMode === 'manage' && (
+            <div className="space-y-3.5">
+              {/* Box 1: Đổi Mật Khẩu */}
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-950 text-amber-600">
+                      <Key className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                        1. Đặt Lại Mật Khẩu Khởi Tạo
+                      </h4>
+                      <p className="text-[11px] text-slate-400">Gán mật khẩu ban đầu cho người dùng</p>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">
-                      1. Đặt Lại Mật Khẩu Tạm Thời
-                    </h4>
-                    <p className="text-[11px] text-slate-400">Gán mật khẩu khởi tạo an toàn</p>
-                  </div>
-                </div>
 
-                <button
-                  type="button"
-                  onClick={() => setKcEnableResetPass(!kcEnableResetPass)}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${kcEnableResetPass ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-700'
-                    }`}
-                >
-                  <span
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${kcEnableResetPass ? 'translate-x-5' : 'translate-x-0'
+                  <button
+                    type="button"
+                    onClick={() => setKcEnableResetPass(!kcEnableResetPass)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${kcEnableResetPass ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-700'
                       }`}
-                  />
-                </button>
-              </div>
-
-              {kcEnableResetPass && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200/60 dark:border-slate-800">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase text-slate-500">Mật khẩu mới:</label>
-                    <input
-                      type="text"
-                      value={kcTempPass}
-                      onChange={(e) => setKcTempPass(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-1.5 font-mono text-xs text-slate-900 dark:text-white"
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${kcEnableResetPass ? 'translate-x-5' : 'translate-x-0'
+                        }`}
                     />
-                  </div>
-                  <div className="flex items-end pb-1.5">
-                    <label className="flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={kcForceChange}
-                        onChange={(e) => setKcForceChange(e.target.checked)}
-                        className="h-4 w-4 rounded-md border-slate-300 text-amber-600 focus:ring-amber-500"
-                      />
-                      <span>Bắt buộc đổi khi đăng nhập</span>
+                  </button>
+                </div>
+
+                {kcEnableResetPass && (
+                  <div className="space-y-3 pt-3 border-t border-slate-200/60 dark:border-slate-800">
+                    <label className="text-[11px] font-bold uppercase text-slate-500">
+                      Chọn Quy Chuẩn Mật Khẩu Áp Dụng:
                     </label>
-                  </div>
-                </div>
-              )}
-            </div>
 
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-4 space-y-3">
+                    {/* 3 Nấc Lựa Chọn Mật Khẩu */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setKcPasswordOption('email_lowercase')}
+                        className={`p-3 rounded-xl border text-left transition cursor-pointer ${kcPasswordOption === 'email_lowercase'
+                          ? 'border-amber-500 bg-amber-50/80 dark:bg-amber-950/40 ring-1 ring-amber-500'
+                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
+                          }`}
+                      >
+                        <div className="flex items-center gap-1.5 font-bold text-xs text-amber-700 dark:text-amber-300">
+                          <AtSign className="w-3.5 h-3.5" />
+                          <span>Dùng Chính Email</span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-1">
+                          Lấy email viết thường làm mật khẩu (chuẩn quen thuộc cho HS/GV).
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setKcPasswordOption('default_secure')}
+                        className={`p-3 rounded-xl border text-left transition cursor-pointer ${kcPasswordOption === 'default_secure'
+                          ? 'border-amber-500 bg-amber-50/80 dark:bg-amber-950/40 ring-1 ring-amber-500'
+                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
+                          }`}
+                      >
+                        <div className="flex items-center gap-1.5 font-bold text-xs text-amber-700 dark:text-amber-300">
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          <span>Mật Khẩu Mặc Định</span>
+                        </div>
+                        <p className="text-[10px] font-mono text-slate-500 mt-1">
+                          Pythaverse@2026
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setKcPasswordOption('custom')}
+                        className={`p-3 rounded-xl border text-left transition cursor-pointer ${kcPasswordOption === 'custom'
+                          ? 'border-amber-500 bg-amber-50/80 dark:bg-amber-950/40 ring-1 ring-amber-500'
+                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
+                          }`}
+                      >
+                        <div className="flex items-center gap-1.5 font-bold text-xs text-amber-700 dark:text-amber-300">
+                          <Key className="w-3.5 h-3.5" />
+                          <span>Mật Khẩu Tùy Chỉnh</span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-1">
+                          Tự gõ chuỗi mật khẩu riêng theo ý bạn.
+                        </p>
+                      </button>
+                    </div>
+
+                    {kcPasswordOption === 'custom' && (
+                      <div className="pt-2">
+                        <label className="text-[10px] font-bold uppercase text-slate-500">Nhập Mật Khẩu Mới:</label>
+                        <input
+                          type="text"
+                          value={kcTempPass}
+                          onChange={(e) => setKcTempPass(e.target.value)}
+                          placeholder="Ví dụ: Ptv@2026..."
+                          className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3.5 py-2 font-mono text-xs text-slate-900 dark:text-white"
+                        />
+                      </div>
+                    )}
+
+                    <div className="pt-1">
+                      <label className="flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={kcForceChange}
+                          onChange={(e) => setKcForceChange(e.target.checked)}
+                          className="h-4 w-4 rounded-md border-slate-300 text-amber-600 focus:ring-amber-500"
+                        />
+                        <span>Bắt buộc đổi mật khẩu khi đăng nhập lần đầu (Temporary = TRUE)</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Box 2: Xác Thực Email */}
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-950 text-emerald-600">
+                      <ShieldCheck className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                        2. Xác Thực Email
+                      </h4>
+                      <p className="text-[11px] text-slate-400">Gỡ lỗi tài khoản chưa xác thực email</p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setKcEnableVerify(!kcEnableVerify)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${kcEnableVerify ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-700'
+                      }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${kcEnableVerify ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                    />
+                  </button>
+                </div>
+
+                {kcEnableVerify && (
+                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200/60 dark:border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setKcVerifyAction('verify')}
+                      className={`rounded-xl py-2 text-xs font-semibold transition-all cursor-pointer ${kcVerifyAction === 'verify'
+                        ? 'border border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                        : 'border border-slate-200 dark:border-slate-800 text-slate-500'
+                        }`}
+                    >
+                      ✓ Đã Xác Thực (Email Verified = True)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setKcVerifyAction('unverify')}
+                      className={`rounded-xl py-2 text-xs font-semibold transition-all cursor-pointer ${kcVerifyAction === 'unverify'
+                        ? 'border border-rose-500 bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                        : 'border border-slate-200 dark:border-slate-800 text-slate-500'
+                        }`}
+                    >
+                      ✗ Gỡ Xác Thực (Email Verified = False)
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Box 3: Trạng Thái Hoạt Động */}
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 dark:bg-sky-950 text-sky-600">
+                      <UserCheck className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                        3. Trạng Thái Hoạt Động
+                      </h4>
+                      <p className="text-[11px] text-slate-400">Khóa hoặc kích hoạt lại người dùng</p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setKcEnableStatus(!kcEnableStatus)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${kcEnableStatus ? 'bg-sky-500' : 'bg-slate-300 dark:bg-slate-700'
+                      }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${kcEnableStatus ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                    />
+                  </button>
+                </div>
+
+                {kcEnableStatus && (
+                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200/60 dark:border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setKcStatusAction('enable')}
+                      className={`rounded-xl py-2 text-xs font-semibold transition-all cursor-pointer ${kcStatusAction === 'enable'
+                        ? 'border border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                        : 'border border-slate-200 dark:border-slate-800 text-slate-500'
+                        }`}
+                    >
+                      ✓ Kích Hoạt (Enabled = True)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setKcStatusAction('disable')}
+                      className={`rounded-xl py-2 text-xs font-semibold transition-all cursor-pointer ${kcStatusAction === 'disable'
+                        ? 'border border-rose-500 bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                        : 'border border-slate-200 dark:border-slate-800 text-slate-500'
+                        }`}
+                    >
+                      ✗ Vô Hiệu Hóa (Enabled = False)
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* CHẾ ĐỘ 2: 🔍 BULK LOOKUP ĐỐI SOÁT DANH TÍNH TRỰC TUYẾN */}
+          {kcActiveMode === 'lookup' && (
+            <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-950 text-emerald-600">
-                    <ShieldCheck className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">
-                      2. Xác Thực Email
-                    </h4>
-                    <p className="text-[11px] text-slate-400">Gỡ lỗi tài khoản chưa xác thực email</p>
-                  </div>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                    Kiểm Tra Tài Khoản eID Trực Tuyến
+                  </h4>
+                  <p className="text-[11px] text-slate-500">
+                    Đối soát trực tiếp qua Keycloak REST API để kiểm tra sự tồn tại và trạng thái tài khoản.
+                  </p>
                 </div>
 
                 <button
                   type="button"
-                  onClick={() => setKcEnableVerify(!kcEnableVerify)}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${kcEnableVerify ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-700'
-                    }`}
+                  onClick={handleKeycloakLookup}
+                  disabled={isKcLookingUp}
+                  className="flex items-center gap-2 px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs font-bold transition shadow-sm cursor-pointer"
                 >
-                  <span
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${kcEnableVerify ? 'translate-x-5' : 'translate-x-0'
-                      }`}
-                  />
+                  {isKcLookingUp ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Đang tra cứu eID...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Search className="w-3.5 h-3.5" />
+                      <span>🔍 Tra Cứu Thông Tin Ngay</span>
+                    </>
+                  )}
                 </button>
               </div>
 
-              {kcEnableVerify && (
-                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200/60 dark:border-slate-800">
-                  <button
-                    type="button"
-                    onClick={() => setKcVerifyAction('verify')}
-                    className={`rounded-xl py-2 text-xs font-semibold transition-all cursor-pointer ${kcVerifyAction === 'verify'
-                      ? 'border border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                      : 'border border-slate-200 dark:border-slate-800 text-slate-500'
-                      }`}
-                  >
-                    ✓ Đã Xác Thực
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setKcVerifyAction('unverify')}
-                    className={`rounded-xl py-2 text-xs font-semibold transition-all cursor-pointer ${kcVerifyAction === 'unverify'
-                      ? 'border border-rose-500 bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
-                      : 'border border-slate-200 dark:border-slate-800 text-slate-500'
-                      }`}
-                  >
-                    ✗ Gỡ Xác Thực
-                  </button>
+              {/* Bảng Kết Quả Tra Cứu */}
+              {kcLookupResults.length > 0 && (
+                <div className="rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-white dark:bg-slate-900 shadow-xs space-y-0">
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-800 dark:text-slate-200">
+                      Kết Quả Đối Soát ({kcLookupResults.length} tài khoản):
+                    </span>
+                    <div className="flex items-center gap-2 text-[11px] font-mono font-bold">
+                      <span className="text-emerald-600">
+                        {kcLookupResults.filter((u) => u.exists).length} Tồn tại
+                      </span>
+                      <span>|</span>
+                      <span className="text-rose-500">
+                        {kcLookupResults.filter((u) => !u.exists).length} Không có
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="max-h-80 overflow-y-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50/50 dark:bg-slate-800/40 text-[10px] font-bold uppercase text-slate-500 sticky top-0">
+                        <tr>
+                          <th className="p-3">Định Danh Đầu Vào</th>
+                          <th className="p-3">Username eID</th>
+                          <th className="p-3">Họ & Tên</th>
+                          <th className="p-3 text-center">Tồn Tại</th>
+                          <th className="p-3 text-center">Kích Hoạt</th>
+                          <th className="p-3 text-center">Verify Email</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-[11px] font-mono">
+                        {kcLookupResults.map((u, idx) => (
+                          <tr
+                            key={idx}
+                            className={`transition ${u.exists ? 'hover:bg-slate-50 dark:hover:bg-slate-800/60' : 'bg-rose-50/30 dark:bg-rose-950/20'
+                              }`}
+                          >
+                            <td className="p-3 font-semibold text-slate-900 dark:text-white">
+                              {u.identifier}
+                            </td>
+                            <td className="p-3 text-purple-600 font-bold">
+                              {u.username || '—'}
+                            </td>
+                            <td className="p-3 font-sans text-slate-700 dark:text-slate-300">
+                              {u.exists ? `${u.lastName} ${u.firstName}`.trim() || '(Chưa đặt tên)' : '—'}
+                            </td>
+                            <td className="p-3 text-center">
+                              {u.exists ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-bold text-[10px]">
+                                  <CheckCircle2 className="w-3 h-3" /> CÓ
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 font-bold text-[10px]">
+                                  <XCircle className="w-3 h-3" /> KHÔNG
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-3 text-center">
+                              {u.exists ? (
+                                u.enabled ? (
+                                  <span className="text-emerald-600 font-bold">Đang Mở</span>
+                                ) : (
+                                  <span className="text-rose-500 font-bold">Bị Khóa</span>
+                                )
+                              ) : (
+                                '—'
+                              )}
+                            </td>
+                            <td className="p-3 text-center">
+                              {u.exists ? (
+                                u.emailVerified ? (
+                                  <span className="text-emerald-600 font-bold">✓ Đã xác thực</span>
+                                ) : (
+                                  <span className="text-amber-500 font-bold">Chưa xác thực</span>
+                                )
+                              ) : (
+                                '—'
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
             </div>
-
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 dark:bg-sky-950 text-sky-600">
-                    <UserCheck className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">
-                      3. Trạng Thái Hoạt Động
-                    </h4>
-                    <p className="text-[11px] text-slate-400">Khóa hoặc kích hoạt lại người dùng</p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setKcEnableStatus(!kcEnableStatus)}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${kcEnableStatus ? 'bg-sky-500' : 'bg-slate-300 dark:bg-slate-700'
-                    }`}
-                >
-                  <span
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${kcEnableStatus ? 'translate-x-5' : 'translate-x-0'
-                      }`}
-                  />
-                </button>
-              </div>
-
-              {kcEnableStatus && (
-                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200/60 dark:border-slate-800">
-                  <button
-                    type="button"
-                    onClick={() => setKcStatusAction('enable')}
-                    className={`rounded-xl py-2 text-xs font-semibold transition-all cursor-pointer ${kcStatusAction === 'enable'
-                      ? 'border border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                      : 'border border-slate-200 dark:border-slate-800 text-slate-500'
-                      }`}
-                  >
-                    ✓ Kích Hoạt
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setKcStatusAction('disable')}
-                    className={`rounded-xl py-2 text-xs font-semibold transition-all cursor-pointer ${kcStatusAction === 'disable'
-                      ? 'border border-rose-500 bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
-                      : 'border border-slate-200 dark:border-slate-800 text-slate-500'
-                      }`}
-                  >
-                    ✗ Vô Hiệu Hóa
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
+          )}
         </div>
       )}
 
