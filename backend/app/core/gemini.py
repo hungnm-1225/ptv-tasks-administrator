@@ -50,7 +50,7 @@ GEMINI_MODELS = [
 AUTOMATED_SENDER_PREFIXES = (
     "noreply@", "no-reply@", "notification@", "notifications@",
     "alert@", "alerts@", "info@", "newsletter@", "marketing@",
-    "billing@", "updates@", "support@",
+    "billing@", "updates@",
 )
 _MODEL_COOLDOWN: Dict[str, float] = {}
 
@@ -130,10 +130,14 @@ class AIEngine:
                     response = model.generate_content(
                         prompt,
                         generation_config={"response_mime_type": "application/json"},
-                        request_options={"timeout": 8.0}
+                        request_options={"timeout": 20.0}
                     )
                     if response and response.text:
-                        parsed = json.loads(response.text)
+                        raw_text = response.text.strip()
+                        clean_text = re.sub(r"^```(?:json)?\s*", "", raw_text, flags=re.IGNORECASE)
+                        clean_text = re.sub(r"\s*```$", "", clean_text).strip()
+                        parsed = json.loads(clean_text)
+                        
                         _MODEL_COOLDOWN.pop(model_name, None)
                         return parsed, model_name
 
