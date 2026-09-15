@@ -1,12 +1,18 @@
-# backend/app/services/request_fact_normalizer.py
 """Deterministic, evidence-backed facts for common Unified Inbox requests."""
 import re
-from typing import List, Optional
+from typing import List, Optional, Tuple, Dict, Any
 
 from app.models.intent import EvidenceSpan, ExtractedEntity, ExtractedIntent, IntentAssessment
 
 EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
-COURSE_RE = re.compile(r"\b(?:SWRP|Python|Robotics)[\w .-]*\d+(?:\s*[–—\-]\s*\d+)?\b", re.IGNORECASE)
+# Nhận diện cả mã khóa học dạng SWRP 7 lẫn Course ID số (ví dụ: Course ID 1445 hoặc id=1445)
+COURSE_RE = re.compile(r"\b(?:SWRP|Python|Robotics)[\w .-]*\d+(?:\s*[–—\-]\s*\d+)?\b|Course\s+ID\s*:?\s*(\d+)|course/view\.php\?id=(\d+)", re.IGNORECASE)
+
+# Pattern nhận diện Username Pythaverse hoặc mã học sinh trong bảng (ví dụ vnv1225st0348)
+USERNAME_RE = re.compile(r"\b([a-zA-Z]{2,4}\d{2,6}[a-zA-Z]{0,4}\d{2,6})\b")
+
+# Email riêng của Quản trị viên hệ thống cần loại trừ khỏi danh sách học sinh
+ADMIN_EXCLUDED_EMAILS = {"hung.nguyenmanh@dtt.vn"}
 
 
 def _span(content: str, start: int, end: int, revision_id: Optional[str]) -> EvidenceSpan:
@@ -41,24 +47,121 @@ def _append_entity(assessment: IntentAssessment, entity: ExtractedEntity) -> Non
     assessment.extracted_entities.append(entity)
 
 
+def split_email_thread(content: str) -> Tuple[str, str]:
+    """
+    Tách tin nhắn mới nhất khỏi chuỗi hội thoại dài (Quoted Replies).
+    Cắt tại các dấu hiệu: 'Vào ngày... đã viết:', 'On ... wrote:', '-----Original Message-----'
+    """
+    if not content:
+        return "", ""
+
+    patterns = [
+        r"\n\s*(?:Vào\s+[\w\s,]+vào\s+lúc\s+[\d:]+|Vào\s+[\w\s,]+đã\s+viết\s*:)",
+        r"\n\s*On\s+[\w\s,]+wrote\s*:",
+        r"\n\s*-{3,}\s*(?:Original Message|Tin nhắn gốc)\s*-{3,}",
+        r"\n\s*_{10,}",
+    ]
+
+    split_pos = len(content)
+    for p in patterns:
+        m = re.search(p, content, re.IGNORECASE)
+        if m and m.start() < split_pos:
+            split_pos = m.start()
+
+    current_msg = content[:split_pos].strip()
+    history = content[split_pos:].strip()
+    return current_msg, history
+
+
+def parse_users_from_table_or_text(text: str, source_revision_id: Optional[str]) -> Tuple[List[Dict[str, Any]], List[EvidenceSpan]]:
+    """
+    Bóc tách người dùng linh hoạt:
+    - Bắt các dòng bảng dạng: Họ Tên | Chặng/Ghi chú | Username/Email | Mật khẩu
+    - Bắt danh sách email/username liệt kê
+    - Tự động loại trừ email của Quản trị viên (hung.nguyenmanh@dtt.vn)
+    """
+    users: List[Dict[str, Any]] = []
+    spans: List[EvidenceSpan] = []
+    seen_ids = set()
+
+    lines = text.splitlines()
+    for line in lines:
+        line_clean = line.strip()
+        if not line_clean:
+            continue
+
+        # 1. Bóc tách dạng dòng BẢNG (phân cách bằng | hoặc tab hoặc nhiều khoảng trắng)
+        if "|" in line_clean:
+            parts = [p.strip() for p in line_clean.split("|") if p.strip()]
+        elif "\t" in line_clean:
+            parts = [p.strip() for p in line_clean.split("\t") if p.strip()]
+        else:
+            parts = []
+
+        if len(parts) >= 2:
+            candidate_id = None
+            candidate_name = None
+
+            for part in parts:
+                # Kiểm tra xem cột này có phải là email hoặc username không
+                if EMAIL_RE.search(part):
+                    em = EMAIL_RE.search(part).group(0)
+                    if em.lower() not in ADMIN_EXCLUDED_EMAILS:
+                        candidate_id = em
+                elif USERNAME_RE.search(part):
+                    candidate_id = USERNAME_RE.search(part).group(0)
+                elif re.fullmatch(r"[A-Za-zÀ-ỹ\s]{3,50}", part) and not candidate_name:
+                    candidate_name = part
+
+            if candidate_id and candidate_id.lower() not in seen_ids:
+                seen_ids.add(candidate_id.lower())
+                u_item = {"email": candidate_id, "role": "student"}
+                if candidate_name:
+                    u_item["full_name"] = candidate_name
+                users.append(u_item)
+
+                # Tìm vị trí span
+                idx = text.find(candidate_id)
+                if idx >= 0:
+                    spans.append(_span(text, idx, idx + len(candidate_id), source_revision_id))
+                continue
+
+        # 2. Bóc tách email thông thường (nếu không nằm trong bảng)
+        for em_match in EMAIL_RE.finditer(line_clean):
+            em_str = em_match.group(0).strip()
+            if em_str.lower() in ADMIN_EXCLUDED_EMAILS:
+                continue
+            if em_str.lower() not in seen_ids:
+                seen_ids.add(em_str.lower())
+                users.append({"email": em_str, "role": "student"})
+                start_pos = text.find(em_str)
+                if start_pos >= 0:
+                    spans.append(_span(text, start_pos, start_pos + len(em_str), source_revision_id))
+
+    return users, spans
+
+
 def augment_assessment_with_request_facts(
     assessment: IntentAssessment, 
     raw_content: str, 
     source_revision_id: Optional[str],
     sender_email: Optional[str] = None
 ) -> IntentAssessment:
-    content = raw_content or ""
-    # SỬA LỖI PYTHON: Dùng .lower() thay vì .toLowerCase()
-    sender_clean = sender_email.strip().lower() if sender_email else ""
+    full_text = raw_content or ""
+    
+    # ✂️ BỔ NHÁT KÉO ĐẦU TIÊN: Tách tin nhắn mới nhất khỏi 35 email lịch sử cũ!
+    current_message, _ = split_email_thread(full_text)
+    content = current_message if len(current_message) > 50 else full_text
 
+    # 1. Phát hiện bằng chứng ý định
     account_evidence = _first_phrase_span(
         content,
-        [r"(?:create|creation of|set up|setup)\s+(?:the\s+)?accounts?", r"tạo\s+(?:mới\s+)?tài\s+khoản"],
+        [r"(?:create|creation of|set up|setup)\s+(?:the\s+)?accounts?", r"tạo\s+(?:mới\s+)?tài\s+khoản", r"use\s+\d+\s+SWRP\s+account"],
         source_revision_id,
     )
     course_evidence = _first_phrase_span(
         content,
-        [r"access to .*?course content", r"(?:enrol|enroll|ghi danh).*?(?:course|khóa học)"],
+        [r"access to .*?course", r"(?:enrol|enroll|ghi danh).*?(?:course|khóa học)", r"Course\s+ID\s+\d+", r"view\.php\?id=\d+"],
         source_revision_id,
     )
     repo_evidence = _first_phrase_span(
@@ -67,77 +170,46 @@ def augment_assessment_with_request_facts(
         source_revision_id,
     )
 
-    list_anchor_match = re.search(
-        r"(?:listed below|dưới đây|following teachers?|following users?|danh sách.*?:)", 
-        content, 
-        re.IGNORECASE
-    )
-    search_start_pos = list_anchor_match.end() if list_anchor_match else 0
-    body_to_search = content[search_start_pos:]
+    # 2. Bóc tách người dùng linh hoạt từ tin nhắn mới nhất
+    parsed_users, user_spans = parse_users_from_table_or_text(content, source_revision_id)
+    if parsed_users:
+        _append_entity(assessment, ExtractedEntity(type="users", raw_value=parsed_users, confidence=1.0, evidence=user_spans))
 
-    emails_in_list = list(EMAIL_RE.finditer(body_to_search))
-    users = []
-    spans = []
+    # 3. Bóc tách khóa học & Course ID số (ví dụ Course ID 1445)
+    normalized_courses = []
+    course_spans = []
 
-    role_match = re.search(r"\bteachers?\b|\bgiáo\s+viên\b", content, re.IGNORECASE)
-    detected_role = "teacher" if role_match else "student"
+    # Tìm Course ID số dạng 1445
+    id_matches = re.finditer(r"(?:Course\s+ID\s*:?\s*|view\.php\?id=)(\d+)", content, re.IGNORECASE)
+    for m in id_matches:
+        c_id = m.group(1).strip()
+        if c_id not in normalized_courses:
+            normalized_courses.append(c_id)
+            course_spans.append(_span(content, m.start(), m.end(), source_revision_id))
 
-    for match in emails_in_list:
-        email_str = match.group(0).strip()
-        # LOẠI TRỪ NGAY NẾU LÀ EMAIL CỦA SENDER
-        if sender_clean and email_str.lower() == sender_clean:
+    # Tìm tên khóa học SWRP/Python/Robotics
+    for m in COURSE_RE.finditer(content):
+        c_str = m.group(0).strip()
+        # Loại bỏ các chuỗi nhiễu có chữ "student" từ thời xưa
+        if "student" in c_str.lower():
             continue
+        if c_str not in normalized_courses:
+            normalized_courses.append(c_str)
+            course_spans.append(_span(content, m.start(), m.end(), source_revision_id))
 
-        real_start = search_start_pos + match.start()
-        real_end = search_start_pos + match.end()
-
-        before_text = content[:real_start].rstrip()
-        lines = [line.strip(" -\t*#") for line in before_text.splitlines() if line.strip(" -\t*#")]
-        candidate_name = lines[-1] if lines else ""
-        
-        full_name = candidate_name if re.fullmatch(r"[A-Za-zÀ-ỹ][A-Za-zÀ-ỹ .'’-]{2,100}", candidate_name) else None
-
-        user_item = {"email": email_str, "role": detected_role}
-        if full_name:
-            user_item["full_name"] = full_name
-
-        users.append(user_item)
-        spans.append(_span(content, real_start, real_end, source_revision_id))
-
-    if users:
-        _append_entity(assessment, ExtractedEntity(type="users", raw_value=users, confidence=1.0, evidence=spans))
-
-    raw_courses = [m.group(0).strip() for m in COURSE_RE.finditer(content)]
-    normalized_courses = list(dict.fromkeys(raw_courses))
-    
     if normalized_courses:
-        course_spans = [_span(content, m.start(), m.end(), source_revision_id) for m in COURSE_RE.finditer(content)]
         _append_entity(assessment, ExtractedEntity(type="courses", raw_value=normalized_courses, confidence=1.0, evidence=course_spans))
 
-    if repo_evidence:
-        _append_entity(assessment, ExtractedEntity(
-            type="repositories",
-            raw_value=normalized_courses if normalized_courses else ["SWRP"],
-            confidence=1.0,
-            evidence=[repo_evidence]
-        ))
-        role_git_match = re.search(r"\b(ADMIN|DEVELOPER|GUEST)\b", content, re.IGNORECASE)
-        if role_git_match:
-            _append_entity(assessment, ExtractedEntity(
-                type="git_role",
-                raw_value=role_git_match.group(1).upper(),
-                confidence=1.0,
-                evidence=[_span(content, role_git_match.start(), role_git_match.end(), source_revision_id)]
-            ))
-
-    if account_evidence and users:
-        _append_intent(assessment, "create_accounts", account_evidence)
-    if course_evidence and users and normalized_courses:
+    # 4. Gán ý định tương ứng nếu có bằng chứng
+    if course_evidence and (parsed_users or normalized_courses):
         _append_intent(assessment, "course_access", course_evidence)
-    if repo_evidence and users:
+
+    if account_evidence and parsed_users:
+        _append_intent(assessment, "create_accounts", account_evidence)
+
+    if repo_evidence and parsed_users:
         _append_intent(assessment, "repository_access", repo_evidence)
 
-    # SỬA LỖI PYDANTIC: Dùng 'candidate_action' thay vì 'actionable'
     if any((account_evidence, course_evidence, repo_evidence)):
         assessment.outcome = "candidate_action"
 

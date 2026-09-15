@@ -129,6 +129,12 @@ class WorkflowPlannerService:
         def _search_in_table(table_name: str) -> List[Dict[str, Any]]:
             try:
                 q = supabase.table(table_name).select("*")
+                id_search = re.search(r"\b(\d{3,6})\b", clean_q)
+                if id_search:
+                    cid = int(id_search.group(1))
+                    res_id = q.eq("course_id", cid).limit(1).execute()
+                    if res_id.data:
+                        return res_id.data
                 if match:
                     prefix, num = match.group(1), match.group(2)
                     q = q.or_(
@@ -139,6 +145,7 @@ class WorkflowPlannerService:
                     )
                 else:
                     q = q.ilike("course_name", f"%{clean_q}%")
+
                 res = q.limit(5).execute()
                 return res.data or []
             except Exception as ex:
