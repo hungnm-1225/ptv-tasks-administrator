@@ -17,6 +17,7 @@ from app.core.playwright_manager import (
     LOW_RAM_CHROMIUM_ARGS,
     setup_low_ram_routes
 )
+from app.services.keycloak_service import keycloak_service
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,9 @@ MOODLE_BASE_URL = "https://learn.pythaverse.space"
 
 class PlaywrightLMSService:
     """
-    Cỗ máy Hybrid Moodle PLearn High-Speed Production Engine (V3.5):
+    Cỗ máy Hybrid Moodle PLearn High-Speed Production Engine (V3.6):
+    - Tích hợp chuẩn hóa danh tính Keycloak IDP: Chấp nhận cả Username lẫn Email.
+      Username không có '@' sẽ được tự động tra cứu Keycloak để lấy Email chính thức.
     - Pha 1: Playwright SSO Keycloak trích xuất Cookies & sesskey trong ~3-5s rồi đóng ngay Chromium (RAM < 25MB).
     - Pha 2: Thực thi 100% bằng Direct HTTPX Async WebService:
       + Quét tự động Metadata (contextid, enrolid) & bảng Participants hiện tại.
@@ -33,29 +36,68 @@ class PlaywrightLMSService:
       + Smart Fallback tự chữa lành: Ép Mono-Role duy nhất & Cập nhật ngày bắt đầu/kết thúc nếu tài khoản đã tồn tại.
       + Phân nhóm thông minh: Hỗ trợ tìm Group gần đúng (Fuzzy match) & Tự động tạo Group mới nếu chưa có.
       + Hủy ghi danh (Unenrol) siêu tốc qua core_enrol_unenrol_user_enrolment.
-    - Timeout co giãn linh hoạt (lên tới 300s - 600s), chịu tải hàng trăm tài khoản không lo ReadTimeout!
+    - Timeout co giãn linh hoạt (300s - 600s), chịu tải hàng trăm tài khoản không lo ReadTimeout!
     """
 
     def __init__(self):
         self.headless = True
 
-    def _sanitize_emails(self, email_list: Any) -> List[str]:
-        """Làm sạch và khử trùng danh sách email."""
-        if not email_list:
+    # =========================================================================
+    # 🔍 BỘ CHUẨN HÓA DANH TÍNH USERNAME ➔ EMAIL QUA KEYCLOAK IDP
+    # =========================================================================
+    async def _normalize_identifiers_to_emails(self, raw_items: Any) -> List[str]:
+        """
+        Chuẩn hóa danh sách đầu vào (chấp nhận cả Username lẫn Email):
+        - Nếu đã là Email (có '@'): giữ nguyên.
+        - Nếu là Username (không có '@'): gọi Keycloak lookup_user_details để lấy email chính thức.
+        - Trả về danh sách email sạch 100% để Moodle tìm kiếm.
+        """
+        if not raw_items:
             return []
-        if isinstance(email_list, str):
-            raw_items = email_list.replace(",", "\n").replace(";", "\n").split("\n")
-        elif isinstance(email_list, list):
-            raw_items = [str(x) for x in email_list]
+        if isinstance(raw_items, str):
+            items = raw_items.replace(",", "\n").replace(";", "\n").split("\n")
+        elif isinstance(raw_items, list):
+            items = [str(x) for x in raw_items]
         else:
             return []
 
-        cleaned = []
-        for item in raw_items:
-            clean = item.strip().lower()
-            if clean and "@" in clean and clean not in cleaned:
-                cleaned.append(clean)
-        return cleaned
+        cleaned_tokens: List[str] = []
+        for it in items:
+            c = it.strip().lower().replace('"', '').replace("'", "")
+            if c and c not in cleaned_tokens:
+                cleaned_tokens.append(c)
+
+        if not cleaned_tokens:
+            return []
+
+        resolved_emails: List[str] = []
+        usernames_to_lookup: List[str] = []
+
+        for token in cleaned_tokens:
+            if "@" in token:
+                resolved_emails.append(token)
+            else:
+                usernames_to_lookup.append(token)
+
+        # Nếu có username cần tra cứu Keycloak
+        if usernames_to_lookup:
+            logger.info(f"🔍 [Keycloak Normalizer] Đang tra cứu email cho {len(usernames_to_lookup)} username: {usernames_to_lookup}")
+            try:
+                details = await keycloak_service.lookup_user_details(usernames_to_lookup)
+                for d in details:
+                    ident = d.get("identifier")
+                    u_email = d.get("email")
+                    if d.get("exists") and u_email and "@" in u_email:
+                        clean_em = u_email.strip().lower()
+                        if clean_em not in resolved_emails:
+                            resolved_emails.append(clean_em)
+                        logger.info(f"   ✓ Chuẩn hóa Keycloak: username '{ident}' ➔ email '{clean_em}'")
+                    else:
+                        logger.warning(f"   ⚠️ Không tìm thấy email trên Keycloak cho username: '{ident}'")
+            except Exception as ex:
+                logger.error(f"❌ Lỗi tra cứu Keycloak: {ex}")
+
+        return list(dict.fromkeys(resolved_emails))
 
     def _parse_date_components(self, date_str: str) -> Dict[str, str]:
         """Chuyển chuỗi ngày sang dict day/month/year."""
@@ -341,25 +383,30 @@ class PlaywrightLMSService:
         if not raw_courses:
             return {"status": "failed", "error": "Không có thông tin khóa học nào để ghi danh."}
 
-        students = self._sanitize_emails(payload.get("student_emails", payload.get("students", [])))
-        teachers = self._sanitize_emails(payload.get("teacher_emails", payload.get("non_editing_teachers", [])))
-        managers = self._sanitize_emails(payload.get("manager_emails", payload.get("managers", [])))
+        # 🎯 CHUẨN HÓA DANH TÍNH (HỖ TRỢ USERNAME LẪN EMAIL QUA KEYCLOAK IDP)
+        students = await self._normalize_identifiers_to_emails(payload.get("student_emails", payload.get("students", [])))
+        teachers = await self._normalize_identifiers_to_emails(payload.get("teacher_emails", payload.get("non_editing_teachers", [])))
+        managers = await self._normalize_identifiers_to_emails(payload.get("manager_emails", payload.get("managers", [])))
 
-        if payload.get("bulk_emails"):
+        # Nhận diện danh sách chung nếu không chia role cụ thể
+        generic_candidates = payload.get("emails") or payload.get("usernames") or payload.get("users") or payload.get("bulk_emails")
+        if generic_candidates:
             role_type = payload.get("single_role", "student")
-            bulk_list = self._sanitize_emails(payload.get("bulk_emails"))
+            normalized_generic = await self._normalize_identifiers_to_emails(generic_candidates)
             if role_type == "student" and not students:
-                students = bulk_list
-            elif role_type == "non_editing_teacher" and not teachers:
-                teachers = bulk_list
+                students = normalized_generic
+            elif role_type in ["non_editing_teacher", "teacher"] and not teachers:
+                teachers = normalized_generic
             elif role_type == "manager" and not managers:
-                managers = bulk_list
+                managers = normalized_generic
+            elif not students and not teachers and not managers:
+                students = normalized_generic
 
         total_requested = len(students) + len(teachers) + len(managers)
-        logger.info(f"⚡ [HTTPX DIRECT ENGINE] Xử lý {len(raw_courses)} khóa học | Tổng {total_requested} người dùng!")
+        logger.info(f"⚡ [HTTPX DIRECT ENGINE] Xử lý {len(raw_courses)} khóa học | Tổng {total_requested} người dùng hợp lệ!")
 
         if total_requested == 0:
-            return {"status": "failed", "error": "Không có email nào được cung cấp."}
+            return {"status": "failed", "error": "Không có email hoặc username hợp lệ nào được cung cấp."}
 
         # BƯỚC 1: BỐC SESSION COOKIE VÀ SESSKEY (CHỈ ~3.8S PLAYWRIGHT)
         cookies_dict, sesskey = await self._steal_moodle_session()
@@ -367,8 +414,6 @@ class PlaywrightLMSService:
             return {"status": "failed", "error": "Không thể lấy phiên đăng nhập Moodle qua Keycloak SSO."}
 
         batch_course_results = []
-
-        # 🎯 CẤU HÌNH TIMEOUT CO GIÃN CHO BATCH LỚN (LÊN TỚI 180S MỖI REQUEST)
         custom_limits = httpx.Limits(max_keepalive_connections=20, max_connections=50)
         custom_timeout = httpx.Timeout(connect=15.0, read=180.0, write=60.0, pool=15.0)
 
@@ -542,7 +587,6 @@ class PlaywrightLMSService:
         raw_courses = payload.get("courses", [])
         courses_count = len(raw_courses) if raw_courses else 1
         
-        # Co giãn trần timeout theo quy mô (300s đến 600s)
         pipeline_timeout = min(600.0, max(300.0, courses_count * 60.0))
         logger.info(f"⏱️ [Timeout Safeguard] Đặt trần thời gian cho luồng LMS Enroller: {pipeline_timeout}s")
 
@@ -553,18 +597,25 @@ class PlaywrightLMSService:
             return {"status": "failed", "error": f"Tác vụ LMS Enroll bị quá hạn thời gian (Timeout {pipeline_timeout}s)."}
 
     async def unenrol_users_pipeline(self, payload_or_course_id: Any, emails: Optional[List[str]] = None) -> Dict[str, Any]:
-        """Hủy ghi danh người dùng qua API core_enrol_unenrol_user_enrolment (chỉ mất ~5 giây)."""
+        """Hủy ghi danh người dùng qua API core_enrol_unenrol_user_enrolment (chấp nhận cả Username lẫn Email)."""
         if isinstance(payload_or_course_id, dict):
             raw_courses = payload_or_course_id.get("courses", [])
             if not raw_courses and payload_or_course_id.get("course_id"):
                 raw_courses = [{"course_id": str(payload_or_course_id.get("course_id"))}]
-            clean_emails = self._sanitize_emails(payload_or_course_id.get("emails", payload_or_course_id.get("student_emails", [])))
+
+            raw_candidates = (
+                payload_or_course_id.get("emails")
+                or payload_or_course_id.get("usernames")
+                or payload_or_course_id.get("users")
+                or payload_or_course_id.get("student_emails", [])
+            )
+            clean_emails = await self._normalize_identifiers_to_emails(raw_candidates)
         else:
             raw_courses = [{"course_id": str(payload_or_course_id)}]
-            clean_emails = self._sanitize_emails(emails or [])
+            clean_emails = await self._normalize_identifiers_to_emails(emails or [])
 
         if not clean_emails:
-            return {"status": "failed", "error": "Danh sách email cần hủy ghi danh rỗng."}
+            return {"status": "failed", "error": "Danh sách email hoặc username cần hủy ghi danh rỗng (hoặc không tồn tại trên Keycloak)."}
 
         cookies_dict, sesskey = await self._steal_moodle_session()
         if not cookies_dict or not sesskey:
@@ -587,6 +638,7 @@ class PlaywrightLMSService:
                         d_res = await client.post(f"/lib/ajax/service.php?sesskey={sesskey}&info=core_enrol_unenrol_user_enrolment", json=del_p)
                         if d_res.status_code == 200 and not d_res.json()[0].get("error"):
                             c_res["unenrolled"].append(em)
+                            logger.info(f"🗑️ Đã Unenrol thành công khỏi khóa #{c_id}: {em}")
                     else:
                         c_res["not_found"].append(em)
 
@@ -600,7 +652,12 @@ class PlaywrightLMSService:
         }
 
     async def modify_user_role(self, course_id: str, email: str, new_role_label: str, mode: str = "mono") -> Dict[str, Any]:
-        """Cập nhật Mono-Role độc lập tức thì."""
+        """Cập nhật Mono-Role độc lập tức thì (chấp nhận cả Username lẫn Email)."""
+        normalized = await self._normalize_identifiers_to_emails([email])
+        if not normalized:
+            return {"status": "failed", "error": f"Không tìm thấy tài khoản '{email}' trên hệ thống."}
+
+        target_email = normalized[0]
         role_map = {"student": "9", "non-editing teacher": "7", "teacher": "5", "manager": "1"}
         r_val = role_map.get(new_role_label.lower().strip(), "9")
 
@@ -610,15 +667,14 @@ class PlaywrightLMSService:
 
         async with httpx.AsyncClient(base_url=MOODLE_BASE_URL, cookies=cookies_dict, timeout=20.0) as client:
             _, _, existing_participants = await self._fetch_course_metadata_and_participants(client, course_id, sesskey)
-            em = email.strip().lower()
-            if em not in existing_participants:
-                return {"status": "failed", "error": f"Không tìm thấy học viên {email} trong khóa."}
+            if target_email not in existing_participants:
+                return {"status": "failed", "error": f"Không tìm thấy học viên {target_email} trong khóa #{course_id}."}
 
-            itemid = existing_participants[em]["itemid"]
+            itemid = existing_participants[target_email]["itemid"]
             p = [{"index": 0, "methodname": "core_update_inplace_editable", "args": {"component": "core_user", "itemtype": "user_roles", "itemid": itemid, "value": f'["{r_val}"]'}}]
             res = await client.post(f"/lib/ajax/service.php?sesskey={sesskey}&info=core_update_inplace_editable", json=p)
             ok = (res.status_code == 200 and not res.json()[0].get("error"))
-            return {"status": "success" if ok else "failed", "message": f"Cập nhật role [{new_role_label}] cho {email}"}
+            return {"status": "success" if ok else "failed", "message": f"Cập nhật role [{new_role_label}] cho {target_email}"}
 
 
 playwright_lms_service = PlaywrightLMSService()

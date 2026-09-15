@@ -439,6 +439,22 @@ async def execute_approved_bot_task(
         # 2. NHÓM TASK LMS PLAYWRIGHT DIRECT (TIỂU NGẠCH / MOODLE DIRECT ENROLLER)
         # =====================================================================
         elif bot_type in ["lms_playwright", "lms_git_provisioning", "lms_enroll"]:
+            # 🎯 BỔ SUNG RẼ NHÁNH CHO HỦY GHI DANH (UNENROL)
+            if action in ["unenrol_users", "unenrol_users_pipeline", "unenrol"]:
+                logger.info(f"🗑️ {task_tag} Kích hoạt Playwright LMS Unenrol Pipeline...")
+                return await playwright_lms_service.unenrol_users_pipeline(payload_data)
+
+            # 🎯 BỔ SUNG RẼ NHÁNH CHO ĐỔI VAI TRÒ (MODIFY ROLE)
+            if action in ["modify_user_role", "change_role"]:
+                logger.info(f"✏️ {task_tag} Kích hoạt Moodle Modify User Role...")
+                target_ident = str(payload_data.get("email") or payload_data.get("username") or payload_data.get("identifier", ""))
+                return await playwright_lms_service.modify_user_role(
+                    course_id=str(payload_data.get("course_id", "")),
+                    email=target_ident,
+                    new_role_label=str(payload_data.get("new_role", payload_data.get("role", "Student")))
+                )
+
+            # Mặc định là ghi danh (Enroll)
             logger.info(f"🎓 {task_tag} Kích hoạt Playwright LMS Direct Enroller...")
             lms_res = await playwright_lms_service.enroll_users_pipeline(payload_data)
 
