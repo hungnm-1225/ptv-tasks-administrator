@@ -15,8 +15,7 @@ from app.core.config import settings
 from app.core.playwright_manager import (
     acquire_playwright_slot,
     LOW_RAM_CHROMIUM_ARGS,
-    setup_low_ram_routes,
-    heavy_operation_guard
+    setup_low_ram_routes
 )
 
 logger = logging.getLogger(__name__)
@@ -26,15 +25,15 @@ MOODLE_BASE_URL = "https://learn.pythaverse.space"
 
 class PlaywrightLMSService:
     """
-    Cỗ máy Hybrid Moodle PLearn High-Speed Production Engine:
-    - Pha 1: Playwright SSO Keycloak trích xuất Cookies & sesskey trong ~4s rồi đóng ngay Chromium (RAM < 25MB).
+    Cỗ máy Hybrid Moodle PLearn High-Speed Production Engine (V3.5):
+    - Pha 1: Playwright SSO Keycloak trích xuất Cookies & sesskey trong ~3-5s rồi đóng ngay Chromium (RAM < 25MB).
     - Pha 2: Thực thi 100% bằng Direct HTTPX Async WebService:
       + Quét tự động Metadata (contextid, enrolid) & bảng Participants hiện tại.
       + Ghi danh theo lô Multi-Role (Học sinh 9, Giáo viên 7, Quản lý 1) trong 1 request duy nhất.
       + Smart Fallback tự chữa lành: Ép Mono-Role duy nhất & Cập nhật ngày bắt đầu/kết thúc nếu tài khoản đã tồn tại.
       + Phân nhóm thông minh: Hỗ trợ tìm Group gần đúng (Fuzzy match) & Tự động tạo Group mới nếu chưa có.
       + Hủy ghi danh (Unenrol) siêu tốc qua core_enrol_unenrol_user_enrolment.
-    - Hoãn toàn bộ background cronjobs thông qua heavy_operation_guard để bảo vệ 512MB RAM Render!
+    - Timeout co giãn linh hoạt (lên tới 300s - 600s), chịu tải hàng trăm tài khoản không lo ReadTimeout!
     """
 
     def __init__(self):
@@ -196,7 +195,7 @@ class PlaywrightLMSService:
                     if enrol_m:
                         enrol_id = enrol_m.group(1)
 
-            # 3. Quét danh sách thành viên hiện tại để lấy UEID (phục vụ Sửa ngày, Đổi Role, Unenrol)
+            # 3. Quét danh sách thành viên hiện tại để lấy UEID
             table_payload = [{
                 "index": 0,
                 "methodname": "core_table_get_dynamic_table_content",
@@ -247,7 +246,6 @@ class PlaywrightLMSService:
             return None, 0
 
         try:
-            # 1. Quét danh sách group hiện có
             res = await client.get(f"/group/index.php?id={course_id}")
             groups_map: Dict[str, str] = {}
             if res.status_code == 200:
@@ -256,7 +254,6 @@ class PlaywrightLMSService:
                     clean_title = re.sub(r'\s*\(\d+\)$', '', g_title).strip()
                     groups_map[clean_title] = g_val
 
-            # 2. Tìm kiếm gần đúng (Fuzzy matching)
             matched_group_name, matched_group_id = None, None
             for g_name, g_id in groups_map.items():
                 if group_query.lower() in g_name.lower():
@@ -269,7 +266,7 @@ class PlaywrightLMSService:
                     matched_group_name = close[0]
                     matched_group_id = groups_map[matched_group_name]
 
-            # 3. Nếu chưa có -> Tự động tạo Group mới
+            # Nếu chưa có -> Tự động tạo Group mới
             if not matched_group_id:
                 logger.info(f"➕ [Group Engine] Nhóm '{group_query}' chưa tồn tại. Đang tự động tạo mới...")
                 create_payload = {
@@ -289,7 +286,6 @@ class PlaywrightLMSService:
                 }
                 await client.post("/group/group.php", data=create_payload)
 
-                # Quét lại để lấy ID của nhóm vừa sinh
                 re_res = await client.get(f"/group/index.php?id={course_id}")
                 if re_res.status_code == 200:
                     options = re.findall(r'<option\s+value="(\d+)"[^>]*title="([^"]*)"[^>]*>', re_res.text)
@@ -303,7 +299,7 @@ class PlaywrightLMSService:
                 logger.warning(f"⚠️ Không thể tạo hoặc nhận diện Group '{group_query}'.")
                 return None, 0
 
-            # 4. Add toàn bộ danh sách User IDs vào Group trong 1 request
+            # Add danh sách User IDs vào Group trong 1 request duy nhất
             add_payload = [
                 ("sesskey", sesskey),
                 ("removeselect_searchtext", ""),
@@ -365,181 +361,196 @@ class PlaywrightLMSService:
         if total_requested == 0:
             return {"status": "failed", "error": "Không có email nào được cung cấp."}
 
-        # BẬT CỜ ƯU TIÊN HOÃN CRONJOB NGẦM
-        async with heavy_operation_guard(f"LMS Enroll {total_requested} Users"):
-            # BƯỚC 1: BỐC SESSION COOKIE VÀ SESSKEY (CHỈ 4S PLAYWRIGHT)
-            cookies_dict, sesskey = await self._steal_moodle_session()
-            if not cookies_dict or not sesskey:
-                return {"status": "failed", "error": "Không thể lấy phiên đăng nhập Moodle qua Keycloak SSO."}
+        # BƯỚC 1: BỐC SESSION COOKIE VÀ SESSKEY (CHỈ ~3.8S PLAYWRIGHT)
+        cookies_dict, sesskey = await self._steal_moodle_session()
+        if not cookies_dict or not sesskey:
+            return {"status": "failed", "error": "Không thể lấy phiên đăng nhập Moodle qua Keycloak SSO."}
 
-            batch_course_results = []
+        batch_course_results = []
 
-            # BƯỚC 2: KHỞI TẠO HTTPX ASYNC CLIENT
-            async with httpx.AsyncClient(
-                base_url=MOODLE_BASE_URL,
-                cookies=cookies_dict,
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0"},
-                timeout=30.0,
-                follow_redirects=True
-            ) as client:
+        # 🎯 CẤU HÌNH TIMEOUT CO GIÃN CHO BATCH LỚN (LÊN TỚI 180S MỖI REQUEST)
+        custom_limits = httpx.Limits(max_keepalive_connections=20, max_connections=50)
+        custom_timeout = httpx.Timeout(connect=15.0, read=180.0, write=60.0, pool=15.0)
 
-                for c_idx, c_info in enumerate(raw_courses):
-                    course_id = str(c_info.get("course_id", "")).strip()
-                    course_name = c_info.get("course_name", f"Course #{course_id}")
-                    end_date_str = c_info.get("end_date", payload.get("end_date", ""))
-                    start_date_option = str(c_info.get("start_date_type", c_info.get("start_date", payload.get("start_date", "4")))).strip()
-                    group_name = c_info.get("group_name", "").strip()
+        async with httpx.AsyncClient(
+            base_url=MOODLE_BASE_URL,
+            cookies=cookies_dict,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0"},
+            timeout=custom_timeout,
+            limits=custom_limits,
+            follow_redirects=True
+        ) as client:
 
-                    date_info = self._parse_date_components(end_date_str) if end_date_str else None
+            for c_idx, c_info in enumerate(raw_courses):
+                course_id = str(c_info.get("course_id", "")).strip()
+                course_name = c_info.get("course_name", f"Course #{course_id}")
+                end_date_str = c_info.get("end_date", payload.get("end_date", ""))
+                start_date_option = str(c_info.get("start_date_type", c_info.get("start_date", payload.get("start_date", "4")))).strip()
+                group_name = c_info.get("group_name", "").strip()
 
-                    logger.info(f"📚 [{c_idx + 1}/{len(raw_courses)}] Đang xử lý: {course_name} (ID: {course_id})")
+                date_info = self._parse_date_components(end_date_str) if end_date_str else None
 
-                    course_results = {
-                        "course_id": course_id,
-                        "course_name": course_name,
-                        "enrolled_new": [],
-                        "extended_access": [],
-                        "not_found": [],
-                        "group_created": None,
-                        "group_members_added": []
-                    }
+                logger.info(f"📚 [{c_idx + 1}/{len(raw_courses)}] Đang xử lý: {course_name} (ID: {course_id})")
 
-                    # Quét Metadata và thành viên hiện có
-                    context_id, enrol_id, existing_participants = await self._fetch_course_metadata_and_participants(client, course_id, sesskey)
-                    if not enrol_id:
-                        logger.error(f"❌ Không tìm thấy Enrol ID hợp lệ cho khóa #{course_id}")
-                        course_results["error"] = "Không lấy được Enrol ID của khóa học."
-                        batch_course_results.append(course_results)
+                course_results = {
+                    "course_id": course_id,
+                    "course_name": course_name,
+                    "enrolled_new": [],
+                    "extended_access": [],
+                    "not_found": [],
+                    "group_created": None,
+                    "group_members_added": []
+                }
+
+                # Quét Metadata và thành viên hiện có
+                context_id, enrol_id, existing_participants = await self._fetch_course_metadata_and_participants(client, course_id, sesskey)
+                if not enrol_id:
+                    logger.error(f"❌ Không tìm thấy Enrol ID hợp lệ cho khóa #{course_id}")
+                    course_results["error"] = "Không lấy được Enrol ID của khóa học."
+                    batch_course_results.append(course_results)
+                    continue
+
+                role_configs = [
+                    ("Non-editing teacher", "7", teachers),
+                    ("Manager", "1", managers),
+                    ("Student", "9", students),
+                ]
+
+                all_enrolled_user_ids_for_group: List[int] = []
+
+                for role_label, role_value, emails in role_configs:
+                    if not emails:
                         continue
 
-                    role_configs = [
-                        ("Non-editing teacher", "7", teachers),
-                        ("Manager", "1", managers),
-                        ("Student", "9", students),
-                    ]
+                    new_user_ids_to_enrol: List[int] = []
+                    emails_enrolled_new: List[str] = []
 
-                    all_enrolled_user_ids_for_group: List[int] = []
+                    for email in emails:
+                        clean_email = email.lower()
 
-                    for role_label, role_value, emails in role_configs:
-                        if not emails:
-                            continue
+                        # 1. Đã tồn tại -> Smart Fallback: Ép Mono-Role & Sửa ngày
+                        if clean_email in existing_participants:
+                            p_info = existing_participants[clean_email]
+                            uid = p_info["user_id"]
+                            ue_id = p_info["ue_id"]
+                            all_enrolled_user_ids_for_group.append(uid)
 
-                        new_user_ids_to_enrol: List[int] = []
-                        emails_enrolled_new: List[str] = []
-
-                        # Phân loại: Đã tồn tại (Fallback) vs Chưa tồn tại (Enrol mới)
-                        for email in emails:
-                            clean_email = email.lower()
-
-                            # 1. Đã tồn tại -> Smart Fallback: Ép Mono-Role & Sửa ngày
-                            if clean_email in existing_participants:
-                                p_info = existing_participants[clean_email]
-                                uid = p_info["user_id"]
-                                ue_id = p_info["ue_id"]
-                                all_enrolled_user_ids_for_group.append(uid)
-
-                                # Ép Mono-Role nếu vai trò hiện tại khác mong muốn
-                                if role_value not in p_info.get("roles", ""):
-                                    role_payload = [{
-                                        "index": 0,
-                                        "methodname": "core_update_inplace_editable",
-                                        "args": {
-                                            "component": "core_user",
-                                            "itemtype": "user_roles",
-                                            "itemid": p_info["itemid"],
-                                            "value": f'["{role_value}"]'
-                                        }
-                                    }]
-                                    await client.post(f"/lib/ajax/service.php?sesskey={sesskey}&info=core_update_inplace_editable", json=role_payload)
-
-                                # Gia hạn ngày nếu có end_date_str
-                                if date_info:
-                                    form_str = urllib.parse.urlencode({
-                                        "ue": ue_id, "ifilter": "", "sesskey": sesskey,
-                                        "_qf__enrol_user_enrolment_form": "1", "status": "0",
-                                        "timestart[enabled]": "0",
-                                        "timeend[day]": date_info["day"], "timeend[month]": date_info["month"],
-                                        "timeend[year]": date_info["year"], "timeend[hour]": "17",
-                                        "timeend[minute]": "00", "timeend[enabled]": "1"
-                                    })
-                                    edit_p = [{"index": 0, "methodname": "core_enrol_submit_user_enrolment_form", "args": {"formdata": form_str}}]
-                                    await client.post(f"/lib/ajax/service.php?sesskey={sesskey}&info=core_enrol_submit_user_enrolment_form", json=edit_p)
-
-                                course_results["extended_access"].append({"email": clean_email, "role": role_label, "valid_until": end_date_str or "Existing"})
-
-                            # 2. Chưa tồn tại -> Tìm kiếm qua core_enrol_get_potential_users
-                            else:
-                                search_p = [{
-                                    "index": 0, "methodname": "core_enrol_get_potential_users",
-                                    "args": {"courseid": course_id, "enrolid": enrol_id, "search": clean_email, "searchanywhere": True, "page": 0, "perpage": 5}
+                            # Ép Mono-Role nếu vai trò hiện tại khác mong muốn
+                            if role_value not in p_info.get("roles", ""):
+                                role_payload = [{
+                                    "index": 0,
+                                    "methodname": "core_update_inplace_editable",
+                                    "args": {
+                                        "component": "core_user",
+                                        "itemtype": "user_roles",
+                                        "itemid": p_info["itemid"],
+                                        "value": f'["{role_value}"]'
+                                    }
                                 }]
-                                s_res = await client.post(f"/lib/ajax/service.php?sesskey={sesskey}&info=core_enrol_get_potential_users", json=search_p)
-                                if s_res.status_code == 200:
-                                    s_data = s_res.json()[0].get("data", [])
-                                    if s_data:
-                                        uid = int(s_data[0]["id"])
-                                        new_user_ids_to_enrol.append(uid)
-                                        emails_enrolled_new.append(clean_email)
-                                        all_enrolled_user_ids_for_group.append(uid)
-                                        course_results["enrolled_new"].append({"email": clean_email, "role": role_label, "valid_until": end_date_str or "Unlimited"})
-                                    else:
-                                        course_results["not_found"].append({"email": clean_email, "role_intended": role_label, "reason": "Không tìm thấy trên Moodle"})
+                                await client.post(f"/lib/ajax/service.php?sesskey={sesskey}&info=core_update_inplace_editable", json=role_payload)
 
-                        # Ghi danh mới cả lô người dùng trong 1 request duy nhất!
-                        if new_user_ids_to_enrol:
-                            form_data = [
-                                ("mform_showmore_main", "0"), ("id", course_id), ("action", "enrol"),
-                                ("enrolid", enrol_id), ("sesskey", sesskey), ("_qf__enrol_manual_enrol_users_form", "1"),
-                                ("mform_showmore_id_main", "1" if date_info else "0"), ("roletoassign", role_value),
-                                ("startdate", start_date_option if start_date_option in ["2", "3", "4"] else "4")
-                            ]
-                            for uid in new_user_ids_to_enrol:
-                                form_data.append(("userlist[]", str(uid)))
-
+                            # Gia hạn ngày nếu có end_date_str
                             if date_info:
-                                form_data.extend([
-                                    ("timeend[day]", date_info["day"]), ("timeend[month]", date_info["month"]),
-                                    ("timeend[year]", date_info["year"]), ("timeend[hour]", "17"),
-                                    ("timeend[minute]", "00"), ("timeend[enabled]", "1")
-                                ])
+                                form_str = urllib.parse.urlencode({
+                                    "ue": ue_id, "ifilter": "", "sesskey": sesskey,
+                                    "_qf__enrol_user_enrolment_form": "1", "status": "0",
+                                    "timestart[enabled]": "0",
+                                    "timeend[day]": date_info["day"], "timeend[month]": date_info["month"],
+                                    "timeend[year]": date_info["year"], "timeend[hour]": "17",
+                                    "timeend[minute]": "00", "timeend[enabled]": "1"
+                                })
+                                edit_p = [{"index": 0, "methodname": "core_enrol_submit_user_enrolment_form", "args": {"formdata": form_str}}]
+                                await client.post(f"/lib/ajax/service.php?sesskey={sesskey}&info=core_enrol_submit_user_enrolment_form", json=edit_p)
 
-                            encoded_body = urllib.parse.urlencode(form_data)
-                            await client.post("/enrol/manual/ajax.php", content=encoded_body, headers={"Content-Type": "application/x-www-form-urlencoded"})
-                            logger.info(f"🎉 Ghi danh MỚI thành công {len(new_user_ids_to_enrol)} tài khoản [{role_label}]!")
+                            course_results["extended_access"].append({"email": clean_email, "role": role_label, "valid_until": end_date_str or "Existing"})
 
-                    # Phân nhóm Group thông minh (Fuzzy + Auto-Create)
-                    if group_name and all_enrolled_user_ids_for_group:
-                        unique_uids = list(set(all_enrolled_user_ids_for_group))
-                        g_name, added_c = await self._ensure_group_and_add_members(client, course_id, group_name, unique_uids, sesskey)
-                        course_results["group_created"] = g_name
-                        course_results["group_members_added"] = [f"{added_c} users added to {g_name}"]
+                        # 2. Chưa tồn tại -> Tìm kiếm qua core_enrol_get_potential_users
+                        else:
+                            search_p = [{
+                                "index": 0, "methodname": "core_enrol_get_potential_users",
+                                "args": {"courseid": course_id, "enrolid": enrol_id, "search": clean_email, "searchanywhere": True, "page": 0, "perpage": 5}
+                            }]
+                            s_res = await client.post(f"/lib/ajax/service.php?sesskey={sesskey}&info=core_enrol_get_potential_users", json=search_p)
+                            if s_res.status_code == 200:
+                                s_data = s_res.json()[0].get("data", [])
+                                if s_data:
+                                    uid = int(s_data[0]["id"])
+                                    new_user_ids_to_enrol.append(uid)
+                                    emails_enrolled_new.append(clean_email)
+                                    all_enrolled_user_ids_for_group.append(uid)
+                                    course_results["enrolled_new"].append({"email": clean_email, "role": role_label, "valid_until": end_date_str or "Unlimited"})
+                                else:
+                                    course_results["not_found"].append({"email": clean_email, "role_intended": role_label, "reason": "Không tìm thấy trên Moodle"})
 
-                    batch_course_results.append(course_results)
+                    # Ghi danh mới cả lô người dùng trong 1 request duy nhất!
+                    if new_user_ids_to_enrol:
+                        form_data = [
+                            ("mform_showmore_main", "0"), ("id", course_id), ("action", "enrol"),
+                            ("enrolid", enrol_id), ("sesskey", sesskey), ("_qf__enrol_manual_enrol_users_form", "1"),
+                            ("mform_showmore_id_main", "1" if date_info else "0"), ("roletoassign", role_value),
+                            ("startdate", start_date_option if start_date_option in ["2", "3", "4"] else "4")
+                        ]
+                        for uid in new_user_ids_to_enrol:
+                            form_data.append(("userlist[]", str(uid)))
 
-            total_courses = len(batch_course_results)
-            all_enrolled = sum(len(c["enrolled_new"]) for c in batch_course_results)
-            all_extended = sum(len(c["extended_access"]) for c in batch_course_results)
-            all_failed = sum(len(c["not_found"]) for c in batch_course_results)
+                        if date_info:
+                            form_data.extend([
+                                ("timeend[day]", date_info["day"]), ("timeend[month]", date_info["month"]),
+                                ("timeend[year]", date_info["year"]), ("timeend[hour]", "17"),
+                                ("timeend[minute]", "00"), ("timeend[enabled]", "1")
+                            ])
 
-            overall_status = "success" if all_failed == 0 else ("partial_success" if (all_enrolled + all_extended) > 0 else "failed")
+                        encoded_body = urllib.parse.urlencode(form_data)
+                        await client.post("/enrol/manual/ajax.php", content=encoded_body, headers={"Content-Type": "application/x-www-form-urlencoded"})
+                        logger.info(f"🎉 Ghi danh MỚI thành công {len(new_user_ids_to_enrol)} tài khoản [{role_label}]!")
 
-            return {
-                "status": overall_status,
-                "courses_count": total_courses,
-                "message": f"⚡ [HTTPX DIRECT] Hoàn tất {total_courses} khóa học cho {total_requested} người dùng (Mới: {all_enrolled}, Gia hạn/Đổi Role: {all_extended}, Thất bại: {all_failed})!",
-                "summary": {
-                    "total_courses": total_courses,
-                    "total_requested_per_course": total_requested,
-                    "all_enrolled_count": all_enrolled,
-                    "all_extended_count": all_extended,
-                    "all_failed_count": all_failed
-                },
-                "details": batch_course_results
-            }
+                # Phân nhóm Group thông minh (Fuzzy + Auto-Create)
+                if group_name and all_enrolled_user_ids_for_group:
+                    unique_uids = list(set(all_enrolled_user_ids_for_group))
+                    g_name, added_c = await self._ensure_group_and_add_members(client, course_id, group_name, unique_uids, sesskey)
+                    course_results["group_created"] = g_name
+                    course_results["group_members_added"] = [f"{added_c} users added to {g_name}"]
+
+                batch_course_results.append(course_results)
+
+        total_courses = len(batch_course_results)
+        all_enrolled = sum(len(c["enrolled_new"]) for c in batch_course_results)
+        all_extended = sum(len(c["extended_access"]) for c in batch_course_results)
+        all_failed = sum(len(c["not_found"]) for c in batch_course_results)
+
+        overall_status = "success" if all_failed == 0 else ("partial_success" if (all_enrolled + all_extended) > 0 else "failed")
+
+        return {
+            "status": overall_status,
+            "courses_count": total_courses,
+            "message": f"⚡ [HTTPX DIRECT] Hoàn tất {total_courses} khóa học cho {total_requested} người dùng (Mới: {all_enrolled}, Gia hạn/Đổi Role: {all_extended}, Thất bại: {all_failed})!",
+            "summary": {
+                "total_courses": total_courses,
+                "total_requested_per_course": total_requested,
+                "all_enrolled_count": all_enrolled,
+                "all_extended_count": all_extended,
+                "all_failed_count": all_failed
+            },
+            "details": batch_course_results
+        }
 
     async def enroll_users_pipeline(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Entrypoint chính ghi danh người dùng."""
-        return await self._internal_enroll_pipeline(payload)
+        """
+        Entrypoint chính ghi danh người dùng có bảo vệ Timeout co giãn linh hoạt:
+        Trần timeout tính toán theo quy mô lô (Tối thiểu 300s = 5 phút, tối đa 600s = 10 phút).
+        """
+        raw_courses = payload.get("courses", [])
+        courses_count = len(raw_courses) if raw_courses else 1
+        
+        # Co giãn trần timeout theo quy mô (300s đến 600s)
+        pipeline_timeout = min(600.0, max(300.0, courses_count * 60.0))
+        logger.info(f"⏱️ [Timeout Safeguard] Đặt trần thời gian cho luồng LMS Enroller: {pipeline_timeout}s")
+
+        try:
+            return await asyncio.wait_for(self._internal_enroll_pipeline(payload), timeout=pipeline_timeout)
+        except asyncio.TimeoutError:
+            logger.error(f"❌ Luồng ghi danh LMS vượt quá trần an toàn ({pipeline_timeout}s)!")
+            return {"status": "failed", "error": f"Tác vụ LMS Enroll bị quá hạn thời gian (Timeout {pipeline_timeout}s)."}
 
     async def unenrol_users_pipeline(self, payload_or_course_id: Any, emails: Optional[List[str]] = None) -> Dict[str, Any]:
         """Hủy ghi danh người dùng qua API core_enrol_unenrol_user_enrolment (chỉ mất ~5 giây)."""
@@ -560,7 +571,9 @@ class PlaywrightLMSService:
             return {"status": "failed", "error": "Không thể lấy session đăng nhập Moodle."}
 
         all_courses_results = []
-        async with httpx.AsyncClient(base_url=MOODLE_BASE_URL, cookies=cookies_dict, timeout=30.0) as client:
+        custom_timeout = httpx.Timeout(connect=15.0, read=120.0, write=30.0, pool=10.0)
+
+        async with httpx.AsyncClient(base_url=MOODLE_BASE_URL, cookies=cookies_dict, timeout=custom_timeout) as client:
             for c_info in raw_courses:
                 c_id = str(c_info.get("course_id", "")).strip()
                 _, _, existing_participants = await self._fetch_course_metadata_and_participants(client, c_id, sesskey)
