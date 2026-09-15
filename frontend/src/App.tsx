@@ -41,8 +41,7 @@ purgeStaleDataCaches();
 
 const PageLoadingFallback: React.FC = () => (
   <div className="min-h-[50vh] flex flex-col items-center justify-center text-ink-2 gap-3">
-    <Loader2 className="w-8 h-8 animate-spin text-accent" />
-    <span className="text-xs font-medium text-ink-2">Đang tải trang...</span>
+    <Loader />
   </div>
 );
 
