@@ -24,6 +24,7 @@ from app.models.intent import (
     EvidenceSpan
 )
 from app.services.evidence_verifier import evidence_verifier
+from app.services.email_thread_service import thread_service
 
 try:
     from app.core.config import settings
@@ -165,60 +166,62 @@ class AIEngine:
         source: str,
         sender_email: Optional[str] = None
     ) -> TicketSummary:
+        # 1. BỘ LỌC ROBOT / NEWSLETTER RÁC
         sender_clean = (sender_email or "").lower().strip()
         is_automated = any(sender_clean.startswith(prefix) or prefix in sender_clean for prefix in AUTOMATED_SENDER_PREFIXES)
-
         if is_automated:
-            logger.info(f"⚡ [FAST-PATH EMAIL] Bỏ qua gọi AI cho thư tự động từ: {sender_clean}")
             return TicketSummary(
                 category="other",
                 priority="low",
                 goal=f"Thông báo tự động: {subject[:60]}",
-                summary_vi=f"📨 Bản tin / Thông báo hệ thống tự động từ [{sender_clean}]: {subject}. Không yêu cầu thao tác kỹ thuật.",
+                summary_vi=f"📨 Bản tin / Thông báo tự động từ [{sender_clean}]: {subject}. Không yêu cầu thao tác kỹ thuật.",
                 assigned_name="Hệ Thống",
                 assigned_email=None,
                 model_name="fast_path_system_filter",
                 prompt_version="fast_path_v1.0"
             )
 
-        full_content = raw_content[:20000] if raw_content else "(Trống)"
+        # 2. PHÂN TÍCH EMAIL THREAD (BÓNG Ở CHÂN AI?)
+        parsed_thread = thread_service.parse_thread(raw_content, sender_email)
+
+        # TRƯỜNG HỢP 1: Kỹ sư vừa gửi mail hỏi thêm ➔ Trạng thái Chờ Khách Phản Hồi!
+        if parsed_thread.lifecycle_state == "WAITING_CUSTOMER_INFO":
+            logger.info(f"⏳ [THREAD WAITING] Tin nhắn mới nhất từ kỹ sư nội bộ ({sender_clean}). Đang chờ khách bổ sung thông tin.")
+            return TicketSummary(
+                category="other",
+                priority="normal",
+                goal=f"Chờ khách phản hồi: {subject}",
+                summary_vi=f"ℹ️ Kỹ sư nội bộ ({sender_clean}) đã phản hồi yêu cầu thêm thông tin. Hiện đang chờ phản hồi từ phía khách hàng.",
+                assigned_name="Kỹ Sư Phụ Trách",
+                assigned_email=sender_clean,
+                model_name="thread_state_machine",
+                prompt_version="v2.0"
+            )
+
+        # TRƯỜNG HỢP 2: Khách hàng gửi yêu cầu / bổ sung ➔ Gửi Compact Context cho AI
+        prompt_content = parsed_thread.compact_prompt_context if parsed_thread.is_thread else (raw_content[:20000] if raw_content else "(Trống)")
 
         if self.summary_prompt_tpl:
-            prompt = self.summary_prompt_tpl.format(source=source, subject=subject, full_content=full_content)
+            prompt = self.summary_prompt_tpl.format(source=source, subject=subject, full_content=prompt_content)
         else:
-            prompt = f"Tóm tắt: {subject}\n{full_content}"
+            prompt = f"Tóm tắt: {subject}\n{prompt_content}"
 
         parsed_data, used_model = self._call_gemini_with_fallback(prompt, primary_key=self.api_key_summary)
 
-        # ⚠️ BÁO LỖI MINH BẠCH KHI GEMINI AI GẶP SỰ CỐ HOẶC HẾT HẠN MỨC (ZERO-MOCKUP)
         if not parsed_data:
-            logger.error("❌ Không thể phân tích tóm tắt vé: Toàn bộ model Gemini gặp sự cố hoặc hết quota API.")
             return TicketSummary(
                 category="other",
                 priority="normal",
                 goal=subject or "Không thể phân tích",
-                summary_vi="⚠️ Lỗi: Không thể phân tích nội dung do sự cố kết nối AI hoặc hết hạn ngạch API (Quota 429). Quản trị viên vui lòng kiểm tra trực tiếp nội dung vé.",
+                summary_vi="⚠️ Lỗi: Không thể phân tích nội dung do sự cố kết nối AI hoặc hết hạn ngạch API (Quota 429).",
                 assigned_name="Chưa phân công",
                 assigned_email=None,
                 model_name="ai_analysis_failed",
                 prompt_version="error_fallback"
             )
 
-        # SANITIZE CHẶT CHẼ: ÉP VỀ ĐÚNG 5 NHÃN NẾU GEMINI TRẢ VỀ TỪ LẠ
         raw_cat = str(parsed_data.get("category", "other")).lower().strip()
-        if raw_cat in VALID_CATEGORIES:
-            final_cat = raw_cat
-        elif "account" in raw_cat or "user" in raw_cat or "pass" in raw_cat:
-            final_cat = "account_keycloak"
-        elif "course" in raw_cat or "enroll" in raw_cat or "lms" in raw_cat:
-            final_cat = "lms_enroll"
-        elif "license" in raw_cat or "contract" in raw_cat or "order" in raw_cat:
-            final_cat = "license"
-        elif "bug" in raw_cat or "error" in raw_cat or "issue" in raw_cat:
-            final_cat = "bug"
-        else:
-            final_cat = "other"
-
+        final_cat = raw_cat if raw_cat in VALID_CATEGORIES else "other"
         raw_pri = str(parsed_data.get("priority", "normal")).lower().strip()
         final_pri = raw_pri if raw_pri in VALID_PRIORITIES else "normal"
 
@@ -230,8 +233,9 @@ class AIEngine:
             assigned_name=parsed_data.get("assigned_name", "Hung Nguyen"),
             assigned_email=parsed_data.get("assigned_email", "hung.nguyenmanh@dtt.vn"),
             model_name=used_model,
-            prompt_version="v1.2.0"
+            prompt_version="v2.0"
         )
+
 
     def extract_operational_facts(
         self,
@@ -243,24 +247,34 @@ class AIEngine:
         sender_email: Optional[str] = None
     ) -> VerifiedIntentAssessment:
         sender_clean = (sender_email or "").lower().strip()
-        is_automated = any(sender_clean.startswith(prefix) or prefix in sender_clean for prefix in AUTOMATED_SENDER_PREFIXES)
 
-        if is_automated:
-            logger.info(f"⚡ [FAST-PATH FACTS] Xác nhận NO_ACTION cho thư tự động: {sender_clean}")
-            raw_assessment = IntentAssessment(
+        # 1. BỘ LỌC ROBOT
+        if any(sender_clean.startswith(prefix) for prefix in AUTOMATED_SENDER_PREFIXES):
+            return IntentAssessment(
                 outcome="no_action",
                 model_name="fast_path_system_filter",
                 prompt_version="fast_path_v1.0",
-                intents=[],
-                entities={},
-                extracted_entities=[],
-                missing_requirements=[],
-                warnings=["Đã nhận diện email thông báo tự động / newsletter. Tự động chuyển sang NO_ACTION mà không tốn Quota AI."],
+                intents=[], entities={}, extracted_entities=[], missing_requirements=[],
+                warnings=["Đã nhận diện email thông báo tự động. Chuyển sang NO_ACTION."],
                 raw_evidence_quotes=[]
             )
-            return raw_assessment
 
-        full_content = raw_content[:20000] if raw_content else "(Trống)"
+        # 2. PHÂN TÍCH EMAIL THREAD
+        parsed_thread = thread_service.parse_thread(raw_content, sender_email)
+
+        # Nếu kỹ sư vừa rep hỏi thêm thông tin ➔ KHÓA KHÔNG CHẠY TỰ ĐỘNG HÓA!
+        if parsed_thread.lifecycle_state == "WAITING_CUSTOMER_INFO":
+            return IntentAssessment(
+                outcome="no_action",
+                model_name="thread_state_machine",
+                prompt_version="v2.0",
+                intents=[], entities={}, extracted_entities=[], missing_requirements=[],
+                warnings=["Email mới nhất do kỹ sư nội bộ gửi yêu cầu bổ sung thông tin. Hệ thống tạm dừng chờ khách hàng phản hồi."],
+                raw_evidence_quotes=[]
+            )
+
+        # Đưa Compact Diff Context vào Prompt cho Gemini
+        full_content = parsed_thread.compact_prompt_context if parsed_thread.is_thread else (raw_content[:20000] if raw_content else "(Trống)")
         excel_info_str = json.dumps(excel_summary, ensure_ascii=False, indent=2) if excel_summary else "Không có file Excel đính kèm."
 
         if self.intent_prompt_tpl:
@@ -274,16 +288,13 @@ class AIEngine:
         parsed_data, used_model = self._call_gemini_with_fallback(prompt, primary_key=self.api_key_facts)
 
         if not parsed_data:
-            logger.error("❌ Không thể bóc tách sự thật vận hành: Toàn bộ model Gemini gặp sự cố hoặc hết quota API.")
             return IntentAssessment(
                 outcome="needs_information",
                 model_name="ai_extraction_failed",
                 prompt_version="error_fallback",
-                intents=[],
-                entities={},
-                extracted_entities=[],
-                missing_requirements=[{"item": "ai_extraction_failed", "reason": "Sự cố kết nối AI hoặc hết hạn ngạch API (Quota 429)"}],
-                warnings=["⚠️ Lỗi: Không thể phân tích và bóc tách sự thật vận hành do sự cố kết nối AI hoặc hết hạn ngạch API (Quota 429). Hệ thống dừng an toàn, không tự động sinh hành động."],
+                intents=[], entities={}, extracted_entities=[],
+                missing_requirements=[{"item": "ai_extraction_failed", "reason": "Sự cố kết nối AI hoặc hết hạn ngạch API"}],
+                warnings=["Không thể bóc tách sự thật vận hành do sự cố kết nối AI."],
                 raw_evidence_quotes=[]
             )
 
@@ -300,25 +311,21 @@ class AIEngine:
                 src_kind = ev.get("source_kind", "ticket_body") if isinstance(ev, dict) else "ticket_body"
 
                 if quote_str:
-                    ev_list.append(
-                        EvidenceSpan(
-                            source_revision_id=source_revision_id,
-                            quote=quote_str,
-                            start_offset=start_off,
-                            end_offset=end_off,
-                            source_kind=src_kind
-                        )
-                    )
+                    ev_list.append(EvidenceSpan(
+                        source_revision_id=source_revision_id,
+                        quote=quote_str,
+                        start_offset=start_off,
+                        end_offset=end_off,
+                        source_kind=src_kind
+                    ))
                     raw_evidence_quotes.append(quote_str)
 
-            structured_intents.append(
-                ExtractedIntent(
-                    type=item.get("type", "unknown"),
-                    confidence=float(item.get("confidence", 0.7)),
-                    evidence=ev_list,
-                    required_entities=item.get("required_entities", [])
-                )
-            )
+            structured_intents.append(ExtractedIntent(
+                type=item.get("type", "unknown"),
+                confidence=float(item.get("confidence", 0.7)),
+                evidence=ev_list,
+                required_entities=item.get("required_entities", [])
+            ))
 
         raw_entities = parsed_data.get("extracted_entities", [])
         structured_entities: List[ExtractedEntity] = []
@@ -349,7 +356,7 @@ class AIEngine:
         raw_assessment = IntentAssessment(
             outcome=parsed_outcome,
             model_name=used_model,
-            prompt_version="v1.2.0",
+            prompt_version="v2.0",
             intents=structured_intents,
             entities=parsed_data.get("entities", {}),
             extracted_entities=structured_entities,
@@ -358,6 +365,7 @@ class AIEngine:
             raw_evidence_quotes=raw_evidence_quotes
         )
 
+        # Chạy bổ trợ tất định với nội dung đã khử quoted reply
         raw_assessment = augment_assessment_with_request_facts(
             raw_assessment, raw_content, source_revision_id, sender_email=sender_email
         )
@@ -367,6 +375,5 @@ class AIEngine:
             raw_content=raw_content,
             source_revision_id=source_revision_id
         )
-
 
 gemini_engine = AIEngine()

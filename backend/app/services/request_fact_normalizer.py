@@ -141,6 +141,7 @@ def parse_users_from_table_or_text(text: str, source_revision_id: Optional[str])
     return users, spans
 
 
+# [CẬP NHẬT THAY THẾ HÀM augment_assessment_with_request_facts TRONG request_fact_normalizer.py]
 def augment_assessment_with_request_facts(
     assessment: IntentAssessment, 
     raw_content: str, 
@@ -149,11 +150,11 @@ def augment_assessment_with_request_facts(
 ) -> IntentAssessment:
     full_text = raw_content or ""
     
-    # ✂️ BỔ NHÁT KÉO ĐẦU TIÊN: Tách tin nhắn mới nhất khỏi 35 email lịch sử cũ!
+    # ✂️ CẮT ĐỨT CHUỖI: Chỉ phân tích tin nhắn mới nhất, vứt bỏ 35 email trích dẫn cũ!
     current_message, _ = split_email_thread(full_text)
     content = current_message if len(current_message) > 50 else full_text
 
-    # 1. Phát hiện bằng chứng ý định
+    # 1. Bằng chứng ý định trong thư mới nhất
     account_evidence = _first_phrase_span(
         content,
         [r"(?:create|creation of|set up|setup)\s+(?:the\s+)?accounts?", r"tạo\s+(?:mới\s+)?tài\s+khoản", r"use\s+\d+\s+SWRP\s+account"],
@@ -170,16 +171,14 @@ def augment_assessment_with_request_facts(
         source_revision_id,
     )
 
-    # 2. Bóc tách người dùng linh hoạt từ tin nhắn mới nhất
+    # 2. Bóc tách danh sách người dùng linh hoạt từ bảng hoặc text
     parsed_users, user_spans = parse_users_from_table_or_text(content, source_revision_id)
     if parsed_users:
         _append_entity(assessment, ExtractedEntity(type="users", raw_value=parsed_users, confidence=1.0, evidence=user_spans))
 
-    # 3. Bóc tách khóa học & Course ID số (ví dụ Course ID 1445)
     normalized_courses = []
     course_spans = []
 
-    # Tìm Course ID số dạng 1445
     id_matches = re.finditer(r"(?:Course\s+ID\s*:?\s*|view\.php\?id=)(\d+)", content, re.IGNORECASE)
     for m in id_matches:
         c_id = m.group(1).strip()
@@ -187,10 +186,8 @@ def augment_assessment_with_request_facts(
             normalized_courses.append(c_id)
             course_spans.append(_span(content, m.start(), m.end(), source_revision_id))
 
-    # Tìm tên khóa học SWRP/Python/Robotics
     for m in COURSE_RE.finditer(content):
         c_str = m.group(0).strip()
-        # Loại bỏ các chuỗi nhiễu có chữ "student" từ thời xưa
         if "student" in c_str.lower():
             continue
         if c_str not in normalized_courses:
@@ -200,7 +197,6 @@ def augment_assessment_with_request_facts(
     if normalized_courses:
         _append_entity(assessment, ExtractedEntity(type="courses", raw_value=normalized_courses, confidence=1.0, evidence=course_spans))
 
-    # 4. Gán ý định tương ứng nếu có bằng chứng
     if course_evidence and (parsed_users or normalized_courses):
         _append_intent(assessment, "course_access", course_evidence)
 
