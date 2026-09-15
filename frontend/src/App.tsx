@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { AppLayout } from './components/layout/AppLayout';
 import { Loader2 } from 'lucide-react';
+import Loader from './components/common/Loader';
 
 // Lazy load all page components for fast initial load
 const LandingPage = lazy(() => import('./features/landing/LandingPage').then(m => ({ default: m.LandingPage })));
@@ -51,8 +52,7 @@ const ProtectedRoute: React.FC = () => {
   if (loading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center text-ink-2 gap-3 transition-colors">
-        <Loader2 className="w-8 h-8 animate-spin text-accent" />
-        <span className="text-xs font-medium text-ink-2">Đang xác thực phiên làm việc...</span>
+        <Loader />
       </div>
     );
   }

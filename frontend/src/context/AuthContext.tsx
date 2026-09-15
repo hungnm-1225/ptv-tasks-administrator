@@ -40,7 +40,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const checkUserAccess = async (currentUser: any) => {
     if (currentUser) {
-      // ⚠️ KIỂM TRA EMAIL: Nếu KHÔNG PHẢI hung.nguyenmanh@dtt.vn -> ĐĂNG XUẤT NGAY!
       if (currentUser.email !== ALLOWED_ADMIN_EMAIL) {
         toast.error(`Truy cập bị từ chối! Email ${currentUser.email} không thuộc danh sách quản trị viên.`);
         await supabase.auth.signOut();
