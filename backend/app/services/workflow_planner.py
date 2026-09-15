@@ -107,8 +107,11 @@ class WorkflowPlannerService:
     @staticmethod
     def resolve_course_from_db(course_query: str, is_cof: bool = False, is_teacher: bool = True) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """
-        Phân giải tên viết tắt (SWRP 11, SWRP_11, SWRP 7...) thành tên đầy đủ chuẩn xác trong CSDL.
-        Khớp đúng tên cột thực tế: 'course_name' và 'sku'.
+        Phân giải tên viết tắt (SWRP 7, SWRP 9, SWRP 11...) và bốc đúng Git Repo thực tế:
+        - Quét cả 2 bảng (lms_courses & workspace_courses) để không bỏ sót cấu hình.
+        - Đọc chính xác URL từ mảng 'git_repos' hoặc cột 'git_repo_url'.
+        - Tuyệt đối KHÔNG tự chế URL giả.
+        - Lọc đúng đối tượng: Học sinh chỉ nhận repo 'Cả GV & Học sinh', Giáo viên nhận repo GV.
         """
         if not course_query:
             return None, None, None
@@ -116,56 +119,101 @@ class WorkflowPlannerService:
         supabase = get_supabase_client()
         clean_q = course_query.strip()
         
-        # Bắt các mẫu viết tắt: SWRP 7, SWRP 11, SWRP_11, SWRP-11, SWRP11...
+        # Bắt mẫu viết tắt: SWRP 7, SWRP 9, SWRP_11, SWRP-11...
         match = re.search(r"([A-Za-z]+)[\s_\-]*(\d+)", clean_q)
-        target_table = "workspace_courses" if is_cof else "lms_courses"
 
-        try:
-            query = supabase.table(target_table).select("*")
-            if match:
-                prefix, num = match.group(1), match.group(2)
-                # ✅ SỬA CHUẨN: Query trên cột 'course_name' và 'sku' thay vì 'name' và 'code'
-                query = query.or_(
-                    f"course_name.ilike.%{prefix} {num}:%,"
-                    f"course_name.ilike.%{prefix} {num}%,"
-                    f"course_name.ilike.%{prefix}%{num}%,"
-                    f"sku.ilike.%{prefix}%{num}%"
-                )
-            else:
-                query = query.ilike("course_name", f"%{clean_q}%")
+        # Thứ tự ưu tiên tra cứu: nếu là COF thì ưu tiên workspace, ngược lại ưu tiên lms
+        primary_table = "workspace_courses" if is_cof else "lms_courses"
+        secondary_table = "lms_courses" if is_cof else "workspace_courses"
 
-            res = query.limit(5).execute()
-            courses = res.data or []
-            if not courses:
-                return clean_q, None, None
+        def _search_in_table(table_name: str) -> List[Dict[str, Any]]:
+            try:
+                q = supabase.table(table_name).select("*")
+                if match:
+                    prefix, num = match.group(1), match.group(2)
+                    q = q.or_(
+                        f"course_name.ilike.%{prefix} {num}:%,"
+                        f"course_name.ilike.%{prefix} {num}%,"
+                        f"course_name.ilike.%{prefix}%{num}%,"
+                        f"sku.ilike.%{prefix}%{num}%"
+                    )
+                else:
+                    q = q.ilike("course_name", f"%{clean_q}%")
+                res = q.limit(5).execute()
+                return res.data or []
+            except Exception as ex:
+                logger.warning(f"Lỗi query bảng {table_name}: {ex}")
+                return []
 
-            best = courses[0]
-            # ✅ SỬA CHUẨN: Lấy 'course_name' và 'sku'
-            canonical_name = best.get("course_name") or best.get("name") or clean_q
-            course_code = best.get("sku") or best.get("code") or ""
-            git_repos = best.get("git_repos") or []
+        # 1. Tìm ở bảng chính, nếu không có thì tìm ở bảng phụ
+        courses = _search_in_table(primary_table)
+        if not courses:
+            courses = _search_in_table(secondary_table)
 
-            resolved_repo = None
-            if isinstance(git_repos, list) and git_repos:
-                for r in git_repos:
-                    if isinstance(r, dict):
-                        r_name = r.get("name", "") or r.get("repo_name", "")
-                        r_target = str(r.get("target", "") or r.get("role", "")).lower()
-                        if is_teacher and ("teacher" in r_target or "gv" in r_name.lower()):
-                            resolved_repo = r.get("url") or f"https://git.pythaverse.space/pythaverse/{r_name}"
-                            break
-                        elif not is_teacher and ("all" in r_target or "hs" in r_name.lower() or "student" in r_target):
-                            resolved_repo = r.get("url") or f"https://git.pythaverse.space/pythaverse/{r_name}"
-                            break
-
-                if not resolved_repo and git_repos:
-                    first = git_repos[0]
-                    resolved_repo = first.get("url") if isinstance(first, dict) else str(first)
-
-            return canonical_name, course_code, resolved_repo
-        except Exception as e:
-            logger.warning(f"Lỗi tra cứu course DB cho '{course_query}': {e}")
+        if not courses:
+            logger.info(f"🔍 Không tìm thấy khóa học nào trong CSDL khớp với '{clean_q}'")
             return clean_q, None, None
+
+        best = courses[0]
+        canonical_name = best.get("course_name") or clean_q
+        course_code = best.get("sku") or ""
+
+        # 2. BỐC ĐÚNG GIT REPOSITORY THỰC TẾ ĐƯỢC LƯU TRONG CSDL (ZERO-MOCKUP)
+        git_repos_list = best.get("git_repos") or []
+        resolved_repo = None
+
+        def _extract_valid_url(entry: Any) -> Optional[str]:
+            if isinstance(entry, dict):
+                u = entry.get("url") or entry.get("repo_url") or entry.get("link")
+                if u and str(u).startswith("http"):
+                    return str(u).strip()
+            elif isinstance(entry, str) and entry.startswith("http"):
+                return entry.strip()
+            return None
+
+        # Trích xuất từ mảng JSONB 'git_repos'
+        if isinstance(git_repos_list, list) and git_repos_list:
+            for r in git_repos_list:
+                if not isinstance(r, dict):
+                    continue
+                repo_url = _extract_valid_url(r)
+                if not repo_url:
+                    continue
+
+                raw_target = str(r.get("target") or r.get("role") or "").lower()
+                
+                # PHÂN BIỆT RẠCH RÒI THEO ĐÚNG NÚT BẤM TRÊN GIAO DIỆN:
+                # - "Giáo viên (Non-editing Teacher)" -> 'teacher', 'gv', 'non-editing'
+                # - "Cả GV & Học Sinh" -> 'all', 'cả', 'student', 'học sinh'
+                is_all_target = any(k in raw_target for k in ["all", "cả", "student", "học sinh", "hs"])
+                is_teacher_target = any(k in raw_target for k in ["teacher", "giáo viên", "gv", "non-editing"])
+
+                if is_teacher:
+                    # Giáo viên: Ưu tiên repo riêng cho GV, nếu không thì lấy repo chung
+                    if is_teacher_target or is_all_target:
+                        resolved_repo = repo_url
+                        if is_teacher_target: # Tìm thấy đúng repo chuyên cho GV thì chốt ngay
+                            break
+                else:
+                    # Học sinh: CHỈ ĐƯỢC PHÉP LẤY REPO DÙNG CHUNG ("Cả GV & Học Sinh")
+                    if is_all_target and not ("non-editing" in raw_target and not "cả" in raw_target):
+                        resolved_repo = repo_url
+                        break
+
+            # Nếu chưa chọn được mà có repo nhưng không rõ target: nếu là GV thì lấy repo đầu tiên
+            if not resolved_repo and git_repos_list and is_teacher:
+                resolved_repo = _extract_valid_url(git_repos_list[0])
+
+        # Fallback: Nếu trong mảng git_repos chưa có, kiểm tra cột đơn 'git_repo_url'
+        if not resolved_repo and best.get("git_repo_url"):
+            single_url = str(best["git_repo_url"]).strip()
+            single_target = str(best.get("git_repo_target") or "").lower()
+            if single_url.startswith("http"):
+                if is_teacher or any(k in single_target for k in ["all", "cả", "student"]):
+                    resolved_repo = single_url
+
+        logger.info(f"🎯 Phân giải khóa học: '{clean_q}' ➔ '{canonical_name}' | Git Repo: {resolved_repo or 'Không có'}")
+        return canonical_name, course_code, resolved_repo
 
     def _resolve_context_value(self, expression: str, context: Dict[str, Any]) -> Any:
         if str(expression).startswith("{{") and str(expression).endswith("}}"):
