@@ -287,3 +287,31 @@ async def smart_poll_condition(
             return res
         await asyncio.sleep(poll_interval)
     return None
+
+_HEAVY_OPERATION_LOCK = asyncio.Lock()
+_IS_HEAVY_OPERATION_RUNNING: bool = False
+_HEAVY_OPERATION_NAME: str = ""
+
+def is_heavy_operation_running() -> tuple[bool, str]:
+    """Kiểm tra xem hệ thống có đang bận chạy tác vụ nặng (LMS Enroll quy mô lớn, Order-Contract) hay không."""
+    return _IS_HEAVY_OPERATION_RUNNING, _HEAVY_OPERATION_NAME
+
+class heavy_operation_guard:
+    """Context Manager kéo cờ ưu tiên tuyệt đối, yêu cầu 6 crons tạm hoãn nhường tài nguyên."""
+    def __init__(self, operation_name: str):
+        self.operation_name = operation_name
+
+    async def __aenter__(self):
+        global _IS_HEAVY_OPERATION_RUNNING, _HEAVY_OPERATION_NAME
+        async with _HEAVY_OPERATION_LOCK:
+            _IS_HEAVY_OPERATION_RUNNING = True
+            _HEAVY_OPERATION_NAME = self.operation_name
+            logger.info(f"🚨 [CIRCUIT BREAKER] BẬT CỜ ƯU TIÊN: '{self.operation_name}'. Toàn bộ Cronjob ngầm sẽ tạm hoãn!")
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        global _IS_HEAVY_OPERATION_RUNNING, _HEAVY_OPERATION_NAME
+        async with _HEAVY_OPERATION_LOCK:
+            _IS_HEAVY_OPERATION_RUNNING = False
+            _HEAVY_OPERATION_NAME = ""
+            logger.info(f"🟢 [CIRCUIT BREAKER] HẠ CỜ ƯU TIÊN: '{self.operation_name}'. Hệ thống trở lại trạng thái bình thường.")

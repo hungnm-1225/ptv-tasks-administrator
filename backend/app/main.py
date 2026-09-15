@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import inspect
+from app.core.playwright_manager import is_heavy_operation_running
 
 # Import Core & Services
 from app.core.playwright_manager import acquire_playwright_slot, force_kill_zombie_chromium, CronSlotYieldException
@@ -36,21 +37,26 @@ def get_now_vn_str() -> str:
     return datetime.now(VN_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 
-async def safe_job_wrapper(job_func, job_name: str):
-    """Bọc an toàn cho cron: bẫy ngoại lệ, chống crash app và thu hồi RAM."""
-    try:
-        logger.info(f"🔄 [Cron Job Started] {job_name}")
-        if inspect.iscoroutinefunction(job_func):
-            await job_func()
-        else:
-            job_func()
-        logger.info(f"✔️ [Cron Job Finished] {job_name}")
-    except CronSlotYieldException as ye:
-        logger.info(f"ℹ️ [Cron Job Yielded] {job_name}: {ye}")
-    except Exception as e:
-        logger.error(f"❌ [Cron Job Error] {job_name}: {str(e)}")
-    finally:
-        gc.collect()
+def safe_job_wrapper(job_func, job_name: str):
+    async def wrapper(*args, **kwargs):
+        # 🛡️ KIỂM TRA CIRCUIT BREAKER: Nếu đang chạy tác vụ nặng -> Hoãn cronjob êm dịu ngay lập tức!
+        is_running, op_name = is_heavy_operation_running()
+        if is_running:
+            logger.info(f"⏸️ [Cron Yield] Hoãn tác vụ định kỳ '{job_name}' vì hệ thống đang ưu tiên chạy: '{op_name}'")
+            return
+
+        try:
+            logger.info(f"⏰ [Cron Start] Bắt đầu cronjob: {job_name}")
+            await job_func(*args, **kwargs)
+            logger.info(f"✅ [Cron Finished] Hoàn thành cronjob: {job_name}")
+        except CronSlotYieldException:
+            logger.info(f"⏸️ [Cron Yield] Nhường slot Playwright cho tác vụ VIP: {job_name}")
+        except Exception as e:
+            logger.error(f"❌ [Cron Error] Lỗi nghiêm trọng trong cronjob {job_name}: {e}", exc_info=True)
+        finally:
+            gc.collect()
+
+    return wrapper
 
 
 async def poll_workspace_long_tasks():
@@ -439,3 +445,4 @@ async def health_check():
         "scheduler_running": scheduler.running,
         "active_jobs": len(scheduler.get_jobs())
     }
+    

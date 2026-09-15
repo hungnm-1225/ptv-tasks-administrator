@@ -246,9 +246,15 @@ export const UnifiedInboxPage: React.FC = () => {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [expandedContent, setExpandedContent] = useState<Record<string, boolean>>({});
   const [previewFile, setPreviewFile] = useState<{ filename: string; url: string } | null>(null);
-  const [spreadsheetPreview, setSpreadsheetPreview] = useState<{ sheetName: string; rows: string[][] } | null>(null);
+  const [spreadsheetPreview, setSpreadsheetPreview] = useState<{
+    sheetNames: string[];
+    activeSheet: string;
+    sheetsData: Record<string, string[][]>;
+  } | null>(null);
   const [spreadsheetPreviewError, setSpreadsheetPreviewError] = useState<string | null>(null);
   const [isSpreadsheetLoading, setIsSpreadsheetLoading] = useState<boolean>(false);
+  const [summarizingTicketId, setSummarizingTicketId] = useState<string | null>(null);
+  const [vungAViewMode, setVungAViewMode] = useState<'summary' | 'raw'>('summary');
 
   // Metadata Phả hệ & Khóa học
   const [schoolsList, setSchoolsList] = useState<HierarchySchoolItem[]>([]);
@@ -327,8 +333,6 @@ export const UnifiedInboxPage: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // This is deliberately a review-only preview. Attachment values are not
-  // promoted to workflow facts until immutable extraction snapshots exist.
   useEffect(() => {
     let cancelled = false;
     const loadSpreadsheet = async () => {
@@ -340,12 +344,29 @@ export const UnifiedInboxPage: React.FC = () => {
         const response = await fetch(previewFile.url);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const workbook = XLSX.read(await response.arrayBuffer(), { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        if (!sheetName) throw new Error('Không có worksheet');
-        const rows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[sheetName], { header: 1, defval: '' })
-          .slice(0, 100)
-          .map(row => row.slice(0, 30).map(value => String(value ?? '')));
-        if (!cancelled) setSpreadsheetPreview({ sheetName, rows });
+        const sheetNames = workbook.SheetNames;
+        if (!sheetNames || sheetNames.length === 0) throw new Error('Không có worksheet');
+
+        const sheetsData: Record<string, string[][]> = {};
+        sheetNames.forEach((sName) => {
+          const ws = workbook.Sheets[sName];
+          if (ws) {
+            const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: '' })
+              .slice(0, 150)
+              .map(row => row.slice(0, 40).map(value => String(value ?? '')));
+            sheetsData[sName] = rows;
+          } else {
+            sheetsData[sName] = [];
+          }
+        });
+
+        if (!cancelled) {
+          setSpreadsheetPreview({
+            sheetNames,
+            activeSheet: sheetNames[0],
+            sheetsData,
+          });
+        }
       } catch {
         if (!cancelled) setSpreadsheetPreviewError('Không thể đọc trực tiếp bảng tính này. Bạn vẫn có thể mở hoặc tải file để đối chiếu.');
       } finally {
@@ -426,6 +447,28 @@ export const UnifiedInboxPage: React.FC = () => {
       toast.error('Lỗi tóm tắt lại: ' + (err as Error).message);
     } finally {
       setWorkflowLoading(false);
+    }
+  };
+  const handleSummarizeSingleTicket = async (ticketId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSummarizingTicketId(ticketId);
+    try {
+      const res = await fetchApi<{ status: string; summary: any }>(`/tickets/${ticketId}/re-summarize`, {
+        method: 'POST',
+      });
+      if (res && res.status === 'success') {
+        toast.success('📝 Đã tóm tắt vé thành công!');
+        await loadTickets(false);
+        // Nếu modal đang mở đúng vé này thì đồng bộ luôn
+        if (selectedWorkflowTicket?.id === ticketId && res.summary) {
+          const summaryText = typeof res.summary === 'string' ? res.summary : (res.summary.summary_vi || '');
+          setSelectedWorkflowTicket(prev => prev ? { ...prev, ai_summary: summaryText } : null);
+        }
+      }
+    } catch (err) {
+      toast.error('Lỗi tóm tắt vé: ' + (err as Error).message);
+    } finally {
+      setSummarizingTicketId(null);
     }
   };
 
@@ -1165,6 +1208,19 @@ export const UnifiedInboxPage: React.FC = () => {
                     ) : (
                       <>
                         <button
+                          onClick={(e) => handleSummarizeSingleTicket(ticket.id, e)}
+                          disabled={summarizingTicketId === ticket.id}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-900/60 transition shadow-2xs cursor-pointer disabled:opacity-60"
+                          title={ticket.ai_summary ? 'Chạy lại AI tóm tắt cho vé này' : 'Tạo tóm tắt AI cho vé này'}
+                        >
+                          {summarizingTicketId === ticket.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600 dark:text-indigo-400" />
+                          ) : (
+                            <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                          )}
+                          <span>{ticket.ai_summary ? 'Tóm tắt lại' : 'Tóm tắt'}</span>
+                        </button>
+                        <button
                           onClick={() => handleDismissTask(ticket.id)}
                           disabled={actionLoading === ticket.id}
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition cursor-pointer"
@@ -1301,12 +1357,12 @@ export const UnifiedInboxPage: React.FC = () => {
                 <>
                   {/* BENTO GRID: VÙNG A + VÙNG B */}
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-                    {/* VÙNG A: REQUEST CONTEXT */}
-                    <div className="lg:col-span-5 p-4 sm:p-5 rounded-2xl bg-slate-50/80 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 space-y-3 flex flex-col justify-between">
+                    {/* ✅ VÙNG A NÂNG CẤP: TÍCH HỢP ĐỐI CHIẾU TÓM TẮT AI & NỘI DUNG GỐC */}
+                    <div className="lg:col-span-5 p-4 sm:p-5 rounded-2xl bg-slate-50/80 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 space-y-3.5 flex flex-col">
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="text-[11px] font-black uppercase tracking-wider text-slate-400">
-                            VÙNG A • Thông Tin Yêu Cầu
+                            VÙNG A • Thông Tin Yêu Cầu & Đối Chiếu
                           </span>
                           {renderSourceBadge(selectedWorkflowTicket.source)}
                         </div>
@@ -1333,7 +1389,7 @@ export const UnifiedInboxPage: React.FC = () => {
                         </div>
 
                         {selectedWorkflowTicket.attachments && selectedWorkflowTicket.attachments.length > 0 && (
-                          <div className="pt-2">
+                          <div className="pt-1">
                             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
                               Tài liệu đính kèm ({selectedWorkflowTicket.attachments.length}):
                             </span>
@@ -1341,15 +1397,15 @@ export const UnifiedInboxPage: React.FC = () => {
                               {selectedWorkflowTicket.attachments.map((att: any, i: number) => (
                                 <div
                                   key={i}
-                                  className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs"
+                                  className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs shadow-2xs"
                                 >
-                                  <span className="truncate max-w-[200px] font-medium text-slate-700 dark:text-slate-300">
+                                  <span className="truncate max-w-[190px] font-medium text-slate-700 dark:text-slate-300">
                                     {att.filename}
                                   </span>
                                   <button
                                     type="button"
                                     onClick={() => setPreviewFile(att)}
-                                    className="p-1 text-indigo-600 hover:underline flex items-center gap-1 font-semibold"
+                                    className="p-1 text-indigo-600 hover:underline flex items-center gap-1 font-semibold cursor-pointer"
                                   >
                                     <Eye className="w-3.5 h-3.5" />
                                     <span>Xem</span>
@@ -1359,6 +1415,49 @@ export const UnifiedInboxPage: React.FC = () => {
                             </div>
                           </div>
                         )}
+                      </div>
+
+                      {/* KHUNG ĐỐI CHIẾU: TAB CHUYỂN ĐỔI GIỮA TÓM TẮT AI VÀ NỘI DUNG NGUYÊN BẢN */}
+                      <div className="pt-2 border-t border-slate-200/80 dark:border-slate-750 flex-1 flex flex-col min-h-0">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-1 bg-slate-200/70 dark:bg-slate-800 p-0.5 rounded-lg text-[11px]">
+                            <button
+                              type="button"
+                              onClick={() => setVungAViewMode('summary')}
+                              className={`px-2.5 py-1 rounded-md font-bold transition cursor-pointer ${vungAViewMode === 'summary'
+                                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
+                                : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                                }`}
+                            >
+                              Tóm Tắt AI
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setVungAViewMode('raw')}
+                              className={`px-2.5 py-1 rounded-md font-bold transition cursor-pointer ${vungAViewMode === 'raw'
+                                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
+                                : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                                }`}
+                            >
+                              Văn Bản Gốc
+                            </button>
+                          </div>
+                          <span className="text-[10px] font-mono text-slate-400">
+                            {vungAViewMode === 'summary' ? 'Bản mềm Inbox' : 'Thân email nguyên thủy'}
+                          </span>
+                        </div>
+
+                        <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs overflow-y-auto max-h-48 flex-1 leading-relaxed shadow-inner">
+                          {vungAViewMode === 'summary' ? (
+                            <p className="whitespace-pre-line text-slate-800 dark:text-slate-200 font-medium">
+                              {selectedWorkflowTicket.ai_summary || 'Chưa có bản tóm tắt. Bạn có thể nhấn nút "Tóm tắt lại" ở trên góc phải để AI sinh tóm tắt.'}
+                            </p>
+                          ) : (
+                            <pre className="whitespace-pre-wrap font-mono text-[11px] text-slate-700 dark:text-slate-300">
+                              {stripHtmlTags(selectedWorkflowTicket.raw_content) || '(Không có nội dung văn bản gốc)'}
+                            </pre>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -1828,64 +1927,153 @@ export const UnifiedInboxPage: React.FC = () => {
         document.body
       )}
 
-      {/* MODAL XEM TRƯỚC FILE ĐÍNH KÈM */}
+      {/* ✅ MODAL XEM TRƯỚC FILE ĐÍNH KÈM ĐA NĂNG (MULTI-TAB EXCEL PREVIEW CHUẨN MỰC) */}
       {previewFile && typeof document !== 'undefined' && createPortal(
         <div
           onClick={() => setPreviewFile(null)}
-          className="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4"
+          className="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-3xl w-full max-w-full sm:max-w-2xl lg:max-w-3xl p-6 shadow-2xl space-y-4 my-auto"
+            className={`bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-3xl w-full shadow-2xl space-y-4 my-auto flex flex-col max-h-[92vh] ${previewFile.filename.match(/\.xlsx?$/i)
+              ? 'max-w-full sm:max-w-4xl lg:max-w-5xl xl:max-w-6xl p-5 sm:p-7'
+              : 'max-w-full sm:max-w-2xl lg:max-w-3xl p-6'
+              }`}
           >
-            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <Paperclip className="w-4 h-4 text-indigo-600" />
-                <span className="text-xs font-bold truncate max-w-[400px] text-slate-900 dark:text-slate-200">{previewFile.filename}</span>
+            {/* Header Modal */}
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3 shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0 pr-3">
+                {previewFile.filename.match(/\.xlsx?$/i) ? (
+                  <div className="p-2 rounded-xl bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                    <FileSpreadsheetIcon className="w-4 h-4" />
+                  </div>
+                ) : (
+                  <div className="p-2 rounded-xl bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
+                    <Paperclip className="w-4 h-4" />
+                  </div>
+                )}
+                <div className="truncate">
+                  <span className="text-xs sm:text-sm font-bold truncate text-slate-900 dark:text-slate-100 block">
+                    {previewFile.filename}
+                  </span>
+                  {spreadsheetPreview && (
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      Phát hiện {spreadsheetPreview.sheetNames.length} Sheet(s) • Đang xem: <b className="text-emerald-600">{spreadsheetPreview.activeSheet}</b>
+                    </span>
+                  )}
+                </div>
               </div>
-              <button onClick={() => setPreviewFile(null)} className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+              <button
+                onClick={() => setPreviewFile(null)}
+                className="p-1.5 rounded-xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer shrink-0"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="flex items-center justify-center min-h-[250px] max-h-[60vh] overflow-auto bg-slate-50 dark:bg-slate-800/40 rounded-2xl p-4">
+            {/* Thanh Tab Navigation dành riêng cho Excel (Hỗ trợ COF 4-5 Tabs) */}
+            {spreadsheetPreview && (
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-0.5 scrollbar-thin shrink-0 border-b border-slate-150 dark:border-slate-800/80">
+                <span className="text-[10px] uppercase font-black text-slate-400 pr-1 shrink-0 flex items-center gap-1">
+                  <Layers className="w-3 h-3" /> Tabs:
+                </span>
+                {spreadsheetPreview.sheetNames.map((sheet) => {
+                  const isActive = sheet === spreadsheetPreview.activeSheet;
+                  const rowCount = spreadsheetPreview.sheetsData[sheet]?.length || 0;
+                  return (
+                    <button
+                      key={sheet}
+                      type="button"
+                      onClick={() => setSpreadsheetPreview((prev) => prev ? { ...prev, activeSheet: sheet } : null)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-2 shrink-0 cursor-pointer ${isActive
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                        }`}
+                    >
+                      <span>{sheet}</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-medium ${isActive ? 'bg-emerald-800 text-emerald-100' : 'bg-slate-200 dark:bg-slate-700 text-slate-500'
+                        }`}>
+                        {rowCount} dòng
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Vùng Render Nội Dung Tệp */}
+            <div className="flex-1 min-h-[300px] max-h-[62vh] overflow-auto bg-slate-50 dark:bg-slate-850/50 rounded-2xl p-4 flex flex-col justify-start">
               {previewFile.filename.match(/\.(png|jpe?g|webp|gif)$/i) ? (
-                <img src={previewFile.url} alt={previewFile.filename} className="max-h-[55vh] object-contain rounded-xl shadow-sm" />
+                <div className="flex items-center justify-center h-full">
+                  <img src={previewFile.url} alt={previewFile.filename} className="max-h-[55vh] object-contain rounded-xl shadow-sm" />
+                </div>
               ) : previewFile.filename.match(/\.pdf$/i) ? (
                 <iframe title={`Xem trước ${previewFile.filename}`} src={previewFile.url} className="w-full h-[55vh] rounded-xl bg-white" />
               ) : previewFile.filename.match(/\.xlsx?$/i) && isSpreadsheetLoading ? (
-                <div className="w-full self-stretch space-y-3 animate-pulse p-2">
-                  <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-48" />
+                <div className="w-full space-y-3 animate-pulse p-2">
+                  <div className="h-5 bg-slate-200 dark:bg-slate-700 rounded w-64" />
                   <div className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
-                    <div className="h-9 bg-slate-200 dark:bg-slate-700 w-full" />
+                    <div className="h-10 bg-slate-200 dark:bg-slate-700 w-full" />
                     <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                      {[1, 2, 3, 4, 5, 6].map((idx) => (
-                        <div key={idx} className="h-8 bg-slate-100/60 dark:bg-slate-800/40 w-full flex items-center px-3 gap-3">
-                          <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-1/6" />
-                          <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-1/3" />
-                          <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-1/4" />
-                          <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-1/6" />
+                      {[1, 2, 3, 4, 5, 6, 7].map((idx) => (
+                        <div key={idx} className="h-9 bg-slate-100/60 dark:bg-slate-800/40 w-full flex items-center px-3 gap-3">
+                          <div className="h-3.5 bg-slate-200 dark:bg-slate-700 rounded w-1/6" />
+                          <div className="h-3.5 bg-slate-200 dark:bg-slate-700 rounded w-1/3" />
+                          <div className="h-3.5 bg-slate-200 dark:bg-slate-700 rounded w-1/4" />
+                          <div className="h-3.5 bg-slate-200 dark:bg-slate-700 rounded w-1/6" />
                         </div>
                       ))}
                     </div>
                   </div>
                 </div>
               ) : previewFile.filename.match(/\.xlsx?$/i) && spreadsheetPreview ? (
-                <div className="w-full self-stretch overflow-auto">
-                  <p className="mb-3 text-[11px] font-bold text-slate-500">Sheet: {spreadsheetPreview.sheetName}</p>
-                  <table className="w-full border-collapse text-left text-xs">
-                    <tbody>
-                      {spreadsheetPreview.rows.map((row, rowIndex) => (
-                        <tr key={rowIndex} className={rowIndex === 0 ? 'bg-slate-200 dark:bg-slate-700 font-bold' : 'border-t border-slate-200 dark:border-slate-700'}>
-                          {row.map((cell, cellIndex) => <td key={cellIndex} className="max-w-64 truncate px-2 py-1.5 text-slate-700 dark:text-slate-200">{cell}</td>)}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <p className="mt-3 text-[11px] text-slate-500">Chỉ hiển thị tối đa 100 hàng và 30 cột của sheet đầu tiên; dữ liệu này không được dùng tự động để thực thi workflow.</p>
+                <div className="w-full flex-1 flex flex-col overflow-hidden">
+                  <div className="flex items-center justify-between mb-2 shrink-0">
+                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                      Đang xem Sheet: <b className="text-slate-900 dark:text-white font-mono">{spreadsheetPreview.activeSheet}</b>
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      (Tối đa 150 hàng x 40 cột được tải)
+                    </span>
+                  </div>
+
+                  <div className="flex-1 overflow-auto rounded-xl border border-slate-200 dark:border-slate-700 shadow-2xs">
+                    <table className="w-full border-collapse text-left text-xs">
+                      <tbody>
+                        {(spreadsheetPreview.sheetsData[spreadsheetPreview.activeSheet] || []).map((row, rowIndex) => (
+                          <tr
+                            key={rowIndex}
+                            className={`${rowIndex === 0
+                              ? 'sticky top-0 bg-slate-200 dark:bg-slate-800 font-extrabold text-slate-900 dark:text-white z-10 shadow-2xs border-b border-slate-300 dark:border-slate-700'
+                              : rowIndex % 2 === 0
+                                ? 'bg-white dark:bg-slate-900/60 hover:bg-indigo-50/40 dark:hover:bg-slate-800/60'
+                                : 'bg-slate-50/70 dark:bg-slate-850 hover:bg-indigo-50/40 dark:hover:bg-slate-800/60'
+                              }`}
+                          >
+                            <td className="px-2 py-1.5 text-[10px] font-mono font-bold text-slate-400 bg-slate-100/70 dark:bg-slate-800/80 border-r border-slate-200 dark:border-slate-700 select-none text-center w-8">
+                              {rowIndex + 1}
+                            </td>
+                            {row.map((cell, cellIndex) => (
+                              <td
+                                key={cellIndex}
+                                className="max-w-64 truncate px-3 py-1.5 text-slate-800 dark:text-slate-200 border-b border-r border-slate-200/70 dark:border-slate-750/70"
+                                title={cell}
+                              >
+                                {cell}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <p className="mt-2 text-[10px] text-slate-400 shrink-0">
+                    💡 Chế độ xem trước trực tiếp: Bấm các tab phía trên để chuyển đổi nhanh giữa các Sheet (Curriculum Order Form, Student Info, Teacher Info...).
+                  </p>
                 </div>
               ) : previewFile.filename.match(/\.(docx?|pptx?)$/i) ? (
-                <div className="text-center space-y-3">
+                <div className="text-center space-y-3 m-auto">
                   <FileText className="w-12 h-12 text-sky-700 mx-auto" />
                   <p className="text-xs text-slate-600 dark:text-slate-400 font-medium">Tài liệu Office cần trình xem của trình duyệt hoặc ứng dụng phù hợp.</p>
                   <a href={`https://view.officeapps.live.com/op/view.aspx?src=${encodeURIComponent(previewFile.url)}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-sky-700 text-white text-xs font-bold hover:bg-sky-800 transition">
@@ -1893,7 +2081,7 @@ export const UnifiedInboxPage: React.FC = () => {
                   </a>
                 </div>
               ) : (
-                <div className="text-center space-y-3">
+                <div className="text-center space-y-3 m-auto">
                   <FileSpreadsheetIcon className="w-12 h-12 text-emerald-600 mx-auto" />
                   <p className="text-xs text-slate-600 dark:text-slate-400 font-medium">{spreadsheetPreviewError || 'Định dạng này chưa có trình xem trực tiếp.'}</p>
                   <a
@@ -1910,19 +2098,28 @@ export const UnifiedInboxPage: React.FC = () => {
               )}
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
-              <a
-                href={previewFile.url}
-                target="_blank"
-                rel="noreferrer"
-                className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-800 dark:text-slate-300 hover:bg-slate-200 transition flex items-center gap-1.5"
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-                <span>Mở trong Tab Mới</span>
-              </a>
-              <button onClick={() => setPreviewFile(null)} className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 transition">
-                Đóng
-              </button>
+            {/* Footer Modal */}
+            <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-slate-800 shrink-0">
+              <span className="text-[11px] text-slate-400 hidden sm:inline">
+                Khung xem kiểm định an toàn đính kèm (Fail-Closed Review)
+              </span>
+              <div className="flex items-center gap-2 ml-auto">
+                <a
+                  href={previewFile.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-800 dark:text-slate-300 hover:bg-slate-200 transition flex items-center gap-1.5"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Mở trong Tab Mới</span>
+                </a>
+                <button
+                  onClick={() => setPreviewFile(null)}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 transition cursor-pointer"
+                >
+                  Đóng
+                </button>
+              </div>
             </div>
           </div>
         </div>,
