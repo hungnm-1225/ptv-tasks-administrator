@@ -37,18 +37,22 @@ VALID_CATEGORIES = {"license", "lms_enroll", "account_keycloak", "bug", "other"}
 VALID_PRIORITIES = {"urgent", "normal", "low", "high"}
 
 GEMINI_MODELS = [
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
     "gemini-3.8-flash",
     "gemini-3.7-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-pro-preview",
     "gemini-3.6-flash",
     "gemini-3.5-flash",
-    "gemini-3.1-flash-lite",
-    "gemini-3-flash-preview",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
+    "gemini-3-flash",
     "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
 ]
+AUTOMATED_SENDER_PREFIXES = (
+    "noreply@", "no-reply@", "notification@", "notifications@",
+    "alert@", "alerts@", "info@", "newsletter@", "marketing@",
+    "billing@", "updates@", "support@",
+)
+_MODEL_COOLDOWN: Dict[str, float] = {}
 
 BRAIN_DIR = os.path.join(os.path.dirname(__file__), "../brain")
 PROMPTS_DIR = os.path.join(BRAIN_DIR, "prompts")
@@ -96,6 +100,8 @@ class AIEngine:
         prompt: str,
         primary_key: Optional[str] = None
     ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        import time
+
         key_1 = primary_key or self.api_key_summary
         key_2 = self.api_key_facts if key_1 == self.api_key_summary else self.api_key_summary
 
@@ -110,12 +116,12 @@ class AIEngine:
         if not keys_to_try:
             return None, None
 
-        consecutive_quota_errors = 0
+        now_ts = time.time()
 
         for model_name in GEMINI_MODELS:
-            if consecutive_quota_errors >= 2:
-                logger.warning("⚡ [CIRCUIT BREAKER] Quota Project Google đã cạn! Kích hoạt Fast-Path ngay.")
-                break
+            if now_ts < _MODEL_COOLDOWN.get(model_name, 0):
+                logger.debug(f"⏳ Bỏ qua [{model_name}] vì đang trong thời gian Cooldown.")
+                continue
 
             for key_idx, active_key in enumerate(keys_to_try):
                 try:
@@ -124,21 +130,26 @@ class AIEngine:
                     response = model.generate_content(
                         prompt,
                         generation_config={"response_mime_type": "application/json"},
-                        request_options={"timeout": 5.0}
+                        request_options={"timeout": 8.0}
                     )
                     if response and response.text:
                         parsed = json.loads(response.text)
+                        _MODEL_COOLDOWN.pop(model_name, None)
                         return parsed, model_name
+
                 except Exception as e:
                     err_str = str(e).lower()
                     is_rate_limit = any(term in err_str for term in ["429", "quota", "resource_exhausted", "limit"])
+                    
                     if is_rate_limit:
-                        consecutive_quota_errors += 1
+                        logger.warning(f"⚠️ Model [{model_name}] với Key #{key_idx + 1} dính Quota 429. Đang chuyển sang dự phòng...")
+                        _MODEL_COOLDOWN[model_name] = time.time() + 300
                         if len(keys_to_try) > 1 and key_idx == 0:
                             continue
                         else:
                             break
                     else:
+                        logger.warning(f"⚠️ Model [{model_name}] gặp lỗi khác: {str(e)[:80]}")
                         break
 
         return None, None
@@ -147,8 +158,25 @@ class AIEngine:
         self,
         subject: str,
         raw_content: str,
-        source: str
+        source: str,
+        sender_email: Optional[str] = None
     ) -> TicketSummary:
+        sender_clean = (sender_email or "").lower().strip()
+        is_automated = any(sender_clean.startswith(prefix) or prefix in sender_clean for prefix in AUTOMATED_SENDER_PREFIXES)
+
+        if is_automated:
+            logger.info(f"⚡ [FAST-PATH EMAIL] Bỏ qua gọi AI cho thư tự động từ: {sender_clean}")
+            return TicketSummary(
+                category="other",
+                priority="low",
+                goal=f"Thông báo tự động: {subject[:60]}",
+                summary_vi=f"📨 Bản tin / Thông báo hệ thống tự động từ [{sender_clean}]: {subject}. Không yêu cầu thao tác kỹ thuật.",
+                assigned_name="Hệ Thống",
+                assigned_email=None,
+                model_name="fast_path_system_filter",
+                prompt_version="fast_path_v1.0"
+            )
+
         full_content = raw_content[:20000] if raw_content else "(Trống)"
 
         if self.summary_prompt_tpl:
@@ -210,6 +238,24 @@ class AIEngine:
         source_revision_id: Optional[str] = None,
         sender_email: Optional[str] = None
     ) -> VerifiedIntentAssessment:
+        sender_clean = (sender_email or "").lower().strip()
+        is_automated = any(sender_clean.startswith(prefix) or prefix in sender_clean for prefix in AUTOMATED_SENDER_PREFIXES)
+
+        if is_automated:
+            logger.info(f"⚡ [FAST-PATH FACTS] Xác nhận NO_ACTION cho thư tự động: {sender_clean}")
+            raw_assessment = IntentAssessment(
+                outcome="no_action",
+                model_name="fast_path_system_filter",
+                prompt_version="fast_path_v1.0",
+                intents=[],
+                entities={},
+                extracted_entities=[],
+                missing_requirements=[],
+                warnings=["Đã nhận diện email thông báo tự động / newsletter. Tự động chuyển sang NO_ACTION mà không tốn Quota AI."],
+                raw_evidence_quotes=[]
+            )
+            return raw_assessment
+
         full_content = raw_content[:20000] if raw_content else "(Trống)"
         excel_info_str = json.dumps(excel_summary, ensure_ascii=False, indent=2) if excel_summary else "Không có file Excel đính kèm."
 
@@ -223,7 +269,6 @@ class AIEngine:
 
         parsed_data, used_model = self._call_gemini_with_fallback(prompt, primary_key=self.api_key_facts)
 
-        # ⚠️ BÁO LỖI MINH BẠCH & DỪNG AN TOÀN (NEEDS_INFORMATION): KHÔNG TỰ ĐỘNG SINH HÀNH ĐỘNG KHI AI LỖI
         if not parsed_data:
             logger.error("❌ Không thể bóc tách sự thật vận hành: Toàn bộ model Gemini gặp sự cố hoặc hết quota API.")
             return IntentAssessment(

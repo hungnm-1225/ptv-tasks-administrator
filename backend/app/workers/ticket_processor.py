@@ -146,16 +146,32 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                     break
                 except Exception as ex_err:
                     logger.warning(f"⚠️ Lỗi bóc tách file Excel [{fname}]: {ex_err}")
+        
+        
+        # lấy sender email từ ticket
+        sender_email = ticket.get("sender_email") or ""
 
         # Phân tách 2 đánh giá AI độc lập (BẮT BUỘC TRUYỀN source_revision_id)
-        summary_res = gemini_engine.summarize_ticket(subject=subject, raw_content=raw_content, source=source)
+        summary_res = gemini_engine.summarize_ticket(
+            subject=subject, 
+            raw_content=raw_content, 
+            source=source,
+            sender_email=sender_email
+        )
+
+        if summary_res.model_name != "fast_path_system_filter":
+            import asyncio
+            await asyncio.sleep(1.2)
+
         facts_res = gemini_engine.extract_operational_facts(
             subject=subject,
             raw_content=raw_content,
             source=source,
             excel_summary=excel_summary,
-            source_revision_id=revision_id  # << SỬA LỖI: TRUYỀN SOURCE_REVISION_ID
+            source_revision_id=revision_id,
+            sender_email=sender_email
         )
+
 
         # Lưu độc lập 2 bản đánh giá AI vào ticket_ai_assessments
         now_iso = datetime.now(timezone.utc).isoformat()
