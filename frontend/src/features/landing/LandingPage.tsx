@@ -99,28 +99,7 @@ export const LandingPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            {/* Theme Toggle */}
-            <ThemeToggle scale={0.82} />
-
-            {user ? (
-              <Link
-                to="/dashboard"
-                className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:hover:bg-slate-100 dark:text-slate-900 text-xs font-semibold rounded-xl transition-all shadow-xs"
-              >
-                <span>Vào Trang Quản Trị</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
-            ) : (
-              <Link
-                to="/login"
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl transition-all shadow-xs shadow-indigo-600/20"
-              >
-                <span>Đăng Nhập SSO</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
-            )}
-          </div>
+          <ThemeToggle scale={0.85} />
         </div>
       </header>
 
