@@ -21,33 +21,36 @@ logger = logging.getLogger(__name__)
 class BulkTemplateService:
 
     @classmethod
+    def is_already_standard_accounts_file(cls, ws_in) -> Tuple[bool, int, Dict[str, int]]:
+        """Kiểm tra xem file đã là phôi chuẩn của trường chưa (Header ở hàng 5)."""
+        for r_idx, row in enumerate(ws_in.iter_rows(values_only=True), 1):
+            if r_idx > 10:
+                break
+            row_vals = [str(c or '').strip().lower() for c in row]
+            row_str = " ".join(row_vals)
+            if "first name" in row_str and "last name" in row_str:
+                col_map = {}
+                for c_idx, val in enumerate(row_vals):
+                    if "first name" in val: col_map["first_name"] = c_idx
+                    elif "last name" in val: col_map["last_name"] = c_idx
+                    elif "mobile" in val or "phone" in val: col_map["mobile"] = c_idx
+                    elif "email" in val: col_map["email"] = c_idx
+                    elif "birth" in val or "dob" in val: col_map["dob"] = c_idx
+                    elif "role" in val: col_map["role"] = c_idx
+                return True, r_idx, col_map
+        return False, -1, {}
+
+    @classmethod
     def normalize_input_accounts_excel(cls, input_file_path: str, output_file_path: str) -> Tuple[str, int, List[Dict[str, Any]]]:
         """Chuẩn hóa mọi file thành PHÔI CHUẨN: Tiêu đề Hàng 2, Header Hàng 5, Data Hàng 6."""
         wb_in = openpyxl.load_workbook(input_file_path, data_only=True)
         try:
             ws_in = wb_in.active
-            header_row_idx = -1
-            col_map = {}
+            is_std, header_row_idx, col_map = cls.is_already_standard_accounts_file(ws_in)
 
-            for r_idx, row in enumerate(ws_in.iter_rows(values_only=True), 1):
-                if r_idx > 15:
-                    break
-                row_vals = [str(c or '').strip().lower() for c in row]
-                row_str = " ".join(row_vals)
-                if "first name" in row_str or ("last name" in row_str and "role" in row_str):
-                    header_row_idx = r_idx
-                    for c_idx, val in enumerate(row_vals):
-                        if "first name" in val: col_map["first_name"] = c_idx
-                        elif "last name" in val: col_map["last_name"] = c_idx
-                        elif "mobile" in val or "phone" in val: col_map["mobile"] = c_idx
-                        elif "email" in val: col_map["email"] = c_idx
-                        elif "birth" in val or "dob" in val: col_map["dob"] = c_idx
-                        elif "role" in val: col_map["role"] = c_idx
-                    break
-
-            if header_row_idx == -1:
-                header_row_idx = 3
-                col_map = {"first_name": 2, "last_name": 3, "mobile": 4, "email": 5, "dob": 6, "role": 7}
+            if not is_std:
+                header_row_idx = 5
+                col_map = {"first_name": 1, "last_name": 2, "mobile": 3, "email": 4, "dob": 5, "role": 6}
 
             extracted_users = []
             for row in ws_in.iter_rows(min_row=header_row_idx + 1, values_only=True):
@@ -67,22 +70,37 @@ class BulkTemplateService:
                 extracted_users.append({
                     "first_name": fn, "last_name": ln, "mobile": mob, "email": em, "dob": dob, "role": role
                 })
+
+            # 🎯 NẾU FILE VỐN ĐÃ LÀ PHÔI CHUẨN Ở HÀNG 5: GIỮ NGUYÊN BẢN GỐC ĐỂ BẢO TOÀN ĐỊNH DẠNG!
+            if is_std and header_row_idx == 5:
+                os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
+                import shutil
+                shutil.copyfile(input_file_path, output_file_path)
+                logger.info(f"🛡️ File đã là phôi chuẩn (Header hàng 5), giữ nguyên vẹn {len(extracted_users)} users: {output_file_path}")
+                return output_file_path, len(extracted_users), extracted_users
         finally:
             wb_in.close()
             del wb_in
             gc.collect()
 
+        # 🎯 NẾU LÀ FILE TỰ DO CẦN TẠO PHÔI: KHỞI TẠO ĐỦ CÁC HÀNG 1..4 ĐỂ CHỐNG COLLAPSE
         wb_out = openpyxl.Workbook()
         try:
             ws_out = wb_out.active
             ws_out.title = "Class 7s"
+
+            # Đảm bảo hàng 1 đến 4 luôn tồn tại ô dữ liệu để parser không co rút dòng
+            for r in range(1, 5):
+                for c in range(1, 8):
+                    ws_out.cell(row=r, column=c, value="")
 
             ws_out.merge_cells("B2:G2")
             ws_out["B2"].value = "Account creation request form"
             ws_out["B2"].font = Font(name="Arial", size=18, bold=True)
             ws_out["B2"].alignment = Alignment(horizontal="center", vertical="center")
 
-            headers = ["No.", "First Name (*)", "Last Name (*)", "Mobile number", "Email (*)", "Date of Birth (*)", "Role (*)"]
+            # Sử dụng đúng tên cột theo chuẩn Workspace
+            headers = ["No.", "First Name (*)", "Last Name (*)", "Mobile number (Optional)", "Email (*)", "Date of Birth (*)", "Role (*)"]
             for c_i, h in enumerate(headers, 1):
                 cell = ws_out.cell(row=5, column=c_i, value=h)
                 cell.font = Font(name="Arial", size=10, bold=True)
@@ -100,7 +118,7 @@ class BulkTemplateService:
 
             os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
             wb_out.save(output_file_path)
-            logger.info(f"✨ Chuẩn hóa phôi tạo tài khoản ({len(extracted_users)} users): {output_file_path}")
+            logger.info(f"✨ Chuẩn hóa phôi mới cố định lưới ({len(extracted_users)} users): {output_file_path}")
             return output_file_path, len(extracted_users), extracted_users
         finally:
             wb_out.close()
@@ -133,12 +151,23 @@ class BulkTemplateService:
                 matched = api_map_by_email.get(row_email) or api_map_by_name.get(f"{row_fn}_{row_ln}")
                 if matched:
                     if matched.get("is_create", False):
+                        # Tài khoản MỚI tạo thành công trên Workspace
                         ws.cell(row=r, column=8, value=matched.get("username", ""))
                         ws.cell(row=r, column=9, value=matched.get("password", ""))
-                        ws.cell(row=r, column=10, value="")
+                        ws.cell(row=r, column=10, value="Tạo mới thành công")
+                        ws.cell(row=r, column=10).font = Font(name="Arial", size=9, color="2E7D32", bold=True)
                     else:
-                        note_c = ws.cell(row=r, column=10, value="Tài khoản đã tồn tại")
-                        note_c.font = Font(name="Arial", size=9, italic=True, color="7F7F7F")
+                        # Tài khoản ĐÃ TỒN TẠI: Điền Real Username và Password (= Email)
+                        real_username = matched.get("username", "")
+                        reset_password = matched.get("password") or row_email
+                        ws.cell(row=r, column=8, value=real_username)
+                        ws.cell(row=r, column=9, value=reset_password)
+                        
+                        note_c = ws.cell(row=r, column=10, value="Tài khoản đã tồn tại (Đã reset pass về email)")
+                        note_c.font = Font(name="Arial", size=9, italic=True, color="1565C0", bold=True)
+                else:
+                    note_c = ws.cell(row=r, column=10, value="Chưa xử lý")
+                    note_c.font = Font(name="Arial", size=9, italic=True, color="7F7F7F")
 
             os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
             wb.save(output_file_path)

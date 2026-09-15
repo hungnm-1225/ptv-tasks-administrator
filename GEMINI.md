@@ -4,7 +4,7 @@
 > **Tài liệu này định hình tư duy, vai trò, nguyên tắc làm việc và quy chuẩn kỹ thuật bắt buộc của AI Assistant khi thực thi bất kỳ tác vụ nào trong không gian làm việc `ptv-tasks-administrator`.**  
 > **Kiến trúc sư trưởng & Tác giả sáng lập:** **Nguyễn Mạnh Hùng** (*Lead AI Engineer & Automation Architect – DTT Corporation / Pythaverse Ecosystem*)  
 > **GitHub:** [`https://github.com/hungnm-1225`](https://github.com/hungnm-1225) | **Email:** `hungnm@dtt.vn` / `hung.nguyenmanh@dtt.vn`  
-> **Phiên bản:** `v3.4.0 Enterprise Comprehensive Edition` | **Cập nhật:** `2026-09-15`
+> **Phiên bản:** `v3.5.0 Master Enterprise Comprehensive Edition` | **Cập nhật:** `2026-09-15`
 
 ---
 
@@ -43,8 +43,8 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
 
 ### 2.1. Cấu Trúc 7 Phân Hệ Pythaverse
 1. **School Workspace (`pythaverse.space`):** Quản trị phân cấp 3 tầng (`Distributor` ➔ `Partner` ➔ `School`). School tạo Order lên Partner; Partner cấp License từ Pool; Distributor duyệt Contract cấp bù; Sales Admin phê duyệt tối cao. Nộp batch tài khoản tự động qua cỗ máy Bulk Account Creation.
-2. **PLearn LMS (`learn.pythaverse.space`):** Moodle LMS (PHP / MariaDB / Edwiser RemUI). Quản lý danh mục khóa học (`SWRP`, `IR`, `ASP`...) và ghi danh theo Role (`Student` - 9, `Teacher` - 7, `Manager` - 1), tìm kiếm 2 nhịp trên `td.cell.c2`.
-3. **PGit Repos (`git.pythaverse.space`):** Máy chủ GitBucket (Scala/JVM). Yêu cầu đăng nhập SSO qua Keycloak ít nhất 1 lần để kích hoạt tài khoản JIT. Thêm Collaborators tại `/settings/collaborators` với quyền `ADMIN`, `DEVELOPER`, `GUEST`.
+2. **PLearn LMS (`learn.pythaverse.space`):** Moodle LMS (PHP / MariaDB / Edwiser RemUI). Quản lý danh mục khóa học (`SWRP`, `IR`, `ASP`...) và ghi danh theo Role (`Student` - 9, `Teacher` - 7, `Manager` - 1). Cỗ máy Hybrid V3.6: Playwright SSO Keycloak (3s) trích xuất Cookie & sesskey ➔ HTTPX Direct WebService. Fallback 2 nhịp trên `td.cell.c2`.
+3. **PGit Repos (`git.pythaverse.space`):** Máy chủ GitBucket (Scala/JVM). Yêu cầu đăng nhập SSO qua Keycloak ít nhất 1 lần để kích hoạt tài khoản JIT. Single-Session Multi-Repo: Sàng lọc người dùng qua Keycloak Gateway, đăng nhập OIDC 1 lần và add nhiều Repositories trong cùng 1 phiên. Thêm Collaborators tại `/settings/collaborators` với quyền `ADMIN`, `DEVELOPER`, `GUEST`.
 4. **Keycloak Auth IDP (`eid.pythaverse.space`):** Cổng xác thực tập trung OAuth2/OIDC (Realm: `master` / `idp`). 2-Tier Hybrid: Direct REST API (300ms) ➔ Playwright RPA Fallback.
 5. **Leanbot IDE (`ide.pythaverse.space`):** Blockly Web IDE kết nối Robot Leanbot qua Bluetooth BLE.
 6. **Support Helpdesk (`support.pythaverse.space`):** osTicket Helpdesk Engine cào dữ liệu định kỳ qua Playwright Headless session và chuyển giao cho Canonical Intake.
@@ -68,7 +68,7 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
 
 ### 2.3. Deterministic Planning Module & Multi-Course Git Sync
 - Bộ lập kế hoạch `workflow_planner.py` hoạt động hoàn toàn tất định, **không gọi LLM bên trong**.
-- Ánh xạ trực tiếp Intent ➔ Capability Pipeline thông qua `intent_policy.json`.
+- Ánh xạ trực tiếp Intent ➔ Capability Pipeline thông qua `intent_policy.json` (v1.2.0).
 - **Tự Động Phân Giải Khóa Học & Đồng Bộ Git Repos (`resolve_course_from_db`):**
   - Tự động nhận diện tên viết tắt (`SWRP 11`, `SWRP_11`, `SWRP11`) và tra cứu bảng `lms_courses` / `workspace_courses`.
   - Tự động ghép cặp Git Repo tương ứng với đối tượng (`teacher` ➔ repo giáo viên `gv`, học sinh ➔ repo học sinh `hs`).
@@ -154,12 +154,12 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
 1. [`email_thread_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/email_thread_service.py): Phân tách email thread, khử quoted reply rác, nhận diện `@dtt.vn` vs Khách hàng.
 2. [`evidence_verifier.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/evidence_verifier.py): Đối soát ký tự offset trích dẫn $\pm 160$ chars, fail-closed attachments.
 3. [`request_fact_normalizer.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/request_fact_normalizer.py): Bổ sung fact tất định (Email, Teacher/Student role, Course ID).
-4. [`workflow_planner.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_planner.py): Policy Registry v1.1.0, Auto Git Sync, Zero-Mockup Git role.
+4. [`workflow_planner.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_planner.py): Policy Registry v1.2.0, Auto Git Sync, Zero-Mockup Git role.
 5. [`workflow_executor.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_executor.py): Thuật toán Tô-pô Kahn DAG, OCC Lease, Smart BFS Retry.
-6. [`excel/`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/excel): Gói dịch vụ xử lý Excel chuyên biệt (`COFService`, `BulkTemplateService`, `GenericExcelService`, `TOFExcelService`).
+6. [`excel/`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/excel): Gói dịch vụ xử lý Excel chuyên biệt 4 module (`COFService`, `BulkTemplateService`, `GenericExcelService`, `TOFExcelService`).
 7. [`workspace/`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workspace): Gói RPA Workspace 8 module (Account, Order, Contract, Enroll, Scanner, Base, Orchestrator).
-8. [`playwright_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/playwright_service.py): Ghi danh PLearn LMS 2 nhịp trên `td.cell.c2`.
-9. [`git_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/git_service.py): Thêm cộng tác viên GitBucket qua Keycloak OIDC SSO.
+8. [`playwright_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/playwright_service.py): Cỗ máy Hybrid Moodle PLearn V3.6 (SSO Playwright Cookie ➔ HTTPX Direct WebService + UI 2 nhịp fallback).
+9. [`git_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/git_service.py): Pythaverse Git Single-Session Multi-Repo (Keycloak Gateway user filtering).
 10. [`keycloak_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/keycloak_service.py): 2-Tier Hybrid Keycloak (REST API 300ms + RPA Fallback).
 
 ### 4.3. 13 Trang Chức Năng Frontend SPA (`frontend/src/features/`)

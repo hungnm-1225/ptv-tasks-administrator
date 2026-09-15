@@ -586,5 +586,97 @@ class KeycloakService:
 
             tasks = [_get_details(i) for i in cleaned_inputs]
             return await asyncio.gather(*tasks)
+    # =========================================================================
+    # 🔑 BÙ REAL USERNAME & RESET MẬT KHẨU VỀ EMAIL CHO TÀI KHOẢN ĐÃ TỒN TẠI
+    # =========================================================================
+    async def sync_existing_users_passwords(self, emails: List[str]) -> Dict[str, Dict[str, Any]]:
+        """
+        Tra cứu Real Username trên Keycloak IDP và Reset mật khẩu về chính Email.
+        Chạy song song qua Direct Admin REST API (siêu tốc ~200ms).
+        """
+        cleaned_emails = [clean_email_identifier(e) for e in emails if clean_email_identifier(e) and "@" in clean_email_identifier(e)]
+        cleaned_emails = list(dict.fromkeys(cleaned_emails))
+        if not cleaned_emails:
+            return {}
+
+        logger.info(f"🔄 [Keycloak Sync] Bắt đầu đồng bộ & reset mật khẩu cho {len(cleaned_emails)} tài khoản đã tồn tại...")
+
+        async with httpx.AsyncClient(verify=False, headers=BROWSER_HEADERS, timeout=15.0) as client:
+            token = await self._get_admin_token(client)
+            if not token:
+                logger.error("❌ Không lấy được Keycloak Token để đồng bộ tài khoản cũ!")
+                return {}
+
+            auth_headers = {
+                **BROWSER_HEADERS,
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            }
+            base_api = f"{self.raw_server_url}/auth/admin/realms/{self.target_realm}"
+            synced_map: Dict[str, Dict[str, Any]] = {}
+
+            async def _sync_single(email: str):
+                try:
+                    # 1. Tìm user chính xác theo Email
+                    resp = await client.get(f"{base_api}/users?email={email}&exact=true", headers=auth_headers)
+                    users = resp.json() if resp.status_code == 200 and isinstance(resp.json(), list) else []
+
+                    # 2. Tìm kiếm mở rộng nếu exact=true bị lệch case
+                    if not users:
+                        resp = await client.get(f"{base_api}/users?search={email}", headers=auth_headers)
+                        if resp.status_code == 200 and isinstance(resp.json(), list):
+                            for u in resp.json():
+                                if (u.get("email") or "").lower() == email:
+                                    users = [u]
+                                    break
+
+                    if not users:
+                        logger.warning(f"⚠️ [Keycloak Sync] Không tìm thấy tài khoản cho email: {email}")
+                        return email, None
+
+                    user_data = users[0]
+                    user_id = user_data.get("id")
+                    real_username = (user_data.get("username") or "").strip()
+
+                    # 3. Reset mật khẩu về chính Email (chữ thường, temporary=False)
+                    pass_payload = {
+                        "type": "password",
+                        "value": email.lower(),
+                        "temporary": False
+                    }
+                    put_res = await client.put(
+                        f"{base_api}/users/{user_id}/reset-password",
+                        json=pass_payload,
+                        headers=auth_headers
+                    )
+
+                    if put_res.status_code in [200, 204]:
+                        logger.info(f"✅ [Keycloak Sync] Đã reset pass về email cho {email} (Real Username: {real_username})")
+                        return email, {
+                            "username": real_username,
+                            "password": email.lower(),
+                            "user_id": user_id,
+                            "status": "success"
+                        }
+                    else:
+                        logger.error(f"❌ [Keycloak Sync] Lỗi reset pass {email} ({put_res.status_code}): {put_res.text}")
+                        return email, {
+                            "username": real_username,
+                            "password": email.lower(),
+                            "status": "reset_failed"
+                        }
+
+                except Exception as ex:
+                    logger.error(f"❌ [Keycloak Sync] Ngoại lệ khi xử lý {email}: {ex}")
+                    return email, None
+
+            tasks = [_sync_single(e) for e in cleaned_emails]
+            results = await asyncio.gather(*tasks)
+
+            for email, data in results:
+                if data:
+                    synced_map[email] = data
+
+            return synced_map
 
 keycloak_service = KeycloakService()

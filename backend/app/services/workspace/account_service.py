@@ -121,7 +121,61 @@ class WorkspaceAccountService(WorkspaceBaseService):
             """)
 
             if isinstance(raw_records, list) and len(raw_records) > 0:
-                logger.info(f"✨ Bắt được {len(raw_records)} tài khoản từ exportData.php! Đang ghi ngược vào file chuẩn...")
+                logger.info(f"✨ Bắt được {len(raw_records)} tài khoản từ exportData.php!")
+
+                # 1. Thu thập danh sách email của các tài khoản ĐÃ TỒN TẠI (is_create != True)
+                from app.services.keycloak_service import keycloak_service
+                emails_to_sync = []
+                for item in raw_records:
+                    if not item.get("is_create", False):
+                        em = str(item.get("email") or "").strip().lower()
+                        if em and "@" in em:
+                            emails_to_sync.append(em)
+
+                # Kiểm tra thêm nếu trong file chuẩn có tài khoản nào bị Workspace "bỏ quên"
+                if standard_input_file and os.path.exists(standard_input_file):
+                    try:
+                        import openpyxl
+                        wb_check = openpyxl.load_workbook(standard_input_file, data_only=True)
+                        ws_check = wb_check.active
+                        api_emails = {str(item.get("email") or "").strip().lower() for item in raw_records if item.get("email")}
+                        for r in range(6, ws_check.max_row + 1):
+                            cell_email = str(ws_check.cell(row=r, column=5).value or "").strip().lower()
+                            if cell_email and "@" in cell_email and cell_email not in api_emails:
+                                emails_to_sync.append(cell_email)
+                        wb_check.close()
+                    except Exception as parse_err:
+                        logger.debug(f"Không thể rà soát email thiếu: {parse_err}")
+
+                emails_to_sync = list(dict.fromkeys(emails_to_sync))
+
+                # 2. Nếu có tài khoản đã tồn tại: Truy vấn Keycloak lấy Real Username & Reset pass về Email
+                if emails_to_sync:
+                    logger.info(f"🔍 Phát hiện {len(emails_to_sync)} tài khoản đã tồn tại! Đang kích hoạt Keycloak Sync...")
+                    keycloak_map = await keycloak_service.sync_existing_users_passwords(emails_to_sync)
+
+                    # Ghi đè lại thông tin thật vào raw_records
+                    for item in raw_records:
+                        em = str(item.get("email") or "").strip().lower()
+                        if em in keycloak_map:
+                            kc_info = keycloak_map[em]
+                            item["username"] = kc_info.get("username") or em.split('@')[0]
+                            item["password"] = em  # Mật khẩu chính là Email
+                            item["is_keycloak_synced"] = True
+
+                    # Bổ sung các tài khoản bị Workspace bỏ rơi (nếu có) vào raw_records
+                    for em, kc_info in keycloak_map.items():
+                        if not any(str(r.get("email") or "").strip().lower() == em for r in raw_records):
+                            raw_records.append({
+                                "email": em,
+                                "username": kc_info.get("username") or em.split('@')[0],
+                                "password": em,
+                                "is_create": False,
+                                "is_keycloak_synced": True
+                            })
+
+                # 3. Ghi kết quả ngược lại file Excel
+                logger.info(f"📝 Đang ghi {len(raw_records)} tài khoản đã chuẩn hóa ngược vào file kết quả...")
                 if standard_input_file and os.path.exists(standard_input_file):
                     COFExcelService.write_results_back_to_standard_accounts(
                         standard_file_path=standard_input_file,
