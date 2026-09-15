@@ -107,7 +107,8 @@ class WorkflowPlannerService:
     @staticmethod
     def resolve_course_from_db(course_query: str, is_cof: bool = False, is_teacher: bool = True) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """
-        Phân giải tên viết tắt (SWRP 11, SWRP_11, SWRP11) thành tên đầy đủ chuẩn xác trong CSDL.
+        Phân giải tên viết tắt (SWRP 11, SWRP_11, SWRP 7...) thành tên đầy đủ chuẩn xác trong CSDL.
+        Khớp đúng tên cột thực tế: 'course_name' và 'sku'.
         """
         if not course_query:
             return None, None, None
@@ -115,7 +116,7 @@ class WorkflowPlannerService:
         supabase = get_supabase_client()
         clean_q = course_query.strip()
         
-        # Bắt các mẫu viết tắt: SWRP 11, SWRP_11, SWRP-11, SWRP11
+        # Bắt các mẫu viết tắt: SWRP 7, SWRP 11, SWRP_11, SWRP-11, SWRP11...
         match = re.search(r"([A-Za-z]+)[\s_\-]*(\d+)", clean_q)
         target_table = "workspace_courses" if is_cof else "lms_courses"
 
@@ -123,10 +124,15 @@ class WorkflowPlannerService:
             query = supabase.table(target_table).select("*")
             if match:
                 prefix, num = match.group(1), match.group(2)
-                # Tìm kiếm linh hoạt mọi biến thể viết tắt
-                query = query.or_(f"name.ilike.%{prefix} {num}:%,name.ilike.%{prefix} {num}%,name.ilike.%{prefix}%{num}%,code.ilike.%{prefix}%{num}%")
+                # ✅ SỬA CHUẨN: Query trên cột 'course_name' và 'sku' thay vì 'name' và 'code'
+                query = query.or_(
+                    f"course_name.ilike.%{prefix} {num}:%,"
+                    f"course_name.ilike.%{prefix} {num}%,"
+                    f"course_name.ilike.%{prefix}%{num}%,"
+                    f"sku.ilike.%{prefix}%{num}%"
+                )
             else:
-                query = query.ilike("name", f"%{clean_q}%")
+                query = query.ilike("course_name", f"%{clean_q}%")
 
             res = query.limit(5).execute()
             courses = res.data or []
@@ -134,8 +140,9 @@ class WorkflowPlannerService:
                 return clean_q, None, None
 
             best = courses[0]
-            canonical_name = best.get("name") or clean_q
-            course_code = best.get("code") or ""
+            # ✅ SỬA CHUẨN: Lấy 'course_name' và 'sku'
+            canonical_name = best.get("course_name") or best.get("name") or clean_q
+            course_code = best.get("sku") or best.get("code") or ""
             git_repos = best.get("git_repos") or []
 
             resolved_repo = None
@@ -147,7 +154,7 @@ class WorkflowPlannerService:
                         if is_teacher and ("teacher" in r_target or "gv" in r_name.lower()):
                             resolved_repo = r.get("url") or f"https://git.pythaverse.space/pythaverse/{r_name}"
                             break
-                        elif not is_teacher and ("all" in r_target or "hs" in r_name.lower()):
+                        elif not is_teacher and ("all" in r_target or "hs" in r_name.lower() or "student" in r_target):
                             resolved_repo = r.get("url") or f"https://git.pythaverse.space/pythaverse/{r_name}"
                             break
 
