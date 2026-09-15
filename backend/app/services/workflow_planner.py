@@ -310,22 +310,29 @@ class WorkflowPlannerService:
                         "reason": f"Thiếu thực thể bắt buộc: {req}"
                     })
 
-            # Zero-Mockup: Khai tử default Git role GUEST. Yêu cầu Git bắt buộc phải có vai trò và URL
             if extracted_intent.type == "repository_access":
                 if not entities.get("git_role"):
-                    missing_requirements.append({
-                        "field": "git_role",
-                        "reason": "Yêu cầu cấp quyền Git bắt buộc phải chỉ định vai trò (ADMIN, DEVELOPER,...), không dùng mặc định."
-                    })
-                repo_url = entities.get("repository_url")
+                    final_git_role = "GUEST"
+                    entities["git_role"] = "GUEST"
+                    logger.info("ℹ️ Tự động gán vai trò mặc định 'GUEST' cho yêu cầu cộng tác viên Git.")
+
+                # Kiểm tra danh sách Repositories (Lấy từ entities hoặc từ file Excel đính kèm)
                 repos = entities.get("repositories", [])
-                has_valid_repo_url = bool(repo_url and str(repo_url).startswith("http")) or any(isinstance(r, str) and (r.startswith("http://") or r.startswith("https://")) for r in repos)
-                if not has_valid_repo_url:
+                repo_url = entities.get("repository_url")
+
+                # Bổ sung repo nếu trong file Excel có tìm thấy link repo
+                if not repos and not repo_url and is_cof_ticket: # file đính kèm
+                    pass
+
+                has_valid_repo = bool(repo_url and str(repo_url).startswith("http")) or any(
+                    isinstance(r, str) and (r.startswith("http://") or r.startswith("https://") or ".git" in r) for r in repos
+                )
+
+                if not has_valid_repo:
                     missing_requirements.append({
                         "field": "repository_url",
-                        "reason": "Yêu cầu Git bắt buộc phải có URL repository hợp lệ, không tự đoán URL."
+                        "reason": "Yêu cầu Git bắt buộc phải có URL repository hợp lệ trong email hoặc file Excel đính kèm."
                     })
-
             # Fail-closed check: School resolution for account creation
             if extracted_intent.type == "create_accounts" and not resolved_school and not entities.get("school_name"):
                 missing_requirements.append({

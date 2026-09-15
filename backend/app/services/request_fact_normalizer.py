@@ -176,6 +176,7 @@ def augment_assessment_with_request_facts(
     if parsed_users:
         _append_entity(assessment, ExtractedEntity(type="users", raw_value=parsed_users, confidence=1.0, evidence=user_spans))
 
+    # 3. Bóc tách Course ID số (ví dụ Course ID 1445)
     normalized_courses = []
     course_spans = []
 
@@ -197,6 +198,7 @@ def augment_assessment_with_request_facts(
     if normalized_courses:
         _append_entity(assessment, ExtractedEntity(type="courses", raw_value=normalized_courses, confidence=1.0, evidence=course_spans))
 
+    # 4. Gán intent nếu có bằng chứng và có tài khoản/khóa học
     if course_evidence and (parsed_users or normalized_courses):
         _append_intent(assessment, "course_access", course_evidence)
 

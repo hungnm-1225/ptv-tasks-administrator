@@ -122,6 +122,7 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                         urllib.request.urlretrieve(furl, tmp_file.name)
                         temp_path = tmp_file.name
 
+                    # 1. Kiểm tra nếu là file COF 3 Tabs truyền thống
                     if COFExcelService.is_cof_file(temp_path):
                         parsed_cof = COFExcelService.parse_cof_file(temp_path)
                         excel_summary = {
@@ -135,10 +136,17 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                             "teachers_to_create": len(parsed_cof.get("teachers_to_create", [])),
                         }
                     else:
+                        # 2. FILE EXCEL THƯỜNG (DANH SÁCH REPOSITORIES / THÀNH VIÊN) - DÙNG GENERIC PARSER!
+                        from app.services.excel.generic_excel_service import GenericExcelService
+                        parsed_generic = GenericExcelService.parse_any_excel(temp_path)
                         excel_summary = {
                             "is_cof": False,
                             "filename": fname,
-                            "notice": "File danh sách tài khoản chuẩn"
+                            "repositories": parsed_generic.get("repositories", []),
+                            "users": parsed_generic.get("users", []),
+                            "total_users": parsed_generic.get("total_users", 0),
+                            "has_repos": parsed_generic.get("has_repos", False),
+                            "notice": f"File danh sách Excel đính kèm: {parsed_generic.get('total_users', 0)} người dùng, {len(parsed_generic.get('repositories', []))} repos."
                         }
 
                     if os.path.exists(temp_path):
