@@ -4,7 +4,7 @@
 > **Tài liệu này định hình tư duy, vai trò, nguyên tắc làm việc và quy chuẩn kỹ thuật bắt buộc của AI Assistant khi thực thi bất kỳ tác vụ nào trong không gian làm việc `ptv-tasks-administrator`.**  
 > **Kiến trúc sư trưởng & Tác giả sáng lập:** **Nguyễn Mạnh Hùng** (*Lead AI Engineer & Automation Architect – DTT Corporation / Pythaverse Ecosystem*)  
 > **GitHub:** [`https://github.com/hungnm-1225`](https://github.com/hungnm-1225) | **Email:** `hungnm@dtt.vn` / `hung.nguyenmanh@dtt.vn`  
-> **Phiên bản:** `v3.3.0 Enterprise Comprehensive Edition` | **Cập nhật:** `2026-09-14`
+> **Phiên bản:** `v3.4.0 Enterprise Comprehensive Edition` | **Cập nhật:** `2026-09-15`
 
 ---
 
@@ -28,7 +28,7 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
 | **10** | `devops-engineer` | [devops-engineer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/devops-engineer.md) | Quản trị CI/CD GitHub Actions, cấu hình Render.com (512MB RAM ASGI), Vercel (Edge CDN Frontend), UptimeRobot (Keep-warm ping & Synthetic monitoring), Dockerfile. |
 | **11** | `performance-optimizer` | [performance-optimizer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/performance-optimizer.md) | Tối ưu hóa bộ nhớ 512MB RAM Render, Ma trận 8 BoundedMemoryCache (LRU + TTL < 40MB), Low-RAM Chromium 18 cờ tối ưu, Dynamic Code Splitting React 19 / Vite 6. |
 | **12** | `penetration-tester` | [penetration-tester.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/penetration-tester.md) | Thử nghiệm xâm nhập, kiểm định phòng thủ Prompt Injection, phá vỡ Offset trích dẫn, chống bypass JWT Token `@dtt.vn`, kiểm định an toàn két sắt Fernet. |
-| **13** | `test-engineer` | [test-engineer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/test-engineer.md) | Thiết kế Hermetic Pytest Suite, Contract Tests 19 Capabilities, Mocking in-memory không tốn Quota AI, kiểm thử hồi quy an toàn. |
+| **13** | `test-engineer` | [test-engineer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/test-engineer.md) | Thiết kế Hermetic Pytest Suite (23/23 tests pass in-memory), Contract Tests 19 Capabilities, Mocking in-memory không tốn Quota AI. |
 | **14** | `code-archaeologist` | [code-archaeologist.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/code-archaeologist.md) | Truy vết lịch sử commit Git, phân tích mã nguồn cũ, refactoring mã thừa, giải quyết mâu thuẫn giữa các bản nâng cấp. |
 | **15** | `explorer-agent` | [explorer-agent.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/explorer-agent.md) | Thám sát cây thư mục, kiểm kê tệp tin, lập bản đồ phụ thuộc file (`CODEBASE.md`). |
 | **16** | `product-manager` | [product-manager.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/product-manager.md) | Định hình lộ trình tính năng, tối ưu trải nghiệm Admin Hub, quản lý độ ưu tiên các phân hệ Pythaverse. |
@@ -83,7 +83,16 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
 - **Đồng Bộ Hai Chiều `waiting_poll`:** Khi bước RPA trả về `waiting_poll`, cập nhật đồng thời cả `automation_workflows` VÀ `bot_automation_tasks.execution_status = 'waiting_poll'`. Cronjob `poll_workspace_long_tasks` quét trúng task, lấy kết quả và tự động **Resume Workflow** chạy tiếp các bước hạ nguồn (LMS, Git).
 - **Append-Only Execution Audit:** Ghi nhận từng mili-giây diễn biến vào bảng `workflow_execution_events`, bắt buộc mang theo `proposal_id`, tự động che mờ mật khẩu và token nhạy cảm (`[PROTECTED]`).
 
-### 2.5. Cơ Sở Dữ Liệu 20 Bảng CSDL Supabase (Data Provenance & Traceability)
+### 2.5. Gói Xử Lý Bảng Tính Chuyên Biệt `app.services.excel` & `EmailThreadService`
+- **Gói `app/services/excel/`:** Chuyên biệt hóa 4 dịch vụ xử lý Excel:
+  1. `COFService`: Bóc tách COF 3 Tabs & ghi ngược kết quả vào COF gốc.
+  2. `BulkTemplateService`: Chuẩn hóa phôi tạo tài khoản theo quy chuẩn của trường & bóc tách text trần sinh phôi Excel.
+  3. `GenericExcelService`: Bóc tách file Excel tự do, trích xuất email và liên kết hyperlinks.
+  4. `TOFExcelService`: Khung dịch vụ cho định dạng Training Order Form (TOF).
+  - Lớp `COFExcelService` đóng vai trò Facade Proxy bảo toàn tương thích ngược 100%.
+- **Dịch vụ `EmailThreadService`:** Tách email thread thành các lượt độc lập, khử sạch 100% quoted reply rác, nhận diện người gửi nội bộ (`@dtt.vn`, `@pythaverse.space`) so với khách hàng và phân loại 4 trạng thái vòng đời hội thoại (`WAITING_CUSTOMER_INFO`, `ACTIONABLE`, `RESOLVED_CONFIRMATION`, `SINGLE_MESSAGE`).
+
+### 2.6. Cơ Sở Dữ Liệu 20 Bảng CSDL Supabase (Data Provenance & Traceability)
 1. `inbox_tickets`: Quản lý vé tiếp nhận tập trung (Gmail, Form, osTicket) với Partial Unique Index `(source, source_id)`.
 2. `inbox_ticket_revisions`: Lưu trữ lịch sử từng lần biến động nội dung vé kèm mã băm SHA-256 `content_hash`.
 3. `ticket_ai_assessments`: Lưu trữ độc lập 2 bản đánh giá AI (`summary` và `fact_extraction`) kèm Model Name và Prompt Version.
@@ -127,7 +136,7 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
 
 ---
 
-## 4. BẢNG CHỈ MỤC TRA CỨU NHANH CÁC ROUTERS VÀ TRANG GIAO DIỆN
+## 4. BẢNG CHỈ MỤC TRA CỨU NHANH CÁC ROUTERS, SERVICES VÀ TRANG GIAO DIỆN
 
 ### 4.1. 10 Router REST APIs Backend (`backend/app/api/v1/endpoints/`)
 1. [`workflows.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/workflows.py): Quản trị Workflow drafts, Server-side JWT approval gate (`POST /{id}/approve_and_run`), Dual Freeze, Retry steps (`POST /{id}/retry_step`), Graph validation.
@@ -141,7 +150,19 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
 9. [`github.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/github.py): Tự động trích xuất lỗi hệ thống thành GitHub Issue qua Gemini AI, Preview và Dispatch vào repo.
 10. [`reports.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/reports.py): Báo cáo số liệu KPI, Phân bố danh mục ticket, Xu hướng xử lý theo tuần/tháng, Xuất file Excel/CSV.
 
-### 4.2. 13 Trang Chức Năng Frontend SPA (`frontend/src/features/`)
+### 4.2. Các Dịch Vụ Chủ Chốt Backend (`backend/app/services/`)
+1. [`email_thread_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/email_thread_service.py): Phân tách email thread, khử quoted reply rác, nhận diện `@dtt.vn` vs Khách hàng.
+2. [`evidence_verifier.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/evidence_verifier.py): Đối soát ký tự offset trích dẫn $\pm 160$ chars, fail-closed attachments.
+3. [`request_fact_normalizer.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/request_fact_normalizer.py): Bổ sung fact tất định (Email, Teacher/Student role, Course ID).
+4. [`workflow_planner.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_planner.py): Policy Registry v1.1.0, Auto Git Sync, Zero-Mockup Git role.
+5. [`workflow_executor.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_executor.py): Thuật toán Tô-pô Kahn DAG, OCC Lease, Smart BFS Retry.
+6. [`excel/`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/excel): Gói dịch vụ xử lý Excel chuyên biệt (`COFService`, `BulkTemplateService`, `GenericExcelService`, `TOFExcelService`).
+7. [`workspace/`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workspace): Gói RPA Workspace 8 module (Account, Order, Contract, Enroll, Scanner, Base, Orchestrator).
+8. [`playwright_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/playwright_service.py): Ghi danh PLearn LMS 2 nhịp trên `td.cell.c2`.
+9. [`git_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/git_service.py): Thêm cộng tác viên GitBucket qua Keycloak OIDC SSO.
+10. [`keycloak_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/keycloak_service.py): 2-Tier Hybrid Keycloak (REST API 300ms + RPA Fallback).
+
+### 4.3. 13 Trang Chức Năng Frontend SPA (`frontend/src/features/`)
 1. [`UnifiedInboxPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/inbox/UnifiedInboxPage.tsx): Trung tâm AI Workflow Console V3.1 (Bento Grid, Drawer 4 trạng thái, Trình xem trước tệp đính kèm đa định dạng SheetJS/PDF/Office/Images, Duyệt luồng thực thi).
 2. [`TaskManagementPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/tasks/TaskManagementPage.tsx): Quản lý danh sách tác vụ bot, Phê duyệt từng task, Sửa payload JSON, Xem lịch sử thực thi.
 3. [`WorkBoardPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/board/WorkBoardPage.tsx): Bảng điều khiển Kanban hiện đại (Kéo thả nhiệm vụ, Phân loại, Thẻ màu sắc, Checklist công việc con).

@@ -312,9 +312,10 @@ class WorkflowPlannerService:
 
             if extracted_intent.type == "repository_access":
                 if not entities.get("git_role"):
-                    final_git_role = "GUEST"
-                    entities["git_role"] = "GUEST"
-                    logger.info("ℹ️ Tự động gán vai trò mặc định 'GUEST' cho yêu cầu cộng tác viên Git.")
+                    missing_requirements.append({
+                        "field": "git_role",
+                        "reason": "Yêu cầu cấp quyền Git bắt buộc phải chỉ định vai trò (ADMIN, DEVELOPER,...), không dùng mặc định."
+                    })
 
                 # Kiểm tra danh sách Repositories (Lấy từ entities hoặc từ file Excel đính kèm)
                 repos = entities.get("repositories", [])

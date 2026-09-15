@@ -84,6 +84,9 @@ def parse_users_from_table_or_text(text: str, source_revision_id: Optional[str])
     spans: List[EvidenceSpan] = []
     seen_ids = set()
 
+    role_match = re.search(r"\bteachers?\b|\bgiáo\s+viên\b", text, re.IGNORECASE)
+    detected_role = "teacher" if role_match else "student"
+
     lines = text.splitlines()
     for line in lines:
         line_clean = line.strip()
@@ -115,7 +118,7 @@ def parse_users_from_table_or_text(text: str, source_revision_id: Optional[str])
 
             if candidate_id and candidate_id.lower() not in seen_ids:
                 seen_ids.add(candidate_id.lower())
-                u_item = {"email": candidate_id, "role": "student"}
+                u_item = {"email": candidate_id, "role": detected_role}
                 if candidate_name:
                     u_item["full_name"] = candidate_name
                 users.append(u_item)
@@ -133,7 +136,7 @@ def parse_users_from_table_or_text(text: str, source_revision_id: Optional[str])
                 continue
             if em_str.lower() not in seen_ids:
                 seen_ids.add(em_str.lower())
-                users.append({"email": em_str, "role": "student"})
+                users.append({"email": em_str, "role": detected_role})
                 start_pos = text.find(em_str)
                 if start_pos >= 0:
                     spans.append(_span(text, start_pos, start_pos + len(em_str), source_revision_id))
