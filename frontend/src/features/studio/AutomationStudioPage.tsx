@@ -138,9 +138,7 @@ interface TeacherAllocationItem {
   assignedLmsGroups: string[];
 }
 
-const [cofTrays, setCofTrays] = useState<LicenseTrayItem[]>([]);
-const [cofUnassignedClasses, setCofUnassignedClasses] = useState<ClassGroupItem[]>([]);
-const [cofTeachersAllocation, setCofTeachersAllocation] = useState<TeacherAllocationItem[]>([]);
+
 
 export const AutomationStudioPage: React.FC = () => {
   const navigate = useNavigate();
@@ -199,6 +197,10 @@ export const AutomationStudioPage: React.FC = () => {
   const [selectedSchool, setSelectedSchool] = useState<HierarchySchoolItem | null>(null);
   const [selectedPartner, setSelectedPartner] = useState<{ name: string; code: string } | null>(null);
   const [selectedDistributor, setSelectedDistributor] = useState<{ name: string; code: string } | null>(null);
+
+  const [cofTrays, setCofTrays] = useState<LicenseTrayItem[]>([]);
+  const [cofUnassignedClasses, setCofUnassignedClasses] = useState<ClassGroupItem[]>([]);
+  const [cofTeachersAllocation, setCofTeachersAllocation] = useState<TeacherAllocationItem[]>([]);
 
   const [entitySearchQuery, setEntitySearchQuery] = useState<string>('');
   const [isEntityDropdownOpen, setIsEntityDropdownOpen] = useState<boolean>(false);
