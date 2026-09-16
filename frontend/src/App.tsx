@@ -21,6 +21,7 @@ const ProfileSettingsPage = lazy(() => import('./features/profile/ProfileSetting
 const AutomationStudioPage = lazy(() => import('./features/studio/AutomationStudioPage').then(m => ({ default: m.AutomationStudioPage })));
 const CoursesManagerPage = lazy(() => import('./features/courses/CoursesManagerPage').then(m => ({ default: m.CoursesManagerPage })));
 const WorkBoardPage = lazy(() => import('./features/board/WorkBoardPage').then(m => ({ default: m.WorkBoardPage })));
+const HierarchyManagerPage = lazy(() => import('./features/hierarchy/HierarchyManagerPage').then(m => ({ default: m.HierarchyManagerPage })));
 
 // 🧹 Dọn dẹp triệt để các key cache localStorage cũ (ptv_*) tồn đọng từ các phiên trước
 const purgeStaleDataCaches = () => {
@@ -94,6 +95,7 @@ const AppContent: React.FC = () => {
               <Route path="/profile" element={<ProfileSettingsPage />} />
               <Route path="/studio" element={<AutomationStudioPage />} />
               <Route path="/courses" element={<CoursesManagerPage />} />
+              <Route path="/hierarchy" element={<HierarchyManagerPage />} />
             </Route>
 
             {/* Fallback */}

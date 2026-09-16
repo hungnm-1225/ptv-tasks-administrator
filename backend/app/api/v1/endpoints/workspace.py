@@ -10,6 +10,8 @@ from app.services.workspace_lineage_service import workspace_lineage_service
 from app.services.workspace_playwright_service import workspace_playwright_service
 from app.services.workspace.workspace_scanner_service import workspace_scanner_service
 from app.services.keycloak_service import keycloak_service
+from cryptography.fernet import Fernet
+from app.core.config import get_utc_iso
 
 router = APIRouter()
 
@@ -359,3 +361,157 @@ async def lookup_keycloak_users(payload: Dict[str, Any]):
         raw_list = [raw_list]
     results = await keycloak_service.lookup_user_details(raw_list)
     return {"users": results}
+
+# =============================================================================
+# 5. QUẢN TRỊ PHẢ HỆ 3 TẦNG & CẬP NHẬT KÉT SẮT FERNET
+# =============================================================================
+
+class UpdateOrganizationPayload(BaseModel):
+    name: Optional[str] = None
+    code: Optional[str] = None
+    parent_id: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None  # Mật khẩu mới dạng text trần (Backend sẽ tự mã hóa Fernet)
+
+
+@router.get("/hierarchy-manage")
+async def get_hierarchy_management_data():
+    """
+    Lấy toàn bộ cây phả hệ 3 cấp (Distributors, Partners, Schools) 
+    kèm trạng thái Két Sắt Fernet phục vụ giao diện Quản trị Phả hệ.
+    """
+    supabase = get_supabase_client()
+    try:
+        # 1. Truy vấn toàn bộ tổ chức
+        orgs_res = supabase.table("workspace_organizations")\
+            .select("id, code, name, role_type, parent_id, country")\
+            .order("role_type")\
+            .order("name")\
+            .execute()
+        all_orgs = orgs_res.data or []
+        
+        # 2. Truy vấn danh bạ Két sắt Vault để đối soát username & trạng thái mật khẩu
+        vault_res = supabase.table("workspace_credentials_vault")\
+            .select("org_id, username, updated_at")\
+            .execute()
+        vault_map = {v["org_id"]: v for v in (vault_res.data or [])}
+        
+        org_map = {o["id"]: o for o in all_orgs}
+        distributors = [o for o in all_orgs if o.get("role_type") == "distributor"]
+        partners = [o for o in all_orgs if o.get("role_type") == "partner"]
+        
+        enriched_orgs = []
+        for o in all_orgs:
+            parent_id = o.get("parent_id")
+            parent = org_map.get(parent_id, {})
+            
+            # Phân giải Distributor gốc (Nếu là School -> lấy parent của Partner; Nếu là Partner -> lấy parent của chính nó)
+            dist_id = parent.get("parent_id") if o.get("role_type") == "school" else (parent_id if o.get("role_type") == "partner" else None)
+            distributor = org_map.get(dist_id, {}) if dist_id else (parent if o.get("role_type") == "partner" else None)
+            
+            v_info = vault_map.get(o["id"], {})
+            
+            enriched_orgs.append({
+                "id": o["id"],
+                "code": o.get("code") or "N/A",
+                "name": o.get("name") or "Chưa đặt tên",
+                "role_type": o.get("role_type") or "school",
+                "parent_id": parent_id,
+                "parent_name": parent.get("name") or "Trực tiếp (Không qua đối tác)",
+                "parent_code": parent.get("code") or "N/A",
+                "distributor_id": dist_id,
+                "distributor_name": distributor.get("name") if distributor else "N/A",
+                "country": o.get("country") or "Vietnam",
+                "username": v_info.get("username") or "",
+                "has_vault_pass": bool(v_info.get("username")),
+                "vault_updated_at": v_info.get("updated_at")
+            })
+            
+        return {
+            "status": "success",
+            "total": len(enriched_orgs),
+            "organizations": enriched_orgs,
+            "distributors": [{"id": d["id"], "name": d["name"], "code": d.get("code")} for d in distributors],
+            "partners": [{"id": p["id"], "name": p["name"], "code": p.get("code"), "parent_id": p.get("parent_id")} for p in partners]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi lấy dữ liệu quản trị phả hệ: {e}")
+
+
+@router.put("/organizations/{org_id}")
+async def update_organization_and_vault(org_id: str, payload: UpdateOrganizationPayload):
+    """
+    Cập nhật thông tin tổ chức, gán lại đối tác cha (Re-assign Parent) 
+    và mã hóa mật khẩu đối xứng Fernet lưu vào Két sắt.
+    """
+    supabase = get_supabase_client()
+    
+    # 1. Kiểm tra tổ chức có tồn tại không
+    check_res = supabase.table("workspace_organizations").select("*").eq("id", org_id).execute()
+    if not check_res.data:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tổ chức yêu cầu.")
+        
+    current_org = check_res.data[0]
+    
+    # Chống gán cha là chính mình
+    if payload.parent_id and payload.parent_id == org_id:
+        raise HTTPException(status_code=400, detail="Một đơn vị không thể tự làm cấp cha của chính mình!")
+        
+    # 2. Cập nhật thông tin workspace_organizations
+    update_org_data: Dict[str, Any] = {}
+    if payload.name is not None:
+        update_org_data["name"] = payload.name.strip()
+    if payload.code is not None:
+        update_org_data["code"] = payload.code.strip()
+    if payload.parent_id is not None:
+        update_org_data["parent_id"] = payload.parent_id if payload.parent_id != "" else None
+
+    if update_org_data:
+        supabase.table("workspace_organizations").update(update_org_data).eq("id", org_id).execute()
+
+    # 3. Cập nhật Két Sắt Fernet (workspace_credentials_vault) nếu có thông tin tài khoản/mật khẩu
+    vault_updated = False
+    if payload.username is not None or payload.password:
+        vault_check = supabase.table("workspace_credentials_vault").select("id, encrypted_password").eq("org_id", org_id).execute()
+        vault_record = vault_check.data[0] if vault_check.data else None
+        
+        encrypted_pass = None
+        if payload.password and payload.password.strip():
+            # Mã hóa đối xứng Fernet bằng VAULT_SECRET_KEY
+            try:
+                fernet_key = settings.VAULT_SECRET_KEY.encode() if isinstance(settings.VAULT_SECRET_KEY, str) else settings.VAULT_SECRET_KEY
+                f = Fernet(fernet_key)
+                encrypted_pass = f.encrypt(payload.password.strip().encode()).decode()
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Lỗi mã hóa mật khẩu Fernet: {e}")
+
+        now_iso = get_utc_iso()
+        if vault_record:
+            # Đã có record -> Update
+            vault_payload: Dict[str, Any] = {"updated_at": now_iso}
+            if payload.username is not None:
+                vault_payload["username"] = payload.username.strip()
+            if encrypted_pass:
+                vault_payload["encrypted_password"] = encrypted_pass
+                
+            supabase.table("workspace_credentials_vault").update(vault_payload).eq("id", vault_record["id"]).execute()
+            vault_updated = True
+        else:
+            # Chưa có record -> Tạo mới vào Két Sắt
+            new_vault = {
+                "org_id": org_id,
+                "username": (payload.username or "").strip(),
+                "encrypted_password": encrypted_pass or "",
+                "updated_at": now_iso
+            }
+            supabase.table("workspace_credentials_vault").insert(new_vault).execute()
+            vault_updated = True
+
+    # 4. Xóa sạch RAM Cache để toàn hệ thống đồng bộ phả hệ mới ngay lập tức
+    ws_cache.invalidate("all_hierarchy_schools")
+
+    return {
+        "status": "success",
+        "message": f"Đã cập nhật thành công phả hệ của '{payload.name or current_org['name']}'!",
+        "vault_updated": vault_updated
+    }
