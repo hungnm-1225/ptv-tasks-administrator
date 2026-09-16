@@ -404,3 +404,5 @@ class WorkspaceAccountService(WorkspaceBaseService):
         except Exception as e:
             logger.error(f"❌ Lỗi check_and_export_batch_result: {e}")
             return {"status": "failed", "error": str(e)}
+
+workspace_account_service = WorkspaceAccountService()
