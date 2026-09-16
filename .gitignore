@@ -2,6 +2,7 @@
 node_modules/
 backend/venv/
 backend/scripts/
+backend/tests/
 backend/__pycache__/
 backend/scripts/*.xlsx
 *.pyc

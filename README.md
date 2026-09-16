@@ -288,6 +288,8 @@ ptv-tasks-administrator/
 │   │   └── pythaverse_hierarchy_data.xlsx      # Bảng tính gốc chứa danh bạ phả hệ trường học
 │   ├── re_triage_all_tickets.py                # Script chạy lại AI Triage hàng loạt cho Inbox
 │   ├── seed_monitor_credentials.py             # Script khởi tạo tài khoản kiểm thử cho 10 Sites
+│   ├── test_cof_parser.py                      # Script kiểm thử local bóc tách COF từng tọa độ (Tab1 Cột G/H/I/L/Q, Tab2, Tab3)
+│   ├── test_cof_intelligent_engine.py          # Cỗ máy phân tích COF thông minh: Grade Matcher, Group Name, Capacity Check, Teacher Allocation
 │   ├── test_git_collaborator.py                # Script kiểm thử độc lập RPA GitBucket
 │   ├── test_git_fast_engine.py                 # Master Test Suite Git Direct API Hybrid (3s stealer, 20ms existence, 200ms POST)
 │   ├── test_lms_advanced_features.py           # Script kiểm thử tính năng nâng cao ghi danh Moodle
@@ -320,7 +322,7 @@ ptv-tasks-administrator/
 │   │   │   │   └── components/                 # WorkflowBuilder, WorkflowStepCard, WorkflowValidationPanel
 │   │   │   ├── tasks/                          # TaskManagementPage.tsx (Bot Tasks Queue & Edit)
 │   │   │   ├── board/                          # WorkBoardPage.tsx (Multi-board Kanban DND)
-│   │   │   ├── studio/                         # AutomationStudioPage.tsx (RPA Multi-System Studio 4,121 lines)
+│   │   │   ├── studio/                         # AutomationStudioPage.tsx (RPA Multi-System Studio 4,969 lines)
 │   │   │   ├── courses/                        # CoursesManagerPage.tsx (Dual Catalog & Git Sync)
 │   │   │   ├── bots/                           # BotCommanderPage.tsx (Bot Monitoring & Live Terminal)
 │   │   │   ├── monitor/                        # SiteMonitorPage.tsx (3-Tab Health & Uptime Monitor)
@@ -706,16 +708,31 @@ Phần này cung cấp giải phẫu sâu sắc về chức năng, lớp và t�
 #### 5.6.4. Gói Xử Lý Bảng Tính Chuyên Biệt (`app/services/excel/` & `cof_excel_service.py`)
 
 ##### 1. [`cof_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/excel/cof_service.py) (`COFService`)
+
+> **Phiên bản hiện hành: Master Enterprise Edition** – Đã được đại tu toàn diện với thuật toán Forward-fill giáo viên, Gộp trùng lặp theo Email và Heuristic Grade Matcher tự động.
+
+- **Hằng số `COURSE_METADATA_MAP`**: Từ điển tra cứu nội bộ 5 khóa học Pythaverse (`SWRP 7`, `SWRP 9`, `SWRP 11`, `ASP`, `C++`) ánh xạ `course_id` → `{name, grade, cat}`. Dùng khi `cof_service` chạy độc lập, không phụ thuộc CSDL.
 - **`clean_str(val: Any) -> str`**: Chuẩn hóa chuỗi an toàn, strip khoảng trắng, xử lý `None`.
-- **`format_date_dob(dob_raw: Any) -> str`**: Chuẩn hóa ngày sinh về định dạng chuẩn `DD/MM/YYYY`, xử lý ngày dạng số của Excel (Serial Date Number) và ngày dạng văn bản quốc tế (`YYYY/MM/DD`). Mặc định fallback an toàn `01/01/2000`.
-- **`is_cof_file(file_path: str) -> bool`**: Kiểm tra cấu trúc sheet của file Excel (`student info`, `teacher info`, `curriculum`, `cof`) để xác định có phải là file COF chuẩn hay không.
-- **`parse_cof_file(file_path: str) -> Dict[str, Any]`**: Bóc tách toàn bộ 3 tabs của file COF:
-  - Tab 1: Đơn hàng, môn học, số lượng bản quyền.
-  - Tab 2: Danh sách học sinh (Họ tên, ngày sinh, khối lớp, tài khoản).
-  - Tab 3: Danh sách giáo viên (Họ tên, email, số điện thoại, môn phụ trách).
-- **`write_results_back_to_cof(original_cof_path: str, accounts_result_data: List[Dict], output_cof_path: str) -> str`**:
-  - Đọc file COF gốc, dán ngược mã đăng nhập (`username`) và mật khẩu (`password`) đã được tạo vào các cột kết quả tương ứng của học sinh và giáo viên.
-  - Đánh dấu màu nền xanh `PatternFill(start_color="E2EFDA")` cho các tài khoản mới tạo thành công, giữ nguyên các tài khoản cũ.
+- **`clean_text_no_special(text: str) -> str`**: Khử sạch toàn bộ ký tự đặc biệt (`regex [^\w\s]`), chỉ giữ chữ cái, số và khoảng trắng đơn. Dùng để tạo tên Group LMS hợp lệ.
+- **`generate_lms_group_name(school_name, class_name, date_obj) -> str`**: Sinh tên Group chuẩn LMS theo quy tắc `[School Clean] [Class Clean] [YYYYMon]` (VD: `Pythaverse School Gr7 2026Sep`).
+- **`extract_grade_number(text: str) -> Optional[int]`**: Trích xuất số khối lớp từ chuỗi văn bản. Hỗ trợ các định dạng: `Gr7`, `Grade 9`, `STEM 11`, `ABM 11-2`, `Khối 7`. Dùng cho thuật toán Heuristic Grade Matcher.
+- **`format_date_dob(dob_raw: Any) -> str`**: Chuẩn hóa ngày sinh về định dạng `DD/MM/YYYY`, xử lý Excel Serial Date Number và các định dạng quốc tế. Fallback an toàn `01/01/2000`.
+- **`format_date_iso(val: Any) -> str`**: Chuẩn hóa ngày tháng về `YYYY-MM-DD` an toàn.
+- **`is_cof_file(file_path: str) -> bool`**: Nhận diện file COF chuẩn 3 tabs qua tên sheet (`student`, `teacher`, `curriculum`, `cof`).
+- **`parse_cof_file(file_path: str) -> Dict[str, Any]`** *(Hàm trung tâm)*:
+  - **Tab 1 – Curriculum Order Form:** Đọc tọa độ chính xác Cột G (Tên môn), Cột H (Course ID), Cột I (Start Date - merged I-K), Cột L (End Date - merged L-N), Cột O (Date Request), Cột Q (Số lượng bản quyền thật). Lọc cốt tử: chỉ giữ dòng có ít nhất 1 trong 3 (Start Date, End Date, Quantity). Xây dựng `ordered_trays` (dict `course_id` → tray metadata).
+  - **Tab 2 – Student Information & Heuristic Grade Matcher:** Đọc học sinh từ hàng 7. Lấy tên lớp ưu tiên theo thứ tự Cột 11 → Cột 10 → Cột 9 (tránh ô dấu cách rác). Sinh `lms_group_name` chuẩn. Chạy **Thuật toán Heuristic Grade Matcher**: so khớp `extract_grade_number(class_name)` với `target_grade` của từng khóa học trong `ordered_trays`, gán học sinh vào đúng khay khóa học tương ứng. Tính `assigned_students_count` và phát hiện `unmatched_classes`.
+  - **Tab 3 – Teacher Information (Đặc Trị Forward-fill & Gộp Email):**
+    - 🎯 **Forward-fill:** Nếu hàng dưới trống tên/email nhưng có ghi môn học, tự động kế thừa `email`, `fn`, `ln`, `dob` từ giáo viên hàng trên.
+    - 🎯 **Gộp theo Email:** Xây dựng `teacher_map[email]` để gom nhóm tất cả môn học và lớp học của cùng một giáo viên, loại bỏ hoàn toàn thẻ giáo viên trùng lặp.
+    - 🎯 **Chẻ nhiều môn:** Phân tách ô chứa nhiều môn học bằng `re.split(r'[\r\n;]+')`, gom vào `Set` tránh trùng lặp.
+    - Output: `teachers_allocation` (unique per email), `teachers_all` (flat list per row), `teachers_to_create`.
+  - **Return dict đầy đủ:** `school_name`, `school_address`, `country`, `courses`, `ordered_trays`, `unmatched_classes`, `teachers_allocation`, `students_all`, `students_to_create`, `teachers_all`, `teachers_to_create`.
+- **`write_results_back_to_cof(original_cof_path, result_excel_path, students_all, students_to_create, teachers_all, teachers_to_create, output_cof_path) -> str`**:
+  - Đọc file kết quả RPA (`result_excel_path`) để xây dựng `res_map[email] → {username, password}`.
+  - Dán ngược `username` (Cột L/12), `password` (Cột M/13) và `lms_group_name` (Cột N/14) vào đúng hàng trong Tab 2 (Students) và Tab 3 (Teachers).
+  - Highlight màu cam `FCE4D6` + Font đỏ đậm `C00000` (Calibri 11 Bold) thay vì màu xanh cũ, cho toàn bộ ô kết quả.
+  - Ghi chú Cột O (15): `"Created"` hoặc `"Already exists - Password reset to email"` tùy trạng thái tài khoản.
 
 ##### 2. [`bulk_template_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/excel/bulk_template_service.py) (`BulkTemplateService`)
 - **`normalize_input_accounts_excel(input_file_path: str, output_file_path: str) -> Dict[str, Any]`**:
@@ -849,11 +866,13 @@ Phần này cung cấp giải phẫu sâu sắc về chức năng, lớp và t�
 - [`backend/scripts/import_hierarchy.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/scripts/import_hierarchy.py): Kịch bản CLI nạp cấu trúc phả hệ 480 trường học từ `pythaverse_hierarchy_data.xlsx` vào bảng `workspace_organizations` và mã hóa mật khẩu nạp vào Két Sắt Fernet (`workspace_credentials_vault`).
 - [`backend/re_triage_all_tickets.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/re_triage_all_tickets.py): Kịch bản chạy lại toàn bộ tiến trình AI Triage cho các vé tồn đọng trong CSDL để chuẩn hóa dữ liệu cũ.
 - [`backend/seed_monitor_credentials.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/seed_monitor_credentials.py): Script khởi tạo tài khoản kiểm thử đăng nhập định kỳ cho 10 phân hệ web trong `site_monitor_credentials`.
-- [`backend/test_git_fast_engine.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/test_git_fast_engine.py): **Master Test Suite Git Direct API Hybrid:** Kiểm thử toàn diện quy trình bốc Session OIDC Keycloak trong 3s, kiểm tra tồn tại JIT qua `/_user/existence` trong 20ms, và bắn request POST cập nhật Collaborators trong 200ms.
-- [`backend/test_workspace_fast_engine.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/test_workspace_fast_engine.py): **Master Test Suite Workspace Direct API Hybrid 6 Giai Đoạn:** Kiểm thử độc lập toàn trình chuỗi License E2E từ School Order -> Partner Approve -> Partner Top-up -> Distributor Approve -> Distributor Top-up -> Sales Admin Approve.
-- [`backend/test_lms_fast_engine.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/test_lms_fast_engine.py): Kịch bản kiểm thử độc lập động cơ Hybrid Moodle PLearn V3.6 (so sánh tốc độ WebService và UI).
-- [`backend/test_git_collaborator.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/test_git_collaborator.py): Kịch bản kiểm thử độc lập luồng tự động hóa thêm cộng tác viên vào GitBucket.
-- [`backend/test_lms_advanced_features.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/test_lms_advanced_features.py): Kịch bản kiểm thử độc lập các tính năng nâng cao ghi danh Moodle.
+- [`backend/scripts/test_cof_parser.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/scripts/test_cof_parser.py): **Script kiểm thử local bóc tách COF từng tọa độ.** Tự động dò tìm file COF trong thư mục `backend/` (hoặc nhận path từ `argv[1]`). Bóc tách chính xác: Tab 1 (Cột G=Tên môn, Cột H=CourseID, Cột I=StartDate, Cột L=EndDate, Cột Q=SL), Tab 2 (Học sinh), Tab 3 (Giáo viên). Lọc cốt tử: bỏ dòng thiếu cả 3 trường, xuất JSON đẹp.
+- [`backend/scripts/test_cof_intelligent_engine.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/scripts/test_cof_intelligent_engine.py): **Cỗ máy phân tích COF thông minh.** Giải mã toàn bộ logic nghiệp vụ: tra cứu Course Name từ ID, sinh tên Group LMS chuẩn `[School Clean][Class Clean][YYYYMon]`, chạy Heuristic Grade Matcher (`SWRP N ↔ Grade N`), tính Capacity Check (Xanh: đủ / Đỏ: tràn), và phân bổ giáo viên vào group cụ thể hoặc toàn bộ group của môn. Xuất báo cáo JSON chi tiết đa tầng.
+- [`backend/scripts/test_git_fast_engine.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/scripts/test_git_fast_engine.py): **Master Test Suite Git Direct API Hybrid:** Kiểm thử toàn diện quy trình bốc Session OIDC Keycloak trong 3s, kiểm tra tồn tại JIT qua `/_user/existence` trong 20ms, và bắn request POST cập nhật Collaborators trong 200ms.
+- [`backend/scripts/test_workspace_fast_engine.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/scripts/test_workspace_fast_engine.py): **Master Test Suite Workspace Direct API Hybrid 6 Giai Đoạn:** Kiểm thử độc lập toàn trình chuỗi License E2E từ School Order -> Partner Approve -> Partner Top-up -> Distributor Approve -> Distributor Top-up -> Sales Admin Approve.
+- [`backend/scripts/test_lms_fast_engine.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/scripts/test_lms_fast_engine.py): Kịch bản kiểm thử độc lập động cơ Hybrid Moodle PLearn V3.6 (so sánh tốc độ WebService và UI).
+- [`backend/scripts/test_git_collaborator.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/scripts/test_git_collaborator.py): Kịch bản kiểm thử độc lập luồng tự động hóa thêm cộng tác viên vào GitBucket.
+- [`backend/scripts/test_lms_advanced_features.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/scripts/test_lms_advanced_features.py): Kịch bản kiểm thử độc lập các tính năng nâng cao ghi danh Moodle.
 
 ---
 
@@ -937,8 +956,12 @@ Hệ thống tích hợp bộ kiểm thử an toàn hermetic, chạy siêu tốc
 - Tùy biến màu sắc cột, độ mờ (`overlay_opacity`, `card_opacity`), và hình nền background URL.
 - Quản lý công việc chi tiết: Phân loại danh mục, mức độ ưu tiên, người phụ trách, ngày hết hạn, và danh sách công việc con (`subtasks`) có thanh tiến độ phần trăm.
 
-#### 4. [`AutomationStudioPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/studio/AutomationStudioPage.tsx) (Siêu Xưởng Tự Động Hóa RPA 4,121 Dòng Code)
-- Bàn điều khiển chạy tay cho kỹ sư tự động hóa, liên thông trực tiếp 7 phân hệ Pythaverse với **4 Cỗ Máy Tự Động Hóa Chính**:
+#### 4. [`AutomationStudioPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/studio/AutomationStudioPage.tsx) (Siêu Xưởng Tự Động Hóa RPA 4,969 Dòng Code)
+- Bàn điều khiển chạy tay cho kỹ sư tự động hóa, liên thông trực tiếp 7 phân hệ Pythaverse với **4 Cỗ Máy Tự Động Hóa Chính**.
+- **Kỹ thuật quan trọng:** Sử dụng `createPortal(modal, document.body)` cho tất cả modal overlay để tránh lỗi co sụp width 0px khi modal nằm bên trong Flex/Grid container hoặc `motion.div` Framer Motion.
+- **Interfaces TypeScript nội bộ chuyên biệt:** `HierarchySchoolItem`, `CourseItem`, `OrderCourseSelection`, `LmsCourseSelectionItem`, `ScrapedPendingItem`, `PreparedTaskSummary`, `ClassGroupItem` (raw class + lms_group_name + count + grade), `TeacherAllocationItem` (email + assignedCourses[] + assignedLmsGroups[]), `LicenseTrayItem` (courseId + quota + assignedStudentsCount + assignedClasses[]).
+- **State COF chuyên biệt:** `cofExtractionResult` chứa `{rawSchoolName, matchedSchool, confidence, score, coursesCount, studentsCount, teachersCount}` phục vụ Fuzzy School Matching UI.
+- **4 Cỗ Máy Tự Động Hóa Chính:**
   1. **`workspace_rpa` (School Workspace):**
      - **Phân luồng 1: Phê Duyệt (`approve`):**
        - `approve_school_order`: Quét và duyệt đơn hàng School gửi Partner.
@@ -946,9 +969,10 @@ Hệ thống tích hợp bộ kiểm thử an toàn hermetic, chạy siêu tốc
        - `admin_approve_contract`: Sales Admin tối cao phê duyệt DST Contract (kèm modal nhập lý do justification).
      - **Phân luồng 2: Tạo & Duyệt (`create_and_approve`):**
        - Luồng toàn trình End-to-End, chuỗi Partner, chuỗi Distributor.
-       - Tích hợp tính năng nộp file COF Excel: tự động trích xuất tên trường thô, đối soát với phả hệ 480 trường, chấm điểm độ tin cậy (`confidence`: high/medium/none) và tự động khớp School ID.
+       - **COF Excel Auto-Fill:** Nộp file COF → Backend `COFService.parse_cof_file` bóc tách → Frontend nhận `cofTrays` (License Trays) + `teachers_allocation` → Hiển thị **Bento Grid Phân Bổ Giáo Viên** (thẻ giáo viên + danh sách Group LMS) → Tự động điền vào payload ghi danh LMS.
+       - Đối soát Fuzzy School Name với phả hệ 480 trường, chấm điểm độ tin cậy (`confidence`: `high`/`medium`/`none`, `score` 0-100) và tự động điền School ID.
      - **Phân luồng 3: Bulk Accounts (`bulk_accounts`):**
-       - Trình upload và validate Excel trực tiếp phía Client: tự động phát hiện trùng lặp username/email, kiểm tra cột rỗng, kiểm tra định dạng ngày sinh, và hiển thị bảng dữ liệu tương tác cho phép chỉnh sửa trước khi nộp.
+       - Trình upload và validate Excel trực tiếp phía Client (SheetJS): tự động phát hiện trùng lặp email, kiểm tra cột rỗng, kiểm tra định dạng ngày sinh, hiển thị bảng preview cho phép chỉnh sửa trước khi nộp.
      - **Phân luồng 4: LMS Enroll & Git Sync (`lms_enroll`):**
        - Chọn khóa học xuyên category, thiết lập ngày bắt đầu/kết thúc, tên nhóm Group, và tự động liên kết Git Repositories tương ứng.
   2. **`keycloak_api` (Keycloak IDP):**
@@ -1283,8 +1307,13 @@ Bảng tra cứu trực tiếp giúp AI Coder tìm kiếm tức thì vị trí �
 | `validate_workflow_graph` | [`backend/app/services/workflow_planner.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_planner.py) | `WorkflowPlannerService` | Kiểm tra đồ thị DAG, phát hiện chu trình lặp (Cycle Detection). |
 | `execute_approved_workflow` | [`backend/app/services/workflow_executor.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_executor.py) | `WorkflowExecutorService` | Sắp xếp Tô-pô Kahn DAG, giải mã `{{ step.property }}`, ghi nhật ký audit. |
 | `retry_workflow_step` | [`backend/app/services/workflow_executor.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_executor.py) | `WorkflowExecutorService` | Duyệt BFS reset chính xác các bước hạ nguồn, giữ nguyên bước thành công. |
-| `parse_cof_file` | [`backend/app/services/excel/cof_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/excel/cof_service.py) | `COFService` | Bóc tách 3 tabs của file COF (Đơn hàng, Học sinh, Giáo viên). |
-| `write_results_back_to_cof` | [`backend/app/services/excel/cof_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/excel/cof_service.py) | `COFService` | Dán ngược mã đăng nhập và mật khẩu vào file COF gốc, tô màu xanh. |
+| `is_cof_file` | [`backend/app/services/excel/cof_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/excel/cof_service.py) | `COFService` | Nhận diện file COF chuẩn 3 tabs qua tên sheet. |
+| `clean_text_no_special` | [`backend/app/services/excel/cof_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/excel/cof_service.py) | `COFService` | Khử sạch ký tự đặc biệt cho tên Group LMS (`regex [^\w\s]`). |
+| `generate_lms_group_name` | [`backend/app/services/excel/cof_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/excel/cof_service.py) | `COFService` | Sinh tên Group LMS chuẩn theo `[School Clean] [Class Clean] [YYYYMon]`. |
+| `extract_grade_number` | [`backend/app/services/excel/cof_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/excel/cof_service.py) | `COFService` | Trích xuất số khối lớp từ chuỗi (Gr7, STEM11, Grade 9...) cho Heuristic Matcher. |
+| `format_date_iso` | [`backend/app/services/excel/cof_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/excel/cof_service.py) | `COFService` | Chuẩn hóa ngày tháng về `YYYY-MM-DD`, xử lý Excel Serial Date Number. |
+| `parse_cof_file` | [`backend/app/services/excel/cof_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/excel/cof_service.py) | `COFService` | Bóc tách 3 tabs COF: Tab1 (ordered_trays từng tọa độ), Tab2 (Heuristic Grade Matcher), Tab3 (Forward-fill + Gộp email + Chẻ đa môn). |
+| `write_results_back_to_cof` | [`backend/app/services/excel/cof_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/excel/cof_service.py) | `COFService` | Dán ngược kết quả RPA vào COF gốc: username (Cột L), password (Cột M), Group LMS (Cột N), highlight cam `FCE4D6`. |
 | `normalize_input_accounts_excel` | [`backend/app/services/excel/bulk_template_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/excel/bulk_template_service.py) | `BulkTemplateService` | Chuẩn hóa mọi file thành Phôi Chuẩn Của Trường (Hàng 2 tiêu đề, Hàng 5 header). |
 | `extract_users_from_raw_text` | [`backend/app/services/excel/bulk_template_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/excel/bulk_template_service.py) | `BulkTemplateService` | Bóc tách text trần sinh phôi Excel cho cỗ máy Bulk Account Creation. |
 | `generate_accounts_excel_from_users` | [`backend/app/services/excel/bulk_template_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/excel/bulk_template_service.py) | `BulkTemplateService` | Tạo file Excel phôi chuẩn trực tiếp từ mảng user dictionary. |
