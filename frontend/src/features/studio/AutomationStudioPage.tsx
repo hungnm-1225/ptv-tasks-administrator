@@ -112,6 +112,36 @@ interface PreparedTaskSummary {
   detailsList: string[];
 }
 
+interface ClassGroupItem {
+  rawClassName: string;
+  lmsGroupName: string;
+  studentsCount: number;
+  gradeDetected: number | null;
+}
+
+interface LicenseTrayItem {
+  courseId: string;
+  courseName: string;
+  category: string;
+  targetGrade: number | null;
+  quota: number;              // Hạn ngạch giấy phép mua (Cột Q)
+  assignedStudentsCount: number;
+  assignedClasses: ClassGroupItem[];
+  startDate: string;
+  endDate: string;
+}
+
+interface TeacherAllocationItem {
+  teacherName: string;
+  email: string;
+  courseAssign: string;
+  assignedLmsGroups: string[];
+}
+
+const [cofTrays, setCofTrays] = useState<LicenseTrayItem[]>([]);
+const [cofUnassignedClasses, setCofUnassignedClasses] = useState<ClassGroupItem[]>([]);
+const [cofTeachersAllocation, setCofTeachersAllocation] = useState<TeacherAllocationItem[]>([]);
+
 export const AutomationStudioPage: React.FC = () => {
   const navigate = useNavigate();
 
@@ -777,8 +807,29 @@ export const AutomationStudioPage: React.FC = () => {
   };
 
   // =========================================================================
-  // 📑 XỬ LÝ NỘP FILE COF & AUTO-FILL DỮ LIỆU VÀO PHÂN LUỒNG "TẠO & DUYỆT"
+  // 🧠 [PATCH 2] THUẬT TOÁN BÓC TÁCH COF THÔNG MINH & TỰ ĐỘNG XẾP KHAY
   // =========================================================================
+  const cleanLmsText = (text: string): string => {
+    if (!text) return '';
+    return text.replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  };
+
+  const extractGradeNumberClient = (text: string): number | null => {
+    if (!text) return null;
+    // Nhận diện các phân ban Lớp 11 & 12 Philippines (STEM, ABM, HUMSS, TVL, GAS)
+    const shsMatch = text.match(/(?:stem|abm|humss|humms|tvl|gas|shs)\s*(\d{1,2})/i);
+    if (shsMatch) return parseInt(shsMatch[1], 10);
+
+    // Nhận diện Gr, Grade, Year, Khối, Lớp
+    const grMatch = text.match(/(?:gr|grade|year|khối|lớp)\s*(\d{1,2})/i);
+    if (grMatch) return parseInt(grMatch[1], 10);
+
+    // Fallback số độc lập
+    const numMatch = text.match(/\b(\d{1,2})\b/);
+    if (numMatch) return parseInt(numMatch[1], 10);
+    return null;
+  };
+
   const processAndAutoFillCOF = (file: File) => {
     setUploadedCofFile(file);
     const reader = new FileReader();
@@ -789,131 +840,202 @@ export const AutomationStudioPage: React.FC = () => {
         const workbook = XLSX.read(data, { type: 'array' });
         const sheetNames = workbook.SheetNames;
 
-        // 1. Tìm sheet COF chính (Tab 1)
+        // 1. ĐỌC TAB 1: CURRICULUM ORDER FORM
         const cofSheetName = sheetNames.find(s => s.toLowerCase().includes('cof') || s.toLowerCase().includes('curriculum')) || sheetNames[0];
-        const ws = workbook.Sheets[cofSheetName];
-        const rawJson: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+        const ws1 = workbook.Sheets[cofSheetName];
+        const rawJson1: any[][] = XLSX.utils.sheet_to_json(ws1, { header: 1, defval: '' });
 
         let extractedSchoolName = '';
-        const detectedCoursesMap: { courseName: string; licenses: number }[] = [];
+        if (rawJson1.length > 6) {
+          extractedSchoolName = String(rawJson1[5]?.[2] || '').trim(); // Cột C hàng 6
+        }
 
-        // Quét tìm thông tin Trường và Khóa học từ Tab 1
-        for (let i = 0; i < rawJson.length; i++) {
-          const row = rawJson[i];
-          const rowStr = row.map(c => String(c)).join(' ').toLowerCase();
+        const dateSuffix = new Date().toLocaleString('en-US', { month: 'short', year: 'numeric' }).replace(' ', ''); // Ví dụ: 2026Sep
+        const cleanSchool = cleanLmsText(extractedSchoolName) || 'School';
 
-          // Nhận diện tên trường
-          if (!extractedSchoolName && (rowStr.includes('school name') || rowStr.includes('tên trường'))) {
-            for (let c = 0; c < row.length; c++) {
-              const val = String(row[c]).trim();
-              if (val.toLowerCase().includes('school name') || val.toLowerCase().includes('tên trường')) {
-                extractedSchoolName = String(row[c + 1] || row[c + 2] || '').trim();
-                break;
-              }
+        const traysMap: Record<string, LicenseTrayItem> = {};
+        const parsedCoursesForForm: OrderCourseSelection[] = [];
+
+        // Quét bảng môn học từ hàng 28
+        for (let r = 27; r < rawJson1.length; r++) {
+          const row = rawJson1[r];
+          const courseIdRaw = row[7]; // Cột H (Course ID)
+          if (!courseIdRaw) continue;
+
+          const courseIdStr = String(courseIdRaw).replace(/\.0$/, '').trim();
+          const courseNameColG = String(row[6] || '').trim(); // Cột G (Tên môn thật)
+          const courseLink = String(row[2] || '').trim();
+
+          const startDate = formatExcelDateClient(row[8]);  // Cột I
+          const endDate = formatExcelDateClient(row[11]);   // Cột L
+          const qtyRaw = parseInt(String(row[16] || '0').trim(), 10); // Cột Q (Số lượng thật!)
+          const licenses = !isNaN(qtyRaw) && qtyRaw > 0 ? qtyRaw : 0;
+
+          // Lọc cốt tử: ít nhất 1 trong 3 thông tin phải có
+          if (!startDate && !endDate && licenses === 0) continue;
+
+          // Tìm thông tin môn trong DB nếu có
+          const dbCourse = workspaceCoursesList.find(c => String(c.course_id) === courseIdStr);
+          const finalCourseName = courseNameColG || dbCourse?.course_name || `Course #${courseIdStr}`;
+          const finalCategory = dbCourse?.category || (finalCourseName.includes('ASP') ? 'ASP' : (finalCourseName.includes('IR') ? 'IR' : 'SWRP'));
+
+          // Nhận diện khối lớp mục tiêu từ tên môn (SWRP 7 -> 7, SWRP 11 -> 11)
+          const swrpMatch = finalCourseName.match(/SWRP\s*(\d+)/i);
+          const targetGrade = swrpMatch ? parseInt(swrpMatch[1], 10) : null;
+
+          const trayItem: LicenseTrayItem = {
+            courseId: courseIdStr,
+            courseName: finalCourseName,
+            category: finalCategory,
+            targetGrade,
+            quota: licenses,
+            assignedStudentsCount: 0,
+            assignedClasses: [],
+            startDate: startDate || getFormattedDate(today),
+            endDate: endDate || getFormattedDate(nextYear),
+          };
+
+          traysMap[courseIdStr] = trayItem;
+
+          parsedCoursesForForm.push({
+            category: finalCategory,
+            course_id: parseInt(courseIdStr, 10) || 1,
+            course_name: finalCourseName,
+            lms_url: dbCourse?.lms_url || courseLink || '',
+            licenses: licenses,
+            start_date: trayItem.startDate,
+            end_date: trayItem.endDate,
+          });
+        }
+
+        // 2. ĐỌC TAB 2: STUDENT INFORMATION & GOM LỚP
+        const studentSheetName = sheetNames.find(s => s.toLowerCase().includes('student'));
+        const classesMap: Record<string, { count: number; grade: number | null }> = {};
+        let totalStudents = 0;
+
+        if (studentSheetName) {
+          const ws2 = workbook.Sheets[studentSheetName];
+          const rawJson2: any[][] = XLSX.utils.sheet_to_json(ws2, { header: 1, defval: '' });
+
+          for (let r = 6; r < rawJson2.length; r++) {
+            const row = rawJson2[r];
+            const fn = String(row[2] || '').trim();
+            const email = String(row[5] || '').trim();
+            if (!fn && !email) continue;
+            totalStudents++;
+
+            const rawClassName = String(row[10] || row[9] || row[8] || 'General Class').trim();
+            if (!classesMap[rawClassName]) {
+              classesMap[rawClassName] = {
+                count: 0,
+                grade: extractGradeNumberClient(rawClassName),
+              };
+            }
+            classesMap[rawClassName].count++;
+          }
+        }
+
+        // 3. THUẬT TOÁN TỰ ĐỘNG GHÉP LỚP VÀO KHAY KHÓA HỌC
+        const unassigned: ClassGroupItem[] = [];
+
+        Object.entries(classesMap).forEach(([className, info]) => {
+          const cleanClass = cleanLmsText(className);
+          const lmsGroupName = `${cleanSchool} ${cleanClass} ${dateSuffix}`.replace(/\s+/g, ' ').trim();
+
+          const classItem: ClassGroupItem = {
+            rawClassName: className,
+            lmsGroupName,
+            studentsCount: info.count,
+            gradeDetected: info.grade,
+          };
+
+          let matchedTrayId: string | null = null;
+          for (const [cid, tray] of Object.entries(traysMap)) {
+            if (tray.targetGrade !== null && info.grade === tray.targetGrade) {
+              matchedTrayId = cid;
+              break;
             }
           }
 
-          // Nhận diện dòng môn học & số lượng license
-          const courseKeywords = ['swrp', 'ir ', 'asp', 'microteaching', 'leanbot', 'digital twin', 'curriculum'];
-          if (courseKeywords.some(k => rowStr.includes(k))) {
-            const courseText = row.find((c: any) => {
-              const s = String(c).trim();
-              return courseKeywords.some(k => s.toLowerCase().includes(k)) && s.length > 5;
-            });
+          if (matchedTrayId) {
+            traysMap[matchedTrayId].assignedStudentsCount += info.count;
+            traysMap[matchedTrayId].assignedClasses.push(classItem);
+          } else {
+            unassigned.push(classItem);
+          }
+        });
 
-            if (courseText) {
-              // Tìm số lượng bản quyền (thường là số nguyên > 0 trong cùng hàng)
-              let qty = 30; // fallback
-              for (let c = row.length - 1; c >= 0; c--) {
-                const num = parseInt(String(row[c]).trim(), 10);
-                if (!isNaN(num) && num > 0 && num < 5000) {
-                  qty = num;
-                  break;
+        // 4. ĐỌC TAB 3: TEACHER INFORMATION (PHÂN BỔ GIÁO VIÊN)
+        const teacherSheetName = sheetNames.find(s => s.toLowerCase().includes('teacher'));
+        const teachersAlloc: TeacherAllocationItem[] = [];
+        let totalTeachers = 0;
+
+        if (teacherSheetName) {
+          const ws3 = workbook.Sheets[teacherSheetName];
+          const rawJson3: any[][] = XLSX.utils.sheet_to_json(ws3, { header: 1, defval: '' });
+
+          for (let r = 6; r < rawJson3.length; r++) {
+            const row = rawJson3[r];
+            const tName = String(row[4] || row[5] || '').trim();
+            const email = String(row[7] || row[3] || '').trim().toLowerCase();
+            const courseAssign = String(row[10] || '').trim();
+            const rawTargetClass = String(row[2] || '').trim();
+
+            if (!tName && !email) continue;
+            totalTeachers++;
+
+            const assignedLmsGroups: string[] = [];
+            if (rawTargetClass && classesMap[rawTargetClass]) {
+              assignedLmsGroups.push(`${cleanSchool} ${cleanLmsText(rawTargetClass)} ${dateSuffix}`);
+            } else {
+              // Gán giáo viên vào TẤT CẢ các group của môn phụ trách
+              Object.values(traysMap).forEach(tray => {
+                if (tray.courseName.toLowerCase().includes(courseAssign.toLowerCase()) ||
+                  (tray.targetGrade && courseAssign.toLowerCase().includes(`swrp ${tray.targetGrade}`))) {
+                  tray.assignedClasses.forEach(c => assignedLmsGroups.push(c.lmsGroupName));
                 }
-              }
-
-              detectedCoursesMap.push({
-                courseName: String(courseText).trim(),
-                licenses: qty,
               });
             }
+
+            teachersAlloc.push({
+              teacherName: tName,
+              email,
+              courseAssign,
+              assignedLmsGroups: Array.from(new Set(assignedLmsGroups)),
+            });
           }
         }
 
-        // 2. Đếm số lượng học sinh & giáo viên ở Tab 2 & Tab 3
-        let studentCount = 0;
-        let teacherCount = 0;
-        const studentSheet = sheetNames.find(s => s.toLowerCase().includes('student'));
-        if (studentSheet) {
-          const sJson = XLSX.utils.sheet_to_json(workbook.Sheets[studentSheet], { header: 1 });
-          studentCount = Math.max(0, sJson.length - 5);
-        }
-        const teacherSheet = sheetNames.find(s => s.toLowerCase().includes('teacher'));
-        if (teacherSheet) {
-          const tJson = XLSX.utils.sheet_to_json(workbook.Sheets[teacherSheet], { header: 1 });
-          teacherCount = Math.max(0, tJson.length - 5);
-        }
-
-        // 3. Khớp trường học với danh sách 480 trường
+        // 5. ĐỐI SOÁT PHẢ HỆ VỚI 480 TRƯỜNG
         const matchResult = matchSchoolWithHierarchy(extractedSchoolName, schoolsList);
-
         if (matchResult.matched) {
           setSelectedSchool(matchResult.matched);
           setSelectedPartner({ name: matchResult.matched.partner_name, code: matchResult.matched.partner_code });
           setSelectedDistributor({ name: matchResult.matched.distributor_name, code: matchResult.matched.distributor_code });
           setEntitySearchQuery(matchResult.matched.school_name);
         } else {
-          setEntitySearchQuery(extractedSchoolName); // Điền text thô để admin tự chọn
+          setEntitySearchQuery(extractedSchoolName);
         }
 
-        // 4. Khớp khóa học với danh mục Workspace Courses & Auto-fill
-        if (detectedCoursesMap.length > 0) {
-          const autoFilledCourses: OrderCourseSelection[] = [];
-
-          detectedCoursesMap.forEach((det) => {
-            const matchedDbCourse = workspaceCoursesList.find(c =>
-              c.course_name.toLowerCase().includes(det.courseName.toLowerCase()) ||
-              det.courseName.toLowerCase().includes(c.course_name.toLowerCase()) ||
-              (c.course_name.toLowerCase().includes('swrp') && det.courseName.toLowerCase().includes('swrp') &&
-                c.course_name.match(/\d+/)?.[0] === det.courseName.match(/\d+/)?.[0])
-            ) || workspaceCoursesList[0];
-
-            if (matchedDbCourse) {
-              autoFilledCourses.push({
-                category: matchedDbCourse.category || 'SWRP',
-                course_id: matchedDbCourse.course_id,
-                course_name: matchedDbCourse.course_name,
-                lms_url: matchedDbCourse.lms_url || '',
-                licenses: det.licenses,
-                start_date: getFormattedDate(today),
-                end_date: getFormattedDate(nextYear),
-              });
-            }
-          });
-
-          if (autoFilledCourses.length > 0) {
-            setSelectedCourses(autoFilledCourses);
-          }
+        // Cập nhật state toàn hệ thống
+        setCofTrays(Object.values(traysMap));
+        setCofUnassignedClasses(unassigned);
+        setCofTeachersAllocation(teachersAlloc);
+        if (parsedCoursesForForm.length > 0) {
+          setSelectedCourses(parsedCoursesForForm);
         }
 
-        // Lưu kết quả tóm tắt bóc tách
         setCofExtractionResult({
           rawSchoolName: extractedSchoolName,
           matchedSchool: matchResult.matched,
           confidence: matchResult.confidence,
           score: matchResult.score,
-          coursesCount: detectedCoursesMap.length,
-          studentsCount: studentCount,
-          teachersCount: teacherCount,
+          coursesCount: Object.keys(traysMap).length,
+          studentsCount: totalStudents,
+          teachersCount: totalTeachers,
         });
 
-        if (matchResult.confidence === 'high') {
-          toast.success(`✨ Đã bóc tách COF! Khớp chuẩn trường: ${matchResult.matched?.school_name}`);
-        } else if (matchResult.confidence === 'medium') {
-          toast.warning(`⚠️ Tên trường trong COF ("${extractedSchoolName}") khớp tương đối. Vui lòng kiểm tra lại!`);
-        } else {
-          toast.error(`❌ Không tìm thấy trường nào trong 480 trường khớp với: "${extractedSchoolName}". Vui lòng chọn trường bằng tay!`);
-        }
+        toast.success(`✨ Đã phân tích xong COF: ${Object.keys(traysMap).length} Khay khóa học, ${totalStudents} Học sinh, ${totalTeachers} Giáo viên!`);
       } catch (err) {
         toast.error('Lỗi khi đọc file COF: ' + (err as Error).message);
       }
@@ -2265,6 +2387,259 @@ export const AutomationStudioPage: React.FC = () => {
                   </div>
                 )}
               </div>
+              {/* ========================================================================= */}
+              {/* 🏆 [PATCH 3] GIAO DIỆN BENTO GRID KHAY KHÓA HỌC (VISUAL LICENSE TRAYS)   */}
+              {/* ========================================================================= */}
+              {cofTrays.length > 0 && (
+                <div className="rounded-3xl border border-indigo-200 dark:border-indigo-900 bg-gradient-to-b from-indigo-50/50 to-white dark:from-slate-900 dark:to-slate-900 p-5 sm:p-6 space-y-5 shadow-xs">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-indigo-100 dark:border-slate-800 pb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-md shadow-indigo-500/20">
+                        <Sparkles className="h-5 w-5 text-amber-300" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-extrabold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                          <span>Khay Phân Bổ Khóa Học & Giấy Phép</span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
+                            Visual License Trays
+                          </span>
+                        </h4>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          Kéo thả hoặc chuyển lớp giữa các khay để khớp chính xác hạn ngạch bản quyền.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-xs font-mono font-bold">
+                      <span className="px-3 py-1 rounded-xl bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                        Tổng Hạn Ngạch: {cofTrays.reduce((sum, t) => sum + t.quota, 0)} licenses
+                      </span>
+                      <span className="px-3 py-1 rounded-xl bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300">
+                        Đã Xếp: {cofTrays.reduce((sum, t) => sum + t.assignedStudentsCount, 0)} học sinh
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* DANH SÁCH CÁC KHAY KHÓA HỌC (GRID BENTO) */}
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    {cofTrays.map((tray) => {
+                      const diff = tray.quota - tray.assignedStudentsCount;
+                      const isOverflow = diff < 0;
+                      const isExact = diff === 0;
+                      const percent = Math.min(Math.round((tray.assignedStudentsCount / (tray.quota || 1)) * 100), 100);
+
+                      return (
+                        <div
+                          key={tray.courseId}
+                          className={`rounded-2xl border p-4.5 flex flex-col justify-between transition-all ${isOverflow
+                            ? 'border-rose-300 bg-rose-50/40 dark:bg-rose-950/20 ring-1 ring-rose-400'
+                            : isExact
+                              ? 'border-emerald-300 bg-emerald-50/40 dark:bg-emerald-950/20 ring-1 ring-emerald-400'
+                              : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs'
+                            }`}
+                        >
+                          <div className="space-y-3">
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-bold font-mono uppercase bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 mb-1">
+                                  {tray.category} • ID: #{tray.courseId}
+                                </span>
+                                <h5 className="text-xs font-bold text-slate-900 dark:text-white line-clamp-2" title={tray.courseName}>
+                                  {tray.courseName}
+                                </h5>
+                                {tray.targetGrade && (
+                                  <p className="text-[11px] text-indigo-600 dark:text-indigo-400 font-semibold mt-0.5">
+                                    Khối mục tiêu: Khối {tray.targetGrade}
+                                  </p>
+                                )}
+                              </div>
+
+                              <span
+                                className={`shrink-0 px-2.5 py-1 rounded-xl text-[10px] font-extrabold font-mono ${isOverflow
+                                  ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-300'
+                                  : isExact
+                                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300'
+                                    : 'bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300'
+                                  }`}
+                              >
+                                {isOverflow ? `TRÀN +${Math.abs(diff)}` : isExact ? 'KHỚP 100%' : `DƯ ${diff} CHỖ`}
+                              </span>
+                            </div>
+
+                            {/* Thanh Tiến Độ Sức Chứa Khay */}
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between text-[11px] font-mono">
+                                <span className="text-slate-500">
+                                  Đã xếp: <b>{tray.assignedStudentsCount}</b> / {tray.quota} slots
+                                </span>
+                                <span className="font-bold">{percent}%</span>
+                              </div>
+                              <div className="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full transition-all duration-300 ${isOverflow ? 'bg-rose-500' : isExact ? 'bg-emerald-500' : 'bg-amber-500'
+                                    }`}
+                                  style={{ width: `${percent}%` }}
+                                />
+                              </div>
+                            </div>
+
+                            {/* Danh Sách Các Lớp Đang Xếp Trong Khay */}
+                            <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                Các Lớp Trong Khay ({tray.assignedClasses.length} lớp):
+                              </span>
+                              <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
+                                {tray.assignedClasses.length === 0 ? (
+                                  <p className="text-[11px] text-slate-400 italic py-2 text-center">
+                                    Chưa có lớp nào trong khay này.
+                                  </p>
+                                ) : (
+                                  tray.assignedClasses.map((clsItem, cIdx) => (
+                                    <div
+                                      key={cIdx}
+                                      className="flex items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200/60 dark:border-slate-700 text-xs"
+                                    >
+                                      <div className="min-w-0 pr-2">
+                                        <p className="font-bold text-slate-800 dark:text-slate-200 truncate">
+                                          {clsItem.rawClassName}
+                                        </p>
+                                        <p className="text-[10px] text-slate-400 font-mono truncate" title={clsItem.lmsGroupName}>
+                                          Group: {clsItem.lmsGroupName}
+                                        </p>
+                                      </div>
+                                      <div className="flex items-center gap-1.5 shrink-0">
+                                        <span className="px-2 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-mono font-bold text-[11px]">
+                                          {clsItem.studentsCount} hs
+                                        </span>
+                                        {/* Nút tháo lớp ra khỏi khay */}
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const updatedTrays = cofTrays.map((t) => {
+                                              if (t.courseId === tray.courseId) {
+                                                return {
+                                                  ...t,
+                                                  assignedStudentsCount: t.assignedStudentsCount - clsItem.studentsCount,
+                                                  assignedClasses: t.assignedClasses.filter((_, i) => i !== cIdx),
+                                                };
+                                              }
+                                              return t;
+                                            });
+                                            setCofTrays(updatedTrays);
+                                            setCofUnassignedClasses([...cofUnassignedClasses, clsItem]);
+                                            toast.info(`Đã chuyển lớp '${clsItem.rawClassName}' ra danh sách chờ.`);
+                                          }}
+                                          className="text-slate-400 hover:text-rose-500 p-1 cursor-pointer transition"
+                                          title="Chuyển lớp này ra ngoài danh sách chờ"
+                                        >
+                                          <X className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* KHU VỰC CÁC LỚP CHƯA XẾP VÀO KHAY (CẦN ADMIN CHUYỂN TAY) */}
+                  {cofUnassignedClasses.length > 0 && (
+                    <div className="p-4 rounded-2xl border border-amber-200/80 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-950/20 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 text-amber-600" />
+                          <h5 className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                            Các Khối Lớp Chưa Xếp Vào Khay ({cofUnassignedClasses.length} lớp - {cofUnassignedClasses.reduce((s, c) => s + c.studentsCount, 0)} học sinh):
+                          </h5>
+                        </div>
+                        <span className="text-[11px] text-amber-700 dark:text-amber-400 font-medium">
+                          Nhấp chọn khay để đưa lớp vào
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                        {cofUnassignedClasses.map((uCls, uIdx) => (
+                          <div
+                            key={uIdx}
+                            className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/40 flex items-center justify-between text-xs shadow-2xs"
+                          >
+                            <div className="min-w-0 pr-2">
+                              <p className="font-bold text-slate-800 dark:text-slate-200 truncate">
+                                {uCls.rawClassName}
+                              </p>
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                {uCls.studentsCount} học sinh {uCls.gradeDetected ? `(Khối ${uCls.gradeDetected})` : ''}
+                              </span>
+                            </div>
+
+                            {/* Dropdown nhanh chuyển vào Khay */}
+                            <select
+                              defaultValue=""
+                              onChange={(e) => {
+                                const targetCid = e.target.value;
+                                if (!targetCid) return;
+
+                                const updatedTrays = cofTrays.map((t) => {
+                                  if (t.courseId === targetCid) {
+                                    return {
+                                      ...t,
+                                      assignedStudentsCount: t.assignedStudentsCount + uCls.studentsCount,
+                                      assignedClasses: [...t.assignedClasses, uCls],
+                                    };
+                                  }
+                                  return t;
+                                });
+
+                                setCofTrays(updatedTrays);
+                                setCofUnassignedClasses(cofUnassignedClasses.filter((_, i) => i !== uIdx));
+                                toast.success(`Đã xếp lớp '${uCls.rawClassName}' vào Khay #${targetCid}!`);
+                              }}
+                              className="text-[11px] font-bold py-1 px-2 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 cursor-pointer outline-none"
+                            >
+                              <option value="" disabled>+ Xếp vào Khay...</option>
+                              {cofTrays.map((t) => (
+                                <option key={t.courseId} value={t.courseId}>
+                                  Khay #{t.courseId} ({t.quota - t.assignedStudentsCount} slots)
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* THÔNG TIN PHÂN BỔ GIÁO VIÊN (ZERO-COST PREVIEW) */}
+                  {cofTeachersAllocation.length > 0 && (
+                    <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                          <Users className="w-4 h-4 text-indigo-600" />
+                          <span>Phân Bổ Giáo Viên Tự Động ({cofTeachersAllocation.length} GV - Không tốn License):</span>
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono">Tự động gán vào toàn bộ Group của môn</span>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        {cofTeachersAllocation.map((t, tIdx) => (
+                          <span
+                            key={tIdx}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[11px] text-slate-700 dark:text-slate-300"
+                            title={`Môn: ${t.courseAssign} | Gán vào: ${t.assignedLmsGroups.join(', ')}`}
+                          >
+                            <span>🧑‍🏫 <b>{t.teacherName}</b></span>
+                            <span className="text-slate-400 font-mono text-[10px]">({t.assignedLmsGroups.length} groups)</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="space-y-1.5 relative" ref={entityDropdownRef}>
                 <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
