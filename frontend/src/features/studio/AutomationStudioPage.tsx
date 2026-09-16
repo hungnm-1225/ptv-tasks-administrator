@@ -2801,37 +2801,30 @@ export const AutomationStudioPage: React.FC = () => {
                   {editingTeacherIndex !== null && cofTeachersAllocation[editingTeacherIndex] && typeof document !== 'undefined' && createPortal(
                     <div
                       onClick={(e) => { if (e.target === e.currentTarget) setEditingTeacherIndex(null); }}
-                      className="fixed inset-0 z-[9999] w-screen h-screen flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-150"
+                      className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-150"
                     >
                       <div
                         onClick={(e) => e.stopPropagation()}
-                        className="w-[92vw] sm:w-[520px] max-w-lg bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 sm:p-7 space-y-4.5 shadow-2xl overflow-hidden my-auto"
+                        style={{ width: '100%', maxWidth: '520px', minWidth: '320px' }}
+                        className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 sm:p-7 space-y-4.5 shadow-2xl overflow-hidden my-auto"
                       >
-                        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3.5">
-                          <div className="flex items-center gap-2.5">
-                            <span className="text-xl">🧑‍🏫</span>
-                            <div>
-                              <h4 className="text-sm font-extrabold text-slate-900 dark:text-white">
-                                Sửa Phân Bổ: {cofTeachersAllocation[editingTeacherIndex].teacherName}
-                              </h4>
-                              <p className="text-[11px] font-mono text-slate-400">
-                                {cofTeachersAllocation[editingTeacherIndex].email}
-                              </p>
-                            </div>
-                          </div>
+                        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                          <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                            <span>Sửa Phân Bổ: {cofTeachersAllocation[editingTeacherIndex].teacherName}</span>
+                          </h4>
                           <button
                             type="button"
                             onClick={() => setEditingTeacherIndex(null)}
-                            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                            className="text-slate-400 hover:text-slate-600"
                           >
-                            <X className="w-5 h-5" />
+                            ✕
                           </button>
                         </div>
 
-                        <div className="space-y-4 text-xs">
+                        <div className="space-y-3 text-xs">
                           <div>
-                            <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1.5">
-                              Khóa Học Phụ Trách:
+                            <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                              Chọn Khóa Học Phụ Trách:
                             </label>
                             <select
                               value={cofTeachersAllocation[editingTeacherIndex].courseAssign}
@@ -2847,7 +2840,7 @@ export const AutomationStudioPage: React.FC = () => {
                                 }
                                 setCofTeachersAllocation(updated);
                               }}
-                              className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-3.5 py-2.5 text-xs text-slate-900 dark:text-white font-medium focus:border-indigo-500 outline-none cursor-pointer"
+                              className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2.5"
                             >
                               <option value="">-- Chưa gán môn --</option>
                               {cofTrays.map((t) => (
@@ -2859,78 +2852,65 @@ export const AutomationStudioPage: React.FC = () => {
                           </div>
 
                           <div>
-                            <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center justify-between mb-1">
                               <label className="font-bold text-slate-700 dark:text-slate-300">
-                                Group LMS Được Gán ({cofTeachersAllocation[editingTeacherIndex].assignedLmsGroups.length} groups):
+                                Danh Sách Group LMS Giáo Viên Được Tham Gia:
                               </label>
                               <button
                                 type="button"
                                 onClick={() => {
+                                  // Nút gán tất cả group của trường
                                   const allGroups: string[] = [];
                                   cofTrays.forEach(t => t.assignedClasses.forEach(c => allGroups.push(c.lmsGroupName)));
                                   const updated = [...cofTeachersAllocation];
                                   updated[editingTeacherIndex].assignedLmsGroups = Array.from(new Set(allGroups));
                                   setCofTeachersAllocation(updated);
-                                  toast.info('Đã gán giáo viên vào toàn bộ Group LMS của trường!');
                                 }}
-                                className="text-[11px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline cursor-pointer"
+                                className="text-[10px] text-indigo-600 font-bold hover:underline"
                               >
                                 + Gán tất cả Group của trường
                               </button>
                             </div>
 
-                            <div className="max-h-52 overflow-y-auto space-y-1.5 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 scrollbar-thin">
-                              {cofTrays.flatMap(t => t.assignedClasses).length === 0 ? (
-                                <p className="text-[11px] text-slate-400 italic text-center py-3">
-                                  Chưa có Group LMS nào trong các khay.
-                                </p>
-                              ) : (
-                                cofTrays.flatMap(t => t.assignedClasses).map((cls, gIdx) => {
-                                  const isChecked = cofTeachersAllocation[editingTeacherIndex].assignedLmsGroups.includes(cls.lmsGroupName);
-                                  return (
-                                    <label key={gIdx} className="flex items-center gap-3 p-2 hover:bg-slate-100 dark:hover:bg-slate-700/60 rounded-xl cursor-pointer transition">
-                                      <input
-                                        type="checkbox"
-                                        checked={isChecked}
-                                        onChange={(e) => {
-                                          const updated = [...cofTeachersAllocation];
-                                          const curList = updated[editingTeacherIndex].assignedLmsGroups;
-                                          if (e.target.checked) {
-                                            updated[editingTeacherIndex].assignedLmsGroups = [...curList, cls.lmsGroupName];
-                                          } else {
-                                            updated[editingTeacherIndex].assignedLmsGroups = curList.filter(g => g !== cls.lmsGroupName);
-                                          }
-                                          setCofTeachersAllocation(updated);
-                                        }}
-                                        className="h-4 w-4 rounded-md border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                                      />
-                                      <span className="text-slate-800 dark:text-slate-200 font-mono text-[11px] truncate flex-1">
-                                        {cls.lmsGroupName}
-                                      </span>
-                                    </label>
-                                  );
-                                })
-                              )}
+                            <div className="max-h-40 overflow-y-auto space-y-1.5 p-2 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+                              {cofTrays.flatMap(t => t.assignedClasses).map((cls, gIdx) => {
+                                const isChecked = cofTeachersAllocation[editingTeacherIndex].assignedLmsGroups.includes(cls.lmsGroupName);
+                                return (
+                                  <label key={gIdx} className="flex items-center gap-2 p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={(e) => {
+                                        const updated = [...cofTeachersAllocation];
+                                        const curList = updated[editingTeacherIndex].assignedLmsGroups;
+                                        if (e.target.checked) {
+                                          updated[editingTeacherIndex].assignedLmsGroups = [...curList, cls.lmsGroupName];
+                                        } else {
+                                          updated[editingTeacherIndex].assignedLmsGroups = curList.filter(g => g !== cls.lmsGroupName);
+                                        }
+                                        setCofTeachersAllocation(updated);
+                                      }}
+                                      className="rounded text-indigo-600"
+                                    />
+                                    <span className="truncate">{cls.lmsGroupName}</span>
+                                  </label>
+                                );
+                              })}
                             </div>
                           </div>
                         </div>
 
-                        <div className="flex justify-end pt-3.5 border-t border-slate-100 dark:border-slate-800">
+                        <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
                           <button
                             type="button"
-                            onClick={() => {
-                              const tName = cofTeachersAllocation[editingTeacherIndex].teacherName;
-                              setEditingTeacherIndex(null);
-                              toast.success(`Đã lưu phân bổ cho giáo viên ${tName}!`);
-                            }}
-                            className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow-md shadow-indigo-500/20 cursor-pointer"
+                            onClick={() => setEditingTeacherIndex(null)}
+                            className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold"
                           >
-                            Lưu & Hoàn Tất
+                            Xong
                           </button>
                         </div>
                       </div>
-                    </div>,
-                    document.body
+                    </div>
                   )}
                 </div>
               )}
