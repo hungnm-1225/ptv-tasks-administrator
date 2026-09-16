@@ -88,7 +88,7 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
             if not payload.get("admin_credentials"):
                 admin_pass = getattr(settings, "TEST_ADMIN_PASS", None)
                 payload["admin_credentials"] = {
-                    "username": getattr(settings, "TEST_ADMIN_USER", "salesadmin@dtt.vn"),
+                    "username": getattr(settings, "TEST_ADMIN_USER", ""),
                     "password": admin_pass or ""
                 }
 

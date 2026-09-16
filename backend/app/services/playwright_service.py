@@ -136,7 +136,7 @@ class PlaywrightLMSService:
                 page = await context.new_page()
 
                 try:
-                    admin_user = str(os.getenv("TEST_ADMIN_USER") or getattr(settings, "TEST_ADMIN_USER", "salesadmin@dtt.vn")).strip().strip("'\"")
+                    admin_user = str(os.getenv("TEST_ADMIN_USER") or getattr(settings, "TEST_ADMIN_USER", "")).strip().strip("'\"")
                     admin_pass = str(os.getenv("TEST_ADMIN_PASS") or getattr(settings, "TEST_ADMIN_PASS", "")).strip().strip("'\"")
 
                     if not admin_pass:

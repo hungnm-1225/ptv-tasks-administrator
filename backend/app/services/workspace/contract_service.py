@@ -324,7 +324,7 @@ class WorkspaceContractService(WorkspaceBaseService):
         """Sales Admin phê duyệt tối cao DST Contract qua REST API update-status."""
         async with acquire_playwright_slot("Sales Admin Approve DST Contract", lane="admin"):
             try:
-                fallback_user = str(getattr(settings, "TEST_ADMIN_USER", "adminworkspace")).strip().strip("'\"")
+                fallback_user = str(getattr(settings, "TEST_ADMIN_USER", "")).strip().strip("'\"")
                 fallback_pass = str(getattr(settings, "TEST_ADMIN_PASS", "")).strip().strip("'\"")
 
                 admin_user = credentials.get("username") or fallback_user

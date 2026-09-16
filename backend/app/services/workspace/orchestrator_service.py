@@ -92,7 +92,7 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
             lineage = workspace_lineage_service.resolve_by_school(school_ident)
             partner_creds = lineage["partner"] if lineage else {"username": payload.get("partner_name", "")}
             distributor_creds = lineage["distributor"] if lineage else {"username": payload.get("distributor_name", "")}
-            sales_admin_creds = {"username": getattr(settings, "TEST_ADMIN_USER", "adminworkspace"), "password": getattr(settings, "TEST_ADMIN_PASS", "")}
+            sales_admin_creds = {"username": getattr(settings, "TEST_ADMIN_USER", ""), "password": getattr(settings, "TEST_ADMIN_PASS", "")}
 
             return await self.execute_approve_school_order_standalone(
                 order_identifier=payload.get("order_code", ""),
@@ -107,7 +107,7 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
             from app.services.workspace_lineage_service import workspace_lineage_service
             lineage = workspace_lineage_service.resolve_by_school(payload.get("distributor_name", ""))
             dist_creds = lineage["distributor"] if lineage else {"username": payload.get("distributor_name", "")}
-            sales_creds = {"username": getattr(settings, "TEST_ADMIN_USER", "adminworkspace"), "password": getattr(settings, "TEST_ADMIN_PASS", "")}
+            sales_creds = {"username": getattr(settings, "TEST_ADMIN_USER", ""), "password": getattr(settings, "TEST_ADMIN_PASS", "")}
 
             return await self.execute_approve_partner_contract_standalone(
                 contract_identifier=payload.get("contract_code", ""),
@@ -118,7 +118,7 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
 
         # 4. Sales Admin phê duyệt DST Contract
         elif action == "admin_approve_contract":
-            sales_creds = {"username": getattr(settings, "TEST_ADMIN_USER", "adminworkspace"), "password": getattr(settings, "TEST_ADMIN_PASS", "")}
+            sales_creds = {"username": getattr(settings, "TEST_ADMIN_USER", ""), "password": getattr(settings, "TEST_ADMIN_PASS", "")}
             return await self.admin_approve_distributor_contract(
                 credentials=sales_creds,
                 contract_identifier=payload.get("contract_code", ""),
@@ -131,7 +131,7 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
             lineage = workspace_lineage_service.resolve_by_school(payload.get("partner_name", ""))
             partner_creds = lineage["partner"] if lineage else {"username": payload.get("partner_name", "")}
             dist_creds = lineage["distributor"] if lineage else {"username": payload.get("distributor_name", "")}
-            sales_creds = {"username": getattr(settings, "TEST_ADMIN_USER", "adminworkspace"), "password": getattr(settings, "TEST_ADMIN_PASS", "")}
+            sales_creds = {"username": getattr(settings, "TEST_ADMIN_USER", ""), "password": getattr(settings, "TEST_ADMIN_PASS", "")}
 
             return await self.execute_partner_create_and_approve_chain(
                 partner_creds=partner_creds,
@@ -145,7 +145,7 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
             from app.services.workspace_lineage_service import workspace_lineage_service
             lineage = workspace_lineage_service.resolve_by_school(payload.get("distributor_name", ""))
             dist_creds = lineage["distributor"] if lineage else {"username": payload.get("distributor_name", "")}
-            sales_creds = {"username": getattr(settings, "TEST_ADMIN_USER", "adminworkspace"), "password": getattr(settings, "TEST_ADMIN_PASS", "")}
+            sales_creds = {"username": getattr(settings, "TEST_ADMIN_USER", ""), "password": getattr(settings, "TEST_ADMIN_PASS", "")}
 
             return await self.execute_distributor_create_and_approve_chain(
                 distributor_creds=dist_creds,
@@ -211,7 +211,7 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
         distributor_creds = lineage["distributor"]
         country_info = lineage.get("country", {})
 
-        fallback_sales_user = str(getattr(settings, "TEST_ADMIN_USER", "adminworkspace")).strip().strip("'\"")
+        fallback_sales_user = str(getattr(settings, "TEST_ADMIN_USER", "")).strip().strip("'\"")
         fallback_sales_pass = str(getattr(settings, "TEST_ADMIN_PASS", "")).strip().strip("'\"")
         final_sales_admin_creds = sales_admin_creds or {"username": fallback_sales_user, "password": fallback_sales_pass}
 
