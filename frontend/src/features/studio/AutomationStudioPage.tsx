@@ -3664,6 +3664,7 @@ export const AutomationStudioPage: React.FC = () => {
                         <tr>
                           <th className="p-3">Định Danh Đầu Vào</th>
                           <th className="p-3">Username eID</th>
+                          <th className="p-3">Email</th>
                           <th className="p-3">Họ & Tên</th>
                           <th className="p-3 text-center">Tồn Tại</th>
                           <th className="p-3 text-center">Kích Hoạt</th>
@@ -3682,6 +3683,9 @@ export const AutomationStudioPage: React.FC = () => {
                             </td>
                             <td className="p-3 text-purple-600 font-bold">
                               {u.username || '—'}
+                            </td>
+                            <td className="p-3 font-sans text-slate-700 dark:text-slate-300">
+                              {u.email || '—'}
                             </td>
                             <td className="p-3 font-sans text-slate-700 dark:text-slate-300">
                               {u.exists ? `${u.lastName} ${u.firstName}`.trim() || '(Chưa đặt tên)' : '—'}
