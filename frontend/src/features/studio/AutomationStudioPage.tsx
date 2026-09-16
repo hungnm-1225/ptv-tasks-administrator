@@ -176,6 +176,23 @@ export const AutomationStudioPage: React.FC = () => {
 
   // File Upload
   const [uploadedAccountsFile, setUploadedAccountsFile] = useState<File | null>(null);
+  // 📑 State dành riêng cho nộp file COF trong phân luồng "Tạo & Duyệt"
+  const [uploadedCofFile, setUploadedCofFile] = useState<File | null>(null);
+  const [cofExtractionResult, setCofExtractionResult] = useState<{
+    rawSchoolName: string;
+    matchedSchool: HierarchySchoolItem | null;
+    confidence: 'high' | 'medium' | 'none';
+    score: number;
+    coursesCount: number;
+    studentsCount: number;
+    teachersCount: number;
+  } | null>(null);
+  const cofFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // 🔍 State tìm kiếm môn học linh hoạt xuyên Category
+  const [courseSearchTerms, setCourseSearchTerms] = useState<Record<number, string>>({});
+  const [activeCourseDropdownRow, setActiveCourseDropdownRow] = useState<number | null>(null);
+
   // --- STATE DÀNH RIÊNG CHO BÓC TÁCH & VALIDATE EXCEL TẠO TÀI KHOẢN ---
   interface ParsedUserRow {
     index: number;
@@ -263,6 +280,77 @@ export const AutomationStudioPage: React.FC = () => {
     }
     const str = String(val).trim().split(' ')[0];
     return str.replace(/-/g, '/');
+  };
+  const cleanSchoolText = (str: string): string => {
+    return str
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // Bỏ dấu tiếng Việt
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\b(school|international|sdn|bhd|smk|sma|academy|trường|tieu hoc|thcs|thpt)\b/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
+  const matchSchoolWithHierarchy = (
+    rawCofName: string,
+    hierarchyList: HierarchySchoolItem[]
+  ): {
+    matched: HierarchySchoolItem | null;
+    confidence: 'high' | 'medium' | 'none';
+    score: number;
+    cleanedName: string;
+  } => {
+    if (!rawCofName || hierarchyList.length === 0) {
+      return { matched: null, confidence: 'none', score: 0, cleanedName: '' };
+    }
+
+    const cleanInput = cleanSchoolText(rawCofName);
+    if (!cleanInput) {
+      return { matched: null, confidence: 'none', score: 0, cleanedName: '' };
+    }
+
+    const inputWords = new Set(cleanInput.split(' ').filter(w => w.length > 1));
+    let bestMatch: HierarchySchoolItem | null = null;
+    let bestScore = 0;
+
+    for (const s of hierarchyList) {
+      const cleanTarget = cleanSchoolText(s.school_name);
+
+      // 1. Khớp tuyệt đối sau khi lọc từ thừa
+      if (cleanInput === cleanTarget) {
+        return { matched: s, confidence: 'high', score: 1.0, cleanedName: cleanInput };
+      }
+
+      // 2. Chứa nhau toàn phần
+      if (cleanTarget.includes(cleanInput) || cleanInput.includes(cleanTarget)) {
+        const score = Math.min(cleanInput.length, cleanTarget.length) / Math.max(cleanInput.length, cleanTarget.length);
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = s;
+        }
+      }
+
+      // 3. Jaccard Index theo từ vựng
+      const targetWords = new Set(cleanTarget.split(' ').filter(w => w.length > 1));
+      let intersection = 0;
+      inputWords.forEach(w => { if (targetWords.has(w)) intersection++; });
+      const union = new Set([...inputWords, ...targetWords]).size;
+      const jaccard = union > 0 ? intersection / union : 0;
+
+      if (jaccard > bestScore) {
+        bestScore = jaccard;
+        bestMatch = s;
+      }
+    }
+
+    if (bestScore >= 0.70 && bestMatch) {
+      return { matched: bestMatch, confidence: 'high', score: bestScore, cleanedName: cleanInput };
+    } else if (bestScore >= 0.35 && bestMatch) {
+      return { matched: bestMatch, confidence: 'medium', score: bestScore, cleanedName: cleanInput };
+    }
+
+    return { matched: null, confidence: 'none', score: bestScore, cleanedName: cleanInput };
   };
 
   const processAndValidateAccountsFile = (file: File) => {
@@ -688,18 +776,183 @@ export const AutomationStudioPage: React.FC = () => {
     }
   };
 
+  // =========================================================================
+  // 📑 XỬ LÝ NỘP FILE COF & AUTO-FILL DỮ LIỆU VÀO PHÂN LUỒNG "TẠO & DUYỆT"
+  // =========================================================================
+  const processAndAutoFillCOF = (file: File) => {
+    setUploadedCofFile(file);
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetNames = workbook.SheetNames;
+
+        // 1. Tìm sheet COF chính (Tab 1)
+        const cofSheetName = sheetNames.find(s => s.toLowerCase().includes('cof') || s.toLowerCase().includes('curriculum')) || sheetNames[0];
+        const ws = workbook.Sheets[cofSheetName];
+        const rawJson: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+        let extractedSchoolName = '';
+        const detectedCoursesMap: { courseName: string; licenses: number }[] = [];
+
+        // Quét tìm thông tin Trường và Khóa học từ Tab 1
+        for (let i = 0; i < rawJson.length; i++) {
+          const row = rawJson[i];
+          const rowStr = row.map(c => String(c)).join(' ').toLowerCase();
+
+          // Nhận diện tên trường
+          if (!extractedSchoolName && (rowStr.includes('school name') || rowStr.includes('tên trường'))) {
+            for (let c = 0; c < row.length; c++) {
+              const val = String(row[c]).trim();
+              if (val.toLowerCase().includes('school name') || val.toLowerCase().includes('tên trường')) {
+                extractedSchoolName = String(row[c + 1] || row[c + 2] || '').trim();
+                break;
+              }
+            }
+          }
+
+          // Nhận diện dòng môn học & số lượng license
+          const courseKeywords = ['swrp', 'ir ', 'asp', 'microteaching', 'leanbot', 'digital twin', 'curriculum'];
+          if (courseKeywords.some(k => rowStr.includes(k))) {
+            const courseText = row.find((c: any) => {
+              const s = String(c).trim();
+              return courseKeywords.some(k => s.toLowerCase().includes(k)) && s.length > 5;
+            });
+
+            if (courseText) {
+              // Tìm số lượng bản quyền (thường là số nguyên > 0 trong cùng hàng)
+              let qty = 30; // fallback
+              for (let c = row.length - 1; c >= 0; c--) {
+                const num = parseInt(String(row[c]).trim(), 10);
+                if (!isNaN(num) && num > 0 && num < 5000) {
+                  qty = num;
+                  break;
+                }
+              }
+
+              detectedCoursesMap.push({
+                courseName: String(courseText).trim(),
+                licenses: qty,
+              });
+            }
+          }
+        }
+
+        // 2. Đếm số lượng học sinh & giáo viên ở Tab 2 & Tab 3
+        let studentCount = 0;
+        let teacherCount = 0;
+        const studentSheet = sheetNames.find(s => s.toLowerCase().includes('student'));
+        if (studentSheet) {
+          const sJson = XLSX.utils.sheet_to_json(workbook.Sheets[studentSheet], { header: 1 });
+          studentCount = Math.max(0, sJson.length - 5);
+        }
+        const teacherSheet = sheetNames.find(s => s.toLowerCase().includes('teacher'));
+        if (teacherSheet) {
+          const tJson = XLSX.utils.sheet_to_json(workbook.Sheets[teacherSheet], { header: 1 });
+          teacherCount = Math.max(0, tJson.length - 5);
+        }
+
+        // 3. Khớp trường học với danh sách 480 trường
+        const matchResult = matchSchoolWithHierarchy(extractedSchoolName, schoolsList);
+
+        if (matchResult.matched) {
+          setSelectedSchool(matchResult.matched);
+          setSelectedPartner({ name: matchResult.matched.partner_name, code: matchResult.matched.partner_code });
+          setSelectedDistributor({ name: matchResult.matched.distributor_name, code: matchResult.matched.distributor_code });
+          setEntitySearchQuery(matchResult.matched.school_name);
+        } else {
+          setEntitySearchQuery(extractedSchoolName); // Điền text thô để admin tự chọn
+        }
+
+        // 4. Khớp khóa học với danh mục Workspace Courses & Auto-fill
+        if (detectedCoursesMap.length > 0) {
+          const autoFilledCourses: OrderCourseSelection[] = [];
+
+          detectedCoursesMap.forEach((det) => {
+            const matchedDbCourse = workspaceCoursesList.find(c =>
+              c.course_name.toLowerCase().includes(det.courseName.toLowerCase()) ||
+              det.courseName.toLowerCase().includes(c.course_name.toLowerCase()) ||
+              (c.course_name.toLowerCase().includes('swrp') && det.courseName.toLowerCase().includes('swrp') &&
+                c.course_name.match(/\d+/)?.[0] === det.courseName.match(/\d+/)?.[0])
+            ) || workspaceCoursesList[0];
+
+            if (matchedDbCourse) {
+              autoFilledCourses.push({
+                category: matchedDbCourse.category || 'SWRP',
+                course_id: matchedDbCourse.course_id,
+                course_name: matchedDbCourse.course_name,
+                lms_url: matchedDbCourse.lms_url || '',
+                licenses: det.licenses,
+                start_date: getFormattedDate(today),
+                end_date: getFormattedDate(nextYear),
+              });
+            }
+          });
+
+          if (autoFilledCourses.length > 0) {
+            setSelectedCourses(autoFilledCourses);
+          }
+        }
+
+        // Lưu kết quả tóm tắt bóc tách
+        setCofExtractionResult({
+          rawSchoolName: extractedSchoolName,
+          matchedSchool: matchResult.matched,
+          confidence: matchResult.confidence,
+          score: matchResult.score,
+          coursesCount: detectedCoursesMap.length,
+          studentsCount: studentCount,
+          teachersCount: teacherCount,
+        });
+
+        if (matchResult.confidence === 'high') {
+          toast.success(`✨ Đã bóc tách COF! Khớp chuẩn trường: ${matchResult.matched?.school_name}`);
+        } else if (matchResult.confidence === 'medium') {
+          toast.warning(`⚠️ Tên trường trong COF ("${extractedSchoolName}") khớp tương đối. Vui lòng kiểm tra lại!`);
+        } else {
+          toast.error(`❌ Không tìm thấy trường nào trong 480 trường khớp với: "${extractedSchoolName}". Vui lòng chọn trường bằng tay!`);
+        }
+      } catch (err) {
+        toast.error('Lỗi khi đọc file COF: ' + (err as Error).message);
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
+  };
+
   const handleAddCourseRow = () => {
+    if (selectedCourses.length > 0) {
+      // 🎯 Copy trọn vẹn Category, ID, Tên, Licenses, Ngày bắt đầu/kết thúc của môn cuối cùng
+      const last = selectedCourses[selectedCourses.length - 1];
+      setSelectedCourses([
+        ...selectedCourses,
+        {
+          category: last.category,
+          course_id: last.course_id,
+          course_name: last.course_name,
+          lms_url: last.lms_url,
+          licenses: last.licenses,
+          start_date: last.start_date,
+          end_date: last.end_date,
+        },
+      ]);
+      toast.info(`Đã nhân bản thông số từ Khóa học #${selectedCourses.length} (${last.category} - ${last.licenses} licenses)`);
+      return;
+    }
+
+    // Lần đầu tiên nếu mảng trống: Sinh môn mặc định
     const defaultCourse =
       workspaceCoursesList.find((c) => c.category === 'SWRP') ||
       workspaceCoursesList[0] || {
         course_id: 654,
         category: 'SWRP',
-        course_name: 'SWRP 9: LEANBOT Programming Applications with IoT [V2] (EN)',
-        lms_url: 'https://learn.pythaverse.space/course/view.php?id=654',
+        course_name: 'Plearn LMS',
+        lms_url: 'https://learn.pythaverse.space/course/view.php?id=1',
       };
 
     setSelectedCourses([
-      ...selectedCourses,
       {
         category: defaultCourse.category,
         course_id: defaultCourse.course_id,
@@ -1906,8 +2159,112 @@ export const AutomationStudioPage: React.FC = () => {
           )}
 
           {/* WORKFLOW 2: TẠO & DUYỆT */}
+
           {workspaceMainCategory === 'create_and_approve' && (
             <div className="space-y-5 pt-2">
+              {/* 🎯 [NEW] KHU VỰC NỘP FILE COF ĐỂ AUTO-FILL TOÀN TRÌNH */}
+              <div className="rounded-2xl border border-indigo-200/80 dark:border-indigo-900/50 bg-indigo-50/40 dark:bg-indigo-950/20 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-xs">
+                      <FileCheck2 className="h-5 w-5 text-amber-300" />
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        <span>Nộp File COF (Curriculum Order Form) Tự Động Điền Dữ Liệu</span>
+                        <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-bold bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300">
+                          Auto-Fill AI Engine
+                        </span>
+                      </h3>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Hệ thống tự bóc tách Tên Trường, Môn học, Số lượng License và điền vào các trường bên dưới.
+                      </p>
+                    </div>
+                  </div>
+
+                  {uploadedCofFile && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUploadedCofFile(null);
+                        setCofExtractionResult(null);
+                        if (cofFileInputRef.current) cofFileInputRef.current.value = '';
+                      }}
+                      className="text-xs text-rose-500 hover:text-rose-700 flex items-center gap-1 cursor-pointer font-semibold"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Xóa file COF</span>
+                    </button>
+                  )}
+                </div>
+
+                <input
+                  type="file"
+                  ref={cofFileInputRef}
+                  accept=".xlsx,.xls"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) processAndAutoFillCOF(f);
+                  }}
+                  className="hidden"
+                />
+
+                <div
+                  onClick={() => cofFileInputRef.current?.click()}
+                  className="flex items-center justify-between p-4 rounded-xl border-2 border-dashed border-indigo-300 dark:border-indigo-800 bg-white dark:bg-slate-900/80 hover:border-indigo-500 transition cursor-pointer"
+                >
+                  <div className="flex items-center gap-3">
+                    <Upload className="w-5 h-5 text-indigo-600" />
+                    <div>
+                      <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                        {uploadedCofFile ? uploadedCofFile.name : 'Nhấp hoặc Kéo thả file COF (.xlsx) vào đây'}
+                      </p>
+                      <p className="text-[10px] text-slate-400">
+                        Hỗ trợ file COF 3 Tabs (Curriculum Order Form, Student Info, Teacher Info)
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-300 text-xs font-bold">
+                    {uploadedCofFile ? 'Đổi File' : 'Chọn File'}
+                  </span>
+                </div>
+
+                {/* THẺ BÁO CÁO KẾT QUẢ ĐỐI SOÁT TRƯỜNG & KHÓA HỌC */}
+                {cofExtractionResult && (
+                  <div className={`p-3.5 rounded-xl border text-xs space-y-2 ${cofExtractionResult.confidence === 'high'
+                    ? 'bg-emerald-50/80 dark:bg-emerald-950/40 border-emerald-300 text-emerald-950 dark:text-emerald-100'
+                    : cofExtractionResult.confidence === 'medium'
+                      ? 'bg-amber-50/80 dark:bg-amber-950/40 border-amber-300 text-amber-950 dark:text-amber-100'
+                      : 'bg-rose-50/80 dark:bg-rose-950/40 border-rose-300 text-rose-950 dark:text-rose-100'
+                    }`}>
+                    <div className="flex items-center justify-between font-bold">
+                      <span className="flex items-center gap-1.5">
+                        {cofExtractionResult.confidence === 'high' && <CheckCircle2 className="w-4 h-4 text-emerald-600" />}
+                        {cofExtractionResult.confidence === 'medium' && <AlertTriangle className="w-4 h-4 text-amber-600" />}
+                        {cofExtractionResult.confidence === 'none' && <XCircle className="w-4 h-4 text-rose-600" />}
+                        <span>
+                          {cofExtractionResult.confidence === 'high' && 'ĐÃ KHỚP TRƯỜNG HỌC THÀNH CÔNG'}
+                          {cofExtractionResult.confidence === 'medium' && 'CẢNH BÁO: KHỚP TRƯỜNG GẦN ĐÚNG (CẦN KIỂM TRA)'}
+                          {cofExtractionResult.confidence === 'none' && 'LỖI: KHÔNG TÌM THẤY TRƯỜNG TRONG 480 TRƯỜNG'}
+                        </span>
+                      </span>
+                      <span className="font-mono text-[11px] font-extrabold">
+                        {Math.round(cofExtractionResult.score * 100)}% Match
+                      </span>
+                    </div>
+
+                    <div className="text-[11px] space-y-1">
+                      <p>• Tên trong file COF: <b>"{cofExtractionResult.rawSchoolName || 'Không tìm thấy'}"</b></p>
+                      {cofExtractionResult.matchedSchool ? (
+                        <p>• Trường được gán trên hệ thống: <b>{cofExtractionResult.matchedSchool.school_name}</b> (Mã: {cofExtractionResult.matchedSchool.school_code})</p>
+                      ) : (
+                        <p className="text-rose-600 font-bold">• Vui lòng tự tìm và chọn trường ở ô tìm kiếm bên dưới!</p>
+                      )}
+                      <p>• Bóc tách thành công: <b>{cofExtractionResult.coursesCount} Môn học</b> | {cofExtractionResult.studentsCount} Học sinh | {cofExtractionResult.teachersCount} Giáo viên.</p>
+                    </div>
+                  </div>
+                )}
+              </div>
               <div className="space-y-1.5 relative" ref={entityDropdownRef}>
                 <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
@@ -2056,32 +2413,102 @@ export const AutomationStudioPage: React.FC = () => {
                           </select>
                         </div>
 
-                        <div className="sm:col-span-2">
-                          <label className="text-[10px] font-bold uppercase text-slate-500">Chọn môn học ({filteredCourses.length} môn):</label>
-                          <select
-                            value={cRow.course_id}
-                            onChange={(e) => {
-                              const cId = parseInt(e.target.value);
-                              const target = workspaceCoursesList.find((c) => c.course_id === cId);
-                              if (target) {
-                                const updated = [...selectedCourses];
-                                updated[idx] = {
-                                  ...updated[idx],
-                                  course_id: target.course_id,
-                                  course_name: target.course_name,
-                                  lms_url: target.lms_url,
-                                };
-                                setSelectedCourses(updated);
+                        {/* 🎯 BỘ TÌM KIẾM MÔN HỌC LINH HOẠT XUYÊN CATEGORY */}
+                        <div className="sm:col-span-2 relative">
+                          <label className="text-[10px] font-bold uppercase text-slate-500 flex items-center justify-between">
+                            <span>Chọn môn học (Tìm kiếm mọi Category):</span>
+                            <span className="font-mono text-indigo-600 font-semibold">ID: {cRow.course_id}</span>
+                          </label>
+
+                          <div className="relative mt-1">
+                            <input
+                              type="text"
+                              value={
+                                activeCourseDropdownRow === idx
+                                  ? (courseSearchTerms[idx] ?? '')
+                                  : cRow.course_name
                               }
-                            }}
-                            className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs text-slate-900 dark:text-white truncate"
-                          >
-                            {filteredCourses.map((c) => (
-                              <option key={c.course_id} value={c.course_id}>
-                                {c.course_name} (ID: {c.course_id})
-                              </option>
-                            ))}
-                          </select>
+                              onFocus={() => {
+                                setActiveCourseDropdownRow(idx);
+                                setCourseSearchTerms(prev => ({ ...prev, [idx]: '' }));
+                              }}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setCourseSearchTerms(prev => ({ ...prev, [idx]: val }));
+                              }}
+                              placeholder="Gõ tên môn, mã ID, hoặc category để tìm..."
+                              className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-900 dark:text-white pr-8 focus:border-indigo-500 focus:outline-hidden"
+                            />
+                            <Search className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3" />
+                          </div>
+
+                          {/* Popover danh sách môn khi đang focus */}
+                          {activeCourseDropdownRow === idx && (
+                            <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-64 overflow-y-auto p-1.5 space-y-1 animate-in fade-in duration-100">
+                              <div className="flex items-center justify-between px-2 py-1 text-[10px] text-slate-400 font-bold uppercase border-b border-slate-100 dark:border-slate-800">
+                                <span>Gợi ý môn học</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveCourseDropdownRow(null)}
+                                  className="text-slate-400 hover:text-slate-600"
+                                >
+                                  ✕ Đóng
+                                </button>
+                              </div>
+
+                              {workspaceCoursesList
+                                .filter(c => {
+                                  const term = (courseSearchTerms[idx] || '').trim().toLowerCase();
+                                  if (!term) return true;
+                                  return (
+                                    c.course_name.toLowerCase().includes(term) ||
+                                    c.category.toLowerCase().includes(term) ||
+                                    String(c.course_id).includes(term)
+                                  );
+                                })
+                                .map(c => {
+                                  const isSameCategory = c.category === cRow.category;
+                                  return (
+                                    <button
+                                      key={c.course_id}
+                                      type="button"
+                                      onClick={() => {
+                                        const updated = [...selectedCourses];
+                                        updated[idx] = {
+                                          ...updated[idx],
+                                          category: c.category, // 🎯 Tự động đổi Category theo môn được chọn!
+                                          course_id: c.course_id,
+                                          course_name: c.course_name,
+                                          lms_url: c.lms_url,
+                                        };
+                                        setSelectedCourses(updated);
+                                        setActiveCourseDropdownRow(null);
+                                        toast.success(`Đã chọn [${c.category}] - ${c.course_name}`);
+                                      }}
+                                      className="w-full text-left p-2.5 rounded-xl text-xs hover:bg-indigo-50 dark:hover:bg-slate-800 transition flex items-center justify-between cursor-pointer"
+                                    >
+                                      <div className="truncate pr-2">
+                                        <div className="font-bold text-slate-800 dark:text-slate-200 truncate">
+                                          {c.course_name}
+                                        </div>
+                                        <div className="text-[10px] font-mono flex items-center gap-1.5 mt-0.5">
+                                          <span className={`px-1.5 py-0.2 rounded font-bold ${isSameCategory
+                                            ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300'
+                                            : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
+                                            }`}>
+                                            {c.category}
+                                          </span>
+                                          <span className="text-slate-400">ID: {c.course_id}</span>
+                                        </div>
+                                      </div>
+                                      {cRow.course_id === c.course_id && (
+                                        <Check className="w-4 h-4 text-indigo-600 shrink-0" />
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                            </div>
+                          )}
                         </div>
                       </div>
 

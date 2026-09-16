@@ -148,6 +148,10 @@ class BulkTemplateService:
                 row_fn = str(ws.cell(row=r, column=2).value or '').strip().lower()
                 row_ln = str(ws.cell(row=r, column=3).value or '').strip().lower()
 
+                # 🎯 NẾU LÀ DÒNG TRỐNG (Không có cả Email lẫn Họ tên): BỎ QUA, ĐỂ NGUYÊN Ô TRẮNG
+                if not row_email and not row_fn and not row_ln:
+                    continue
+
                 matched = api_map_by_email.get(row_email) or api_map_by_name.get(f"{row_fn}_{row_ln}")
                 if matched:
                     if matched.get("is_create", False):
@@ -166,6 +170,7 @@ class BulkTemplateService:
                         note_c = ws.cell(row=r, column=10, value="Tài khoản đã tồn tại (Đã reset pass về email)")
                         note_c.font = Font(name="Arial", size=9, italic=True, color="1565C0", bold=True)
                 else:
+                    # Chỉ ghi chú nếu dòng đó THỰC SỰ có dữ liệu người dùng nhưng không match được
                     note_c = ws.cell(row=r, column=10, value="Chưa xử lý")
                     note_c.font = Font(name="Arial", size=9, italic=True, color="7F7F7F")
 
