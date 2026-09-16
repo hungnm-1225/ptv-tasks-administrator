@@ -201,6 +201,9 @@ export const AutomationStudioPage: React.FC = () => {
   const [cofTrays, setCofTrays] = useState<LicenseTrayItem[]>([]);
   const [cofUnassignedClasses, setCofUnassignedClasses] = useState<ClassGroupItem[]>([]);
   const [cofTeachersAllocation, setCofTeachersAllocation] = useState<TeacherAllocationItem[]>([]);
+  const [draggedClassInfo, setDraggedClassInfo] = useState<{ sourceTrayId: string | null; classItem: ClassGroupItem } | null>(null);
+  const [activeDropTrayId, setActiveDropTrayId] = useState<string | null>(null);
+  const [isDropToUnassignedActive, setIsDropToUnassignedActive] = useState<boolean>(false);
 
   const [entitySearchQuery, setEntitySearchQuery] = useState<string>('');
   const [isEntityDropdownOpen, setIsEntityDropdownOpen] = useState<boolean>(false);
@@ -910,7 +913,7 @@ export const AutomationStudioPage: React.FC = () => {
           });
         }
 
-        // 2. ĐỌC TAB 2: STUDENT INFORMATION & GOM LỚP
+        // 2. ĐỌC TAB 2: STUDENT INFORMATION & GOM LỚP (ĐÃ FIX LỖI Ô DẤU CÁCH)
         const studentSheetName = sheetNames.find(s => s.toLowerCase().includes('student'));
         const classesMap: Record<string, { count: number; grade: number | null }> = {};
         let totalStudents = 0;
@@ -922,11 +925,20 @@ export const AutomationStudioPage: React.FC = () => {
           for (let r = 6; r < rawJson2.length; r++) {
             const row = rawJson2[r];
             const fn = String(row[2] || '').trim();
+            const ln = String(row[3] || '').trim();
             const email = String(row[5] || '').trim();
-            if (!fn && !email) continue;
+
+            // Bỏ qua dòng trống hoàn toàn hoặc dòng tổng kết Total
+            if (!fn && !ln && !email) continue;
+            if (fn.toLowerCase().includes('total') || ln.toLowerCase().includes('total')) continue;
+
             totalStudents++;
 
-            const rawClassName = String(row[10] || row[9] || row[8] || 'General Class').trim();
+            const c10 = String(row[10] || '').trim();
+            const c9 = String(row[9] || '').trim();
+            const c8 = String(row[8] || '').trim();
+            const rawClassName = c10 || c9 || c8 || 'Chưa phân lớp (No Class)';
+
             if (!classesMap[rawClassName]) {
               classesMap[rawClassName] = {
                 count: 0,
@@ -2390,10 +2402,10 @@ export const AutomationStudioPage: React.FC = () => {
                 )}
               </div>
               {/* ========================================================================= */}
-              {/* 🏆 [PATCH 3] GIAO DIỆN BENTO GRID KHAY KHÓA HỌC (VISUAL LICENSE TRAYS)   */}
+              {/* 🏆 GIAO DIỆN BENTO GRID KHAY KHÓA HỌC KÉO THẢ (DRAG & DROP LICENSE TRAYS)  */}
               {/* ========================================================================= */}
               {cofTrays.length > 0 && (
-                <div className="rounded-3xl border border-indigo-200 dark:border-indigo-900 bg-gradient-to-b from-indigo-50/50 to-white dark:from-slate-900 dark:to-slate-900 p-5 sm:p-6 space-y-5 shadow-xs">
+                <div className="rounded-3xl border border-indigo-200 dark:border-indigo-900 bg-gradient-to-b from-indigo-50/40 via-white to-white dark:from-slate-900 dark:via-slate-900 dark:to-slate-900 p-5 sm:p-6 space-y-5 shadow-xs">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-indigo-100 dark:border-slate-800 pb-4">
                     <div className="flex items-center gap-3">
                       <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-md shadow-indigo-500/20">
@@ -2401,13 +2413,13 @@ export const AutomationStudioPage: React.FC = () => {
                       </div>
                       <div>
                         <h4 className="text-sm font-extrabold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
-                          <span>Khay Phân Bổ Khóa Học & Giấy Phép</span>
+                          <span>Khay Phân Bổ Khóa Học & Giấy Phép (Kéo & Thả)</span>
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
-                            Visual License Trays
+                            DRAG & DROP ENGINE
                           </span>
                         </h4>
                         <p className="text-xs text-slate-500 dark:text-slate-400">
-                          Kéo thả hoặc chuyển lớp giữa các khay để khớp chính xác hạn ngạch bản quyền.
+                          Kéo thả các thẻ lớp học trực tiếp vào khay hoặc dùng nút bấm nhanh để khớp đủ 100% hạn ngạch.
                         </p>
                       </div>
                     </div>
@@ -2422,22 +2434,69 @@ export const AutomationStudioPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* DANH SÁCH CÁC KHAY KHÓA HỌC (GRID BENTO) */}
+                  {/* 1. DANH SÁCH 3 KHAY KHÓA HỌC (CÁC VÙNG THẢ - DROP ZONES) */}
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                     {cofTrays.map((tray) => {
                       const diff = tray.quota - tray.assignedStudentsCount;
                       const isOverflow = diff < 0;
                       const isExact = diff === 0;
                       const percent = Math.min(Math.round((tray.assignedStudentsCount / (tray.quota || 1)) * 100), 100);
+                      const isBeingHovered = activeDropTrayId === tray.courseId;
 
                       return (
                         <div
                           key={tray.courseId}
-                          className={`rounded-2xl border p-4.5 flex flex-col justify-between transition-all ${isOverflow
-                            ? 'border-rose-300 bg-rose-50/40 dark:bg-rose-950/20 ring-1 ring-rose-400'
-                            : isExact
-                              ? 'border-emerald-300 bg-emerald-50/40 dark:bg-emerald-950/20 ring-1 ring-emerald-400'
-                              : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs'
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.dataTransfer.dropEffect = 'move';
+                            setActiveDropTrayId(tray.courseId);
+                          }}
+                          onDragLeave={() => setActiveDropTrayId(null)}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            setActiveDropTrayId(null);
+                            if (!draggedClassInfo) return;
+
+                            const { sourceTrayId, classItem } = draggedClassInfo;
+                            if (sourceTrayId === tray.courseId) return; // Không thả vào chính nó
+
+                            // Cập nhật các khay
+                            const updatedTrays = cofTrays.map((t) => {
+                              // Trừ khỏi khay nguồn (nếu kéo từ khay khác)
+                              if (sourceTrayId && t.courseId === sourceTrayId) {
+                                return {
+                                  ...t,
+                                  assignedStudentsCount: t.assignedStudentsCount - classItem.studentsCount,
+                                  assignedClasses: t.assignedClasses.filter((c) => c.rawClassName !== classItem.rawClassName),
+                                };
+                              }
+                              // Cộng vào khay đích
+                              if (t.courseId === tray.courseId) {
+                                return {
+                                  ...t,
+                                  assignedStudentsCount: t.assignedStudentsCount + classItem.studentsCount,
+                                  assignedClasses: [...t.assignedClasses, classItem],
+                                };
+                              }
+                              return t;
+                            });
+
+                            // Xóa khỏi danh sách chờ (nếu kéo từ hàng đợi)
+                            if (!sourceTrayId) {
+                              setCofUnassignedClasses((prev) => prev.filter((c) => c.rawClassName !== classItem.rawClassName));
+                            }
+
+                            setCofTrays(updatedTrays);
+                            setDraggedClassInfo(null);
+                            toast.success(`🎯 Đã thả lớp '${classItem.rawClassName}' vào Khay #${tray.courseId}!`);
+                          }}
+                          className={`rounded-2xl border p-4.5 flex flex-col justify-between transition-all duration-200 ${isBeingHovered
+                            ? 'border-indigo-500 bg-indigo-50/80 dark:bg-indigo-950/60 ring-2 ring-indigo-500 scale-[1.01] shadow-md'
+                            : isOverflow
+                              ? 'border-rose-300 bg-rose-50/40 dark:bg-rose-950/20 ring-1 ring-rose-400'
+                              : isExact
+                                ? 'border-emerald-300 bg-emerald-50/40 dark:bg-emerald-950/20 ring-1 ring-emerald-400'
+                                : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs'
                             }`}
                         >
                           <div className="space-y-3">
@@ -2468,7 +2527,7 @@ export const AutomationStudioPage: React.FC = () => {
                               </span>
                             </div>
 
-                            {/* Thanh Tiến Độ Sức Chứa Khay */}
+                            {/* Thanh tiến độ sức chứa */}
                             <div className="space-y-1">
                               <div className="flex items-center justify-between text-[11px] font-mono">
                                 <span className="text-slate-500">
@@ -2485,35 +2544,44 @@ export const AutomationStudioPage: React.FC = () => {
                               </div>
                             </div>
 
-                            {/* Danh Sách Các Lớp Đang Xếp Trong Khay */}
+                            {/* Danh sách các lớp trong Khay (Có thể kéo ra ngoài) */}
                             <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800">
-                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                                Các Lớp Trong Khay ({tray.assignedClasses.length} lớp):
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                                <span>Các Lớp Trong Khay ({tray.assignedClasses.length} lớp):</span>
+                                <span className="text-[9px] lowercase font-normal italic text-slate-400">kéo để chuyển khay</span>
                               </span>
-                              <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
+
+                              <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
                                 {tray.assignedClasses.length === 0 ? (
-                                  <p className="text-[11px] text-slate-400 italic py-2 text-center">
-                                    Chưa có lớp nào trong khay này.
-                                  </p>
+                                  <div className="p-4 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-[11px] text-slate-400 italic">
+                                    Thả các lớp học từ bên dưới vào đây
+                                  </div>
                                 ) : (
-                                  tray.assignedClasses.map((clsItem, cIdx) => (
+                                  tray.assignedClasses.map((clsItem) => (
                                     <div
-                                      key={cIdx}
-                                      className="flex items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200/60 dark:border-slate-700 text-xs"
+                                      key={clsItem.rawClassName}
+                                      draggable
+                                      onDragStart={(e) => {
+                                        setDraggedClassInfo({ sourceTrayId: tray.courseId, classItem: clsItem });
+                                        e.dataTransfer.setData('text/plain', clsItem.rawClassName);
+                                      }}
+                                      className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/60 dark:border-slate-700 text-xs cursor-grab active:cursor-grabbing hover:border-indigo-400 hover:shadow-2xs transition"
                                     >
                                       <div className="min-w-0 pr-2">
-                                        <p className="font-bold text-slate-800 dark:text-slate-200 truncate">
-                                          {clsItem.rawClassName}
+                                        <p className="font-bold text-slate-800 dark:text-slate-200 truncate flex items-center gap-1.5">
+                                          <span className="text-slate-400">⠿</span>
+                                          <span>{clsItem.rawClassName}</span>
                                         </p>
-                                        <p className="text-[10px] text-slate-400 font-mono truncate" title={clsItem.lmsGroupName}>
-                                          Group: {clsItem.lmsGroupName}
+                                        <p className="text-[10px] text-slate-400 font-mono truncate pl-3" title={clsItem.lmsGroupName}>
+                                          {clsItem.lmsGroupName}
                                         </p>
                                       </div>
+
                                       <div className="flex items-center gap-1.5 shrink-0">
                                         <span className="px-2 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-mono font-bold text-[11px]">
                                           {clsItem.studentsCount} hs
                                         </span>
-                                        {/* Nút tháo lớp ra khỏi khay */}
+                                        {/* Nút tháo lớp nhanh */}
                                         <button
                                           type="button"
                                           onClick={() => {
@@ -2522,17 +2590,17 @@ export const AutomationStudioPage: React.FC = () => {
                                                 return {
                                                   ...t,
                                                   assignedStudentsCount: t.assignedStudentsCount - clsItem.studentsCount,
-                                                  assignedClasses: t.assignedClasses.filter((_, i) => i !== cIdx),
+                                                  assignedClasses: t.assignedClasses.filter((c) => c.rawClassName !== clsItem.rawClassName),
                                                 };
                                               }
                                               return t;
                                             });
                                             setCofTrays(updatedTrays);
-                                            setCofUnassignedClasses([...cofUnassignedClasses, clsItem]);
-                                            toast.info(`Đã chuyển lớp '${clsItem.rawClassName}' ra danh sách chờ.`);
+                                            setCofUnassignedClasses((prev) => [...prev, clsItem]);
+                                            toast.info(`Đã đưa lớp '${clsItem.rawClassName}' ra danh sách chờ.`);
                                           }}
                                           className="text-slate-400 hover:text-rose-500 p-1 cursor-pointer transition"
-                                          title="Chuyển lớp này ra ngoài danh sách chờ"
+                                          title="Đưa lớp này ra danh sách chờ"
                                         >
                                           <X className="w-3.5 h-3.5" />
                                         </button>
@@ -2548,74 +2616,125 @@ export const AutomationStudioPage: React.FC = () => {
                     })}
                   </div>
 
-                  {/* KHU VỰC CÁC LỚP CHƯA XẾP VÀO KHAY (CẦN ADMIN CHUYỂN TAY) */}
-                  {cofUnassignedClasses.length > 0 && (
-                    <div className="p-4 rounded-2xl border border-amber-200/80 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-950/20 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <AlertTriangle className="w-4 h-4 text-amber-600" />
-                          <h5 className="text-xs font-bold text-amber-900 dark:text-amber-200">
-                            Các Khối Lớp Chưa Xếp Vào Khay ({cofUnassignedClasses.length} lớp - {cofUnassignedClasses.reduce((s, c) => s + c.studentsCount, 0)} học sinh):
-                          </h5>
-                        </div>
-                        <span className="text-[11px] text-amber-700 dark:text-amber-400 font-medium">
-                          Nhấp chọn khay để đưa lớp vào
-                        </span>
-                      </div>
+                  {/* 2. VÙNG DANH SÁCH LỚP CHỜ (VÙNG KÉO ĐI HOẶC THẢ NGƯỢC LẠI) */}
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setIsDropToUnassignedActive(true);
+                    }}
+                    onDragLeave={() => setIsDropToUnassignedActive(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setIsDropToUnassignedActive(false);
+                      if (!draggedClassInfo || !draggedClassInfo.sourceTrayId) return;
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                        {cofUnassignedClasses.map((uCls, uIdx) => (
+                      const { sourceTrayId, classItem } = draggedClassInfo;
+                      // Rút khỏi khay
+                      const updatedTrays = cofTrays.map((t) => {
+                        if (t.courseId === sourceTrayId) {
+                          return {
+                            ...t,
+                            assignedStudentsCount: t.assignedStudentsCount - classItem.studentsCount,
+                            assignedClasses: t.assignedClasses.filter((c) => c.rawClassName !== classItem.rawClassName),
+                          };
+                        }
+                        return t;
+                      });
+
+                      setCofTrays(updatedTrays);
+                      setCofUnassignedClasses((prev) => [...prev, classItem]);
+                      setDraggedClassInfo(null);
+                      toast.info(`Đã chuyển lớp '${classItem.rawClassName}' về hàng đợi.`);
+                    }}
+                    className={`p-4.5 rounded-2xl border transition-all duration-200 ${isDropToUnassignedActive
+                      ? 'border-amber-500 bg-amber-100/60 ring-2 ring-amber-400'
+                      : 'border-amber-200/80 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-950/20'
+                      } space-y-3`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 text-amber-600" />
+                        <h5 className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                          Hàng Đợi Các Khối Lớp Chưa Xếp Vào Khay ({cofUnassignedClasses.length} lớp - {cofUnassignedClasses.reduce((s, c) => s + c.studentsCount, 0)} học sinh):
+                        </h5>
+                      </div>
+                      <span className="text-[11px] text-amber-700 dark:text-amber-400 font-medium italic">
+                        ✋ Nắm kéo thẻ lớp thả vào khay, hoặc bấm nút xếp nhanh
+                      </span>
+                    </div>
+
+                    {cofUnassignedClasses.length === 0 ? (
+                      <div className="p-6 rounded-xl border border-dashed border-emerald-300 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/30 text-center text-xs text-emerald-700 dark:text-emerald-300 font-bold flex items-center justify-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        <span>Tuyệt vời! Tất cả các khối lớp đã được xếp gọn gàng vào các khay môn học!</span>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {cofUnassignedClasses.map((uCls) => (
                           <div
-                            key={uIdx}
-                            className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/40 flex items-center justify-between text-xs shadow-2xs"
+                            key={uCls.rawClassName}
+                            draggable
+                            onDragStart={(e) => {
+                              setDraggedClassInfo({ sourceTrayId: null, classItem: uCls });
+                              e.dataTransfer.setData('text/plain', uCls.rawClassName);
+                            }}
+                            className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/40 flex flex-col justify-between gap-2.5 text-xs shadow-2xs hover:border-amber-400 cursor-grab active:cursor-grabbing transition"
                           >
-                            <div className="min-w-0 pr-2">
-                              <p className="font-bold text-slate-800 dark:text-slate-200 truncate">
-                                {uCls.rawClassName}
-                              </p>
-                              <span className="text-[10px] text-slate-400 font-mono">
-                                {uCls.studentsCount} học sinh {uCls.gradeDetected ? `(Khối ${uCls.gradeDetected})` : ''}
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <p className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                                  <span className="text-slate-400">⠿</span>
+                                  <span>{uCls.rawClassName || 'Chưa phân lớp (No Class)'}</span>
+                                </p>
+                                <span className="text-[10px] text-slate-400 font-mono pl-3">
+                                  {uCls.studentsCount} học sinh {uCls.gradeDetected ? `(Khối ${uCls.gradeDetected})` : ''}
+                                </span>
+                              </div>
+                              <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300 text-[10px] font-mono font-bold">
+                                Chờ xếp
                               </span>
                             </div>
 
-                            {/* Dropdown nhanh chuyển vào Khay */}
-                            <select
-                              defaultValue=""
-                              onChange={(e) => {
-                                const targetCid = e.target.value;
-                                if (!targetCid) return;
+                            {/* CÁC NÚT XẾP NHANH 1-CHẠM THAY THẾ DROPDOWN */}
+                            <div className="flex items-center gap-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800">
+                              <span className="text-[10px] text-slate-400 font-semibold shrink-0">Xếp vào:</span>
+                              <div className="flex flex-wrap gap-1">
+                                {cofTrays.map((t) => (
+                                  <button
+                                    key={t.courseId}
+                                    type="button"
+                                    onClick={() => {
+                                      // Cập nhật khay
+                                      const updatedTrays = cofTrays.map((tray) => {
+                                        if (tray.courseId === t.courseId) {
+                                          return {
+                                            ...tray,
+                                            assignedStudentsCount: tray.assignedStudentsCount + uCls.studentsCount,
+                                            assignedClasses: [...tray.assignedClasses, uCls],
+                                          };
+                                        }
+                                        return tray;
+                                      });
 
-                                const updatedTrays = cofTrays.map((t) => {
-                                  if (t.courseId === targetCid) {
-                                    return {
-                                      ...t,
-                                      assignedStudentsCount: t.assignedStudentsCount + uCls.studentsCount,
-                                      assignedClasses: [...t.assignedClasses, uCls],
-                                    };
-                                  }
-                                  return t;
-                                });
-
-                                setCofTrays(updatedTrays);
-                                setCofUnassignedClasses(cofUnassignedClasses.filter((_, i) => i !== uIdx));
-                                toast.success(`Đã xếp lớp '${uCls.rawClassName}' vào Khay #${targetCid}!`);
-                              }}
-                              className="text-[11px] font-bold py-1 px-2 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 cursor-pointer outline-none"
-                            >
-                              <option value="" disabled>+ Xếp vào Khay...</option>
-                              {cofTrays.map((t) => (
-                                <option key={t.courseId} value={t.courseId}>
-                                  Khay #{t.courseId} ({t.quota - t.assignedStudentsCount} slots)
-                                </option>
-                              ))}
-                            </select>
+                                      // Xóa khỏi danh sách chờ bằng filter theo tên lớp chuẩn xác
+                                      setCofTrays(updatedTrays);
+                                      setCofUnassignedClasses((prev) => prev.filter((c) => c.rawClassName !== uCls.rawClassName));
+                                      toast.success(`Đã xếp lớp '${uCls.rawClassName}' vào Khay #${t.courseId}!`);
+                                    }}
+                                    className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 font-mono text-[10px] font-bold border border-indigo-200 dark:border-indigo-800 cursor-pointer transition"
+                                  >
+                                    #{t.courseId} ({t.quota - t.assignedStudentsCount})
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
                           </div>
                         ))}
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
 
-                  {/* THÔNG TIN PHÂN BỔ GIÁO VIÊN (ZERO-COST PREVIEW) */}
+                  {/* 3. THÔNG TIN PHÂN BỔ GIÁO VIÊN */}
                   {cofTeachersAllocation.length > 0 && (
                     <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-800 space-y-2">
                       <div className="flex items-center justify-between text-xs">
