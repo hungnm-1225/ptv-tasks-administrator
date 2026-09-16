@@ -4,7 +4,7 @@
 > **Tài liệu này định hình tư duy, vai trò, nguyên tắc làm việc và quy chuẩn kỹ thuật bắt buộc của AI Assistant khi thực thi bất kỳ tác vụ nào trong không gian làm việc `ptv-tasks-administrator`.**  
 > **Kiến trúc sư trưởng & Tác giả sáng lập:** **Nguyễn Mạnh Hùng** (*Lead AI Engineer & Automation Architect – DTT Corporation / Pythaverse Ecosystem*)  
 > **GitHub:** [`https://github.com/hungnm-1225`](https://github.com/hungnm-1225) | **Email:** `hungnm@dtt.vn` / `hung.nguyenmanh@dtt.vn`  
-> **Phiên bản:** `v3.5.0 Master Enterprise Comprehensive Edition` | **Cập nhật:** `2026-09-15`
+> **Phiên bản:** `v3.6.0 Master Enterprise Comprehensive Edition` | **Cập nhật:** `2026-09-16`
 
 ---
 
@@ -16,19 +16,19 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
 
 | STT | Agent Chuyên Gia | Hồ Sơ Tham Chiếu | Lĩnh Vực / Phạm Vi Trọng Tâm Áp Dụng |
 |---|---|---|---|
-| **1** | `frontend-specialist` | [frontend-specialist.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/frontend-specialist.md) | React 19, TypeScript Strict, Tailwind CSS v4, Bento Grid, Enterprise Pastel OKLCH, Dark/Light theme, Evidence Provenance UI, loại bỏ nhãn song ngữ thừa, responsive 13 trang, SheetJS Excel Preview modal. |
-| **2** | `backend-specialist` | [backend-specialist.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/backend-specialist.md) | Python 3.11/3.12, FastAPI 0.115, Pydantic v2 validation, Async/Await, Dual-Key Gemini cross-failover, Deterministic Fast-Path Triage, True Topological Sort (Kahn), Safe Job Wrapper, Ma trận 8 RAM Caches 1ms. |
-| **3** | `database-architect` | [database-architect.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/database-architect.md) | Supabase PostgreSQL 16 (20 bảng CSDL + Storage Bucket `ticket-attachments`), Revisions, Assessments, Proposals, Append-only Execution Events, RLS Policies `@dtt.vn`, Stored Procedure Atomic Allocation `FOR UPDATE`. |
-| **4** | `qa-automation-engineer` | [qa-automation-engineer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/qa-automation-engineer.md) | Playwright Async Chromium, Gói `workspace/` modularized 8 modules, Single Playwright Semaphore (1 Slot cho 512MB RAM Render), Re-entrant ContextVar Lock, Zombie process cleanup `gc.collect()`. |
-| **5** | `security-auditor` | [security-auditor.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/security-auditor.md) | Whitelist Domain `@dtt.vn`, Fernet Credential Vault (`VAULT_SECRET_KEY`), Keycloak Admin REST API + Playwright Fallback, Credential Masking `[PROTECTED]`, Server-Side JWT Approval Gate. |
+| **1** | `frontend-specialist` | [frontend-specialist.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/frontend-specialist.md) | React 19, TypeScript Strict, Tailwind CSS v4, Bento Grid, Enterprise Pastel OKLCH, Dark/Light theme, Evidence Provenance UI, loại bỏ nhãn song ngữ thừa, responsive 13 trang, SheetJS Excel Preview modal, Automation Studio 4 Engine Tabs. |
+| **2** | `backend-specialist` | [backend-specialist.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/backend-specialist.md) | Python 3.11/3.12, FastAPI 0.115, Pydantic v2 validation, Async/Await, Dual-Key Gemini cross-failover, Deterministic Fast-Path Triage, True Topological Sort (Kahn), Safe Job Wrapper, Ma trận 8 RAM Caches 1ms, Git & Workspace Fast Engine Direct API Hybrids. |
+| **3** | `database-architect` | [database-architect.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/database-architect.md) | Supabase PostgreSQL 16 (21 bảng CSDL + Storage Bucket `ticket-attachments`), Revisions, Assessments, Proposals, Append-only Execution Events, RLS Policies `@dtt.vn`, 2 Stored Procedures (`create_or_get_inbox_ticket_revision`, `approve_workflow_proposal`). |
+| **4** | `qa-automation-engineer` | [qa-automation-engineer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/qa-automation-engineer.md) | Playwright Async Chromium, Fast Engine Hybrid Session Stealers (3s login -> Direct API), Single Playwright Semaphore (1 Slot cho 512MB RAM Render), Re-entrant ContextVar Lock, Zombie process cleanup `gc.collect()`. |
+| **5** | `security-auditor` | [security-auditor.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/security-auditor.md) | Whitelist Domain `@dtt.vn`, Fernet Credential Vault (`VAULT_SECRET_KEY`), Keycloak Admin REST API + Playwright Fallback, Credential Masking `[PROTECTED]`, Server-Side JWT Approval Gate (`get_current_user_email`). |
 | **6** | `orchestrator` | [orchestrator.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/orchestrator.md) | Phân tích luồng end-to-end, giải quyết xung đột dữ liệu, thiết kế pipeline liên thông đa dịch vụ (Workspace ➔ LMS ➔ Git ➔ Keycloak). |
-| **7** | `debugger` | [debugger.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/debugger.md) | 4-Phase Systematic Debugging, bắt log thực thi chuẩn hóa GMT+7, cô lập nguyên nhân gốc rễ, Gemini 10-model fallback + Deterministic Fast-Path Triage. |
-| **8** | `documentation-writer` | [documentation-writer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/documentation-writer.md) | Chuẩn hóa README, API Docs, cẩm nang kiến trúc, Single Source of Truth cho toàn bộ dự án, đồng bộ hóa tuyệt đối với mã nguồn. |
-| **9** | `project-planner` | [project-planner.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/project-planner.md) | Phương pháp luận 4 pha (Analysis, Planning, Solutioning, Implementation), lập bản đồ công việc, duy trì invariants. |
-| **10** | `devops-engineer` | [devops-engineer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/devops-engineer.md) | Quản trị CI/CD GitHub Actions, cấu hình Render.com (512MB RAM ASGI), Vercel (Edge CDN Frontend), UptimeRobot (Keep-warm ping & Synthetic monitoring), Dockerfile. |
+| **7** | `debugger` | [debugger.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/debugger.md) | 4-Phase Systematic Debugging, bắt log thực thi chuẩn hóa GMT+7, cô lập nguyên nhân gốc rễ, Gemini 10-model fallback + Deterministic Fast-Path Triage v1.2.0. |
+| **8** | `documentation-writer` | [documentation-writer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/documentation-writer.md) | Chuẩn hóa [README.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/README.md), API Docs, cẩm nang kiến trúc, Single Source of Truth cho toàn bộ dự án, đồng bộ hóa tuyệt đối với mã nguồn. |
+| **9** | `project-planner` | [project-planner.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/project-planner.md) | Phương pháp luận 4 pha (Analysis, Planning, Solutioning, Implementation), lập bản đồ công việc, duy trì 6 Invariants cốt lõi. |
+| **10** | `devops-engineer` | [devops-engineer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/devops-engineer.md) | Quản trị CI/CD GitHub Actions, cấu hình [render.yaml](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/render.yaml) (512MB RAM ASGI), [vercel.json](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/vercel.json) (Edge CDN Frontend), UptimeRobot (Keep-warm ping & Synthetic monitoring), Dockerfile. |
 | **11** | `performance-optimizer` | [performance-optimizer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/performance-optimizer.md) | Tối ưu hóa bộ nhớ 512MB RAM Render, Ma trận 8 BoundedMemoryCache (LRU + TTL < 40MB), Low-RAM Chromium 18 cờ tối ưu, Dynamic Code Splitting React 19 / Vite 6. |
 | **12** | `penetration-tester` | [penetration-tester.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/penetration-tester.md) | Thử nghiệm xâm nhập, kiểm định phòng thủ Prompt Injection, phá vỡ Offset trích dẫn, chống bypass JWT Token `@dtt.vn`, kiểm định an toàn két sắt Fernet. |
-| **13** | `test-engineer` | [test-engineer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/test-engineer.md) | Thiết kế Hermetic Pytest Suite (23/23 tests pass in-memory), Contract Tests 19 Capabilities, Mocking in-memory không tốn Quota AI. |
+| **13** | `test-engineer` | [test-engineer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/test-engineer.md) | Thiết kế Hermetic Pytest Suite (23/23 tests pass in-memory), Contract Tests 19 Capabilities, Fast Engine Test Suites ([test_git_fast_engine.py](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/test_git_fast_engine.py), [test_workspace_fast_engine.py](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/test_workspace_fast_engine.py)). |
 | **14** | `code-archaeologist` | [code-archaeologist.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/code-archaeologist.md) | Truy vết lịch sử commit Git, phân tích mã nguồn cũ, refactoring mã thừa, giải quyết mâu thuẫn giữa các bản nâng cấp. |
 | **15** | `explorer-agent` | [explorer-agent.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/explorer-agent.md) | Thám sát cây thư mục, kiểm kê tệp tin, lập bản đồ phụ thuộc file (`CODEBASE.md`). |
 | **16** | `product-manager` | [product-manager.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/product-manager.md) | Định hình lộ trình tính năng, tối ưu trải nghiệm Admin Hub, quản lý độ ưu tiên các phân hệ Pythaverse. |
@@ -41,11 +41,14 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
 
 ## 2. TRI THỨC NGHIỆP VỤ CỐT LÕI HỆ SINH THÁI PYTHAVERSE (DOMAIN TRUTH)
 
-### 2.1. Cấu Trúc 7 Phân Hệ Pythaverse
-1. **School Workspace (`pythaverse.space`):** Quản trị phân cấp 3 tầng (`Distributor` ➔ `Partner` ➔ `School`). School tạo Order lên Partner; Partner cấp License từ Pool; Distributor duyệt Contract cấp bù; Sales Admin phê duyệt tối cao. Nộp batch tài khoản tự động qua cỗ máy Bulk Account Creation.
-2. **PLearn LMS (`learn.pythaverse.space`):** Moodle LMS (PHP / MariaDB / Edwiser RemUI). Quản lý danh mục khóa học (`SWRP`, `IR`, `ASP`...) và ghi danh theo Role (`Student` - 9, `Teacher` - 7, `Manager` - 1). Cỗ máy Hybrid V3.6: Playwright SSO Keycloak (3s) trích xuất Cookie & sesskey ➔ HTTPX Direct WebService. Fallback 2 nhịp trên `td.cell.c2`.
-3. **PGit Repos (`git.pythaverse.space`):** Máy chủ GitBucket (Scala/JVM). Yêu cầu đăng nhập SSO qua Keycloak ít nhất 1 lần để kích hoạt tài khoản JIT. Single-Session Multi-Repo: Sàng lọc người dùng qua Keycloak Gateway, đăng nhập OIDC 1 lần và add nhiều Repositories trong cùng 1 phiên. Thêm Collaborators tại `/settings/collaborators` với quyền `ADMIN`, `DEVELOPER`, `GUEST`.
-4. **Keycloak Auth IDP (`eid.pythaverse.space`):** Cổng xác thực tập trung OAuth2/OIDC (Realm: `master` / `idp`). 2-Tier Hybrid: Direct REST API (300ms) ➔ Playwright RPA Fallback.
+### 2.1. Cấu Trúc 7 Phân Hệ Pythaverse & Cỗ Máy Vận Hành V3.6
+1. **School Workspace (`pythaverse.space`):** Quản trị phân cấp 3 tầng (`Distributor` ➔ `Partner` ➔ `School`). School tạo Order lên Partner; Partner cấp License từ Pool; Distributor duyệt Contract cấp bù; Sales Admin phê duyệt tối cao.  
+   - **Workspace Fast Engine V3.6:** Playwright đăng nhập trích xuất Cookie + `window.user` (WordPress identity: `school_id`, `partner_id`, `distributor_id`, `user_id`) trong 3s, sau đó đóng trình duyệt và gửi trực tiếp HTTPX Multipart POST tới các endpoint PHP (`schoolCreateOrder.php`, `updateStatusOrder.php`, `createOrderSale.php`, `updateStatusPartnerOrder.php`, `createOrder.php`, `/wp-json/...`).
+2. **PLearn LMS (`learn.pythaverse.space`):** Moodle LMS (PHP / MariaDB / Edwiser RemUI). Quản lý danh mục khóa học (`SWRP`, `IR`, `ASP`...) và ghi danh theo Role (`Student` - 9, `Teacher` - 7, `Manager` - 1).  
+   - **LMS Fast Engine Hybrid V3.6:** Playwright SSO Keycloak (3s) trích xuất Cookie & sesskey ➔ HTTPX Direct WebService (`core_enrol_manual_enrol_users`, `core_user_get_users_by_field`). Fallback 2 nhịp trên `td.cell.c2` khi WebService bị khóa.
+3. **PGit Repos (`git.pythaverse.space`):** Máy chủ GitBucket (Scala/JVM). Yêu cầu đăng nhập SSO qua Keycloak ít nhất 1 lần để kích hoạt tài khoản JIT.  
+   - **Git Fast Engine Hybrid V3.6:** Playwright SSO Session Stealer (3s) trích xuất Cookie `GITBUCKET_SESSION_ID`, kiểm tra tài khoản đã đăng nhập JIT hay chưa qua `POST /_user/existence` (chỉ mất 20ms). Nếu tồn tại, gửi trực tiếp `POST /settings/collaborators` (200ms). Người dùng chưa đăng nhập được gom vào danh sách `not_logged_in_git` cảnh báo cho Admin mà không làm dừng cả pipeline.
+4. **Keycloak Auth IDP (`eid.pythaverse.space`):** Cổng xác thực tập trung OAuth2/OIDC (Realm: `master` / `idp`). 2-Tier Hybrid: Direct Admin REST API (300ms) ➔ Playwright RPA Fallback.
 5. **Leanbot IDE (`ide.pythaverse.space`):** Blockly Web IDE kết nối Robot Leanbot qua Bluetooth BLE.
 6. **Support Helpdesk (`support.pythaverse.space`):** osTicket Helpdesk Engine cào dữ liệu định kỳ qua Playwright Headless session và chuyển giao cho Canonical Intake.
 7. **PContest (`contest.pythaverse.space`):** Hệ thống thi đấu trực tuyến và bảng xếp hạng Leaderboard.
@@ -92,7 +95,7 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
   - Lớp `COFExcelService` đóng vai trò Facade Proxy bảo toàn tương thích ngược 100%.
 - **Dịch vụ `EmailThreadService`:** Tách email thread thành các lượt độc lập, khử sạch 100% quoted reply rác, nhận diện người gửi nội bộ (`@dtt.vn`, `@pythaverse.space`) so với khách hàng và phân loại 4 trạng thái vòng đời hội thoại (`WAITING_CUSTOMER_INFO`, `ACTIONABLE`, `RESOLVED_CONFIRMATION`, `SINGLE_MESSAGE`).
 
-### 2.6. Cơ Sở Dữ Liệu 20 Bảng CSDL Supabase (Data Provenance & Traceability)
+### 2.6. Cơ Sở Dữ Liệu 21 Bảng CSDL Supabase & Stored Procedures
 1. `inbox_tickets`: Quản lý vé tiếp nhận tập trung (Gmail, Form, osTicket) với Partial Unique Index `(source, source_id)`.
 2. `inbox_ticket_revisions`: Lưu trữ lịch sử từng lần biến động nội dung vé kèm mã băm SHA-256 `content_hash`.
 3. `ticket_ai_assessments`: Lưu trữ độc lập 2 bản đánh giá AI (`summary` và `fact_extraction`) kèm Model Name và Prompt Version.
@@ -113,6 +116,10 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
 18. `work_boards`: Bảng Kanban đa năng.
 19. `work_board_columns`: Các cột trạng thái Kanban.
 20. `work_board_cards`: Thẻ công việc, nhiệm vụ phụ (subtasks), hạn chót và người phụ trách.
+21. `bot_cron_configs`: Cấu hình tần suất và trạng thái các cronjobs ngầm.
+- **2 Stored Procedures Bất Biến:**
+  - `create_or_get_inbox_ticket_revision`: Tính toán SHA-256 và sinh revision ID nguyên tử chống xung đột ghi đồng thời.
+  - `approve_workflow_proposal`: Cập nhật trạng thái `approved`, đóng băng `frozen_plan` và `steps` trong 1 transaction an toàn.
 
 ---
 
@@ -123,7 +130,7 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
 2. **Attachment Evidence Fail-Closed Invariant (File đính kèm chưa đối soát ➔ Không Action):**
    - Các trích dẫn có `source_kind == "attachment_extract"` tạm thời bị gắn cờ `is_verified = False` (chuyển sang `needs_information`), nghiêm cấm việc dùng text thân email để đối soát trích dẫn từ file đính kèm khi chưa qua hạ tầng bóc tách bất biến.
 3. **Zero-Mockup Invariant (Cấm Tuyệt Đối Dữ Liệu Bịa Đặt / Fallback Giả Định):**
-   - Nghiêm cấm sử dụng bất kỳ giá trị mặc định giả lập nào (`SWRP 4-12`, count=4, mật khẩu `Ptv@2026`). **Đặc biệt: Khai tử hoàn toàn default Git role `GUEST`**. Yêu cầu cấp quyền Git không nêu rõ vai trò bắt buộc sinh `missing_requirement: git_role`, chuyển trạng thái sang `needs_information` và không tạo bước `git.add_collaborators`.
+   - Nghiêm cấm sử dụng bất kỳ giá trị mặc định giả lập nào (`SWRP 4-12`, count=4, mật khẩu `Ptv@2026`). **Đặc biệt: Khai tử hoàn toàn default Git role `GUEST` và default LMS role `student`**. Yêu cầu cấp quyền không nêu rõ vai trò bắt buộc sinh `missing_requirement`, chuyển trạng thái sang `needs_information` và không tạo bước tự ý.
 4. **Dual-Freeze Proposal & Immutable Provenance Linkage:**
    - Khi Admin phê duyệt, hệ thống đóng băng đồng thời cả `workflow_proposals.frozen_plan` và `automation_workflows.steps`. Toàn bộ execution events bắt buộc phải mang theo `proposal_id`. Tuyệt đối không cho phép chỉnh sửa workflow hay proposal sau khi đã ở trạng thái `approved`.
 5. **Real JWT Identity Enforcement (Chống Mạo Danh Người Phê Duyệt):**
@@ -157,16 +164,16 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
 4. [`workflow_planner.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_planner.py): Policy Registry v1.2.0, Auto Git Sync, Zero-Mockup Git role.
 5. [`workflow_executor.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_executor.py): Thuật toán Tô-pô Kahn DAG, OCC Lease, Smart BFS Retry.
 6. [`excel/`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/excel): Gói dịch vụ xử lý Excel chuyên biệt 4 module (`COFService`, `BulkTemplateService`, `GenericExcelService`, `TOFExcelService`).
-7. [`workspace/`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workspace): Gói RPA Workspace 8 module (Account, Order, Contract, Enroll, Scanner, Base, Orchestrator).
+7. [`workspace/`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workspace): Gói RPA & Direct API Workspace 8 module (Account, Order, Contract, Enroll, Scanner, Base, Orchestrator).
 8. [`playwright_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/playwright_service.py): Cỗ máy Hybrid Moodle PLearn V3.6 (SSO Playwright Cookie ➔ HTTPX Direct WebService + UI 2 nhịp fallback).
-9. [`git_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/git_service.py): Pythaverse Git Single-Session Multi-Repo (Keycloak Gateway user filtering).
-10. [`keycloak_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/keycloak_service.py): 2-Tier Hybrid Keycloak (REST API 300ms + RPA Fallback).
+9. [`git_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/git_service.py): Pythaverse Git Fast Engine Hybrid V3.6 (Session Stealer ➔ `POST /_user/existence` 20ms ➔ `POST /settings/collaborators` 200ms).
+10. [`keycloak_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/keycloak_service.py): 2-Tier Hybrid Keycloak (Admin REST API 300ms + RPA Fallback).
 
 ### 4.3. 13 Trang Chức Năng Frontend SPA (`frontend/src/features/`)
 1. [`UnifiedInboxPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/inbox/UnifiedInboxPage.tsx): Trung tâm AI Workflow Console V3.1 (Bento Grid, Drawer 4 trạng thái, Trình xem trước tệp đính kèm đa định dạng SheetJS/PDF/Office/Images, Duyệt luồng thực thi).
 2. [`TaskManagementPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/tasks/TaskManagementPage.tsx): Quản lý danh sách tác vụ bot, Phê duyệt từng task, Sửa payload JSON, Xem lịch sử thực thi.
 3. [`WorkBoardPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/board/WorkBoardPage.tsx): Bảng điều khiển Kanban hiện đại (Kéo thả nhiệm vụ, Phân loại, Thẻ màu sắc, Checklist công việc con).
-4. [`AutomationStudioPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/studio/AutomationStudioPage.tsx): Xưởng tự động hóa RPA điều khiển trực tiếp 7 phân hệ (Tạo tài khoản COF, Cấp bù License, Ghi danh LMS, Sync Git).
+4. [`AutomationStudioPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/studio/AutomationStudioPage.tsx): Xưởng tự động hóa 4 Engine Tabs (`workspace_rpa`, `keycloak_api`, `git_collaborator`, `feedback_doc_triage`), COF School matching & Lineage Traversal, Client-side Excel SheetJS Validator.
 5. [`CoursesManagerPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/courses/CoursesManagerPage.tsx): Quản lý danh mục môn học song song, Gán danh sách Git Repositories, Import Excel.
 6. [`BotCommanderPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/bots/BotCommanderPage.tsx): Trạm chỉ huy Bot, Theo dõi trạng thái worker, Terminal logs trực quan thời gian thực.
 7. [`SiteMonitorPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/monitor/SiteMonitorPage.tsx): Bảng giám sát hạ tầng 3 tab (10 Public Sites Uptime, Auth Matrix, Lịch sử sự cố).
@@ -176,6 +183,12 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
 11. [`ProfileSettingsPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/profile/ProfileSettingsPage.tsx): Cấu hình tài khoản cá nhân, Kiểm tra trạng thái Két Sắt Fernet và thông số hệ thống.
 12. [`LandingPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/landing/LandingPage.tsx): Cổng thông tin giới thiệu Pythaverse Central Admin Hub.
 13. [`LoginPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/auth/LoginPage.tsx): Cổng đăng nhập xác thực OAuth/JWT an toàn dành riêng cho email nội bộ `@dtt.vn`.
+
+### 4.4. Các Bộ Test Suite Xác Minh Hệ Thống (`backend/` & `tests/`)
+1. **Hermetic Pytest Suite (23/23 in-memory):** `tests/test_capability_contracts.py`, `tests/test_execution_safety.py`, `tests/test_planning_policy.py`, `tests/test_request_fact_normalizer.py`, `tests/test_security_and_provenance.py`, `tests/test_workflow_legacy_replan.py`.
+2. **Git Fast Engine Direct API Test Suite:** [`test_git_fast_engine.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/test_git_fast_engine.py) - Kiểm tra 3s Stealer, 20ms Existence Check và Direct Collaboration POST.
+3. **Workspace Fast Engine Direct API Test Suite:** [`test_workspace_fast_engine.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/test_workspace_fast_engine.py) - Kiểm tra luồng cấp License, Order và Contract 6 chặng.
+4. **Git Collaborator End-to-End Suite:** [`test_git_collaborator.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/test_git_collaborator.py) - Kiểm tra đồng bộ nhiều kho Git và cơ chế bỏ qua user chưa kích hoạt.
 
 ---
 
