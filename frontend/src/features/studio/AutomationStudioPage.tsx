@@ -119,6 +119,13 @@ interface ClassGroupItem {
   gradeDetected: number | null;
 }
 
+interface TeacherAllocationItem {
+  teacherName: string;
+  email: string;
+  courseAssign: string;
+  assignedLmsGroups: string[];
+}
+
 interface LicenseTrayItem {
   courseId: string;
   courseName: string;
@@ -130,14 +137,6 @@ interface LicenseTrayItem {
   startDate: string;
   endDate: string;
 }
-
-interface TeacherAllocationItem {
-  teacherName: string;
-  email: string;
-  courseAssign: string;
-  assignedLmsGroups: string[];
-}
-
 
 
 export const AutomationStudioPage: React.FC = () => {
@@ -197,13 +196,6 @@ export const AutomationStudioPage: React.FC = () => {
   const [selectedSchool, setSelectedSchool] = useState<HierarchySchoolItem | null>(null);
   const [selectedPartner, setSelectedPartner] = useState<{ name: string; code: string } | null>(null);
   const [selectedDistributor, setSelectedDistributor] = useState<{ name: string; code: string } | null>(null);
-
-  const [cofTrays, setCofTrays] = useState<LicenseTrayItem[]>([]);
-  const [cofUnassignedClasses, setCofUnassignedClasses] = useState<ClassGroupItem[]>([]);
-  const [cofTeachersAllocation, setCofTeachersAllocation] = useState<TeacherAllocationItem[]>([]);
-  const [draggedClassInfo, setDraggedClassInfo] = useState<{ sourceTrayId: string | null; classItem: ClassGroupItem } | null>(null);
-  const [activeDropTrayId, setActiveDropTrayId] = useState<string | null>(null);
-  const [isDropToUnassignedActive, setIsDropToUnassignedActive] = useState<boolean>(false);
 
   const [entitySearchQuery, setEntitySearchQuery] = useState<string>('');
   const [isEntityDropdownOpen, setIsEntityDropdownOpen] = useState<boolean>(false);
@@ -523,6 +515,43 @@ export const AutomationStudioPage: React.FC = () => {
   nextYear.setDate(nextYear.getDate() - 1);
 
   const [selectedCourses, setSelectedCourses] = useState<OrderCourseSelection[]>([]);
+
+  // =========================================================================
+  // 🎯 CÁC STATE PHẢN XẠ & KÉO THẢ CỦA KHAY KHÓA HỌC (ĐÃ ĐẶT ĐÚNG VỊ TRÍ)
+  // =========================================================================
+  const [cofClassAssignments, setCofClassAssignments] = useState<Record<string, ClassGroupItem[]>>({});
+  const [cofUnassignedClasses, setCofUnassignedClasses] = useState<ClassGroupItem[]>([]);
+  const [cofTeachersAllocation, setCofTeachersAllocation] = useState<TeacherAllocationItem[]>([]);
+
+  const [editingTeacherIndex, setEditingTeacherIndex] = useState<number | null>(null);
+  const [draggedClassInfo, setDraggedClassInfo] = useState<{ sourceTrayId: string | null; classItem: ClassGroupItem } | null>(null);
+  const [activeDropTrayId, setActiveDropTrayId] = useState<string | null>(null);
+  const [isDropToUnassignedActive, setIsDropToUnassignedActive] = useState<boolean>(false);
+
+  // 🎯 [TWO-WAY REACTIVE BINDING]: Tự động đồng bộ 100% theo selectedCourses bên dưới!
+  const cofTrays = useMemo(() => {
+    if (!uploadedCofFile && selectedCourses.length === 0) return [];
+
+    return selectedCourses.map((c: OrderCourseSelection) => {
+      const cidStr = String(c.course_id);
+      const assigned = cofClassAssignments[cidStr] || [];
+      const assignedCount = assigned.reduce((sum, item) => sum + item.studentsCount, 0);
+      const swrpM = c.course_name.match(/SWRP\s*(\d+)/i);
+      const targetGrade = swrpM ? parseInt(swrpM[1], 10) : null;
+
+      return {
+        courseId: cidStr,
+        courseName: c.course_name,
+        category: c.category,
+        targetGrade,
+        quota: c.licenses || 0, // 👈 Bắt chuẩn 4360 khi anh sửa ở dưới!
+        assignedStudentsCount: assignedCount,
+        assignedClasses: assigned,
+        startDate: c.start_date,
+        endDate: c.end_date,
+      };
+    });
+  }, [selectedCourses, cofClassAssignments, uploadedCofFile]);
 
   // LMS State
   const [lmsSelectedCourses, setLmsSelectedCourses] = useState<LmsCourseSelectionItem[]>([
@@ -949,7 +978,8 @@ export const AutomationStudioPage: React.FC = () => {
           }
         }
 
-        // 3. THUẬT TOÁN TỰ ĐỘNG GHÉP LỚP VÀO KHAY KHÓA HỌC
+        // 3. THUẬT TOÁN GHÉP LỚP VÀO KHAY
+        const newClassAssignments: Record<string, ClassGroupItem[]> = {};
         const unassigned: ClassGroupItem[] = [];
 
         Object.entries(classesMap).forEach(([className, info]) => {
@@ -972,14 +1002,14 @@ export const AutomationStudioPage: React.FC = () => {
           }
 
           if (matchedTrayId) {
-            traysMap[matchedTrayId].assignedStudentsCount += info.count;
-            traysMap[matchedTrayId].assignedClasses.push(classItem);
+            if (!newClassAssignments[matchedTrayId]) newClassAssignments[matchedTrayId] = [];
+            newClassAssignments[matchedTrayId].push(classItem);
           } else {
             unassigned.push(classItem);
           }
         });
 
-        // 4. ĐỌC TAB 3: TEACHER INFORMATION (PHÂN BỔ GIÁO VIÊN)
+        // 4. ĐỌC TAB 3: TEACHER INFORMATION (KHAI BÁO TRƯỚC)
         const teacherSheetName = sheetNames.find(s => s.toLowerCase().includes('teacher'));
         const teachersAlloc: TeacherAllocationItem[] = [];
         let totalTeachers = 0;
@@ -1002,7 +1032,6 @@ export const AutomationStudioPage: React.FC = () => {
             if (rawTargetClass && classesMap[rawTargetClass]) {
               assignedLmsGroups.push(`${cleanSchool} ${cleanLmsText(rawTargetClass)} ${dateSuffix}`);
             } else {
-              // Gán giáo viên vào TẤT CẢ các group của môn phụ trách
               Object.values(traysMap).forEach(tray => {
                 if (tray.courseName.toLowerCase().includes(courseAssign.toLowerCase()) ||
                   (tray.targetGrade && courseAssign.toLowerCase().includes(`swrp ${tray.targetGrade}`))) {
@@ -1020,6 +1049,14 @@ export const AutomationStudioPage: React.FC = () => {
           }
         }
 
+        // 🎯 5. BÂY GIỜ MỚI CẬP NHẬT TẤT CẢ CÁC STATE (ĐẢM BẢO teachersAlloc ĐÃ CÓ!)
+        setCofClassAssignments(newClassAssignments);
+        setCofUnassignedClasses(unassigned);
+        setCofTeachersAllocation(teachersAlloc);
+        if (parsedCoursesForForm.length > 0) {
+          setSelectedCourses(parsedCoursesForForm);
+        }
+
         // 5. ĐỐI SOÁT PHẢ HỆ VỚI 480 TRƯỜNG
         const matchResult = matchSchoolWithHierarchy(extractedSchoolName, schoolsList);
         if (matchResult.matched) {
@@ -1032,7 +1069,7 @@ export const AutomationStudioPage: React.FC = () => {
         }
 
         // Cập nhật state toàn hệ thống
-        setCofTrays(Object.values(traysMap));
+        setCofClassAssignments(newClassAssignments);
         setCofUnassignedClasses(unassigned);
         setCofTeachersAllocation(teachersAlloc);
         if (parsedCoursesForForm.length > 0) {
@@ -2402,7 +2439,7 @@ export const AutomationStudioPage: React.FC = () => {
                 )}
               </div>
               {/* ========================================================================= */}
-              {/* 🏆 GIAO DIỆN BENTO GRID KHAY KHÓA HỌC KÉO THẢ (DRAG & DROP LICENSE TRAYS)  */}
+              {/* 🏆 GIAO DIỆN BENTO GRID KHAY KHÓA HỌC KÉO THẢ & ĐỒNG BỘ 2 CHIỀU TỨC THỜI  */}
               {/* ========================================================================= */}
               {cofTrays.length > 0 && (
                 <div className="rounded-3xl border border-indigo-200 dark:border-indigo-900 bg-gradient-to-b from-indigo-50/40 via-white to-white dark:from-slate-900 dark:via-slate-900 dark:to-slate-900 p-5 sm:p-6 space-y-5 shadow-xs">
@@ -2415,11 +2452,11 @@ export const AutomationStudioPage: React.FC = () => {
                         <h4 className="text-sm font-extrabold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
                           <span>Khay Phân Bổ Khóa Học & Giấy Phép (Kéo & Thả)</span>
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
-                            DRAG & DROP ENGINE
+                            TWO-WAY SYNC
                           </span>
                         </h4>
                         <p className="text-xs text-slate-500 dark:text-slate-400">
-                          Kéo thả các thẻ lớp học trực tiếp vào khay hoặc dùng nút bấm nhanh để khớp đủ 100% hạn ngạch.
+                          Tự động đồng bộ số lượng & thông số môn học với bảng cấu hình bên dưới. Kéo thả để phân bổ lớp.
                         </p>
                       </div>
                     </div>
@@ -2434,13 +2471,17 @@ export const AutomationStudioPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* 1. DANH SÁCH 3 KHAY KHÓA HỌC (CÁC VÙNG THẢ - DROP ZONES) */}
+                  {/* 1. DANH SÁCH CÁC KHAY KHÓA HỌC (HIỂN THỊ PHẦN TRĂM THỰC TẾ VƯỢT 100%) */}
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                     {cofTrays.map((tray) => {
                       const diff = tray.quota - tray.assignedStudentsCount;
                       const isOverflow = diff < 0;
-                      const isExact = diff === 0;
-                      const percent = Math.min(Math.round((tray.assignedStudentsCount / (tray.quota || 1)) * 100), 100);
+                      const isExact = diff === 0 && tray.quota > 0;
+
+                      // 🎯 TÍNH PHẦN TRĂM THỰC TẾ: Không bị chặn trần 100% nữa!
+                      const rawPercent = Math.round((tray.assignedStudentsCount / (tray.quota || 1)) * 100);
+                      const displayPercent = isNaN(rawPercent) ? 0 : rawPercent;
+                      const barWidth = Math.min(displayPercent, 100);
                       const isBeingHovered = activeDropTrayId === tray.courseId;
 
                       return (
@@ -2458,35 +2499,22 @@ export const AutomationStudioPage: React.FC = () => {
                             if (!draggedClassInfo) return;
 
                             const { sourceTrayId, classItem } = draggedClassInfo;
-                            if (sourceTrayId === tray.courseId) return; // Không thả vào chính nó
+                            if (sourceTrayId === tray.courseId) return;
 
-                            // Cập nhật các khay
-                            const updatedTrays = cofTrays.map((t) => {
-                              // Trừ khỏi khay nguồn (nếu kéo từ khay khác)
-                              if (sourceTrayId && t.courseId === sourceTrayId) {
-                                return {
-                                  ...t,
-                                  assignedStudentsCount: t.assignedStudentsCount - classItem.studentsCount,
-                                  assignedClasses: t.assignedClasses.filter((c) => c.rawClassName !== classItem.rawClassName),
-                                };
+                            // Chuyển lớp vào khay đích
+                            setCofClassAssignments((prev) => {
+                              const next = { ...prev };
+                              if (sourceTrayId && next[sourceTrayId]) {
+                                next[sourceTrayId] = next[sourceTrayId].filter((c) => c.rawClassName !== classItem.rawClassName);
                               }
-                              // Cộng vào khay đích
-                              if (t.courseId === tray.courseId) {
-                                return {
-                                  ...t,
-                                  assignedStudentsCount: t.assignedStudentsCount + classItem.studentsCount,
-                                  assignedClasses: [...t.assignedClasses, classItem],
-                                };
-                              }
-                              return t;
+                              next[tray.courseId] = [...(next[tray.courseId] || []), classItem];
+                              return next;
                             });
 
-                            // Xóa khỏi danh sách chờ (nếu kéo từ hàng đợi)
                             if (!sourceTrayId) {
                               setCofUnassignedClasses((prev) => prev.filter((c) => c.rawClassName !== classItem.rawClassName));
                             }
 
-                            setCofTrays(updatedTrays);
                             setDraggedClassInfo(null);
                             toast.success(`🎯 Đã thả lớp '${classItem.rawClassName}' vào Khay #${tray.courseId}!`);
                           }}
@@ -2515,6 +2543,7 @@ export const AutomationStudioPage: React.FC = () => {
                                 )}
                               </div>
 
+                              {/* 🎯 BADGE TRẠNG THÁI HIỂN THỊ PHẦN TRĂM THỰC TẾ VƯỢT 100% */}
                               <span
                                 className={`shrink-0 px-2.5 py-1 rounded-xl text-[10px] font-extrabold font-mono ${isOverflow
                                   ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-300'
@@ -2523,7 +2552,7 @@ export const AutomationStudioPage: React.FC = () => {
                                     : 'bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300'
                                   }`}
                               >
-                                {isOverflow ? `TRÀN +${Math.abs(diff)}` : isExact ? 'KHỚP 100%' : `DƯ ${diff} CHỖ`}
+                                {isOverflow ? `TRÀN +${Math.abs(diff)} (${displayPercent}%)` : isExact ? 'KHỚP 100%' : `DƯ ${diff} CHỖ (${displayPercent}%)`}
                               </span>
                             </div>
 
@@ -2533,18 +2562,20 @@ export const AutomationStudioPage: React.FC = () => {
                                 <span className="text-slate-500">
                                   Đã xếp: <b>{tray.assignedStudentsCount}</b> / {tray.quota} slots
                                 </span>
-                                <span className="font-bold">{percent}%</span>
+                                <span className={`font-bold ${isOverflow ? 'text-rose-600' : 'text-slate-700 dark:text-slate-300'}`}>
+                                  {displayPercent}%
+                                </span>
                               </div>
                               <div className="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                                 <div
                                   className={`h-full transition-all duration-300 ${isOverflow ? 'bg-rose-500' : isExact ? 'bg-emerald-500' : 'bg-amber-500'
                                     }`}
-                                  style={{ width: `${percent}%` }}
+                                  style={{ width: `${barWidth}%` }}
                                 />
                               </div>
                             </div>
 
-                            {/* Danh sách các lớp trong Khay (Có thể kéo ra ngoài) */}
+                            {/* Danh sách các lớp trong Khay */}
                             <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800">
                               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
                                 <span>Các Lớp Trong Khay ({tray.assignedClasses.length} lớp):</span>
@@ -2585,17 +2616,13 @@ export const AutomationStudioPage: React.FC = () => {
                                         <button
                                           type="button"
                                           onClick={() => {
-                                            const updatedTrays = cofTrays.map((t) => {
-                                              if (t.courseId === tray.courseId) {
-                                                return {
-                                                  ...t,
-                                                  assignedStudentsCount: t.assignedStudentsCount - clsItem.studentsCount,
-                                                  assignedClasses: t.assignedClasses.filter((c) => c.rawClassName !== clsItem.rawClassName),
-                                                };
+                                            setCofClassAssignments((prev) => {
+                                              const next = { ...prev };
+                                              if (next[tray.courseId]) {
+                                                next[tray.courseId] = next[tray.courseId].filter((c) => c.rawClassName !== clsItem.rawClassName);
                                               }
-                                              return t;
+                                              return next;
                                             });
-                                            setCofTrays(updatedTrays);
                                             setCofUnassignedClasses((prev) => [...prev, clsItem]);
                                             toast.info(`Đã đưa lớp '${clsItem.rawClassName}' ra danh sách chờ.`);
                                           }}
@@ -2629,19 +2656,13 @@ export const AutomationStudioPage: React.FC = () => {
                       if (!draggedClassInfo || !draggedClassInfo.sourceTrayId) return;
 
                       const { sourceTrayId, classItem } = draggedClassInfo;
-                      // Rút khỏi khay
-                      const updatedTrays = cofTrays.map((t) => {
-                        if (t.courseId === sourceTrayId) {
-                          return {
-                            ...t,
-                            assignedStudentsCount: t.assignedStudentsCount - classItem.studentsCount,
-                            assignedClasses: t.assignedClasses.filter((c) => c.rawClassName !== classItem.rawClassName),
-                          };
+                      setCofClassAssignments((prev) => {
+                        const next = { ...prev };
+                        if (next[sourceTrayId]) {
+                          next[sourceTrayId] = next[sourceTrayId].filter((c) => c.rawClassName !== classItem.rawClassName);
                         }
-                        return t;
+                        return next;
                       });
-
-                      setCofTrays(updatedTrays);
                       setCofUnassignedClasses((prev) => [...prev, classItem]);
                       setDraggedClassInfo(null);
                       toast.info(`Đã chuyển lớp '${classItem.rawClassName}' về hàng đợi.`);
@@ -2704,20 +2725,10 @@ export const AutomationStudioPage: React.FC = () => {
                                     key={t.courseId}
                                     type="button"
                                     onClick={() => {
-                                      // Cập nhật khay
-                                      const updatedTrays = cofTrays.map((tray) => {
-                                        if (tray.courseId === t.courseId) {
-                                          return {
-                                            ...tray,
-                                            assignedStudentsCount: tray.assignedStudentsCount + uCls.studentsCount,
-                                            assignedClasses: [...tray.assignedClasses, uCls],
-                                          };
-                                        }
-                                        return tray;
-                                      });
-
-                                      // Xóa khỏi danh sách chờ bằng filter theo tên lớp chuẩn xác
-                                      setCofTrays(updatedTrays);
+                                      setCofClassAssignments((prev) => ({
+                                        ...prev,
+                                        [t.courseId]: [...(prev[t.courseId] || []), uCls],
+                                      }));
                                       setCofUnassignedClasses((prev) => prev.filter((c) => c.rawClassName !== uCls.rawClassName));
                                       toast.success(`Đã xếp lớp '${uCls.rawClassName}' vào Khay #${t.courseId}!`);
                                     }}
@@ -2734,28 +2745,163 @@ export const AutomationStudioPage: React.FC = () => {
                     )}
                   </div>
 
-                  {/* 3. THÔNG TIN PHÂN BỔ GIÁO VIÊN */}
+                  {/* 3. 🧑‍🏫 MỞ KHÓA CHỈNH SỬA PHÂN BỔ GIÁO VIÊN */}
                   {cofTeachersAllocation.length > 0 && (
-                    <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-800 space-y-2">
-                      <div className="flex items-center justify-between text-xs">
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-800 space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs">
                         <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                           <Users className="w-4 h-4 text-indigo-600" />
-                          <span>Phân Bổ Giáo Viên Tự Động ({cofTeachersAllocation.length} GV - Không tốn License):</span>
+                          <span>Phân Bổ Giáo Viên ({cofTeachersAllocation.length} GV - Không tốn License):</span>
                         </span>
-                        <span className="text-[10px] text-slate-400 font-mono">Tự động gán vào toàn bộ Group của môn</span>
+                        <span className="text-[11px] text-slate-500 italic">
+                          Click vào biểu tượng ✎ trên từng giáo viên để sửa môn hoặc gán lại Group LMS
+                        </span>
                       </div>
 
-                      <div className="flex flex-wrap gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
                         {cofTeachersAllocation.map((t, tIdx) => (
-                          <span
+                          <div
                             key={tIdx}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[11px] text-slate-700 dark:text-slate-300"
-                            title={`Môn: ${t.courseAssign} | Gán vào: ${t.assignedLmsGroups.join(', ')}`}
+                            className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex flex-col justify-between gap-2 text-xs shadow-2xs hover:border-indigo-300 transition"
                           >
-                            <span>🧑‍🏫 <b>{t.teacherName}</b></span>
-                            <span className="text-slate-400 font-mono text-[10px]">({t.assignedLmsGroups.length} groups)</span>
-                          </span>
+                            <div className="flex items-start justify-between gap-1.5">
+                              <div>
+                                <p className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                                  <span>🧑‍🏫 {t.teacherName}</span>
+                                </p>
+                                <p className="text-[10px] text-slate-400 font-mono">{t.email}</p>
+                              </div>
+
+                              {/* Nút sửa giáo viên */}
+                              <button
+                                type="button"
+                                onClick={() => setEditingTeacherIndex(tIdx)}
+                                className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 dark:hover:bg-slate-800 cursor-pointer transition"
+                                title="Sửa phân bổ môn & group cho giáo viên này"
+                              >
+                                ✎
+                              </button>
+                            </div>
+
+                            <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800 text-[11px] space-y-1">
+                              <p className="text-slate-600 dark:text-slate-300 truncate">
+                                📚 Môn: <b>{t.courseAssign || 'Chưa gán'}</b>
+                              </p>
+                              <p className="text-indigo-600 dark:text-indigo-400 font-mono text-[10px]">
+                                👥 {t.assignedLmsGroups.length} Group LMS được gán
+                              </p>
+                            </div>
+                          </div>
                         ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 🎯 MODAL SỬA PHÂN BỔ GIÁO VIÊN */}
+                  {editingTeacherIndex !== null && cofTeachersAllocation[editingTeacherIndex] && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
+                      <div className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 space-y-4 shadow-2xl">
+                        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                          <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                            <span>Sửa Phân Bổ: {cofTeachersAllocation[editingTeacherIndex].teacherName}</span>
+                          </h4>
+                          <button
+                            type="button"
+                            onClick={() => setEditingTeacherIndex(null)}
+                            className="text-slate-400 hover:text-slate-600"
+                          >
+                            ✕
+                          </button>
+                        </div>
+
+                        <div className="space-y-3 text-xs">
+                          <div>
+                            <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                              Chọn Khóa Học Phụ Trách:
+                            </label>
+                            <select
+                              value={cofTeachersAllocation[editingTeacherIndex].courseAssign}
+                              onChange={(e) => {
+                                const newCourse = e.target.value;
+                                const updated = [...cofTeachersAllocation];
+                                updated[editingTeacherIndex].courseAssign = newCourse;
+
+                                // Tự động gợi ý gán tất cả Group của môn này
+                                const matchedTray = cofTrays.find(t => t.courseName === newCourse || t.courseId === newCourse);
+                                if (matchedTray) {
+                                  updated[editingTeacherIndex].assignedLmsGroups = matchedTray.assignedClasses.map(c => c.lmsGroupName);
+                                }
+                                setCofTeachersAllocation(updated);
+                              }}
+                              className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2.5"
+                            >
+                              <option value="">-- Chưa gán môn --</option>
+                              {cofTrays.map((t) => (
+                                <option key={t.courseId} value={t.courseName}>
+                                  [{t.category}] {t.courseName} (ID: #{t.courseId})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="font-bold text-slate-700 dark:text-slate-300">
+                                Danh Sách Group LMS Giáo Viên Được Tham Gia:
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  // Nút gán tất cả group của trường
+                                  const allGroups: string[] = [];
+                                  cofTrays.forEach(t => t.assignedClasses.forEach(c => allGroups.push(c.lmsGroupName)));
+                                  const updated = [...cofTeachersAllocation];
+                                  updated[editingTeacherIndex].assignedLmsGroups = Array.from(new Set(allGroups));
+                                  setCofTeachersAllocation(updated);
+                                }}
+                                className="text-[10px] text-indigo-600 font-bold hover:underline"
+                              >
+                                + Gán tất cả Group của trường
+                              </button>
+                            </div>
+
+                            <div className="max-h-40 overflow-y-auto space-y-1.5 p-2 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+                              {cofTrays.flatMap(t => t.assignedClasses).map((cls, gIdx) => {
+                                const isChecked = cofTeachersAllocation[editingTeacherIndex].assignedLmsGroups.includes(cls.lmsGroupName);
+                                return (
+                                  <label key={gIdx} className="flex items-center gap-2 p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={(e) => {
+                                        const updated = [...cofTeachersAllocation];
+                                        const curList = updated[editingTeacherIndex].assignedLmsGroups;
+                                        if (e.target.checked) {
+                                          updated[editingTeacherIndex].assignedLmsGroups = [...curList, cls.lmsGroupName];
+                                        } else {
+                                          updated[editingTeacherIndex].assignedLmsGroups = curList.filter(g => g !== cls.lmsGroupName);
+                                        }
+                                        setCofTeachersAllocation(updated);
+                                      }}
+                                      className="rounded text-indigo-600"
+                                    />
+                                    <span className="truncate">{cls.lmsGroupName}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
+                          <button
+                            type="button"
+                            onClick={() => setEditingTeacherIndex(null)}
+                            className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold"
+                          >
+                            Xong
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
