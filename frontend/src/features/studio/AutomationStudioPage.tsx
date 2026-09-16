@@ -1386,6 +1386,9 @@ export const AutomationStudioPage: React.FC = () => {
                 end_date: c.end_date,
               })),
             },
+            class_assignments: cofClassAssignments,
+            teachers_allocation: cofTeachersAllocation,
+            auto_sync_git: true,
           };
 
           summary.actionTitle = 'Chạy Toàn Trình Trọn Gói 4 Cấp (End-to-End Pipeline)';

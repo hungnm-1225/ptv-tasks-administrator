@@ -1,33 +1,43 @@
 # backend/app/main.py
+"""
+Pythaverse Central Admin & Automation Hub - Entrypoint ASGI & Background Schedulers
+Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI (Master Enterprise Comprehensive Edition)
+"""
 import gc
 import os
 import pytz
 import logging
 import asyncio
+import inspect
 from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-import inspect
-from app.core.playwright_manager import is_heavy_operation_running
 
-# Import Core & Services
-from app.core.playwright_manager import acquire_playwright_slot, force_kill_zombie_chromium, CronSlotYieldException
+# Import Core & Concurrency
+from app.core.playwright_manager import (
+    acquire_playwright_slot, 
+    force_kill_zombie_chromium, 
+    CronSlotYieldException, 
+    is_heavy_operation_running
+)
+from app.core.supabase import get_supabase_client
+
+# Import Services (Tất cả đã được hiện đại hóa sang Direct API)
 from app.services.gmail_service import poll_unread_gmails
 from app.services.osticket_service import poll_open_ostickets
 from app.services.google_sheet_service import poll_form_feedbacks
 from app.services.site_monitor_service import poll_site_uptime_cron
-from app.services.workspace_playwright_service import workspace_playwright_service
-from app.services.cof_excel_service import COFExcelService
-from app.core.supabase import get_supabase_client
+from app.services.workspace.account_service import workspace_account_service
 from app.services.workspace.workspace_scanner_service import workspace_scanner_service
+from app.services.excel.cof_service import COFService
 
 # Import API Router
 from app.api.v1.router import api_router
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("MAIN_SCHEDULER")
 
 scheduler = AsyncIOScheduler()
 VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
@@ -38,17 +48,18 @@ def get_now_vn_str() -> str:
 
 
 def safe_job_wrapper(job_func, job_name: str):
+    """Bọc an toàn tuyệt đối cho mọi cronjob: Chống crash tiến trình ASGI & Tự thu hồi RAM."""
     async def wrapper(*args, **kwargs):
-        # 🛡️ KIỂM TRA CIRCUIT BREAKER: Nếu đang chạy tác vụ nặng -> Hoãn cronjob êm dịu ngay lập tức!
+        # 🛡️ KIỂM TRA CIRCUIT BREAKER: Nếu đang chạy tác vụ nặng VIP -> Hoãn cronjob êm dịu!
         is_running, op_name = is_heavy_operation_running()
         if is_running:
-            logger.info(f"⏸️ [Cron Yield] Hoãn tác vụ định kỳ '{job_name}' vì hệ thống đang ưu tiên chạy: '{op_name}'")
+            logger.info(f"⏸️ [Cron Yield] Hoãn tác vụ định kỳ '{job_name}' vì hệ thống đang ưu tiên: '{op_name}'")
             return
 
         try:
-            logger.info(f"⏰ [Cron Start] Bắt đầu cronjob: {job_name}")
+            logger.info(f"⏰ [Cron Start] Bắt đầu tác vụ: {job_name}")
             await job_func(*args, **kwargs)
-            logger.info(f"✅ [Cron Finished] Hoàn thành cronjob: {job_name}")
+            logger.info(f"✅ [Cron Finished] Hoàn thành tác vụ: {job_name}")
         except CronSlotYieldException:
             logger.info(f"⏸️ [Cron Yield] Nhường slot Playwright cho tác vụ VIP: {job_name}")
         except Exception as e:
@@ -61,8 +72,10 @@ def safe_job_wrapper(job_func, job_name: str):
 
 async def poll_workspace_long_tasks():
     """
-    Quét Supabase kiểm tra các batch tạo tài khoản đang waiting_poll.
-    Fail-closed toàn diện: Xử lý triệt để lỗi Request #None và tự động Resume Workflow hạ nguồn.
+    Quét Supabase kiểm tra các batch tạo tài khoản đang waiting_poll:
+    - Kiểm tra tiến độ qua Direct API siêu tốc (150ms).
+    - Tự động dán ngược kết quả vào file COF gốc (Highlight cam/đỏ #FCE4D6).
+    - Tự động tải kết quả lên Supabase Storage và Resume Workflow DAG hạ nguồn.
     """
     supabase = get_supabase_client()
     now_utc = datetime.now(timezone.utc)
@@ -110,7 +123,7 @@ async def poll_workspace_long_tasks():
             proposal_id = None
             if wf_res.data:
                 wf_record = wf_res.data[0]
-                proposal_id = wf_record.get("proposal_id") # << PHA E: LẤY PROPOSAL_ID
+                proposal_id = wf_record.get("proposal_id")
                 wf_steps = wf_record.get("steps") or []
                 for s in wf_steps:
                     if s.get("step_id") == workflow_step_id or s.get("capability_id") == "workspace.poll_account_batch":
@@ -123,10 +136,9 @@ async def poll_workspace_long_tasks():
                     "updated_at": now_iso
                 }).eq("id", workflow_id).execute()
 
-            # Ghi Audit Event: FAILED (ĐÓNG DẤU PROPOSAL_ID)
             try:
                 supabase.table("workflow_execution_events").insert({
-                    "proposal_id": proposal_id, # << PHA E
+                    "proposal_id": proposal_id,
                     "workflow_id": workflow_id,
                     "step_id": workflow_step_id or "poll_account_batch",
                     "event_type": "failed",
@@ -138,47 +150,61 @@ async def poll_workspace_long_tasks():
                 logger.warning(f"Lỗi ghi execution event missing_request_id: {ev_err}")
         return
 
-    download_dir = "/tmp/ptv_results"
+    download_dir = os.path.join(os.getcwd(), "backend", "data", "results_download")
     os.makedirs(download_dir, exist_ok=True)
-    logger.info(f"🔍 [{now_vn}] {task_tag} Bắt đầu kiểm tra tiến độ Request #{request_id}...")
+    logger.info(f"🔍 [{now_vn}] {task_tag} Kiểm tra tiến độ Request #{request_id} qua Direct API...")
 
     try:
-        check_res = await workspace_playwright_service.check_and_export_batch_result(
+        # 🎯 2. GỌI TRỰC TIẾP QUA DIRECT API CỦA WORKSPACE ACCOUNT SERVICE (150ms)
+        check_res = await workspace_account_service.check_and_export_batch_result(
             credentials=school_creds,
-            request_id=request_id,
+            request_id=str(request_id),
             download_dir=download_dir
         )
-    except CronSlotYieldException:
-        logger.info(f"ℹ️ {task_tag} Nhường slot Playwright ở chu kỳ này, sẽ kiểm tra lại ở chu kỳ tiếp theo.")
-        return
     except Exception as check_err:
-        logger.error(f"Lỗi khi kiểm tra kết quả batch Playwright: {check_err}")
+        logger.error(f"Lỗi khi kiểm tra kết quả batch: {check_err}")
         check_res = {"status": "error", "error": str(check_err)}
 
     status = check_res.get("status")
 
-    # 🟢 2. BATCH HOÀN TẤT THÀNH CÔNG (COMPLETED)
+    # 🟢 3. BATCH HOÀN TẤT THÀNH CÔNG (COMPLETED)
     if status == "completed":
         downloaded_file = check_res.get("result_file_path")
-        cof_input_path = payload.get("cof_file_path")
+        cof_input_path = payload.get("cof_file_path") or payload.get("original_file_path") or payload.get("upload_file_path")
         final_file_to_upload = downloaded_file
 
+        # Dán ngược kết quả vào file COF gốc nếu có
         if cof_input_path and os.path.exists(cof_input_path) and downloaded_file and os.path.exists(downloaded_file):
-            output_cof_path = f"/tmp/ptv_results/COMPLETED_{os.path.basename(cof_input_path)}"
+            output_cof_path = os.path.join(download_dir, f"COMPLETED_{os.path.basename(cof_input_path)}")
             try:
-                COFExcelService.write_results_back_to_cof(
+                students_all = payload.get("students_all", [])
+                students_to_create = payload.get("students_to_create", [])
+                teachers_all = payload.get("teachers_all", [])
+                teachers_to_create = payload.get("teachers_to_create", [])
+
+                # 🎯 NẾU DỮ LIỆU RỖNG -> TỰ ĐỘNG BÓC TÁCH COF TRONG 10MS ĐỂ LẤY DANH BẠ
+                if not students_all and not teachers_all:
+                    parsed_cof = COFService.parse_cof_file(cof_input_path)
+                    students_all = parsed_cof.get("students_all", [])
+                    students_to_create = parsed_cof.get("students_to_create", [])
+                    teachers_all = parsed_cof.get("teachers_all", [])
+                    teachers_to_create = parsed_cof.get("teachers_to_create", [])
+
+                COFService.write_results_back_to_cof(
                     original_cof_path=cof_input_path,
                     result_excel_path=downloaded_file,
-                    students_all=payload.get("students_all", []),
-                    students_to_create=payload.get("students_to_create", []),
-                    teachers_all=payload.get("teachers_all", []),
-                    teachers_to_create=payload.get("teachers_to_create", []),
+                    students_all=students_all,
+                    students_to_create=students_to_create,
+                    teachers_all=teachers_all,
+                    teachers_to_create=teachers_to_create,
                     output_cof_path=output_cof_path
                 )
                 final_file_to_upload = output_cof_path
+                logger.info(f"✨ {task_tag} Đã dán ngược kết quả thành công vào file COF: {output_cof_path}")
             except Exception as cof_err:
                 logger.error(f"Lỗi ghi ngược COF: {cof_err}")
 
+        # Tải kết quả lên Supabase Storage
         storage_path = f"results/RESULT_{request_id}_{os.path.basename(final_file_to_upload)}"
         try:
             with open(final_file_to_upload, "rb") as f_up:
@@ -212,13 +238,13 @@ async def poll_workspace_long_tasks():
             "executed_at": datetime.now(VN_TZ).isoformat()
         }).eq("id", task_id).execute()
 
-        # 🎯 RESUME WORKFLOW HẠ NGUỒN NẾU TASK NẰM TRONG MỘT WORKFLOW
+        # 🎯 RESUME WORKFLOW HẠ NGUỒN (LMS ENROLL / GIT SYNC TIẾP THEO)
         if workflow_id:
             logger.info(f"🔄 {task_tag} Task thuộc Workflow #{workflow_id[:8]}, tiến hành resume các bước tiếp theo...")
             wf_res = supabase.table("automation_workflows").select("*").eq("id", workflow_id).execute()
             if wf_res.data:
                 wf_record = wf_res.data[0]
-                proposal_id = wf_record.get("proposal_id") # << PHA E: LẤY PROPOSAL_ID
+                proposal_id = wf_record.get("proposal_id")
                 wf_steps = wf_record.get("steps") or []
                 for s in wf_steps:
                     if s.get("step_id") == workflow_step_id or s.get("capability_id") == "workspace.poll_account_batch":
@@ -232,10 +258,9 @@ async def poll_workspace_long_tasks():
                     "updated_at": now_iso
                 }).eq("id", workflow_id).execute()
 
-                # Ghi Audit Event: SUCCEEDED (ĐÓNG DẤU PROPOSAL_ID)
                 try:
                     supabase.table("workflow_execution_events").insert({
-                        "proposal_id": proposal_id, # << PHA E
+                        "proposal_id": proposal_id,
                         "workflow_id": workflow_id,
                         "step_id": workflow_step_id or "poll_account_batch",
                         "event_type": "succeeded",
@@ -249,11 +274,10 @@ async def poll_workspace_long_tasks():
                 from app.services.workflow_executor import workflow_executor_service
                 asyncio.create_task(workflow_executor_service.execute_approved_workflow(workflow_id))
         else:
-            # Nếu là task độc lập không qua workflow, mới đánh dấu completed ticket
             if task.get("ticket_id"):
                 supabase.table("inbox_tickets").update({"status": "completed"}).eq("id", task["ticket_id"]).execute()
 
-    # ⏳ 3. BATCH VẪN ĐANG XỬ LÝ (STILL PROCESSING)
+    # ⏳ 4. BATCH VẪN ĐANG XỬ LÝ (STILL PROCESSING)
     elif status == "still_processing":
         next_check = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
         payload["next_check_at"] = next_check
@@ -265,7 +289,7 @@ async def poll_workspace_long_tasks():
             "execution_logs": (task.get("execution_logs") or "") + new_log
         }).eq("id", task_id).execute()
 
-    # 🔴 4. BATCH THẤT BẠI HOẶC LỖI HỆ THỐNG (FAILED / ERROR)
+    # 🔴 5. BATCH THẤT BẠI (FAILED / ERROR)
     elif status in ["failed", "error"]:
         err_msg = check_res.get("error") or "Lỗi kiểm tra tiến độ batch tài khoản trên School Workspace."
         new_log = f"\n[{now_vn}] [ERROR] [workspace_rpa] {task_tag}: Batch Request #{request_id} thất bại: {err_msg}"
@@ -282,7 +306,7 @@ async def poll_workspace_long_tasks():
             proposal_id = None
             if wf_res.data:
                 wf_record = wf_res.data[0]
-                proposal_id = wf_record.get("proposal_id") # << PHA E: LẤY PROPOSAL_ID
+                proposal_id = wf_record.get("proposal_id")
                 wf_steps = wf_record.get("steps") or []
                 for s in wf_steps:
                     if s.get("step_id") == workflow_step_id or s.get("capability_id") == "workspace.poll_account_batch":
@@ -295,10 +319,9 @@ async def poll_workspace_long_tasks():
                     "updated_at": now_iso
                 }).eq("id", workflow_id).execute()
 
-            # Ghi Audit Event: FAILED (ĐÓNG DẤU PROPOSAL_ID)
             try:
                 supabase.table("workflow_execution_events").insert({
-                    "proposal_id": proposal_id, # << PHA E
+                    "proposal_id": proposal_id,
                     "workflow_id": workflow_id,
                     "step_id": workflow_step_id or "poll_account_batch",
                     "event_type": "failed",
@@ -310,6 +333,9 @@ async def poll_workspace_long_tasks():
                 logger.warning(f"Lỗi ghi audit event poll failed: {ev_err}")
 
 
+# =============================================================================
+# 🚀 LIFESPAN SCHEDULER (6 CRONS SO LE BẢO VỆ 512MB RAM RENDER)
+# =============================================================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🔥 Đang kích hoạt APScheduler (Lập lịch so le bảo vệ Render 512MB RAM)...")
@@ -347,7 +373,7 @@ async def lifespan(app: FastAPI):
         replace_existing=True
     )
 
-    # 3. Quét Task Workspace Long-Running mỗi 10 phút (Playwright - Giãn cách ở giây thứ 180)
+    # 3. Quét Task Workspace Long-Running mỗi 10 phút (Direct API - Giãn cách ở giây thứ 180)
     scheduler.add_job(
         safe_job_wrapper, 
         'interval', 
@@ -389,7 +415,7 @@ async def lifespan(app: FastAPI):
         replace_existing=True
     )
     
-    # 6. Quét Workspace Distributor Cache mỗi 60 phút (Playwright - Chạy sau 40 phút / 2400s)
+    # 6. Quét Workspace Distributor Cache mỗi 60 phút (Fast Smart Sync - Chạy sau 40 phút / 2400s)
     scheduler.add_job(
         safe_job_wrapper,
         "interval",
@@ -445,4 +471,3 @@ async def health_check():
         "scheduler_running": scheduler.running,
         "active_jobs": len(scheduler.get_jobs())
     }
-    

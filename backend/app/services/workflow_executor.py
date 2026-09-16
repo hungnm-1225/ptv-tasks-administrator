@@ -1,4 +1,15 @@
 # backend/app/services/workflow_executor.py
+"""
+Safety-Critical Topological Workflow Executor (Master Enterprise Edition)
+Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI
+Chuyên trách:
+- Thực thi đồ thị DAG tuần tự theo thuật toán Sắp Xếp Tô-pô (Kahn's Algorithm).
+- Bộ giải mã Deep Path Parameter Interpolation: Tự động truyền mảng class_assignments, teachers_allocation, outputs giữa các bước.
+- Đồng bộ trọn vẹn 19 Capabilities hệ sinh thái Pythaverse (Fail-Closed Invariant).
+- Quản lý Atomic OCC Workflow Lease & Append-Only Execution Events gắn proposal_id bất biến.
+- Khắc phục triệt để lỗi Request #None tại bước waiting_poll & Tự động Resume.
+- Thuật toán BFS Smart Retry: Reset thông minh toàn bộ downstream dependencies.
+"""
 import re
 import json
 import time
@@ -10,21 +21,18 @@ from typing import Dict, Any, List, Optional, Tuple, Set
 from app.core.supabase import get_supabase_client
 from app.core.task_coordinator import TaskCoordinator
 from app.workers.bot_executor import execute_approved_bot_task
-from app.core.playwright_manager import acquire_playwright_slot
 
 logger = logging.getLogger(__name__)
 
 
 class WorkflowExecutorService:
     """
-    Bộ điều phối thực thi Workflow tập trung (Safety-Critical Topological Workflow Executor):
-    - PHA B & E: Bắt buộc đọc từ Frozen Proposal làm Single Source of Truth.
-    - Truy vết đầy đủ: Mọi Execution Event bắt buộc đóng dấu proposal_id bất biến.
+    Bộ điều phối thực thi Workflow tập trung:
+    - Nguồn chân lý tối cao: Đọc từ Frozen Proposal đã được phê duyệt.
+    - Deep Parameter Interpolation: Giải mã chính xác {{ step.outputs.field }} và bảo toàn Object/Array.
     - Quản lý Atomic Lease cấp Workflow thông qua TaskCoordinator.claim_workflow_lease().
-    - Bọc toàn bộ quá trình chạy trong try ... finally để đảm bảo 100% giải phóng Lease.
-    - True Topological Sorting (Kahn's Algorithm): ném lỗi và dừng ngay khi phát hiện chu trình (Cycle).
-    - Khắc phục triệt để lỗi Request #None tại bước waiting_poll.
-    - Reset thông minh toàn bộ downstream dependencies khi retry một bước.
+    - Bọc toàn bộ quá trình chạy trong try ... finally để đảm bảo 100% thu hồi Lease.
+    - True Topological Sorting (Kahn's Algorithm): Ném lỗi và dừng ngay khi phát hiện chu trình.
     """
 
     @staticmethod
@@ -43,36 +51,98 @@ class WorkflowExecutorService:
             return [WorkflowExecutorService._sanitize_payload(item) for item in data]
         return data
 
+    # =========================================================================
+    # 🧠 BỘ GIẢI MÃ DEEP PATH PARAMETER INTERPOLATION ĐA TẦNG
+    # =========================================================================
+    @staticmethod
+    def _get_nested_value(obj: Any, path_tokens: List[str]) -> Any:
+        """Trích xuất giá trị lồng sâu theo đường dẫn dot-notation (hỗ trợ cả dict và list)."""
+        curr = obj
+        for token in path_tokens:
+            if curr is None:
+                return None
+            if isinstance(curr, dict):
+                # Thử lấy trực tiếp key
+                if token in curr:
+                    curr = curr[token]
+                elif token == "outputs" and "outputs" not in curr:
+                    # Nếu người dùng viết step_1.outputs.field mà step_out vốn đã là outputs phẳng
+                    continue
+                else:
+                    return None
+            elif isinstance(curr, list) and token.isdigit():
+                idx = int(token)
+                curr = curr[idx] if 0 <= idx < len(curr) else None
+            else:
+                return None
+        return curr
+
     @staticmethod
     def _resolve_input_bindings(inputs: Dict[str, Any], step_outputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Giải mã chuỗi template dạng {{ step_id.field_name }} thành giá trị thực tế."""
+        """
+        Giải mã toàn diện chuỗi template:
+        - Hỗ trợ 2 cấp: {{ step_1.request_id }}
+        - Hỗ trợ 3 cấp: {{ step_1.outputs.class_assignments }}
+        - Hỗ trợ mảng: {{ step_1.outputs.courses.0.id }}
+        - BẢO TOÀN KIỂU DỮ LIỆU GỐC: Nếu ô giá trị là thuần template, trả về chính xác Dict/List chứ không ép thành String!
+        """
         resolved: Dict[str, Any] = {}
-        pattern = re.compile(r"\{\{\s*([a-zA-Z0-9_-]+)\.([a-zA-Z0-9_-]+)\s*\}\}")
+        # Bắt mọi mẫu {{ a.b.c... }}
+        pattern = re.compile(r"\{\{\s*([a-zA-Z0-9_\-\.]+)\s*\}\}")
 
         for k, v in inputs.items():
             if isinstance(v, str):
-                match = pattern.search(v)
-                if match:
-                    src_step_id, src_field = match.group(1), match.group(2)
-                    step_out = step_outputs.get(src_step_id) or {}
-                    val = step_out.get(src_field)
+                v_trimmed = v.strip()
+                match = pattern.search(v_trimmed)
 
-                    if v.strip() == match.group(0):
-                        resolved[k] = val if val is not None else v
+                if match:
+                    full_match_str = match.group(0)
+                    path_str = match.group(1)
+                    parts = [p.strip() for p in path_str.split(".") if p.strip()]
+
+                    if len(parts) >= 2:
+                        src_step_id = parts[0]
+                        sub_path = parts[1:]
+
+                        step_out = step_outputs.get(src_step_id) or {}
+                        extracted_val = WorkflowExecutorService._get_nested_value(step_out, sub_path)
+
+                        # Nếu chưa thấy và sub_path bắt đầu bằng 'outputs' -> thử tìm trong step_out phẳng
+                        if extracted_val is None and sub_path and sub_path[0] == "outputs" and len(sub_path) > 1:
+                            extracted_val = WorkflowExecutorService._get_nested_value(step_out, sub_path[1:])
+
+                        # 🎯 NẾU LÀ TOÀN BỘ Ô TÍNH: Giữ nguyên Dict / List / Int gốc!
+                        if v_trimmed == full_match_str:
+                            resolved[k] = extracted_val if extracted_val is not None else v
+                        else:
+                            # Nếu là chuỗi lồng văn bản: "Mã đơn là: {{ step_1.order_code }}"
+                            resolved[k] = pattern.sub(str(extracted_val or ""), v)
                     else:
-                        resolved[k] = pattern.sub(str(val or ""), v)
+                        resolved[k] = v
                 else:
                     resolved[k] = v
             elif isinstance(v, dict):
                 resolved[k] = WorkflowExecutorService._resolve_input_bindings(v, step_outputs)
+            elif isinstance(v, list):
+                resolved[k] = [
+                    WorkflowExecutorService._resolve_input_bindings(item, step_outputs) if isinstance(item, dict)
+                    else (
+                        WorkflowExecutorService._resolve_input_bindings({"_": item}, step_outputs)["_"]
+                        if isinstance(item, str) else item
+                    )
+                    for item in v
+                ]
             else:
                 resolved[k] = v
 
         return resolved
 
+    # =========================================================================
+    # 🤹 SẮP XẾP TÔ-PÔ THỰC THỤ (KAHN'S ALGORITHM)
+    # =========================================================================
     @staticmethod
     def _topological_sort(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Sắp xếp Tô-pô thực thụ (Kahn's Algorithm). Ném ValueError nếu phát hiện chu trình."""
+        """Sắp xếp Tô-pô chuẩn mực. Ném ValueError và dừng khẩn cấp nếu phát hiện chu trình lặp."""
         step_map = {s["step_id"]: s for s in steps}
         in_degree = {s["step_id"]: 0 for s in steps}
         adj: Dict[str, List[str]] = {s["step_id"]: [] for s in steps}
@@ -114,10 +184,7 @@ class WorkflowExecutorService:
         duration_ms: Optional[int] = None,
         actor: str = "workflow_executor"
     ):
-        """
-        PHA B & E: Ghi nhận sự kiện thực thi bất biến vào bảng workflow_execution_events.
-        BẮT BUỘC lưu proposal_id để truy vết trọn vẹn chuỗi Provenance.
-        """
+        """Ghi nhận sự kiện thực thi bất biến có đóng dấu proposal_id vào bảng workflow_execution_events."""
         try:
             supabase = get_supabase_client()
             event_data = {
@@ -136,14 +203,16 @@ class WorkflowExecutorService:
         except Exception as e:
             logger.warning(f"⚠️ Không thể ghi audit event '{event_type}' cho bước {step_id}: {e}")
 
+    # =========================================================================
+    # 🚀 THỰC THI WORKFLOW ĐÃ DUYỆT (SAFETY-CRITICAL DAG EXECUTION)
+    # =========================================================================
     async def execute_approved_workflow(self, workflow_id: str) -> Dict[str, Any]:
         """
-        THỰC THI WORKFLOW ĐÃ DUYỆT (SAFETY-CRITICAL EXECUTION):
-        - Bắt buộc kiểm tra proposal_id và xác thực Proposal đã 'approved'.
-        - Lấy 'frozen_plan' từ proposal làm chân lý tối cao.
-        - Chiếm Workflow Lease thực thụ (Fail-closed nếu bị tranh chấp).
-        - Toàn bộ hàm nằm trong try ... finally để luôn giải phóng Lease.
-        - Xử lý waiting_poll an toàn: Chặn đứng lỗi Request #None.
+        THỰC THI WORKFLOW ĐÃ DUYỆT:
+        - Đọc frozen_plan từ proposal_id làm chân lý tối cao bất biến.
+        - Chiếm Workflow Lease qua TaskCoordinator (OCC updated_at).
+        - try ... finally đảm bảo 100% thu hồi Lease.
+        - Tự động truyền Output bước trước làm Input bước sau.
         """
         supabase = get_supabase_client()
         res = supabase.table("automation_workflows").select("*").eq("id", workflow_id).execute()
@@ -172,18 +241,15 @@ class WorkflowExecutorService:
             logger.error(f"❌ {err_msg}")
             return {"status": "failed", "error": err_msg}
 
-        # Nguồn chân lý tối cao của các bước là frozen_plan đã được đóng băng
         frozen_plan = proposal.get("frozen_plan") or []
         if not frozen_plan:
             err_msg = f"Proposal #{proposal_id[:8]} không có frozen_plan hợp lệ."
             logger.error(f"❌ {err_msg}")
             return {"status": "failed", "error": err_msg}
 
-        # The proposal is the execution contract.  Runtime state is merged
-        # from the workflow only for fields that cannot change the action.
         raw_steps = self._hydrate_frozen_plan(frozen_plan, wf.get("steps") or [])
 
-        # 2. CHIẾM WORKFLOW-LEVEL LEASE (CHỐNG RACE-CONDITION THỰC SỰ)
+        # 2. CHIẾM WORKFLOW-LEVEL LEASE (CHỐNG RACE-CONDITION)
         is_claimed, lease_token, _ = await TaskCoordinator.claim_workflow_lease(
             workflow_id=workflow_id,
             operator=operator_name
@@ -243,7 +309,7 @@ class WorkflowExecutorService:
                     final_workflow_status = "waiting_dependency"
                     return {"status": "waiting_dependency", "message": msg, "blocked_step": step_id}
 
-                # C. Phân giải Data Bindings
+                # C. Phân giải Data Bindings Deep Path
                 raw_inputs = step.get("inputs") or {}
                 resolved_inputs = self._resolve_input_bindings(raw_inputs, step_outputs)
                 step["inputs"] = resolved_inputs
@@ -292,7 +358,7 @@ class WorkflowExecutorService:
                 step["started_at"] = datetime.now(timezone.utc).isoformat()
                 self._update_workflow_steps(workflow_id, steps)
 
-                # Ghi Audit Event: STARTED (Gắn proposal_id)
+                # Ghi Audit Event: STARTED
                 start_ts = time.time()
                 await self._record_execution_event(
                     proposal_id=proposal_id,
@@ -303,23 +369,15 @@ class WorkflowExecutorService:
                     actor=operator_name
                 )
 
-                # F. Thực thi Bot với Semaphore bảo vệ RAM Render 512MB
+                # F. Thực thi Bot (Các Sub-services tự quản lý slot nội bộ siêu tốc)
                 logger.info(f"▶️ {wf_tag} [BƯỚC {idx+1}/{len(steps)}] Thực thi: {step_name} ({cap_id})...")
                 step_result = {}
                 try:
-                    if any(kw in cap_id for kw in ["playwright", "bulk_account", "lms", "git", "order"]):
-                        async with acquire_playwright_slot(f"wf_{step_id}", timeout=300.0, lane="admin"):
-                            step_result = await execute_approved_bot_task(
-                                bot_type=bot_type,
-                                payload_data=task_payload,
-                                task_id=execution_task_id
-                            )
-                    else:
-                        step_result = await execute_approved_bot_task(
-                            bot_type=bot_type,
-                            payload_data=task_payload,
-                            task_id=execution_task_id
-                        )
+                    step_result = await execute_approved_bot_task(
+                        bot_type=bot_type,
+                        payload_data=task_payload,
+                        task_id=execution_task_id
+                    )
                 except Exception as ex:
                     logger.error(f"❌ {wf_tag} Lỗi ngoại lệ tại bước {step_name}: {ex}", exc_info=True)
                     step_result = {"status": "failed", "error": str(ex)}
@@ -328,7 +386,7 @@ class WorkflowExecutorService:
                 status_res = step_result.get("status")
 
                 # G. Xử lý kết quả trả về
-                # 1. TRƯỜNG HỢP WAITING_POLL (DIỆT TẬN GỐC LỖI REQUEST #NONE)
+                # 1. WAITING_POLL (DIỆT TẬN GỐC LỖI REQUEST #NONE)
                 if status_res == "waiting_poll":
                     req_id = step_result.get("request_id")
                     if not req_id or str(req_id).strip() in ["", "None", "null", "undefined"]:
@@ -386,7 +444,7 @@ class WorkflowExecutorService:
                     final_workflow_status = "waiting_poll"
                     return {"status": "waiting_poll", "step_id": step_id, "step_result": step_result}
 
-                # 2. TRƯỜNG HỢP BƯỚC THẤT BẠI (FAILED)
+                # 2. BƯỚC THẤT BẠI (FAILED)
                 elif status_res in ["failed", "error"]:
                     err_msg = step_result.get("error") or "Lỗi thực thi bước."
                     logger.error(f"❌ {wf_tag} Bước '{step_name}' thất bại: {err_msg}")
@@ -413,7 +471,7 @@ class WorkflowExecutorService:
                     final_workflow_status = "failed"
                     return {"status": "failed", "failed_step": step_id, "error": err_msg}
 
-                # 3. TRƯỜNG HỢP BƯỚC THÀNH CÔNG (SUCCESS)
+                # 3. BƯỚC THÀNH CÔNG (SUCCESS)
                 else:
                     logger.info(f"✅ {wf_tag} Bước '{step_name}' hoàn thành xuất sắc!")
                     step["status"] = "success"
@@ -466,13 +524,15 @@ class WorkflowExecutorService:
                 final_status=final_workflow_status
             )
 
+    # =========================================================================
+    # 🔄 RETRY THÔNG MINH (BFS DOWNSTREAM RESET)
+    # =========================================================================
     async def retry_workflow_step(self, workflow_id: str, target_step_id: str) -> Dict[str, Any]:
         """
-        PHA G: RETRY THÔNG MINH
+        RETRY THÔNG MINH:
         - Reset target_step_id về 'ready'.
-        - Tìm và reset TOÀN BỘ các bước hạ nguồn phụ thuộc (downstream dependents) về 'waiting_dependency'.
-        - Tuyệt đối không chạy lại các bước thành công độc lập thượng nguồn (upstream).
-        - Ghi nhận event 'retried' có proposal_id.
+        - Tìm và reset TOÀN BỘ các bước hạ nguồn phụ thuộc về 'waiting_dependency'.
+        - Giữ nguyên trạng thái thành công của các bước thượng nguồn độc lập.
         """
         supabase = get_supabase_client()
         res = supabase.table("automation_workflows").select("*").eq("id", workflow_id).execute()
@@ -495,7 +555,7 @@ class WorkflowExecutorService:
         if target_step_id not in step_ids:
             return {"status": "failed", "error": f"Không tìm thấy bước '{target_step_id}'."}
 
-        # Thuật toán duyệt BFS tìm toàn bộ downstream steps phụ thuộc vào target_step_id
+        # Thuật toán duyệt BFS tìm toàn bộ downstream steps
         downstream: Set[str] = set()
         queue = [target_step_id]
         while queue:
@@ -529,23 +589,49 @@ class WorkflowExecutorService:
         )
         return await self.execute_approved_workflow(workflow_id)
 
+    # =========================================================================
+    # 🎯 ÁNH XẠ TOÀN DIỆN 19 CAPABILITIES SANG BOT HANDLER (FAIL-CLOSED)
+    # =========================================================================
     @staticmethod
     def _map_capability_to_bot(capability_id: str) -> Tuple[str, str]:
-        """Ánh xạ capability sang bot handler thực tế (Fail-Closed)."""
+        """Ánh xạ chuẩn mực 19 Capabilities hệ thống (Fail-Closed Invariant)."""
         mapping = {
+            # Workspace & COF Capabilities
+            "workspace.resolve_school": ("workspace_rpa", "resolve_school"),
+            "cof.parse_file": ("workspace_rpa", "cof_parse_file"),
+            "cof.generate_accounts_file": ("workspace_rpa", "cof_generate_accounts_file"),
             "workspace.bulk_account_creation": ("workspace_rpa", "bulk_account_creation"),
             "workspace.poll_account_batch": ("workspace_rpa", "check_account_batch"),
+            "workspace.create_school_order": ("workspace_rpa", "school_create_order"),
             "workspace.school_create_order": ("workspace_rpa", "school_create_order"),
+            "workspace.partner_grant_license": ("workspace_rpa", "approve_school_order_standalone"),
             "workspace.partner_approve_order": ("workspace_rpa", "approve_school_order_standalone"),
-            "workspace.partner_create_contract": ("workspace_rpa", "partner_create_contract"),
+            "workspace.partner_request_contract": ("workspace_rpa", "partner_create_contract"),
             "workspace.distributor_approve_contract": ("workspace_rpa", "approve_partner_contract_standalone"),
             "workspace.admin_approve_contract": ("workspace_rpa", "admin_approve_contract"),
-            "workspace.school_enroll_users": ("workspace_rpa", "school_enroll_users"),
+            "workspace.enroll_students": ("workspace_rpa", "enroll_students_pipeline"),
+            "workspace.school_enroll_users": ("workspace_rpa", "enroll_students_pipeline"),
+            "workspace.query_distributor_contracts": ("workspace_rpa", "query_distributor_contracts"),
+            "workspace.query_partner_orders": ("workspace_rpa", "query_partner_orders"),
+
+            # Moodle LMS Capabilities
             "lms.direct_enroll": ("lms_playwright", "direct_moodle_lms_enroll"),
+            "lms.unenrol_users": ("lms_playwright", "unenrol_users_pipeline"),
+            "lms.modify_role": ("lms_playwright", "modify_user_role"),
+
+            # Keycloak IDP Capabilities
             "keycloak.reset_password": ("keycloak_api", "reset_password"),
             "keycloak.enable_account": ("keycloak_api", "set_user_status"),
+            "keycloak.unlock_account": ("keycloak_api", "set_user_status"),
             "keycloak.verify_email": ("keycloak_api", "mark_email_verified"),
+            "keycloak.create_user": ("keycloak_api", "create_user"),
+
+            # Pythaverse Git Capabilities
             "git.add_collaborators": ("git_collaborator", "add_repo_collaborators"),
+            "git.remove_collaborators": ("git_collaborator", "remove_repo_collaborators"),
+
+            # GitHub & Feedback Doc Capabilities
+            "github.create_issue": ("github_issue_creator", "create_issue"),
             "feedback.comment_and_assign": ("feedback_doc_triage", "comment_and_assign"),
         }
         if capability_id not in mapping:
@@ -568,12 +654,7 @@ class WorkflowExecutorService:
     def _hydrate_frozen_plan(
         frozen_plan: List[Dict[str, Any]], runtime_steps: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        """Merge checkpoint fields into the immutable approved instruction set.
-
-        A draft/runtime row must never be able to replace a capability, target
-        input, or dependency after approval.  It may only preserve execution
-        progress so polling/resume does not repeat an already successful step.
-        """
+        """Kế thừa trạng thái thực thi runtime vào bản kế hoạch đóng băng bất biến."""
         runtime_by_id = {
             step.get("step_id"): step
             for step in runtime_steps
