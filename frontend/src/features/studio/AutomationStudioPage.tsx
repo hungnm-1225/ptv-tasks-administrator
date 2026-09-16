@@ -2797,33 +2797,41 @@ export const AutomationStudioPage: React.FC = () => {
                     </div>
                   )}
 
-                  {/* 🎯 [PATCH ĐẶC TRỊ]: DÙNG CREATEPORTAL ĐỂ BỐC POPUP RA KHỎI MOTION.DIV */}
+                  {/* 🎯 MODAL SỬA PHÂN BỔ GIÁO VIÊN */}
                   {editingTeacherIndex !== null && cofTeachersAllocation[editingTeacherIndex] && typeof document !== 'undefined' && createPortal(
                     <div
                       onClick={(e) => { if (e.target === e.currentTarget) setEditingTeacherIndex(null); }}
-                      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-150"
+                      className="fixed inset-0 z-[9999] w-screen h-screen flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-150"
                     >
                       <div
                         onClick={(e) => e.stopPropagation()}
-                        className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 space-y-4 shadow-2xl my-auto"
+                        className="w-[92vw] sm:w-[520px] max-w-lg bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 sm:p-7 space-y-4.5 shadow-2xl overflow-hidden my-auto"
                       >
-                        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-                          <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                            <span>🧑‍🏫 Sửa Phân Bổ: {cofTeachersAllocation[editingTeacherIndex].teacherName}</span>
-                          </h4>
+                        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3.5">
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-xl">🧑‍🏫</span>
+                            <div>
+                              <h4 className="text-sm font-extrabold text-slate-900 dark:text-white">
+                                Sửa Phân Bổ: {cofTeachersAllocation[editingTeacherIndex].teacherName}
+                              </h4>
+                              <p className="text-[11px] font-mono text-slate-400">
+                                {cofTeachersAllocation[editingTeacherIndex].email}
+                              </p>
+                            </div>
+                          </div>
                           <button
                             type="button"
                             onClick={() => setEditingTeacherIndex(null)}
-                            className="p-1 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
                           >
                             <X className="w-5 h-5" />
                           </button>
                         </div>
 
-                        <div className="space-y-3.5 text-xs">
+                        <div className="space-y-4 text-xs">
                           <div>
-                            <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                              Chọn Khóa Học Phụ Trách:
+                            <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1.5">
+                              Khóa Học Phụ Trách:
                             </label>
                             <select
                               value={cofTeachersAllocation[editingTeacherIndex].courseAssign}
@@ -2839,7 +2847,7 @@ export const AutomationStudioPage: React.FC = () => {
                                 }
                                 setCofTeachersAllocation(updated);
                               }}
-                              className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 p-2.5 text-slate-900 dark:text-white font-medium focus:border-indigo-500 outline-none"
+                              className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-3.5 py-2.5 text-xs text-slate-900 dark:text-white font-medium focus:border-indigo-500 outline-none cursor-pointer"
                             >
                               <option value="">-- Chưa gán môn --</option>
                               {cofTrays.map((t) => (
@@ -2851,9 +2859,9 @@ export const AutomationStudioPage: React.FC = () => {
                           </div>
 
                           <div>
-                            <div className="flex items-center justify-between mb-1.5">
+                            <div className="flex items-center justify-between mb-2">
                               <label className="font-bold text-slate-700 dark:text-slate-300">
-                                Danh Sách Group LMS Giáo Viên Được Tham Gia ({cofTeachersAllocation[editingTeacherIndex].assignedLmsGroups.length} groups):
+                                Group LMS Được Gán ({cofTeachersAllocation[editingTeacherIndex].assignedLmsGroups.length} groups):
                               </label>
                               <button
                                 type="button"
@@ -2871,16 +2879,16 @@ export const AutomationStudioPage: React.FC = () => {
                               </button>
                             </div>
 
-                            <div className="max-h-48 overflow-y-auto space-y-1.5 p-2.5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 scrollbar-thin">
+                            <div className="max-h-52 overflow-y-auto space-y-1.5 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 scrollbar-thin">
                               {cofTrays.flatMap(t => t.assignedClasses).length === 0 ? (
-                                <p className="text-[11px] text-slate-400 italic text-center py-2">
+                                <p className="text-[11px] text-slate-400 italic text-center py-3">
                                   Chưa có Group LMS nào trong các khay.
                                 </p>
                               ) : (
                                 cofTrays.flatMap(t => t.assignedClasses).map((cls, gIdx) => {
                                   const isChecked = cofTeachersAllocation[editingTeacherIndex].assignedLmsGroups.includes(cls.lmsGroupName);
                                   return (
-                                    <label key={gIdx} className="flex items-center gap-2.5 p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700/60 rounded-xl cursor-pointer transition">
+                                    <label key={gIdx} className="flex items-center gap-3 p-2 hover:bg-slate-100 dark:hover:bg-slate-700/60 rounded-xl cursor-pointer transition">
                                       <input
                                         type="checkbox"
                                         checked={isChecked}
@@ -2894,9 +2902,9 @@ export const AutomationStudioPage: React.FC = () => {
                                           }
                                           setCofTeachersAllocation(updated);
                                         }}
-                                        className="h-4 w-4 rounded-md border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                        className="h-4 w-4 rounded-md border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                                       />
-                                      <span className="text-slate-800 dark:text-slate-200 font-mono text-[11px] truncate">
+                                      <span className="text-slate-800 dark:text-slate-200 font-mono text-[11px] truncate flex-1">
                                         {cls.lmsGroupName}
                                       </span>
                                     </label>
@@ -2907,7 +2915,7 @@ export const AutomationStudioPage: React.FC = () => {
                           </div>
                         </div>
 
-                        <div className="flex justify-end pt-3 border-t border-slate-100 dark:border-slate-800">
+                        <div className="flex justify-end pt-3.5 border-t border-slate-100 dark:border-slate-800">
                           <button
                             type="button"
                             onClick={() => {
@@ -2915,7 +2923,7 @@ export const AutomationStudioPage: React.FC = () => {
                               setEditingTeacherIndex(null);
                               toast.success(`Đã lưu phân bổ cho giáo viên ${tName}!`);
                             }}
-                            className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow-xs cursor-pointer"
+                            className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow-md shadow-indigo-500/20 cursor-pointer"
                           >
                             Lưu & Hoàn Tất
                           </button>
