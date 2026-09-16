@@ -122,8 +122,9 @@ interface ClassGroupItem {
 interface TeacherAllocationItem {
   teacherName: string;
   email: string;
-  courseAssign: string;
-  assignedLmsGroups: string[];
+  assignedCourses: string[];    // Danh sách các Course ID giáo viên phụ trách (VD: ['679', '654'])
+  courseAssign?: string;        // Text tóm tắt hiển thị
+  assignedLmsGroups: string[];   // Danh sách Group LMS được tham gia
 }
 
 interface LicenseTrayItem {
@@ -1009,7 +1010,7 @@ export const AutomationStudioPage: React.FC = () => {
           }
         });
 
-        // 4. ĐỌC TAB 3: TEACHER INFORMATION (KHAI BÁO TRƯỚC)
+        // 4. ĐỌC TAB 3: TEACHER INFORMATION (GỘP GIÁO VIÊN DẠY NHIỀU MÔN & FORWARD-FILL)
         const teacherSheetName = sheetNames.find(s => s.toLowerCase().includes('teacher'));
         const teachersAlloc: TeacherAllocationItem[] = [];
         let totalTeachers = 0;
@@ -1018,35 +1019,88 @@ export const AutomationStudioPage: React.FC = () => {
           const ws3 = workbook.Sheets[teacherSheetName];
           const rawJson3: any[][] = XLSX.utils.sheet_to_json(ws3, { header: 1, defval: '' });
 
+          // Map gộp giáo viên theo Email: email -> TeacherData
+          const teacherMap: Record<string, {
+            name: string;
+            email: string;
+            courses: Set<string>;
+            classes: Set<string>;
+          }> = {};
+
+          let lastTeacherName = '';
+          let lastTeacherEmail = '';
+
           for (let r = 6; r < rawJson3.length; r++) {
             const row = rawJson3[r];
-            const tName = String(row[4] || row[5] || '').trim();
-            const email = String(row[7] || row[3] || '').trim().toLowerCase();
+            let tName = String(row[4] || row[5] || '').trim();
+            let email = String(row[7] || row[3] || '').trim().toLowerCase();
             const courseAssign = String(row[10] || '').trim();
             const rawTargetClass = String(row[2] || '').trim();
 
-            if (!tName && !email) continue;
-            totalTeachers++;
+            if (!courseAssign && !tName && !email) continue;
 
-            const assignedLmsGroups: string[] = [];
-            if (rawTargetClass && classesMap[rawTargetClass]) {
-              assignedLmsGroups.push(`${cleanSchool} ${cleanLmsText(rawTargetClass)} ${dateSuffix}`);
-            } else {
-              Object.values(traysMap).forEach(tray => {
-                if (tray.courseName.toLowerCase().includes(courseAssign.toLowerCase()) ||
-                  (tray.targetGrade && courseAssign.toLowerCase().includes(`swrp ${tray.targetGrade}`))) {
-                  tray.assignedClasses.forEach(c => assignedLmsGroups.push(c.lmsGroupName));
-                }
-              });
+            // 🎯 FORWARD-FILL: Nếu hàng dưới để trống tên/email nhưng có ghi môn học -> Tự hiểu là của thầy ở hàng trên!
+            if (!email && lastTeacherEmail) {
+              email = lastTeacherEmail;
+              tName = tName || lastTeacherName;
+            } else if (email) {
+              lastTeacherEmail = email;
+              lastTeacherName = tName || lastTeacherName;
             }
 
-            teachersAlloc.push({
-              teacherName: tName,
-              email,
-              courseAssign,
-              assignedLmsGroups: Array.from(new Set(assignedLmsGroups)),
-            });
+            if (!email) continue;
+
+            if (!teacherMap[email]) {
+              teacherMap[email] = {
+                name: tName || 'Teacher',
+                email,
+                courses: new Set(),
+                classes: new Set(),
+              };
+            }
+
+            // Tách các môn nếu viết nhiều môn trong 1 ô (ngăn cách bởi xuống dòng hoặc dấu phẩy)
+            const splittedCourses = courseAssign.split(/[\n,;]+/).map(c => c.trim()).filter(c => c.length > 0);
+            splittedCourses.forEach(c => teacherMap[email].courses.add(c));
+            if (rawTargetClass) teacherMap[email].classes.add(rawTargetClass);
           }
+
+          // Chuyển đổi sang danh sách TeacherAllocationItem duy nhất (Không còn bị duplicate thẻ!)
+          Object.values(teacherMap).forEach(t => {
+            totalTeachers++;
+            const assignedCourseIds = new Set<string>();
+            const assignedGroups = new Set<string>();
+
+            // Khớp các môn của giáo viên với các Khay hiện có
+            t.courses.forEach(cStr => {
+              Object.values(traysMap).forEach(tray => {
+                if (tray.courseName.toLowerCase().includes(cStr.toLowerCase()) ||
+                  (tray.targetGrade && cStr.toLowerCase().includes(`swrp ${tray.targetGrade}`))) {
+                  assignedCourseIds.add(tray.courseId);
+
+                  // Gán các group tương ứng
+                  if (t.classes.size > 0) {
+                    t.classes.forEach(clsName => {
+                      if (tray.assignedClasses.some(ac => ac.rawClassName === clsName)) {
+                        assignedGroups.add(`${cleanSchool} ${cleanLmsText(clsName)} ${dateSuffix}`);
+                      }
+                    });
+                  } else {
+                    // Nếu không chỉ định lớp cụ thể -> Gán toàn bộ group của môn đó!
+                    tray.assignedClasses.forEach(ac => assignedGroups.add(ac.lmsGroupName));
+                  }
+                }
+              });
+            });
+
+            teachersAlloc.push({
+              teacherName: t.name,
+              email: t.email,
+              assignedCourses: Array.from(assignedCourseIds),
+              courseAssign: Array.from(t.courses).join(' | '),
+              assignedLmsGroups: Array.from(assignedGroups),
+            });
+          });
         }
 
         // 🎯 5. BÂY GIỜ MỚI CẬP NHẬT TẤT CẢ CÁC STATE (ĐẢM BẢO teachersAlloc ĐÃ CÓ!)
@@ -2797,136 +2851,260 @@ export const AutomationStudioPage: React.FC = () => {
                     </div>
                   )}
 
-                  {/* 🎯 MODAL SỬA PHÂN BỔ GIÁO VIÊN (SỬ DỤNG CREATEPORTAL TRÁNH CO SỤP WIDTH) */}
+                  {/* ========================================================================= */}
+                  {/* 🎯 BÀN LÀM VIỆC GIÁO VIÊN SIÊU TO 1050PX (2 CỘT: CHỌN MÔN & ĐỒNG BỘ GROUP)  */}
+                  {/* ========================================================================= */}
                   {editingTeacherIndex !== null && cofTeachersAllocation[editingTeacherIndex] && typeof document !== 'undefined' && createPortal(
                     <div
                       onClick={(e) => {
                         if (e.target === e.currentTarget) setEditingTeacherIndex(null);
                       }}
-                      className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-150"
+                      className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-slate-950/75 backdrop-blur-sm animate-in fade-in duration-150"
                     >
                       <div
                         onClick={(e) => e.stopPropagation()}
-                        className="w-full max-w-full sm:max-w-lg min-w-[320px] bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 space-y-4 shadow-2xl my-auto relative"
+                        style={{ width: '94vw', maxWidth: '1050px', maxHeight: '90vh' }}
+                        className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 sm:p-7 shadow-2xl overflow-hidden flex flex-col my-auto"
                       >
-                        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-                          <div className="flex items-center gap-2">
-                            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 font-bold text-sm">
+                        {/* Header Modal */}
+                        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4 shrink-0">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-bold text-lg">
                               🧑‍🏫
                             </div>
                             <div>
                               <h4 className="text-sm font-extrabold text-slate-900 dark:text-white">
-                                Sửa Phân Bổ Giáo Viên
+                                Phân Bổ Khóa Học & Group LMS Cho Giáo Viên
                               </h4>
-                              <p className="text-[11px] text-slate-400 font-mono">
+                              <p className="text-xs font-mono text-indigo-600 dark:text-indigo-400 font-bold">
                                 {cofTeachersAllocation[editingTeacherIndex].teacherName} ({cofTeachersAllocation[editingTeacherIndex].email})
                               </p>
                             </div>
                           </div>
+
                           <button
                             type="button"
                             onClick={() => setEditingTeacherIndex(null)}
-                            className="p-1 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
                           >
                             <X className="w-5 h-5" />
                           </button>
                         </div>
 
-                        <div className="space-y-4 text-xs">
-                          <div>
-                            <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1.5">
-                              Khóa Học Phụ Trách:
-                            </label>
-                            <select
-                              value={cofTeachersAllocation[editingTeacherIndex].courseAssign}
-                              onChange={(e) => {
-                                const newCourse = e.target.value;
-                                const updated = [...cofTeachersAllocation];
-                                updated[editingTeacherIndex].courseAssign = newCourse;
+                        {/* Thân Modal: Bố Cục 2 Cột Rộng Rãi */}
+                        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 py-4 overflow-y-auto flex-1 scrollbar-thin text-xs">
+                          {/* CỘT 1 (BÊN TRÁI): CHỌN CÁC KHÓA HỌC PHỤ TRÁCH (MULTI-SELECT) */}
+                          <div className="md:col-span-5 space-y-3 border-b md:border-b-0 md:border-r border-slate-100 dark:border-slate-800 pb-4 md:pb-0 md:pr-4">
+                            <div className="flex items-center justify-between">
+                              <label className="font-extrabold text-slate-800 dark:text-slate-200 uppercase tracking-wider text-[11px]">
+                                1. Khóa Học Phụ Trách ({cofTeachersAllocation[editingTeacherIndex].assignedCourses.length} môn):
+                              </label>
+                              <span className="text-[10px] text-slate-400 italic">Có thể chọn nhiều môn</span>
+                            </div>
 
-                                // Tự động gợi ý gán tất cả Group của môn này
-                                const matchedTray = cofTrays.find(t => t.courseName === newCourse || t.courseId === newCourse);
-                                if (matchedTray) {
-                                  updated[editingTeacherIndex].assignedLmsGroups = matchedTray.assignedClasses.map(c => c.lmsGroupName);
-                                }
-                                setCofTeachersAllocation(updated);
-                              }}
-                              className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/80 p-2.5 text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
-                            >
-                              <option value="">-- Chưa gán môn --</option>
-                              {cofTrays.map((t) => (
-                                <option key={t.courseId} value={t.courseName}>
-                                  [{t.category}] {t.courseName} (ID: #{t.courseId})
-                                </option>
-                              ))}
-                            </select>
+                            <div className="space-y-2">
+                              {cofTrays.map((tray) => {
+                                const isCourseSelected = cofTeachersAllocation[editingTeacherIndex].assignedCourses.includes(tray.courseId);
+
+                                return (
+                                  <label
+                                    key={tray.courseId}
+                                    className={`flex items-start gap-3 p-3 rounded-2xl border transition cursor-pointer ${isCourseSelected
+                                      ? 'border-indigo-500 bg-indigo-50/70 dark:bg-indigo-950/40 shadow-xs'
+                                      : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                                      }`}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={isCourseSelected}
+                                      onChange={(e) => {
+                                        const updated = [...cofTeachersAllocation];
+                                        const curCourses = updated[editingTeacherIndex].assignedCourses;
+                                        let nextCourses: string[] = [];
+
+                                        if (e.target.checked) {
+                                          nextCourses = [...curCourses, tray.courseId];
+                                          // Tự động gợi ý thêm các group của môn mới chọn
+                                          const newGroups = tray.assignedClasses.map((c) => c.lmsGroupName);
+                                          updated[editingTeacherIndex].assignedLmsGroups = Array.from(
+                                            new Set([...updated[editingTeacherIndex].assignedLmsGroups, ...newGroups])
+                                          );
+                                        } else {
+                                          nextCourses = curCourses.filter((id) => id !== tray.courseId);
+                                          // 🎯 QUY TẮC CÔ LẬP: Gỡ môn nào là TỰ ĐỘNG GỠ BỎ TẤT CẢ GROUP của môn đó!
+                                          const trayGroupNames = new Set(tray.assignedClasses.map((c) => c.lmsGroupName));
+                                          updated[editingTeacherIndex].assignedLmsGroups = updated[editingTeacherIndex].assignedLmsGroups.filter(
+                                            (g) => !trayGroupNames.has(g)
+                                          );
+                                        }
+
+                                        updated[editingTeacherIndex].assignedCourses = nextCourses;
+                                        setCofTeachersAllocation(updated);
+                                      }}
+                                      className="mt-0.5 h-4 w-4 rounded-md border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                    />
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-center gap-1.5 mb-0.5">
+                                        <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400 text-[10px]">
+                                          #{tray.courseId}
+                                        </span>
+                                        <span className="px-1.5 py-0.2 rounded font-bold text-[9px] bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
+                                          {tray.category}
+                                        </span>
+                                        <span className="text-[10px] text-slate-400 font-mono ml-auto">
+                                          ({tray.assignedClasses.length} lớp)
+                                        </span>
+                                      </div>
+                                      <p className="font-bold text-slate-900 dark:text-white leading-snug line-clamp-2">
+                                        {tray.courseName}
+                                      </p>
+                                    </div>
+                                  </label>
+                                );
+                              })}
+                            </div>
                           </div>
 
-                          <div>
-                            <div className="flex items-center justify-between mb-1.5">
-                              <label className="font-bold text-slate-700 dark:text-slate-300">
-                                Danh Sách Group LMS Giáo Viên Được Tham Gia:
+                          {/* CỘT 2 (BÊN PHẢI): DANH SÁCH GROUP LMS THEO CÁC MÔN ĐÃ CHỌN */}
+                          <div className="md:col-span-7 space-y-3 flex flex-col">
+                            <div className="flex items-center justify-between">
+                              <label className="font-extrabold text-slate-800 dark:text-slate-200 uppercase tracking-wider text-[11px]">
+                                2. Group LMS Được Gán ({cofTeachersAllocation[editingTeacherIndex].assignedLmsGroups.length} groups):
                               </label>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  // Nút gán tất cả group của trường
-                                  const allGroups: string[] = [];
-                                  cofTrays.forEach(t => t.assignedClasses.forEach(c => allGroups.push(c.lmsGroupName)));
-                                  const updated = [...cofTeachersAllocation];
-                                  updated[editingTeacherIndex].assignedLmsGroups = Array.from(new Set(allGroups));
-                                  setCofTeachersAllocation(updated);
-                                }}
-                                className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline cursor-pointer"
-                              >
-                                + Gán tất cả Group của trường
-                              </button>
+                              <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold">
+                                Không tốn bản quyền
+                              </span>
                             </div>
 
-                            <div className="max-h-48 overflow-y-auto space-y-1.5 p-2 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 scrollbar-thin">
-                              {cofTrays.flatMap(t => t.assignedClasses).length === 0 ? (
-                                <div className="p-4 text-center text-[11px] text-slate-400 italic">
-                                  Chưa có lớp nào được xếp vào khay môn học. Vui lòng xếp lớp vào khay môn học trước.
-                                </div>
-                              ) : (
-                                cofTrays.flatMap(t => t.assignedClasses).map((cls, gIdx) => {
-                                  const isChecked = cofTeachersAllocation[editingTeacherIndex].assignedLmsGroups.includes(cls.lmsGroupName);
+                            {cofTeachersAllocation[editingTeacherIndex].assignedCourses.length === 0 ? (
+                              <div className="p-8 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-slate-400 italic flex flex-col items-center justify-center my-auto space-y-2">
+                                <BookOpen className="w-8 h-8 text-slate-300 dark:text-slate-700" />
+                                <span>Vui lòng chọn ít nhất 1 khóa học ở cột bên trái để hiển thị danh sách Group LMS.</span>
+                              </div>
+                            ) : (
+                              <div className="space-y-4 overflow-y-auto pr-1 flex-1 scrollbar-thin">
+                                {cofTeachersAllocation[editingTeacherIndex].assignedCourses.map((cid) => {
+                                  const tray = cofTrays.find((t) => t.courseId === cid);
+                                  if (!tray) return null;
+
+                                  const allTrayGroupNames = tray.assignedClasses.map((c) => c.lmsGroupName);
+                                  const isAllSelectedInTray =
+                                    allTrayGroupNames.length > 0 &&
+                                    allTrayGroupNames.every((g) =>
+                                      cofTeachersAllocation[editingTeacherIndex].assignedLmsGroups.includes(g)
+                                    );
+
                                   return (
-                                    <label
-                                      key={`${cls.lmsGroupName}-${gIdx}`}
-                                      className="flex items-center gap-2.5 p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg cursor-pointer transition text-slate-800 dark:text-slate-200"
+                                    <div
+                                      key={cid}
+                                      className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 p-3.5 space-y-2.5"
                                     >
-                                      <input
-                                        type="checkbox"
-                                        checked={isChecked}
-                                        onChange={(e) => {
-                                          const updated = [...cofTeachersAllocation];
-                                          const curList = updated[editingTeacherIndex].assignedLmsGroups;
-                                          if (e.target.checked) {
-                                            updated[editingTeacherIndex].assignedLmsGroups = [...curList, cls.lmsGroupName];
-                                          } else {
-                                            updated[editingTeacherIndex].assignedLmsGroups = curList.filter(g => g !== cls.lmsGroupName);
-                                          }
-                                          setCofTeachersAllocation(updated);
-                                        }}
-                                        className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4"
-                                      />
-                                      <span className="truncate font-mono text-[11px]">{cls.lmsGroupName}</span>
-                                    </label>
+                                      {/* Header từng môn */}
+                                      <div className="flex items-center justify-between border-b border-slate-200/60 dark:border-slate-800 pb-2">
+                                        <div className="truncate pr-2">
+                                          <span className="font-mono text-indigo-600 font-bold text-[10px] mr-1.5">
+                                            #{tray.courseId}
+                                          </span>
+                                          <span className="font-bold text-slate-800 dark:text-slate-200 text-xs">
+                                            {tray.courseName}
+                                          </span>
+                                        </div>
+
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const updated = [...cofTeachersAllocation];
+                                            const curGroups = updated[editingTeacherIndex].assignedLmsGroups;
+
+                                            if (isAllSelectedInTray) {
+                                              // Bỏ chọn tất cả nhóm của môn này
+                                              const traySet = new Set(allTrayGroupNames);
+                                              updated[editingTeacherIndex].assignedLmsGroups = curGroups.filter((g) => !traySet.has(g));
+                                            } else {
+                                              // Chọn tất cả nhóm của môn này
+                                              updated[editingTeacherIndex].assignedLmsGroups = Array.from(
+                                                new Set([...curGroups, ...allTrayGroupNames])
+                                              );
+                                            }
+                                            setCofTeachersAllocation(updated);
+                                          }}
+                                          className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline shrink-0 cursor-pointer"
+                                        >
+                                          {isAllSelectedInTray ? '✕ Bỏ chọn môn này' : '+ Chọn hết môn này'}
+                                        </button>
+                                      </div>
+
+                                      {/* Danh sách checkbox group */}
+                                      <div className="space-y-1.5">
+                                        {tray.assignedClasses.length === 0 ? (
+                                          <p className="text-[11px] text-slate-400 italic py-1">
+                                            Chưa có lớp nào được xếp vào khay môn học này.
+                                          </p>
+                                        ) : (
+                                          tray.assignedClasses.map((cls) => {
+                                            const isChecked = cofTeachersAllocation[editingTeacherIndex].assignedLmsGroups.includes(
+                                              cls.lmsGroupName
+                                            );
+                                            return (
+                                              <label
+                                                key={cls.lmsGroupName}
+                                                className="flex items-center gap-2.5 p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 hover:border-indigo-200 dark:hover:border-slate-700 cursor-pointer transition shadow-2xs"
+                                              >
+                                                <input
+                                                  type="checkbox"
+                                                  checked={isChecked}
+                                                  onChange={(e) => {
+                                                    const updated = [...cofTeachersAllocation];
+                                                    const curList = updated[editingTeacherIndex].assignedLmsGroups;
+                                                    if (e.target.checked) {
+                                                      updated[editingTeacherIndex].assignedLmsGroups = [...curList, cls.lmsGroupName];
+                                                    } else {
+                                                      updated[editingTeacherIndex].assignedLmsGroups = curList.filter(
+                                                        (g) => g !== cls.lmsGroupName
+                                                      );
+                                                    }
+                                                    setCofTeachersAllocation(updated);
+                                                  }}
+                                                  className="h-4 w-4 rounded-md border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                                />
+                                                <div className="min-w-0 flex-1">
+                                                  <span className="font-bold text-slate-800 dark:text-slate-200">
+                                                    {cls.rawClassName}
+                                                  </span>
+                                                  <span className="text-[10px] text-slate-400 font-mono ml-2">
+                                                    ({cls.lmsGroupName})
+                                                  </span>
+                                                </div>
+                                              </label>
+                                            );
+                                          })
+                                        )}
+                                      </div>
+                                    </div>
                                   );
-                                })
-                              )}
-                            </div>
+                                })}
+                              </div>
+                            )}
                           </div>
                         </div>
 
-                        <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                        {/* Footer Modal */}
+                        <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-slate-800 shrink-0">
+                          <div className="text-[11px] text-slate-500">
+                            Đang gán: <b>{cofTeachersAllocation[editingTeacherIndex].assignedCourses.length} môn</b> |{' '}
+                            <b>{cofTeachersAllocation[editingTeacherIndex].assignedLmsGroups.length} Group LMS</b>
+                          </div>
+
                           <button
                             type="button"
-                            onClick={() => setEditingTeacherIndex(null)}
-                            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow-xs cursor-pointer"
+                            onClick={() => {
+                              const tName = cofTeachersAllocation[editingTeacherIndex].teacherName;
+                              setEditingTeacherIndex(null);
+                              toast.success(`Đã lưu phân bổ cho giáo viên ${tName}!`);
+                            }}
+                            className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow-md shadow-indigo-500/20 cursor-pointer"
                           >
-                            Hoàn Tất
+                            Lưu & Hoàn Tất
                           </button>
                         </div>
                       </div>

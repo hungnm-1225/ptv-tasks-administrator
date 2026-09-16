@@ -5,6 +5,7 @@ Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI (Master Enterprise Edition)
 Chuyên trách: 
 - Bóc tách file COF 3 Tabs chuẩn xác từng tọa độ (Cột G, H, I, L, Q).
 - Thuật toán Heuristic Grade Matcher: Tự động ghép Khối lớp vào Khay khóa học (SWRP {N} <-> Grade {N}).
+- ĐẶC TRỊ GIÁO VIÊN: Forward-fill hàng trống, tách nhiều môn trong 1 ô, gộp giáo viên trùng lặp theo Email.
 - Chuẩn hóa tên Group LMS không ký tự đặc biệt: [School Clean] [Class Clean] [YYYYMon].
 - Dán ngược kết quả tài khoản & Group vào Cột L, M, N, O (Highlight cam/đỏ FCE4D6).
 """
@@ -13,7 +14,7 @@ import re
 import gc
 import logging
 from datetime import datetime, date, timedelta
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Tuple, Optional, Set
 import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
@@ -37,7 +38,7 @@ class COFService:
 
     @staticmethod
     def clean_text_no_special(text: str) -> str:
-        """Khử sạch sành sanh ký tự đặc biệt, chỉ giữ lại chữ, số và khoảng trắng đơn."""
+        """Khử sạch sành sanh ký tự đặc biệt, chỉ giữ lại chữ cái, số và khoảng trắng đơn."""
         if not text:
             return ""
         cleaned = re.sub(r"[^\w\s]", " ", str(text))
@@ -57,17 +58,14 @@ class COFService:
         """Trích xuất khối lớp, hỗ trợ các phân ban Senior High School: STEM, ABM, HUMSS, TVL, GAS."""
         if not text:
             return None
-        # 1. Bắt các phân ban lớp 11 và 12 phổ biến
         shs_match = re.search(r"(?:stem|abm|humss|humms|tvl|gas|shs)\s*(\d{1,2})", text, re.IGNORECASE)
         if shs_match:
             return int(shs_match.group(1))
 
-        # 2. Bắt các tiền tố Gr, Grade, Year, Khối, Lớp
         gr_match = re.search(r"(?:gr|grade|year|khối|lớp)\s*(\d{1,2})", text, re.IGNORECASE)
         if gr_match:
             return int(gr_match.group(1))
 
-        # 3. Fallback số độc lập
         num_match = re.search(r"\b(\d{1,2})\b", text)
         if num_match:
             return int(num_match.group(1))
@@ -188,7 +186,7 @@ class COFService:
                 except (ValueError, TypeError):
                     licenses = 0
 
-                # 🎯 LỌC CỐT TỬ: Chỉ nhận môn có ít nhất 1 trong 3 thông tin (Start Date, End Date, Licenses)
+                # Lọc cốt tử: ít nhất 1 trong 3 thông tin phải có
                 if not (start_date or end_date or licenses > 0):
                     continue
 
@@ -230,13 +228,11 @@ class COFService:
                     dob_raw = ws2.cell(row=r, column=7).value
                     account_exist = cls.clean_str(ws2.cell(row=r, column=8).value).lower()
                     
-                    # Lấy tên lớp: Cột 11 -> Cột 10 -> Cột 9
-                    raw_class_name = (
-                        cls.clean_str(ws2.cell(row=r, column=11).value)
-                        or cls.clean_str(ws2.cell(row=r, column=10).value)
-                        or cls.clean_str(ws2.cell(row=r, column=9).value)
-                        or "General Class"
-                    )
+                    # Lấy tên lớp: Cột 11 -> Cột 10 -> Cột 9 (Trim từng ô tránh ô dấu cách rác!)
+                    c11 = cls.clean_str(ws2.cell(row=r, column=11).value)
+                    c10 = cls.clean_str(ws2.cell(row=r, column=10).value)
+                    c9 = cls.clean_str(ws2.cell(row=r, column=9).value)
+                    raw_class_name = c11 or c10 or c9 or "Chưa phân lớp (No Class)"
                     username = cls.clean_str(ws2.cell(row=r, column=12).value)
 
                     if not fn and not email:
@@ -265,7 +261,7 @@ class COFService:
                     if not username and account_exist != "yes":
                         students_to_create.append(student_record)
 
-            # 🎯 HEURISTIC GRADE MATCHER: Xếp các lớp vào Khay khóa học
+            # HEURISTIC GRADE MATCHER: Xếp các lớp vào Khay khóa học
             unmatched_classes = []
             for class_name, std_list in classes_map.items():
                 class_grade = cls.extract_grade_number(class_name)
@@ -291,7 +287,7 @@ class COFService:
                     })
 
             # =========================================================================
-            # 3. TAB 3: TEACHER INFORMATION
+            # 3. TAB 3: TEACHER INFORMATION (GỘP GIÁO VIÊN & FORWARD-FILL)
             # =========================================================================
             tab3_name = next((s for s in sheet_names if "teacher" in s.lower()), None)
             teachers_all = []
@@ -300,6 +296,16 @@ class COFService:
 
             if tab3_name:
                 ws3 = wb[tab3_name]
+                
+                # Bảng gộp giáo viên theo Email
+                teacher_map: Dict[str, Dict[str, Any]] = {}
+                last_teacher_name = ""
+                last_teacher_email = ""
+                last_fn = ""
+                last_ln = ""
+                last_dob = ""
+                last_acc_exist = ""
+
                 for r in range(7, ws3.max_row + 1):
                     raw_target_class = cls.clean_str(ws3.cell(row=r, column=3).value)
                     fn = cls.clean_str(ws3.cell(row=r, column=6).value) or cls.clean_str(ws3.cell(row=r, column=5).value)
@@ -310,12 +316,30 @@ class COFService:
                     course_assign = cls.clean_str(ws3.cell(row=r, column=11).value)
                     username = cls.clean_str(ws3.cell(row=r, column=12).value)
 
-                    if not fn and not email:
+                    if not course_assign and not fn and not email:
                         continue
                     if "total" in fn.lower():
                         continue
 
-                    teacher_record = {
+                    # 🎯 FORWARD-FILL: Nếu hàng dưới trống tên/email nhưng có ghi môn học -> Kế thừa thầy ở hàng trên!
+                    if not email and last_teacher_email:
+                        email = last_teacher_email
+                        fn = fn or last_fn
+                        ln = ln or last_ln
+                        dob_raw = dob_raw or last_dob
+                        account_exist = account_exist or last_acc_exist
+                    elif email:
+                        last_teacher_email = email
+                        last_fn = fn
+                        last_ln = ln
+                        last_dob = dob_raw
+                        last_acc_exist = account_exist
+
+                    if not email:
+                        continue
+
+                    # Lưu danh sách phẳng để phục vụ dán ngược kết quả vào Excel
+                    teacher_row_record = {
                         "row_index": r,
                         "full_name": f"{fn} {ln}".strip(),
                         "first_name": fn or "Teacher",
@@ -328,28 +352,57 @@ class COFService:
                         "already_exists": account_exist == "yes" or bool(username),
                         "role": "teacher"
                     }
-                    teachers_all.append(teacher_record)
+                    teachers_all.append(teacher_row_record)
                     if not username and account_exist != "yes":
-                        teachers_to_create.append(teacher_record)
+                        teachers_to_create.append(teacher_row_record)
 
-                    # Phân bổ Group cho giáo viên
-                    assigned_groups = []
-                    assigned_cids = []
-                    if raw_target_class and raw_target_class in classes_map:
-                        assigned_groups.append(cls.generate_lms_group_name(school_name, raw_target_class))
-                    else:
+                    # 🎯 GỘP THEO EMAIL: Bóc tách nhiều môn trong 1 ô & gom nhóm
+                    if email not in teacher_map:
+                        teacher_map[email] = {
+                            "teacher_name": teacher_row_record["full_name"],
+                            "email": email,
+                            "courses": set(),
+                            "classes": set(),
+                            "rows": []
+                        }
+
+                    teacher_map[email]["rows"].append(r)
+                    if raw_target_class:
+                        teacher_map[email]["classes"].add(raw_target_class)
+
+                    # Chẻ nhỏ nếu trong ô có nhiều môn (ngăn cách bởi xuống dòng, dấu phẩy, chấm phẩy)
+                    course_tokens = [c.strip() for c in re.split(r"[\r\n;]+", course_assign) if c.strip()]
+                    for c_tok in course_tokens:
+                        teacher_map[email]["courses"].add(c_tok)
+
+                # Chuyển đổi sang danh sách teachers_allocation duy nhất (Không còn bị duplicate thẻ!)
+                for email, t_data in teacher_map.items():
+                    assigned_cids = set()
+                    assigned_groups = set()
+
+                    for c_str in t_data["courses"]:
                         for cid, cinfo in ordered_trays.items():
-                            if (cinfo["course_name"].lower() in course_assign.lower()) or (f"swrp {cinfo['target_grade']}" in course_assign.lower() if cinfo['target_grade'] else False):
-                                assigned_cids.append(cid)
-                                for _, c_detail in cinfo["assigned_classes"].items():
-                                    assigned_groups.append(c_detail["lms_group_name"])
+                            if (cinfo["course_name"].lower() in c_str.lower()) or \
+                               (cinfo["target_grade"] and f"swrp {cinfo['target_grade']}" in c_str.lower()):
+                                assigned_cids.add(cid)
+
+                                # Nếu có lớp cụ thể
+                                if t_data["classes"]:
+                                    for cls_name in t_data["classes"]:
+                                        if cls_name in cinfo["assigned_classes"]:
+                                            assigned_groups.add(cls_name)
+                                else:
+                                    # Gán toàn bộ group của môn
+                                    for _, c_detail in cinfo["assigned_classes"].items():
+                                        assigned_groups.add(c_detail["lms_group_name"])
 
                     teachers_allocation.append({
-                        "teacher_name": teacher_record["full_name"],
+                        "teacher_name": t_data["teacher_name"],
                         "email": email,
-                        "course_assign": course_assign,
-                        "assigned_courses": list(set(assigned_cids)),
-                        "assigned_lms_groups": list(set(assigned_groups))
+                        "course_assign": " | ".join(t_data["courses"]),
+                        "assigned_courses": list(assigned_cids),
+                        "assigned_lms_groups": list(assigned_groups),
+                        "row_indices": t_data["rows"]
                     })
 
             return {
@@ -400,7 +453,6 @@ class COFService:
 
         wb_orig = openpyxl.load_workbook(original_cof_path)
         try:
-            # Màu nền cam đỏ nhạt #FCE4D6 và chữ đỏ đậm
             highlight_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
             highlight_font = Font(name="Calibri", size=11, bold=True, color="C00000")
 
