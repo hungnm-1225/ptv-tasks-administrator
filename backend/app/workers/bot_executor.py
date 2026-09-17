@@ -7,6 +7,7 @@ Chuyên trách:
 - Kết nối trực tiếp với các Động Cơ Hybrid Direct API siêu tốc: Workspace Orchestrator, Moodle LMS, GitBucket, Keycloak IDP, GitHub, Google Docs.
 - Tự động tải file đính kèm từ Supabase Storage và lưu vết Checkpoint 2.0.
 """
+import re
 import os
 import logging
 import httpx
