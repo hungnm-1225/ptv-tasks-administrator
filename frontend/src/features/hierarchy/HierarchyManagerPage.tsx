@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
     Network, Building2, ShieldCheck, ShieldAlert, Search, Filter,
     Edit3, KeyRound, Eye, EyeOff, RefreshCw, Layers, School, Check, X, ArrowRight
@@ -247,14 +248,13 @@ export const HierarchyManagerPage: React.FC = () => {
                     data?.partners && (
                         <select
                             value={selectedPartnerFilter}
-                            onChange={(e) => setSelectedPartnerFilter(e.target.value)
-                            }
+                            onChange={(e) => setSelectedPartnerFilter(e.target.value)}
                             className="px-3 py-2 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700/80 rounded-xl text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 max-w-[200px]"
                         >
-                            <option value="all" > Tất cả đối tác quản lý </option>
+                            <option value="all">Tất cả đối tác quản lý</option>
                             {
                                 data.partners.map(p => (
-                                    <option key={p.id} value={p.id} > {p.name} </option>
+                                    <option key={p.id} value={p.id}>{p.name}</option>
                                 ))
                             }
                         </select>
@@ -400,11 +400,17 @@ export const HierarchyManagerPage: React.FC = () => {
                 </div>
             </div>
 
-            {/* Modal Chỉnh Sửa Phả Hệ & Mật Khẩu Fernet */}
+            {/* Modal Chỉnh Sửa Phả Hệ & Mật Khẩu Fernet – render qua Portal để tránh layout collapse */}
             {
-                editingOrg && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200" >
-                        <div className="bg-white dark:bg-[#131B2B] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200" >
+                editingOrg && createPortal(
+                    <div
+                        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200"
+                        onClick={() => setEditingOrg(null)}
+                    >
+                        <div
+                            className="bg-white dark:bg-[#131B2B] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200"
+                            onClick={(e) => e.stopPropagation()}
+                        >
                             {/* Modal Header */}
                             < div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50" >
                                 <div className="flex items-center gap-2.5" >
@@ -575,8 +581,10 @@ export const HierarchyManagerPage: React.FC = () => {
                                 </div>
                             </form>
                         </div>
-                    </div>
-                )}
+                    </div>,
+                    document.body
+                )
+            }
         </div>
     );
 };
