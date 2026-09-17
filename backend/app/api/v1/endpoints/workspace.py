@@ -562,3 +562,40 @@ async def get_user_search_and_detail(payload: UserSearchRequest):
     except Exception as e:
         logger.error(f"❌ [UserDetailAPI] Lỗi tra cứu người dùng: {e}")
         return {"success": False, "message": str(e)}
+
+@router.get("/organizations/{org_id}/vault-password")
+async def get_org_vault_password(org_id: str):
+    """Giải mã mật khẩu Fernet Vault trả về cho Quản trị viên xem."""
+    db = get_supabase_client()
+    try:
+        # 1. Truy vấn Két sắt theo org_id
+        resp = db.table("workspace_credentials_vault").select("encrypted_password, username").eq("org_id", org_id).execute()
+        
+        # 2. Nếu không thấy theo org_id, truy vấn dự phòng theo username của tổ chức
+        if not resp.data or not resp.data[0].get("encrypted_password"):
+            org_res = db.table("workspace_organizations").select("username").eq("id", org_id).execute()
+            if org_res.data and org_res.data[0].get("username"):
+                u_name = org_res.data[0]["username"]
+                resp = db.table("workspace_credentials_vault").select("encrypted_password").eq("username", u_name).execute()
+
+        if not resp.data or not resp.data[0].get("encrypted_password"):
+            logger.warning(f"⚠️ [Vault] Không tìm thấy bản ghi mật khẩu cho org: {org_id}")
+            return {"password": ""}
+
+        enc_pass = resp.data[0]["encrypted_password"]
+
+        # 3. Nếu mật khẩu là plain text (không bắt đầu bằng gAAAAA), trả về luôn
+        if not enc_pass.startswith("gAAAAA"):
+            return {"password": enc_pass}
+
+        # 4. Giải mã đối xứng bằng Fernet
+        cipher = get_clean_fernet_cipher()
+        if not cipher:
+            return {"password": enc_pass}
+
+        decrypted = cipher.decrypt(enc_pass.encode()).decode("utf-8")
+        logger.info(f"🔓 [Vault] Đã giải mã thành công mật khẩu cho org: {org_id}")
+        return {"password": decrypted}
+    except Exception as e:
+        logger.error(f"❌ [Vault] Lỗi giải mã mật khẩu két sắt cho org {org_id}: {e}")
+        return {"password": ""}
