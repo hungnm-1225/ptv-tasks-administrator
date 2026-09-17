@@ -200,7 +200,7 @@ export const ProfileSettingsPage: React.FC = () => {
 
             if (error) throw error;
 
-            toast.success("Đã lưu thành công! Thông tin mới đã được cập nhật ngay lập tức.");
+            toast.success("Đã lưu thành công!");
         } catch (error: any) {
             toast.error("Lỗi lưu dữ liệu: " + (error.message || "Không thể kết nối Supabase"));
         } finally {
