@@ -432,6 +432,7 @@ export const UnifiedInboxPage: React.FC = () => {
     }
   };
 
+  // 🎯 1. SỬA HÀM TÓM TẮT LẠI: ĐỒNG BỘ NGAY VÀO VÙNG A CỦA MODAL ĐANG MỞ
   const handleReSummarize = async () => {
     if (!selectedWorkflowTicket) return;
     setWorkflowLoading(true);
@@ -440,6 +441,9 @@ export const UnifiedInboxPage: React.FC = () => {
         method: 'POST',
       });
       if (res && res.status === 'success') {
+        const summaryText = typeof res.summary === 'string' ? res.summary : (res.summary?.summary_vi || '');
+        // Cập nhật ngay State của Modal đang mở
+        setSelectedWorkflowTicket(prev => prev ? { ...prev, ai_summary: summaryText } : null);
         toast.success('📝 Đã làm tươi bản tóm tắt Inbox thành công!');
         await loadTickets(false);
       }
@@ -449,6 +453,7 @@ export const UnifiedInboxPage: React.FC = () => {
       setWorkflowLoading(false);
     }
   };
+
   const handleSummarizeSingleTicket = async (ticketId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     setSummarizingTicketId(ticketId);
@@ -459,7 +464,6 @@ export const UnifiedInboxPage: React.FC = () => {
       if (res && res.status === 'success') {
         toast.success('📝 Đã tóm tắt vé thành công!');
         await loadTickets(false);
-        // Nếu modal đang mở đúng vé này thì đồng bộ luôn
         if (selectedWorkflowTicket?.id === ticketId && res.summary) {
           const summaryText = typeof res.summary === 'string' ? res.summary : (res.summary.summary_vi || '');
           setSelectedWorkflowTicket(prev => prev ? { ...prev, ai_summary: summaryText } : null);
@@ -472,21 +476,36 @@ export const UnifiedInboxPage: React.FC = () => {
     }
   };
 
+  // 🎯 2. SỬA HÀM ĐÁNH GIÁ LẠI Ý ĐỊNH: BẮT ĐÚNG BIẾN `res.workflow` ĐỂ MODAL LẬP TỨC NHẢY SỐ MỚI
   const handleReAssessIntent = async () => {
     if (!selectedWorkflowTicket) return;
     setWorkflowLoading(true);
     setWorkflowError(null);
     try {
-      const res = await fetchApi<{ status: string; result: any }>(`/tickets/${selectedWorkflowTicket.id}/re-assess-intent`, {
+      const res = await fetchApi<{ status: string; workflow?: any; result?: any }>(`/tickets/${selectedWorkflowTicket.id}/re-assess-intent`, {
         method: 'POST',
       });
-      if (res && res.result && res.result.workflow_draft) {
-        setActiveWorkflow(res.result.workflow_draft);
-        if (res.result.workflow_draft.steps && res.result.workflow_draft.steps.length > 0) {
-          runValidation(res.result.workflow_draft.id);
+
+      // ✅ BẮT TRÚNG CẢ res.workflow LẪN CÁC BIẾN FALLBACK
+      const newWf = res?.workflow || res?.result?.workflow_draft || res?.result;
+
+      if (newWf) {
+        // Cập nhật ngay lập tức Workflow mới vào State Modal!
+        setActiveWorkflow(newWf);
+
+        // Nếu có tóm tắt mới thì đồng bộ luôn sang Vùng A
+        if (newWf.ai_analysis?.summary) {
+          setSelectedWorkflowTicket(prev => prev ? { ...prev, ai_summary: newWf.ai_analysis.summary } : null);
         }
-        toast.success('✨ AI đã bóc tách sự thật có bằng chứng và tạo Proposal mới!');
+
+        if (newWf.steps && newWf.steps.length > 0) {
+          runValidation(newWf.id);
+        }
+
+        toast.success('✨ AI đã bóc tách sự thật và cập nhật Proposal mới lên Modal!');
         await loadTickets(false);
+      } else {
+        toast.warning('Đã phân tích lại nhưng không nhận được cấu trúc workflow mới.');
       }
     } catch (err) {
       const msg = (err as Error).message || 'Lỗi không xác định';
