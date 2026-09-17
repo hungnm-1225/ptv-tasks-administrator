@@ -316,11 +316,18 @@ class WorkflowPlannerService:
         # ---------------------------------------------------------------------
         # 🎯 PHÂN TÍCH SUMMARY-GUIDED (XÁC ĐỊNH VIỆC ĐÃ HOÀN THÀNH VS VIỆC CẦN LÀM)
         # ---------------------------------------------------------------------
-        accounts_already_created = any(k in summary_str for k in [
-            "đã gửi thông tin tài khoản", "đã tạo tài khoản", "đã hoàn thành việc tạo", "credentials sent"
-        ])
-        needs_school_update = any(k in summary_str for k in [
-            "cập nhật lại thông tin trường", "đổi tên trường", "tên trường bị nhầm", "cập nhật thông tin tên trường"
+        summary_lower = str(ai_summary or "").lower()
+        accounts_already_created = any(k in summary_lower for k in [
+            "đã cung cấp thông tin tài khoản",
+            "đã gửi thông tin tài khoản",
+            "đã tạo tài khoản",
+            "đã hoàn thành việc tạo",
+            "credentials sent",
+            "đã cung cấp"
+        ]) or ("thông tin tài khoản" in summary_lower and "đã" in summary_lower)
+
+        needs_school_update = any(k in summary_lower for k in [
+            "cập nhật lại thông tin trường", "đổi tên trường", "tên trường bị nhầm", "cập nhật thông tin tên trường", "cập nhật lại trường"
         ])
 
         # ---------------------------------------------------------------------
@@ -640,19 +647,19 @@ class WorkflowPlannerService:
         ai_summary_text = ticket.get("ai_summary") or ""
         corrected_school_name = None
 
-        # Regex non-greedy: Chặn ngay khi gặp dấu ngoặc đóng ), dấu phẩy, dấu chấm hoặc liên từ "và", "đồng thời"
-        school_patterns = [
-            r"(?:thành|là)\s+([A-Za-z0-9\s\.\-']+?)(?:\)|và|,|\.|\n|đồng thời|$)",
-            r"(?:trường|school)\s+([A-Za-z0-9\s\.\-']+?)(?:\)|và|,|\.|\n|$)"
+        # Hỗ trợ bóc tên trường có nháy: thành 'St Lorenzo School of Polomolok'
+        patterns = [
+            r"['\"]([A-Za-z0-9\s\.\-']*(?:School|Academy|College)[A-Za-z0-9\s\.\-]*)['\"]",
+            r"(?:thành|là)\s+['\"]?([A-Za-z0-9\s\.\-']+)['\"]?(?:\s*\(|\s*và|\s*\,|\s*\.|\s*\n|$)",
+            r"(?:trường|school)\s+['\"]?([A-Za-z0-9\s\.\-']+)['\"]?(?:\s*\(|\s*và|\s*\,|\s*\.|\s*\n|$)"
         ]
-        for pat in school_patterns:
+        for pat in patterns:
             m = re.search(pat, ai_summary_text, re.IGNORECASE)
             if m:
-                extracted = m.group(1).strip()
-                # Chỉ lấy nếu chuỗi có độ dài hợp lý và chứa từ khóa trường học
-                if len(extracted) > 4 and any(k in extracted.lower() for k in ["school", "lorenzo", "academy", "trường"]):
-                    corrected_school_name = extracted
-                    logger.info(f"🏫 [Planner] Tự động phát hiện tên trường đính chính từ tóm tắt: '{corrected_school_name}'")
+                cand = m.group(1).strip(" '\",.")
+                if len(cand) > 5 and any(k in cand.lower() for k in ["lorenzo", "school", "academy", "polomolok"]):
+                    corrected_school_name = cand
+                    logger.info(f"🏫 [Planner] Đã trích xuất chuẩn xác tên trường đính chính: '{corrected_school_name}'")
                     break
 
         detected_school_str = (

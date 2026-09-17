@@ -248,86 +248,75 @@ class AIEngine:
     ) -> VerifiedIntentAssessment:
         sender_clean = (sender_email or "").lower().strip()
 
-        # 1. BỘ LỌC ROBOT
+        # 1. BỘ LỌC EMAIL TỰ ĐỘNG / ROBOT
         if any(sender_clean.startswith(prefix) for prefix in AUTOMATED_SENDER_PREFIXES):
             return IntentAssessment(
                 outcome="no_action",
                 model_name="fast_path_system_filter",
                 prompt_version="fast_path_v1.0",
                 intents=[], entities={}, extracted_entities=[], missing_requirements=[],
-                warnings=["Đã nhận diện email thông báo tự động. Chuyển sang NO_ACTION."],
+                warnings=["Email thông báo tự động từ hệ thống. Chuyển sang NO_ACTION."],
                 raw_evidence_quotes=[]
             )
 
-        # 2. PHÂN TÍCH EMAIL THREAD
+        # 2. PHÂN TÍCH VÒNG ĐỜI HỘI THOẠI (EMAIL THREAD)
         parsed_thread = thread_service.parse_thread(raw_content, sender_email)
 
+        # Nếu tin nhắn mới nhất do Kỹ sư nội bộ gửi hỏi thông tin -> Chờ khách hàng
         if parsed_thread.lifecycle_state == "WAITING_CUSTOMER_INFO":
             return IntentAssessment(
                 outcome="no_action",
                 model_name="thread_state_machine",
                 prompt_version="v2.0",
                 intents=[], entities={}, extracted_entities=[], missing_requirements=[],
-                warnings=["Email mới nhất do kỹ sư nội bộ gửi. Tạm dừng chờ khách hàng phản hồi."],
+                warnings=["Email mới nhất do kỹ sư nội bộ phản hồi. Hệ thống tạm dừng chờ khách hàng cung cấp thêm thông tin."],
                 raw_evidence_quotes=[]
             )
 
-        # Đưa Compact Context VÀ Tóm tắt tiến trình vào Prompt
+        # Chuẩn bị nội dung gửi cho mô hình AI
         full_content = parsed_thread.compact_prompt_context if parsed_thread.is_thread else (raw_content[:20000] if raw_content else "(Trống)")
         excel_info_str = json.dumps(excel_summary, ensure_ascii=False, indent=2) if excel_summary else "Không có file Excel đính kèm."
-        summary_guide = f"\n[BẢN TÓM TẮT TIẾN TRÌNH & ĐỀ XUẤT HIỆN TẠI TỪ HỆ THỐNG]:\n{ai_summary}\n" if ai_summary else ""
+        summary_guide = f"\n[BẢN TÓM TẮT TIẾN TRÌNH & ĐỀ XUẤT TỪ HỆ THỐNG]:\n{ai_summary}\n" if ai_summary else ""
 
         prompt = (
-            f"Bạn là chuyên gia trích xuất sự thật vận hành cho hệ sinh thái Pythaverse.\n"
+            f"Bạn là chuyên gia phân tích và trích xuất sự thật vận hành cho hệ sinh thái Pythaverse.\n"
             f"Tiêu đề: {subject}\n"
             f"Nguồn: {source}\n"
             f"{summary_guide}"
             f"Nội dung email chi tiết/lượt hội thoại mới nhất:\n{full_content}\n\n"
-            "HƯỚNG DẪN QUAN TRỌNG (SUMMARY-GUIDED TRUTH):\n"
-            "1. Hãy bám sát vào mục [Đề xuất tổng quan] trong bản tóm tắt trên để xác định công việc CẦN LÀM HIỆN TẠI.\n"
-            "2. Nếu tóm tắt cho biết tài khoản đã được tạo/đã gửi, TUYỆT ĐỐI KHÔNG trích xuất intent 'create_accounts' nữa!\n"
-            "3. Nếu khách hàng yêu cầu đính chính/sửa tên trường hoặc thông tin user, hãy trích xuất intent 'update_user_profile' và trích xuất câu văn khách hàng phản hồi tên trường bị nhầm làm bằng chứng (quote).\n"
-            "4. QUY ĐỊNH BẮT BUỘC VỀ ĐỊNH DẠNG JSON:\n"
-            "   - 'outcome': BẮT BUỘC chỉ được là 1 trong 3 chuỗi: 'candidate_action', 'needs_information', hoặc 'no_action'. TUYỆT ĐỐI KHÔNG viết câu giải thích vào trường outcome!\n"
-            "   - 'intents': Danh sách các ý định cần làm hiện tại kèm quote nguyên văn.\n"
-            "   - 'entities': Gồm school_name, courses, users.\n"
+            "NGUYÊN TẮC BÓC TÁCH NGHIÊM NGẶT (EVIDENCE-BASED & ZERO-MOCKUP):\n"
+            "1. Bám sát [BẢN TÓM TẮT TIẾN TRÌNH] và lượt phản hồi mới nhất để xác định việc CÒN TỒN ĐỌNG CẦN LÀM HIỆN TẠI.\n"
+            "2. Nếu tài khoản đã được tạo hoặc đã gửi thông tin đăng nhập trong quá khứ, TUYỆT ĐỐI KHÔNG trích xuất intent 'create_accounts'.\n"
+            "3. Nếu có yêu cầu sửa/đính chính thông tin trường học hoặc người dùng, trích xuất intent 'update_user_profile'.\n"
+            "4. Mọi bằng chứng (quote) BẮT BUỘC PHẢI LÀ ĐOẠN TRÍCH NGUYÊN VĂN từng ký tự có mặt trong [Nội dung email chi tiết/lượt hội thoại mới nhất] ở trên. Tuyệt đối không tự bịa câu trích dẫn!\n"
+            "5. ĐỊNH DẠNG JSON ĐẦU RA BẮT BUỘC:\n"
+            "   - 'outcome': CHỈ ĐƯỢC CHỌN 1 TRONG 3 GIÁ TRỊ: 'candidate_action', 'needs_information', hoặc 'no_action'.\n"
+            "   - 'intents': Danh sách các ý định [{type, confidence, evidence: [{quote}]}]\n"
+            "   - 'entities': {school_name, courses, users}\n"
+            "   - 'missing_requirements': Danh sách các thông tin còn thiếu nếu chưa đủ căn cứ.\n"
         )
 
         parsed_data, used_model = self._call_gemini_with_fallback(prompt, primary_key=self.api_key_facts)
 
-        # Xử lý fallback an toàn nếu Gemini bị Quota hoặc trả về rỗng
+        # 3. NGUYÊN TẮC FAIL-CLOSED: NẾU AI LỖI HOẶC KHÔNG PHÂN TÍCH ĐƯỢC -> BÁO RÕ LỖI, CẤM BỊA DATA!
         if not parsed_data or not isinstance(parsed_data, dict):
-            if ai_summary and any(k in ai_summary.lower() for k in ["đổi tên trường", "tên trường bị nhầm", "cập nhật lại thông tin trường"]):
-                logger.info("⚡ [Fallback Fast-Path] Tự động suy luận intent 'update_user_profile' từ bản tóm tắt.")
-                parsed_data = {
-                    "outcome": "candidate_action",
-                    "intents": [
-                        {
-                            "type": "update_user_profile",
-                            "confidence": 0.95,
-                            "evidence": [{"quote": "khách hàng phản hồi tên trường bị nhầm", "start_offset": -1, "end_offset": -1}]
-                        },
-                        {
-                            "type": "course_access",
-                            "confidence": 0.90,
-                            "evidence": [{"quote": "Access to SWRP 11 and Repositories", "start_offset": -1, "end_offset": -1}]
-                        }
-                    ],
-                    "entities": {"school_name": "St Lorenzo School of Polomolok", "courses": ["SWRP 11"]}
-                }
-                used_model = "summary_guided_fallback"
-            else:
-                return IntentAssessment(
-                    outcome="needs_information",
-                    model_name="ai_extraction_failed",
-                    prompt_version="error_fallback",
-                    intents=[], entities={}, extracted_entities=[],
-                    missing_requirements=[{"item": "ai_extraction_failed", "reason": "Sự cố kết nối AI"}],
-                    warnings=["Không thể bóc tách sự thật vận hành."],
-                    raw_evidence_quotes=[]
-                )
+            logger.warning("⚠️ [Gemini Facts] Không thể phân tích cấu trúc dữ liệu từ AI. Kích hoạt Fail-Closed an toàn.")
+            return IntentAssessment(
+                outcome="needs_information",
+                model_name=used_model or "ai_extraction_failed",
+                prompt_version="error_fallback",
+                intents=[],
+                entities={},
+                extracted_entities=[],
+                missing_requirements=[{
+                    "field": "ai_analysis",
+                    "message": "Không thể bóc tách sự thật vận hành từ nội dung yêu cầu do sự cố kết nối AI hoặc hạn ngạch API. Quản trị viên cần kiểm tra thủ công."
+                }],
+                warnings=["Hệ thống kích hoạt van an toàn: Không thể tự động phân tích yêu cầu này."],
+                raw_evidence_quotes=[]
+            )
 
-        # 🎯 CHỐT CHẶN VÀNG: ÉP CHUẨN OUTCOME VỀ ĐÚNG 3 LITERAL CỦA PYDANTIC
+        # 4. CHUẨN HÓA VÀ BẢO VỆ SCHEMA PYDANTIC CHO OUTCOME
         raw_outcome_str = str(parsed_data.get("outcome", "candidate_action")).lower().strip()
         if any(k in raw_outcome_str for k in ["no_action", "không cần", "thông báo"]):
             final_outcome = "no_action"
@@ -370,18 +359,19 @@ class AIEngine:
                 required_entities=item.get("required_entities", [])
             ))
 
-        # Kiểm tra xem tóm tắt có báo đã tạo tài khoản chưa
-        accounts_done = bool(ai_summary and any(k in ai_summary.lower() for k in ["đã gửi thông tin tài khoản", "đã tạo tài khoản"]))
+        # Kiểm tra xem tóm tắt có báo việc tạo tài khoản đã xong chưa
+        accounts_done = bool(ai_summary and any(k in ai_summary.lower() for k in [
+            "đã gửi thông tin tài khoản", "đã cung cấp thông tin tài khoản", "đã tạo tài khoản", "credentials sent"
+        ]))
 
-        # Lọc bỏ intent create_accounts nếu việc đó đã làm trong quá khứ
         if accounts_done:
             structured_intents = [i for i in structured_intents if i.type != "create_accounts"]
             raw_evidence_quotes = [q for q in raw_evidence_quotes if "creation of accounts" not in q.lower()]
 
         raw_assessment = IntentAssessment(
-            outcome=final_outcome,  # 🎯 DÙNG FINAL_OUTCOME ĐÃ ĐƯỢC ÉP CHUẨN!
+            outcome=final_outcome,
             model_name=used_model,
-            prompt_version="v2.1_summary_guided",
+            prompt_version="v2.2_zero_mockup",
             intents=structured_intents,
             entities=parsed_data.get("entities", {}) if isinstance(parsed_data.get("entities"), dict) else {},
             extracted_entities=[],
@@ -390,19 +380,20 @@ class AIEngine:
             raw_evidence_quotes=raw_evidence_quotes
         )
 
-        # Chạy bổ trợ fact, nhưng nếu tài khoản đã tạo thì chặn không cho nhồi lại 'create_accounts'
+        # Bổ trợ fact tất định từ nội dung gốc
         raw_assessment = augment_assessment_with_request_facts(
             raw_assessment, raw_content, source_revision_id, sender_email=sender_email
         )
+
         if accounts_done:
             raw_assessment.intents = [i for i in raw_assessment.intents if i.type != "create_accounts"]
             raw_assessment.raw_evidence_quotes = [q for q in raw_assessment.raw_evidence_quotes if "creation of accounts" not in q.lower()]
 
+        # Xác thực từng ký tự bằng chứng qua EvidenceVerifier
         return evidence_verifier.verify_intent_assessment(
             assessment=raw_assessment,
             raw_content=raw_content,
             source_revision_id=source_revision_id
         )
-
 
 gemini_engine = AIEngine()
