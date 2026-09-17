@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
     Network, Building2, ShieldCheck, ShieldAlert, Search, Filter,
-    Edit3, KeyRound, Eye, EyeOff, RefreshCw, Layers, School, Check, X, ArrowRight
+    Edit3, KeyRound, Eye, EyeOff, RefreshCw, Layers, School, Check, X, ArrowRight,
+    ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { toast } from 'sonner';
@@ -40,6 +41,10 @@ export const HierarchyManagerPage: React.FC = () => {
     const [selectedCountry, setSelectedCountry] = useState<string>('all');
     const [selectedPartnerFilter, setSelectedPartnerFilter] = useState<string>('all');
 
+    // 🎯 State phân trang Local (Client-side Pagination)
+    const [currentPage, setCurrentPage] = useState<number>(1);
+    const [pageSize, setPageSize] = useState<number>(20);
+
     // State Modal chỉnh sửa
     const [editingOrg, setEditingOrg] = useState<OrganizationItem | null>(null);
     const [editForm, setEditForm] = useState({
@@ -51,6 +56,7 @@ export const HierarchyManagerPage: React.FC = () => {
     });
     const [showPassword, setShowPassword] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isLoadingPassword, setIsLoadingPassword] = useState(false);
 
     // Tải dữ liệu từ Backend
     const loadHierarchyData = async (showToast = false) => {
@@ -71,17 +77,32 @@ export const HierarchyManagerPage: React.FC = () => {
         loadHierarchyData();
     }, []);
 
-    // Mở modal chỉnh sửa
-    const handleOpenEdit = (org: OrganizationItem) => {
+    // 🎯 Mở modal chỉnh sửa & tự động nạp mật khẩu đã giải mã từ Két Sắt
+    const handleOpenEdit = async (org: OrganizationItem) => {
         setEditingOrg(org);
         setEditForm({
             name: org.name,
             code: org.code === 'N/A' ? '' : org.code,
             parent_id: org.parent_id || '',
             username: org.username || '',
-            password: '' // Không nạp mật khẩu cũ để đảm bảo bảo mật tuyệt đối
+            password: ''
         });
         setShowPassword(false);
+
+        // Nếu tổ chức này đã có mật khẩu trong Vault -> Tự động kéo mật khẩu đã giải mã về
+        if (org.has_vault_pass) {
+            setIsLoadingPassword(true);
+            try {
+                const res = await fetchApi<{ password: string }>(`/workspace/organizations/${org.id}/vault-password`);
+                if (res?.password) {
+                    setEditForm(prev => ({ ...prev, password: res.password }));
+                }
+            } catch {
+                console.debug('Không thể tải trước mật khẩu vault');
+            } finally {
+                setIsLoadingPassword(false);
+            }
+        }
     };
 
     // Lưu chỉnh sửa phả hệ & mật khẩu Két Sắt
@@ -98,7 +119,6 @@ export const HierarchyManagerPage: React.FC = () => {
 
             toast.success(`Đã cập nhật phả hệ của "${editForm.name}" thành công!`);
             setEditingOrg(null);
-            // Tải lại dữ liệu làm tươi giao diện
             await loadHierarchyData(false);
         } catch (err: any) {
             toast.error(err.message || 'Lỗi khi cập nhật phả hệ');
@@ -126,6 +146,18 @@ export const HierarchyManagerPage: React.FC = () => {
         });
     }, [data, searchQuery, selectedRole, selectedCountry, selectedPartnerFilter]);
 
+    // Khi lọc hoặc đổi page size thì reset về trang 1
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchQuery, selectedRole, selectedCountry, selectedPartnerFilter, pageSize]);
+
+    // 🎯 Danh sách sau khi cắt theo Trang (Pagination Slicing)
+    const totalPages = Math.ceil(filteredOrgs.length / pageSize) || 1;
+    const paginatedOrgs = useMemo(() => {
+        const start = (currentPage - 1) * pageSize;
+        return filteredOrgs.slice(start, start + pageSize);
+    }, [filteredOrgs, currentPage, pageSize]);
+
     // Thống kê nhanh
     const stats = useMemo(() => {
         if (!data?.organizations) return { schools: 0, partners: 0, distributors: 0, vaultReady: 0 };
@@ -138,30 +170,30 @@ export const HierarchyManagerPage: React.FC = () => {
     }, [data]);
 
     return (
-        <div className="space-y-6" >
+        <div className="space-y-6">
             {/* Header Bento Title */}
-            < div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-[#131B2B] p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm" >
-                <div className="space-y-1" >
-                    <div className="flex items-center gap-3" >
-                        <div className="p-2.5 bg-indigo-50 dark:bg-indigo-950/50 rounded-xl text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/50" >
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-[#131B2B] p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm">
+                <div className="space-y-1">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2.5 bg-indigo-50 dark:bg-indigo-950/50 rounded-xl text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/50">
                             <Network className="w-6 h-6" />
                         </div>
-                        < div >
-                            <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight" >
+                        <div>
+                            <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
                                 Quản Trị Phả Hệ & Két Sắt Trường Học
                             </h1>
-                            < p className="text-sm text-slate-500 dark:text-slate-400" >
-                                Hiệu chỉnh phân cấp 3 tầng(Distributor ➔ Partner ➔ School), sửa tên hiển thị và cập nhật mật khẩu Fernet Vault.
+                            <p className="text-sm text-slate-500 dark:text-slate-400">
+                                Hiệu chỉnh phân cấp 3 tầng (Distributor ➔ Partner ➔ School), tra cứu mật khẩu Fernet Vault.
                             </p>
                         </div>
                     </div>
                 </div>
 
-                < div className="flex items-center gap-3" >
+                <div className="flex items-center gap-3">
                     <button
                         onClick={() => loadHierarchyData(true)}
                         disabled={refreshing}
-                        className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-sm font-semibold transition-all border border-slate-200 dark:border-slate-700 active:scale-95 disabled:opacity-50"
+                        className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-sm font-semibold transition-all border border-slate-200 dark:border-slate-700 active:scale-95 disabled:opacity-50 cursor-pointer"
                     >
                         <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
                         Làm mới
@@ -170,54 +202,54 @@ export const HierarchyManagerPage: React.FC = () => {
             </div>
 
             {/* Bento Grid KPI Stats */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" >
-                <div className="bg-white dark:bg-[#131B2B] p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm" >
-                    <div className="flex items-center justify-between" >
-                        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider" > Trường Học(School) </span>
-                        < div className="p-2 bg-sky-50 dark:bg-sky-950/50 text-sky-600 rounded-lg" >
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-white dark:bg-[#131B2B] p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm">
+                    <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Trường Học (School)</span>
+                        <div className="p-2 bg-sky-50 dark:bg-sky-950/50 text-sky-600 rounded-lg">
                             <School className="w-4 h-4" />
                         </div>
                     </div>
-                    < div className="mt-3 text-2xl font-bold text-slate-900 dark:text-white" > {stats.schools} </div>
+                    <div className="mt-3 text-2xl font-bold text-slate-900 dark:text-white">{stats.schools}</div>
                 </div>
 
-                < div className="bg-white dark:bg-[#131B2B] p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm" >
-                    <div className="flex items-center justify-between" >
-                        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider" > Đối Tác(Partner) </span>
-                        < div className="p-2 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 rounded-lg" >
+                <div className="bg-white dark:bg-[#131B2B] p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm">
+                    <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Đối Tác (Partner)</span>
+                        <div className="p-2 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 rounded-lg">
                             <Layers className="w-4 h-4" />
                         </div>
                     </div>
-                    < div className="mt-3 text-2xl font-bold text-slate-900 dark:text-white" > {stats.partners} </div>
+                    <div className="mt-3 text-2xl font-bold text-slate-900 dark:text-white">{stats.partners}</div>
                 </div>
 
-                < div className="bg-white dark:bg-[#131B2B] p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm" >
-                    <div className="flex items-center justify-between" >
-                        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider" > Nhà Phân Phối(Distributor) </span>
-                        < div className="p-2 bg-amber-50 dark:bg-amber-950/50 text-amber-600 rounded-lg" >
+                <div className="bg-white dark:bg-[#131B2B] p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm">
+                    <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Nhà Phân Phối (Distributor)</span>
+                        <div className="p-2 bg-amber-50 dark:bg-amber-950/50 text-amber-600 rounded-lg">
                             <Building2 className="w-4 h-4" />
                         </div>
                     </div>
-                    < div className="mt-3 text-2xl font-bold text-slate-900 dark:text-white" > {stats.distributors} </div>
+                    <div className="mt-3 text-2xl font-bold text-slate-900 dark:text-white">{stats.distributors}</div>
                 </div>
 
-                < div className="bg-white dark:bg-[#131B2B] p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm" >
-                    <div className="flex items-center justify-between" >
-                        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider" > Két Sắt Đã Khóa(Vault) </span>
-                        < div className="p-2 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 rounded-lg" >
+                <div className="bg-white dark:bg-[#131B2B] p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm">
+                    <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Két Sắt Đã Khóa (Vault)</span>
+                        <div className="p-2 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 rounded-lg">
                             <ShieldCheck className="w-4 h-4" />
                         </div>
                     </div>
-                    < div className="mt-3 text-2xl font-bold text-emerald-600 dark:text-emerald-400" >
-                        {stats.vaultReady} < span className="text-xs text-slate-400 font-normal" > / {data?.total || 0}</span >
+                    <div className="mt-3 text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+                        {stats.vaultReady} <span className="text-xs text-slate-400 font-normal">/ {data?.total || 0}</span>
                     </div>
                 </div>
             </div>
 
             {/* Filter Toolbar */}
-            <div className="bg-white dark:bg-[#131B2B] p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm flex flex-col md:flex-row items-center gap-3" >
+            <div className="bg-white dark:bg-[#131B2B] p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm flex flex-col md:flex-row items-center gap-3">
                 {/* Search */}
-                < div className="relative flex-1 w-full" >
+                <div className="relative flex-1 w-full">
                     <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
                         type="text"
@@ -229,17 +261,17 @@ export const HierarchyManagerPage: React.FC = () => {
                 </div>
 
                 {/* Role Type Filter */}
-                <div className="flex items-center gap-2 w-full md:w-auto" >
+                <div className="flex items-center gap-2 w-full md:w-auto">
                     <Filter className="w-4 h-4 text-slate-400" />
                     <select
                         value={selectedRole}
                         onChange={(e) => setSelectedRole(e.target.value)}
                         className="px-3 py-2 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700/80 rounded-xl text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
                     >
-                        <option value="all" > Tất cả cấp bậc </option>
-                        < option value="school" > Trường học(School) </option>
-                        < option value="partner" > Đối tác(Partner) </option>
-                        < option value="distributor" > Nhà phân phối(Distributor) </option>
+                        <option value="all">Tất cả cấp bậc</option>
+                        <option value="school">Trường học (School)</option>
+                        <option value="partner">Đối tác (Partner)</option>
+                        <option value="distributor">Nhà phân phối (Distributor)</option>
                     </select>
                 </div>
 
@@ -259,145 +291,191 @@ export const HierarchyManagerPage: React.FC = () => {
             </div>
 
             {/* Main Table */}
-            <div className="bg-white dark:bg-[#131B2B] rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm overflow-hidden" >
-                <div className="overflow-x-auto" >
-                    <table className="w-full text-left border-collapse" >
+            <div className="bg-white dark:bg-[#131B2B] rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
                         <thead>
-                            <tr className="border-b border-slate-200/80 dark:border-slate-800 text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50/50 dark:bg-slate-900/30" >
-                                <th className="py-3.5 px-4" > Tổ Chức / Đơn Vị </th>
-                                < th className="py-3.5 px-4" > Cấp Bậc </th>
-                                < th className="py-3.5 px-4" > Phả Hệ Cha Con(Lineage) </th>
-                                < th className="py-3.5 px-4" > Tài Khoản & Két Sắt </th>
-                                < th className="py-3.5 px-4 text-right" > Thao Tác </th>
+                            <tr className="border-b border-slate-200/80 dark:border-slate-800 text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50/50 dark:bg-slate-900/30">
+                                <th className="py-3.5 px-4">Tổ Chức / Đơn Vị</th>
+                                <th className="py-3.5 px-4">Cấp Bậc</th>
+                                <th className="py-3.5 px-4">Phả Hệ Cha Con (Lineage)</th>
+                                <th className="py-3.5 px-4">Tài Khoản & Két Sắt</th>
+                                <th className="py-3.5 px-4 text-right">Thao Tác</th>
                             </tr>
                         </thead>
-                        < tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 text-sm" >
-                            {
-                                loading ? (
-                                    <tr>
-                                        <td colSpan={5} className="py-12 text-center text-slate-400" >
-                                            <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-500" />
-                                            Đang giải mã phả hệ 480 trường học...
-                                        </td>
-                                    </tr>
-                                ) : filteredOrgs.length === 0 ? (
-                                    <tr>
-                                        <td colSpan={5} className="py-12 text-center text-slate-400" >
-                                            Không tìm thấy đơn vị nào khớp với tiêu chí lọc.
-                                        </td>
-                                    </tr>
-                                ) : (
-                                    filteredOrgs.map((org) => {
-                                        const isSchool = org.role_type === 'school';
-                                        const isPartner = org.role_type === 'partner';
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 text-sm">
+                            {loading ? (
+                                <tr>
+                                    <td colSpan={5} className="py-12 text-center text-slate-400">
+                                        <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-500" />
+                                        Đang giải mã phả hệ 480 trường học...
+                                    </td>
+                                </tr>
+                            ) : paginatedOrgs.length === 0 ? (
+                                <tr>
+                                    <td colSpan={5} className="py-12 text-center text-slate-400">
+                                        Không tìm thấy đơn vị nào khớp với tiêu chí lọc.
+                                    </td>
+                                </tr>
+                            ) : (
+                                paginatedOrgs.map((org) => {
+                                    const isSchool = org.role_type === 'school';
+                                    const isPartner = org.role_type === 'partner';
 
-                                        return (
-                                            <tr key={org.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors" >
-                                                {/* Name & Code */}
-                                                < td className="py-3.5 px-4" >
-                                                    <div className="font-semibold text-slate-900 dark:text-white" >
-                                                        {org.name}
-                                                    </div>
-                                                    < div className="text-xs text-slate-400 font-mono flex items-center gap-1.5 mt-0.5" >
-                                                        <span>Mã: {org.code} </span>
-                                                        <span>•</span>
-                                                        < span > {org.country} </span>
-                                                    </div>
-                                                </td>
+                                    return (
+                                        <tr key={org.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors">
+                                            {/* Name & Code */}
+                                            <td className="py-3.5 px-4">
+                                                <div className="font-semibold text-slate-900 dark:text-white">
+                                                    {org.name}
+                                                </div>
+                                                <div className="text-xs text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
+                                                    <span>Mã: {org.code}</span>
+                                                    <span>•</span>
+                                                    <span>{org.country}</span>
+                                                </div>
+                                            </td>
 
-                                                {/* Role Badge */}
-                                                <td className="py-3.5 px-4" >
-                                                    {isSchool && (
-                                                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300 border border-sky-200/60 dark:border-sky-800/50" >
-                                                            School
+                                            {/* Role Badge */}
+                                            <td className="py-3.5 px-4">
+                                                {isSchool && (
+                                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300 border border-sky-200/60 dark:border-sky-800/50">
+                                                        School
+                                                    </span>
+                                                )}
+                                                {isPartner && (
+                                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50">
+                                                        Partner
+                                                    </span>
+                                                )}
+                                                {org.role_type === 'distributor' && (
+                                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800/50">
+                                                        Distributor
+                                                    </span>
+                                                )}
+                                            </td>
+
+                                            {/* Parent Lineage */}
+                                            <td className="py-3.5 px-4">
+                                                {isSchool && (
+                                                    <div className="flex items-center gap-1.5 text-xs">
+                                                        <span className="text-amber-600 dark:text-amber-400 font-medium">
+                                                            {org.distributor_name}
+                                                        </span>
+                                                        <ArrowRight className="w-3 h-3 text-slate-400" />
+                                                        <span className="text-indigo-600 dark:text-indigo-400 font-medium">
+                                                            {org.parent_name}
+                                                        </span>
+                                                    </div>
+                                                )}
+                                                {isPartner && (
+                                                    <div className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400 font-medium">
+                                                        <Building2 className="w-3.5 h-3.5" />
+                                                        <span>Trực thuộc: {org.parent_name}</span>
+                                                    </div>
+                                                )}
+                                                {org.role_type === 'distributor' && (
+                                                    <span className="text-xs text-slate-400 italic">Đơn vị Master cấp cao nhất</span>
+                                                )}
+                                            </td>
+
+                                            {/* Username & Vault Status */}
+                                            <td className="py-3.5 px-4">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-mono text-xs text-slate-600 dark:text-slate-300">
+                                                        {org.username || <span className="text-slate-400 italic">Chưa cấu hình</span>}
+                                                    </span>
+                                                    {org.has_vault_pass ? (
+                                                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-md border border-emerald-200/50 dark:border-emerald-900/50" title="Mật khẩu đã được mã hóa an toàn bằng Fernet">
+                                                            <ShieldCheck className="w-3 h-3" />
+                                                            Vault
+                                                        </span>
+                                                    ) : (
+                                                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 px-2 py-0.5 rounded-md border border-rose-200/50 dark:border-rose-900/50" title="Chưa cấu hình mật khẩu trong két sắt">
+                                                            <ShieldAlert className="w-3 h-3" />
+                                                            Trống pass
                                                         </span>
                                                     )}
-                                                    {
-                                                        isPartner && (
-                                                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50" >
-                                                                Partner
-                                                            </span>
-                                                        )
-                                                    }
-                                                    {
-                                                        org.role_type === 'distributor' && (
-                                                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800/50" >
-                                                                Distributor
-                                                            </span>
-                                                        )
-                                                    }
-                                                </td>
+                                                </div>
+                                            </td>
 
-                                                {/* Parent Lineage */}
-                                                <td className="py-3.5 px-4" >
-                                                    {isSchool && (
-                                                        <div className="flex items-center gap-1.5 text-xs" >
-                                                            <span className="text-amber-600 dark:text-amber-400 font-medium" >
-                                                                {org.distributor_name}
-                                                            </span>
-                                                            < ArrowRight className="w-3 h-3 text-slate-400" />
-                                                            <span className="text-indigo-600 dark:text-indigo-400 font-medium" >
-                                                                {org.parent_name}
-                                                            </span>
-                                                        </div>
-                                                    )}
-                                                    {
-                                                        isPartner && (
-                                                            <div className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400 font-medium" >
-                                                                <Building2 className="w-3.5 h-3.5" />
-                                                                <span>Trực thuộc: {org.parent_name} </span>
-                                                            </div>
-                                                        )
-                                                    }
-                                                    {
-                                                        org.role_type === 'distributor' && (
-                                                            <span className="text-xs text-slate-400 italic" > Đơn vị Master cấp cao nhất </span>
-                                                        )
-                                                    }
-                                                </td>
-
-                                                {/* Username & Vault Status */}
-                                                <td className="py-3.5 px-4" >
-                                                    <div className="flex items-center gap-2" >
-                                                        <span className="font-mono text-xs text-slate-600 dark:text-slate-300" >
-                                                            {org.username || <span className="text-slate-400 italic"> Chưa cấu hình</ span >}
-                                                        </span>
-                                                        {
-                                                            org.has_vault_pass ? (
-                                                                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-md border border-emerald-200/50 dark:border-emerald-900/50" title="Mật khẩu đã được mã hóa an toàn bằng Fernet" >
-                                                                    <ShieldCheck className="w-3 h-3" />
-                                                                    Vault
-                                                                </span>
-                                                            ) : (
-                                                                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 px-2 py-0.5 rounded-md border border-rose-200/50 dark:border-rose-900/50" title="Chưa cấu hình mật khẩu trong két sắt" >
-                                                                    <ShieldAlert className="w-3 h-3" />
-                                                                    Trống pass
-                                                                </span>
-                                                            )
-                                                        }
-                                                    </div>
-                                                </td>
-
-                                                {/* Edit Action Button */}
-                                                <td className="py-3.5 px-4 text-right" >
-                                                    <button
-                                                        onClick={() => handleOpenEdit(org)}
-                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 rounded-xl text-xs font-semibold transition-all border border-indigo-200/60 dark:border-indigo-800/60 active:scale-95"
-                                                    >
-                                                        <Edit3 className="w-3.5 h-3.5" />
-                                                        Chỉnh sửa
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })
-                                )}
+                                            {/* Edit Action Button */}
+                                            <td className="py-3.5 px-4 text-right">
+                                                <button
+                                                    onClick={() => handleOpenEdit(org)}
+                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 rounded-xl text-xs font-semibold transition-all border border-indigo-200/60 dark:border-indigo-800/60 active:scale-95 cursor-pointer"
+                                                >
+                                                    <Edit3 className="w-3.5 h-3.5" />
+                                                    Chỉnh sửa
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    );
+                                })
+                            )}
                         </tbody>
                     </table>
                 </div>
+
+                {/* 🎯 BENTO LOCAL PAGINATION TOOLBAR */}
+                {!loading && filteredOrgs.length > 0 && (
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 text-xs text-slate-500 dark:text-slate-400">
+                        <div className="flex items-center gap-2">
+                            <span>Hiển thị</span>
+                            <span className="font-semibold text-slate-800 dark:text-slate-200">
+                                {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, filteredOrgs.length)}
+                            </span>
+                            <span>trên tổng số</span>
+                            <span className="font-bold text-indigo-600 dark:text-indigo-400">{filteredOrgs.length}</span>
+                            <span>đơn vị</span>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                            {/* Chọn số dòng hiển thị */}
+                            <div className="flex items-center gap-1.5">
+                                <span>Số dòng:</span>
+                                <select
+                                    value={pageSize}
+                                    onChange={(e) => setPageSize(Number(e.target.value))}
+                                    className="px-2 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-200 focus:outline-none"
+                                >
+                                    <option value={20}>20</option>
+                                    <option value={50}>50</option>
+                                    <option value={100}>100</option>
+                                    <option value={200}>200</option>
+                                </select>
+                            </div>
+
+                            {/* Điều hướng trang */}
+                            <div className="flex items-center gap-1">
+                                <button
+                                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                                    disabled={currentPage === 1}
+                                    className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-800 disabled:opacity-30 cursor-pointer"
+                                    title="Trang trước"
+                                >
+                                    <ChevronLeft className="w-4 h-4" />
+                                </button>
+
+                                <span className="px-3 py-1 font-mono font-bold text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                                    {currentPage} / {totalPages}
+                                </span>
+
+                                <button
+                                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                                    disabled={currentPage === totalPages}
+                                    className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-800 disabled:opacity-30 cursor-pointer"
+                                    title="Trang sau"
+                                >
+                                    <ChevronRight className="w-4 h-4" />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
 
-            {/* Modal Chỉnh Sửa Phả Hệ & Mật Khẩu Fernet – CHỐNG CO SỤP WIDTH & TRÀN CHIỀU CAO */}
+            {/* Modal Chỉnh Sửa Phả Hệ & Két Sắt (Khóa width 512px, có xem pass và dấu * đỏ) */}
             {
                 editingOrg && typeof document !== 'undefined' && createPortal(
                     <div
@@ -409,7 +487,7 @@ export const HierarchyManagerPage: React.FC = () => {
                             className="bg-white dark:bg-[#131B2B] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 my-auto flex flex-col max-h-[90vh]"
                             onClick={(e) => e.stopPropagation()}
                         >
-                            {/* Modal Header (Cố định ở trên) */}
+                            {/* Modal Header */}
                             <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 shrink-0">
                                 <div className="flex items-center gap-2.5">
                                     <div className="p-2 bg-indigo-50 dark:bg-indigo-950 text-indigo-600 rounded-xl">
@@ -432,12 +510,12 @@ export const HierarchyManagerPage: React.FC = () => {
                                 </button>
                             </div>
 
-                            {/* Modal Form (Có thanh cuộn riêng khi form dài) */}
+                            {/* Modal Form */}
                             <form onSubmit={handleSaveEdit} className="p-5 space-y-4 overflow-y-auto flex-1 scrollbar-thin">
                                 {/* Tên tổ chức */}
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                                        Tên hiển thị tổ chức (*)
+                                        Tên hiển thị tổ chức <span className="text-rose-500 font-bold">*</span>
                                     </label>
                                     <input
                                         type="text"
@@ -472,7 +550,7 @@ export const HierarchyManagerPage: React.FC = () => {
                                         <select
                                             value={editForm.parent_id}
                                             onChange={(e) => setEditForm(prev => ({ ...prev, parent_id: e.target.value }))}
-                                            className="w-full px-3.5 py-2 bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-800 rounded-xl text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                                            className="w-full px-3.5 py-2 bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-800 rounded-xl text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer"
                                         >
                                             <option value="">-- Trực tiếp (Không qua Partner) --</option>
                                             {data?.partners.map(p => (
@@ -492,7 +570,7 @@ export const HierarchyManagerPage: React.FC = () => {
                                         <select
                                             value={editForm.parent_id}
                                             onChange={(e) => setEditForm(prev => ({ ...prev, parent_id: e.target.value }))}
-                                            className="w-full px-3.5 py-2 bg-amber-50/40 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-xl text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                                            className="w-full px-3.5 py-2 bg-amber-50/40 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-xl text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/20 cursor-pointer"
                                         >
                                             <option value="">-- Trực tiếp Master --</option>
                                             {data?.distributors.map(d => (
@@ -504,11 +582,18 @@ export const HierarchyManagerPage: React.FC = () => {
                                     </div>
                                 )}
 
-                                {/* KHU VỰC KÉT SẮT FERNET VAULT */}
+                                {/* KHU VỰC KÉT SẮT FERNET VAULT (XEM ĐƯỢC MẬT KHẨU GỐC) */}
                                 <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200/80 dark:border-slate-800 space-y-3">
-                                    <div className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-white">
-                                        <KeyRound className="w-4 h-4 text-emerald-500" />
-                                        <span>Két Sắt Tài Khoản Đăng Nhập (Fernet Vault)</span>
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-white">
+                                            <KeyRound className="w-4 h-4 text-emerald-500" />
+                                            <span>Két Sắt Tài Khoản Đăng Nhập (Fernet Vault)</span>
+                                        </div>
+                                        {isLoadingPassword && (
+                                            <span className="text-[10px] text-indigo-500 animate-pulse font-mono">
+                                                Đang giải mã mật khẩu...
+                                            </span>
+                                        )}
                                     </div>
 
                                     <div>
@@ -525,16 +610,27 @@ export const HierarchyManagerPage: React.FC = () => {
                                     </div>
 
                                     <div>
-                                        <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                                            Mật khẩu mới (Để trống nếu giữ nguyên mật khẩu cũ)
-                                        </label>
+                                        <div className="flex items-center justify-between mb-1">
+                                            <label className="text-[11px] font-semibold text-slate-500">
+                                                Mật khẩu tài khoản (Đã mã hóa Fernet)
+                                            </label>
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowPassword(!showPassword)}
+                                                className="text-[11px] text-indigo-600 dark:text-indigo-400 font-semibold hover:underline flex items-center gap-1 cursor-pointer"
+                                            >
+                                                {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                                <span>{showPassword ? 'Ẩn mật khẩu' : 'Xem mật khẩu'}</span>
+                                            </button>
+                                        </div>
+
                                         <div className="relative">
                                             <input
                                                 type={showPassword ? 'text' : 'password'}
                                                 value={editForm.password}
                                                 onChange={(e) => setEditForm(prev => ({ ...prev, password: e.target.value }))}
                                                 className="w-full pl-3 pr-10 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-                                                placeholder="••••••••••••"
+                                                placeholder={isLoadingPassword ? 'Đang nạp mật khẩu...' : '••••••••••••'}
                                             />
                                             <button
                                                 type="button"
@@ -545,7 +641,7 @@ export const HierarchyManagerPage: React.FC = () => {
                                             </button>
                                         </div>
                                         <p className="text-[10px] text-slate-400 mt-1">
-                                            Mật khẩu sẽ được mã hóa đối xứng 32-byte Fernet trước khi lưu vào Supabase.
+                                            Mật khẩu được lưu trữ an toàn bằng mã hóa đối xứng 32-byte Fernet.
                                         </p>
                                     </div>
                                 </div>

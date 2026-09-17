@@ -20,6 +20,7 @@ from app.services.excel.cof_service import COFService
 from pydantic import BaseModel
 from app.services.workspace.user_service import WorkspaceUserService
 from app.services.workspace_lineage_service import WorkspaceLineageService
+from app.core.supabase import get_supabase_client
 
 
 router = APIRouter()
@@ -552,3 +553,19 @@ async def get_user_search_and_detail(payload: UserSearchRequest):
     except Exception as e:
         logger.error(f"❌ [UserDetailAPI] Lỗi tra cứu người dùng: {e}")
         return {"success": False, "message": str(e)}
+
+@router.get("/organizations/{org_id}/vault-password")
+async def get_org_vault_password(org_id: str):
+    """Giải mã mật khẩu Fernet Vault trả về cho Quản trị viên xem."""
+    db = get_supabase_client()
+    try:
+        resp = db.table("workspace_credentials_vault").select("encrypted_password").eq("org_id", org_id).execute()
+        if not resp.data or not resp.data[0].get("encrypted_password"):
+            return {"password": ""}
+        
+        enc_pass = resp.data[0]["encrypted_password"]
+        decrypted = WorkspaceLineageService.decrypt_password(enc_pass)
+        return {"password": decrypted}
+    except Exception as e:
+        logger.error(f"Lỗi giải mã mật khẩu két sắt cho org {org_id}: {e}")
+        return {"password": ""}

@@ -1308,6 +1308,7 @@ export const AutomationStudioPage: React.FC = () => {
       const res = await fetchApi<any>('/workspace/users/search-and-detail', {
         method: 'POST',
         body: JSON.stringify({ identifier: cleanIdentifier }),
+        timeoutMs: 90000,
       });
 
       if (!res?.success || !res?.detail) {
