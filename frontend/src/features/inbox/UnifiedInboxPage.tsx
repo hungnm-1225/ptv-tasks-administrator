@@ -594,7 +594,7 @@ export const UnifiedInboxPage: React.FC = () => {
   };
 
   const handleConfirmAndRun = async () => {
-    if (!activeWorkflow) return;
+    if (!activeWorkflow || isConfirmingRun) return;
     setIsConfirmingRun(true);
 
     try {
