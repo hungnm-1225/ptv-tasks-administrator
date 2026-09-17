@@ -34,8 +34,11 @@ class WorkspaceUserService(WorkspaceBaseService):
                 page = await context.new_page()
                 try:
                     await page.goto("https://pythaverse.space/admin-workspace/login", wait_until="domcontentloaded", timeout=25000)
-                    await cls.login_role(page, admin_user, admin_pass, role_title="Admin")
                     
+                    base_service = WorkspaceBaseService()
+                    await base_service.login_role(page, admin_user, admin_pass, role_title="Admin")
+                    
+                    # Lấy Cookies phiên làm việc sau khi đăng nhập thành công
                     cookies_list = await context.cookies()
                     cookies = {c["name"]: c["value"] for c in cookies_list}
                     logger.info("🔑 [WorkspaceUser] Bốc Cookie Admin thành công!")
