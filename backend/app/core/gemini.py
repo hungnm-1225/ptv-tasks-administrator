@@ -253,153 +253,134 @@ class AIEngine:
     ) -> VerifiedIntentAssessment:
         sender_clean = (sender_email or "").lower().strip()
 
-        # 1. BỘ LỌC EMAIL TỰ ĐỘNG
+        # 1. Lọc email hệ thống tự động
         if any(sender_clean.startswith(prefix) for prefix in AUTOMATED_SENDER_PREFIXES):
             return IntentAssessment(
                 outcome="no_action",
                 model_name="fast_path_system_filter",
-                prompt_version="fast_path_v1.0",
+                prompt_version="v4.0_structured",
                 intents=[], entities={}, extracted_entities=[], missing_requirements=[],
-                warnings=["Email thông báo tự động từ hệ thống. Chuyển sang NO_ACTION."],
+                warnings=["Email thông báo tự động từ hệ thống."],
                 raw_evidence_quotes=[]
             )
 
-        # 2. PHÂN TÍCH VÒNG ĐỜI HỘI THOẠI BẰNG THREAD SERVICE MỚI
+        # 2. Phân tích thread
         parsed_thread = thread_service.parse_thread(raw_content, sender_email)
-
         if parsed_thread.lifecycle_state == "WAITING_CUSTOMER_INFO":
             return IntentAssessment(
                 outcome="no_action",
                 model_name="thread_state_machine",
-                prompt_version="v2.0",
+                prompt_version="v4.0_structured",
                 intents=[], entities={}, extracted_entities=[], missing_requirements=[],
-                warnings=["Email mới nhất do kỹ sư nội bộ phản hồi. Hệ thống tạm dừng chờ khách hàng cung cấp thêm thông tin."],
+                warnings=["Email mới nhất do kỹ sư nội bộ phản hồi. Tạm dừng chờ khách hàng."],
                 raw_evidence_quotes=[]
             )
 
         full_content = parsed_thread.compact_prompt_context if parsed_thread.is_thread else (raw_content[:20000] if raw_content else "(Trống)")
-        excel_info_str = json.dumps(excel_summary, ensure_ascii=False, indent=2) if excel_summary else "Không có file Excel đính kèm."
-        summary_guide = f"\n[BẢN TÓM TẮT TIẾN TRÌNH & ĐỀ XUẤT HIỆN TẠI]:\n{ai_summary}\n" if ai_summary else ""
 
-        prompt = (
-            f"Bạn là chuyên gia phân tích và trích xuất sự thật vận hành cho hệ sinh thái Pythaverse.\n"
-            f"Tiêu đề: {subject}\n"
-            f"Nguồn: {source}\n"
-            f"{summary_guide}"
-            f"Nội dung email/tiến trình hội thoại chi tiết:\n{full_content}\n\n"
-            "NGUYÊN TẮC BÓC TÁCH NGHIÊM NGẶT (EVIDENCE-BASED & ZERO-MOCKUP):\n"
-            "1. Bám sát vào lượt phản hồi mới nhất để xác định công việc CÒN TỒN ĐỌNG CẦN LÀM HIỆN TẠI.\n"
-            "2. Nếu tài khoản đã được tạo ở lượt trước, TUYỆT ĐỐI KHÔNG trích xuất intent 'create_accounts'.\n"
-            "3. Nếu có yêu cầu sửa/đính chính thông tin trường học hoặc người dùng, hãy trích xuất intent 'update_user_profile'.\n"
-            "4. Mọi bằng chứng (quote) BẮT BUỘC PHẢI LÀ ĐOẠN TRÍCH NGUYÊN VĂN có mặt trong nội dung văn bản ở trên.\n"
-            "5. ĐỊNH DẠNG JSON ĐẦU RA BẮT BUỘC:\n"
-            "   - 'outcome': CHỈ ĐƯỢC CHỌN 1 TRONG 3 GIÁ TRỊ: 'candidate_action', 'needs_information', hoặc 'no_action'. TUYỆT ĐỐI KHÔNG viết câu giải thích vào outcome!\n"
-            "   - 'intents': Danh sách các ý định [{type, confidence, evidence: [{quote}]}]\n"
-            "   - 'entities': {school_name, courses, users}\n"
-        )
+        # 🎯 PROMPT MỚI: BẮT GEMINI LÀM ĐÚNG VAI TRÒ SUY LUẬN NGỮ NGHĨA (KHÔNG DÙNG REGEX ĐOÁN MÒ NỮA)
+        prompt = f"""Bạn là Senior Automation Architect cho Pythaverse. Hãy đọc toàn bộ ngữ cảnh và lịch sử hội thoại dưới đây để trích xuất sự thật vận hành chính xác:
+
+TIÊU ĐỀ: {subject}
+NGƯỜI GỬI EMAIL: {sender_email}
+TIẾN TRÌNH & NỘI DUNG HỘI THOẠI:
+{full_content}
+
+HÃY SUY LUẬN VÀ TRẢ VỀ JSON CÓ CẤU TRÚC CHÍNH XÁC THEO SCHEMA SAU:
+{{
+  "outcome": "candidate_action", // "candidate_action" nếu có việc cần làm, "needs_information" nếu thiếu dữ liệu, "no_action" nếu chỉ là trao đổi
+  "target_school_name": "Tên trường học chính xác mà khách hàng yêu cầu áp dụng (nếu có đính chính, lấy tên trường mới nhất, gọt sạch chữ thừa như School Name:, chỉ để lại tên trường chuẩn)",
+  "beneficiary_users": [
+    // Danh sách những người THẬT SỰ được thụ hưởng (được tạo tk, sửa trường, hoặc vào lớp).
+    // NẾU NGƯỜI GỬI ({sender_email}) CHỈ LÀ NGƯỜI ĐẠI DIỆN GỬI THAY CHO DANH SÁCH GIÁO VIÊN/HỌC SINH THÌ TUYỆT ĐỐI KHÔNG ĐƯA NGƯỜI GỬI VÀO MẢNG NÀY!
+    {{ "name": "Họ và tên", "email": "email", "role": "teacher hoặc student" }}
+  ],
+  "already_completed_actions": [
+    // Những việc đã được nhân viên hoàn thành ở các lượt trước (ví dụ nếu nhân viên đã gửi login/credentials thì điền "create_accounts")
+  ],
+  "actionable_intents": [
+    // Những việc CÒN TỒN ĐỌNG CẦN LÀM BÂY GIỜ (chọn trong: "update_user_profile", "course_access", "create_accounts", "reset_password")
+    {{
+      "type": "tên intent",
+      "confidence": 0.95,
+      "evidence_quote": "Trích dẫn nguyên văn câu tiếng Anh/Việt trong hội thoại yêu cầu việc này"
+    }}
+  ],
+  "courses": ["Tên các khóa học được yêu cầu (ví dụ SWRP 11)"]
+}}
+"""
 
         parsed_data, used_model = self._call_gemini_with_fallback(prompt, primary_key=self.api_key_facts)
 
-        # 3. NGUYÊN TẮC FAIL-CLOSED: KHÔNG BỊA DỮ LIỆU KHI AI LỖI
         if not parsed_data or not isinstance(parsed_data, dict):
-            logger.warning("⚠️ [Gemini Facts] Không thể phân tích cấu trúc dữ liệu từ AI. Kích hoạt Fail-Closed an toàn.")
+            logger.warning("⚠️ Không thể phân tích cấu trúc từ AI.")
             return IntentAssessment(
                 outcome="needs_information",
                 model_name=used_model or "ai_extraction_failed",
-                prompt_version="error_fallback",
+                prompt_version="v4.0_structured",
                 intents=[], entities={}, extracted_entities=[],
-                missing_requirements=[{
-                    "field": "ai_analysis",
-                    "message": "Không thể bóc tách sự thật vận hành từ nội dung yêu cầu do sự cố kết nối AI hoặc hạn ngạch API. Quản trị viên cần kiểm tra thủ công."
-                }],
-                warnings=["Hệ thống kích hoạt van an toàn: Không thể tự động phân tích yêu cầu này."],
+                missing_requirements=[{"field": "ai_analysis", "message": "Không thể phân tích yêu cầu từ AI."}],
+                warnings=["Hệ thống kích hoạt van an toàn."],
                 raw_evidence_quotes=[]
             )
 
-        # 4. CHUẨN HÓA VÀ BẢO VỆ SCHEMA PYDANTIC CHO OUTCOME
-        raw_outcome_str = str(parsed_data.get("outcome", "candidate_action")).lower().strip()
-        if any(k in raw_outcome_str for k in ["no_action", "không cần", "thông báo"]):
-            final_outcome = "no_action"
-        elif any(k in raw_outcome_str for k in ["needs_information", "needs_info", "thiếu", "bổ sung"]):
-            final_outcome = "needs_information"
-        else:
-            final_outcome = "candidate_action"
+        # 3. Chuẩn hóa Outcome
+        raw_outcome = str(parsed_data.get("outcome", "candidate_action")).lower().strip()
+        final_outcome = "no_action" if "no_action" in raw_outcome else ("needs_information" if "needs_info" in raw_outcome else "candidate_action")
 
-        raw_intents = parsed_data.get("intents", [])
-        if not isinstance(raw_intents, list):
-            raw_intents = []
-
+        # 4. Trích xuất Actionable Intents (Đã được Gemini lọc bỏ việc cũ)
         structured_intents: List[ExtractedIntent] = []
         raw_evidence_quotes: List[str] = []
 
-        for item in raw_intents:
+        for item in parsed_data.get("actionable_intents", []):
             if not isinstance(item, dict):
                 continue
+            quote_str = str(item.get("evidence_quote") or "").strip()
             ev_list = []
-            for ev in item.get("evidence", []):
-                quote_str = ev.get("quote", "").strip() if isinstance(ev, dict) else str(ev).strip()
-                start_off = ev.get("start_offset", -1) if isinstance(ev, dict) else -1
-                end_off = ev.get("end_offset", -1) if isinstance(ev, dict) else -1
-                src_kind = ev.get("source_kind", "ticket_body") if isinstance(ev, dict) else "ticket_body"
-
-                if quote_str:
-                    ev_list.append(EvidenceSpan(
-                        source_revision_id=source_revision_id,
-                        quote=quote_str,
-                        start_offset=start_off,
-                        end_offset=end_off,
-                        source_kind=src_kind
-                    ))
-                    raw_evidence_quotes.append(quote_str)
+            if quote_str:
+                ev_list.append(EvidenceSpan(
+                    source_revision_id=source_revision_id,
+                    quote=quote_str,
+                    start_offset=-1,
+                    end_offset=-1,
+                    source_kind="ticket_body"
+                ))
+                raw_evidence_quotes.append(quote_str)
 
             structured_intents.append(ExtractedIntent(
                 type=item.get("type", "unknown"),
-                confidence=float(item.get("confidence", 0.7)),
-                evidence=ev_list,
-                required_entities=item.get("required_entities", [])
+                confidence=float(item.get("confidence", 0.9)),
+                evidence=ev_list
             ))
 
-        # Kiểm tra cờ tài khoản đã tạo từ thread_service
-        accounts_done = parsed_thread.accounts_already_created
+        # 🎯 ENTITIES ĐƯỢC GEMINI TỰ ĐỘNG LÀM SẠCH VÀ PHÂN LOẠI CHUẨN XÁC
+        clean_school = str(parsed_data.get("target_school_name") or "").strip(" '\",.:")
+        clean_users = parsed_data.get("beneficiary_users", [])
+        clean_courses = parsed_data.get("courses", [])
 
-        # Nếu đã tạo xong ở Lượt 2 -> Gạt bỏ hoàn toàn intent và quote create_accounts
-        if accounts_done:
-            structured_intents = [i for i in structured_intents if i.type != "create_accounts"]
-            raw_evidence_quotes = [
-                q for q in raw_evidence_quotes 
-                if not any(k in q.lower() for k in ["creation of accounts", "create accounts"])
-            ]
+        entities_payload = {
+            "school_name": clean_school if clean_school and clean_school.lower() != "none" else None,
+            "users": clean_users if isinstance(clean_users, list) else [],
+            "courses": clean_courses if isinstance(clean_courses, list) else [],
+            "already_completed_actions": parsed_data.get("already_completed_actions", [])
+        }
 
         raw_assessment = IntentAssessment(
             outcome=final_outcome,
             model_name=used_model,
-            prompt_version="v3.1_grounded_thread",
+            prompt_version="v4.0_ai_first",
             intents=structured_intents,
-            entities=parsed_data.get("entities", {}) if isinstance(parsed_data.get("entities"), dict) else {},
+            entities=entities_payload,
             extracted_entities=[],
-            missing_requirements=parsed_data.get("missing_requirements", []) if isinstance(parsed_data.get("missing_requirements"), list) else [],
-            warnings=parsed_data.get("warnings", []) if isinstance(parsed_data.get("warnings"), list) else [],
+            missing_requirements=[],
+            warnings=[],
             raw_evidence_quotes=raw_evidence_quotes
         )
-
-        # Chạy bổ trợ fact tất định từ nội dung gốc
-        raw_assessment = augment_assessment_with_request_facts(
-            raw_assessment, raw_content, source_revision_id, sender_email=sender_email
-        )
-
-        # Đảm bảo chặn sạch 'create_accounts' nếu thread_service đã xác nhận tài khoản đã tạo
-        if accounts_done:
-            raw_assessment.intents = [i for i in raw_assessment.intents if i.type != "create_accounts"]
-            raw_assessment.raw_evidence_quotes = [
-                q for q in raw_assessment.raw_evidence_quotes 
-                if not any(k in q.lower() for k in ["creation of accounts", "create accounts"])
-            ]
 
         return evidence_verifier.verify_intent_assessment(
             assessment=raw_assessment,
             raw_content=raw_content,
             source_revision_id=source_revision_id
         )
-
 
 gemini_engine = AIEngine()
