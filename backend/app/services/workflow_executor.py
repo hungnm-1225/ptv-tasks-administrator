@@ -607,10 +607,11 @@ class WorkflowExecutorService:
             "workspace.partner_grant_license": ("workspace_rpa", "approve_school_order_standalone"),
             "workspace.partner_approve_order": ("workspace_rpa", "approve_school_order_standalone"),
             "workspace.partner_request_contract": ("workspace_rpa", "partner_create_contract"),
+            "workspace.partner_create_contract": ("workspace_rpa", "partner_create_contract"),
             "workspace.distributor_approve_contract": ("workspace_rpa", "approve_partner_contract_standalone"),
             "workspace.admin_approve_contract": ("workspace_rpa", "admin_approve_contract"),
             "workspace.enroll_students": ("workspace_rpa", "enroll_students_pipeline"),
-            "workspace.school_enroll_users": ("workspace_rpa", "enroll_students_pipeline"),
+            "workspace.school_enroll_users": ("workspace_rpa", "school_enroll_users"),
             "workspace.query_distributor_contracts": ("workspace_rpa", "query_distributor_contracts"),
             "workspace.query_partner_orders": ("workspace_rpa", "query_partner_orders"),
 

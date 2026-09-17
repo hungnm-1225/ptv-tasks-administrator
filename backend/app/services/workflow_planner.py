@@ -260,6 +260,46 @@ class WorkflowPlannerService:
             })
         entities: Dict[str, Any] = typed_entities.model_dump() if isinstance(typed_entities, TypedEntities) else {}
 
+        # 🛡️ KIỂM ĐỊNH NGUYÊN TẮC BẤT DI BẤT DỊCH (FAIL-CLOSED INVARIANTS)
+        for intent in assessment.intents:
+            # 1. Bằng chứng nguyên văn (Evidence-Based Fail-Closed Invariant)
+            if not intent.evidence:
+                missing_requirements.append({
+                    "field": "evidence",
+                    "reason": f"Intent '{intent.type}' không có trích dẫn bằng chứng nguyên văn (Fail-Closed Invariant)."
+                })
+            # 2. Thực thể bắt buộc (Required Entities Invariant)
+            if intent.required_entities:
+                for req_ent in intent.required_entities:
+                    ent_val = entities.get(req_ent)
+                    if ent_val is None or ent_val == [] or ent_val == "":
+                        if not any(m.get("field") == req_ent for m in missing_requirements):
+                            missing_requirements.append({
+                                "field": req_ent,
+                                "reason": f"Thiếu thực thể bắt buộc '{req_ent}' cho hành vi '{intent.type}'."
+                            })
+            # 3. Phân quyền Git (Zero-Mockup Invariant)
+            if intent.type == "repository_access":
+                if not entities.get("git_role"):
+                    if not any(m.get("field") == "git_role" for m in missing_requirements):
+                        missing_requirements.append({
+                            "field": "git_role",
+                            "reason": "Thiếu vai trò phân quyền Git (Zero-Mockup Invariant cấm gán mặc định role GUEST)."
+                        })
+                # Kiểm tra repository_url hợp lệ (không đoán mò từ tên)
+                repo_url = entities.get("repository_url")
+                raw_repos = entities.get("repositories", [])
+                has_valid_url = (
+                    (repo_url and isinstance(repo_url, str) and repo_url.startswith("http")) or
+                    (raw_repos and any(isinstance(r, str) and r.startswith("http") for r in raw_repos))
+                )
+                if not has_valid_url:
+                    if not any(m.get("field") == "repository_url" for m in missing_requirements):
+                        missing_requirements.append({
+                            "field": "repository_url",
+                            "reason": "Thiếu đường dẫn kho lưu trữ Git hợp lệ (repository_url). Zero Guessing Invariant cấm suy đoán URL từ tên repo."
+                        })
+
         raw_users = entities.get("users", [])
         if not isinstance(raw_users, list):
             raw_users = []
