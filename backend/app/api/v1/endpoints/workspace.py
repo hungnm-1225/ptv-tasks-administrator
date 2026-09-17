@@ -17,7 +17,9 @@ from app.services.workspace.workspace_scanner_service import workspace_scanner_s
 from app.services.keycloak_service import keycloak_service
 from app.services.excel.cof_service import COFService
 from app.services.workspace_lineage_service import WorkspaceLineageService
-from app.core.supabase import get_supabase_client
+from datetime import datetime, timezone
+from typing import Optional
+from fastapi import HTTPException
 
 
 router = APIRouter()
@@ -68,14 +70,6 @@ class UserSearchRequest(BaseModel):
 class ExtractCOFRequest(BaseModel):
     cof_text: Optional[str] = None
     file_path: Optional[str] = None
-
-
-class UpdateOrganizationPayload(BaseModel):
-    name: Optional[str] = None
-    code: Optional[str] = None
-    parent_id: Optional[str] = None
-    username: Optional[str] = None
-    password: Optional[str] = None
 
 # 🎯 NÂNG CẤP API CẬP NHẬT TỔ CHỨC: LƯU COUNTRY & GOOGLE DRIVE
 class OrgUpdateRequest(BaseModel):
@@ -397,143 +391,93 @@ def _infer_country_from_org(org_name: str, org_code: str, dist_name: str) -> str
         return "Vietnam"
     return "Unknown"
 
+# 🎯 1. API LẤY DANH SÁCH PHẢ HỆ (ĐỌC TRỰC TIẾP TỪ CSDL, CÓ KẾ THỪA COUNTRY & DRIVE)
 @router.get("/hierarchy-manage")
-async def get_hierarchy_management_data():
-    """Lấy dữ liệu phả hệ chuẩn theo schema Supabase (Đã loại bỏ cột country không tồn tại)."""
-    supabase = get_supabase_client()
+async def get_hierarchy_manage():
+    """Lấy danh sách phả hệ 3 cấp kèm quốc gia và thư mục Google Drive thật từ CSDL."""
+    db = get_supabase_client()
     try:
-        # 1. Chỉ query các cột thực sự tồn tại trong CSDL
-        orgs_res = supabase.table("workspace_organizations")\
-            .select("id, code, name, role_type, parent_id")\
-            .order("role_type")\
-            .order("name")\
-            .execute()
+        # Lấy toàn bộ tổ chức (có cả cột country và drive_folder_url)
+        orgs_res = db.table("workspace_organizations").select(
+            "id, name, code, role_type, parent_id, country, country_code, drive_folder_url, drive_folder_id, created_at"
+        ).order("name").execute()
         all_orgs = orgs_res.data or []
-        
-        # 2. Lấy credentials vault
-        vault_res = supabase.table("workspace_credentials_vault")\
-            .select("org_id, username, updated_at")\
-            .execute()
-        vault_map = {v["org_id"]: v for v in (vault_res.data or [])}
-        
-        org_map = {o["id"]: o for o in all_orgs}
-        distributors = [o for o in all_orgs if o.get("role_type") == "distributor"]
-        partners = [o for o in all_orgs if o.get("role_type") == "partner"]
-        
-        enriched_orgs = []
-        for o in all_orgs:
-            parent_id = o.get("parent_id")
-            parent = org_map.get(parent_id, {})
+
+        # Lấy thông tin Két Sắt để hiển thị trạng thái Vault
+        vault_res = db.table("workspace_credentials_vault").select("org_id, username, encrypted_password, updated_at").execute()
+        vault_map = {v["org_id"]: v for v in (vault_res.data or []) if v.get("org_id")}
+
+        org_dict = {o["id"]: o for o in all_orgs}
+        result_orgs = []
+
+        for org in all_orgs:
+            o_id = org["id"]
+            role = org.get("role_type")
+            parent_id = org.get("parent_id")
             
-            # Phân giải Distributor gốc
-            dist_id = parent.get("parent_id") if o.get("role_type") == "school" else (parent_id if o.get("role_type") == "partner" else None)
-            distributor = org_map.get(dist_id, {}) if dist_id else (parent if o.get("role_type") == "partner" else None)
-            
-            v_info = vault_map.get(o["id"], {})
-            
-            org_name = o.get("name") or "Chưa đặt tên"
-            org_code = o.get("code") or "N/A"
-            dist_name = distributor.get("name") if distributor else "N/A"
-            
-            # Nhận diện quốc gia không phụ thuộc cột CSDL
-            country_inferred = _infer_country_from_org(org_name, org_code, dist_name)
-            
-            enriched_orgs.append({
-                "id": o["id"],
-                "code": org_code,
-                "name": org_name,
-                "role_type": o.get("role_type") or "school",
+            parent = org_dict.get(parent_id) if parent_id else None
+            distributor = None
+
+            if role == "distributor":
+                distributor = org
+            elif role == "partner":
+                distributor = parent
+            elif role == "school":
+                if parent:
+                    distributor = org_dict.get(parent.get("parent_id"))
+
+            # 🎯 KẾ THỪA QUỐC GIA: School -> Partner -> Distributor -> Mặc định Vietnam
+            resolved_country = (
+                org.get("country") or 
+                (parent.get("country") if parent else None) or 
+                (distributor.get("country") if distributor else None) or 
+                "Vietnam"
+            )
+
+            # 🎯 KẾ THỪA GOOGLE DRIVE LINK CHO CÁC ĐƠN VỊ CẤP DƯỚI
+            resolved_drive_url = (
+                org.get("drive_folder_url") or 
+                (distributor.get("drive_folder_url") if distributor else None) or 
+                ""
+            )
+
+            v_info = vault_map.get(o_id)
+            has_vault = bool(v_info and v_info.get("encrypted_password"))
+            username = v_info.get("username") if v_info else ""
+
+            result_orgs.append({
+                "id": o_id,
+                "code": org.get("code") or "N/A",
+                "name": org.get("name") or "",
+                "role_type": role,
                 "parent_id": parent_id,
-                "parent_name": parent.get("name") or "Trực tiếp (Không qua đối tác)",
-                "parent_code": parent.get("code") or "N/A",
-                "distributor_id": dist_id,
-                "distributor_name": dist_name,
-                "country": country_inferred,
-                "username": v_info.get("username") or "",
-                "has_vault_pass": bool(v_info.get("username")),
-                "vault_updated_at": v_info.get("updated_at")
+                "parent_name": parent.get("name") if parent else ("Đơn vị Master" if role == "distributor" else "Trực tiếp"),
+                "parent_code": parent.get("code") if parent else "",
+                "distributor_id": distributor.get("id") if distributor else None,
+                "distributor_name": distributor.get("name") if distributor else ("Chính nó" if role == "distributor" else "N/A"),
+                "country": resolved_country,
+                "country_code": org.get("country_code") or "",
+                "drive_folder_url": resolved_drive_url,
+                "drive_folder_id": org.get("drive_folder_id") or "",
+                "username": username,
+                "has_vault_pass": has_vault,
+                "vault_updated_at": v_info.get("updated_at") if v_info else None
             })
-            
+
+        distributors = [{"id": o["id"], "name": o["name"], "code": o.get("code", "")} for o in all_orgs if o.get("role_type") == "distributor"]
+        partners = [{"id": o["id"], "name": o["name"], "code": o.get("code", ""), "parent_id": o.get("parent_id")} for o in all_orgs if o.get("role_type") == "partner"]
+
         return {
             "status": "success",
-            "total": len(enriched_orgs),
-            "organizations": enriched_orgs,
-            "distributors": [{"id": d["id"], "name": d["name"], "code": d.get("code")} for d in distributors],
-            "partners": [{"id": p["id"], "name": p["name"], "code": p.get("code"), "parent_id": p.get("parent_id")} for p in partners]
+            "total": len(result_orgs),
+            "organizations": result_orgs,
+            "distributors": distributors,
+            "partners": partners
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Lỗi lấy dữ liệu quản trị phả hệ: {e}")
+        logger.error(f"Lỗi lấy dữ liệu hierarchy-manage: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.put("/organizations/{org_id}")
-async def update_organization_and_vault(org_id: str, payload: UpdateOrganizationPayload):
-    """Cập nhật phả hệ và mã hóa Fernet bảo vệ an toàn ràng buộc NOT NULL của CSDL."""
-    supabase = get_supabase_client()
-    
-    check_res = supabase.table("workspace_organizations").select("*").eq("id", org_id).execute()
-    if not check_res.data:
-        raise HTTPException(status_code=404, detail="Không tìm thấy tổ chức yêu cầu.")
-        
-    current_org = check_res.data[0]
-    
-    if payload.parent_id and payload.parent_id == org_id:
-        raise HTTPException(status_code=400, detail="Một đơn vị không thể tự làm cấp cha của chính mình!")
-        
-    update_org_data: Dict[str, Any] = {}
-    if payload.name is not None:
-        update_org_data["name"] = payload.name.strip()
-    if payload.code is not None:
-        update_org_data["code"] = payload.code.strip()
-    if payload.parent_id is not None:
-        update_org_data["parent_id"] = payload.parent_id if payload.parent_id != "" else None
-
-    if update_org_data:
-        supabase.table("workspace_organizations").update(update_org_data).eq("id", org_id).execute()
-
-    vault_updated = False
-    if payload.username is not None or payload.password:
-        vault_check = supabase.table("workspace_credentials_vault").select("id").eq("org_id", org_id).execute()
-        vault_record = vault_check.data[0] if vault_check.data else None
-        
-        encrypted_pass = None
-        if payload.password and payload.password.strip():
-            try:
-                fernet_key = settings.VAULT_SECRET_KEY.encode() if isinstance(settings.VAULT_SECRET_KEY, str) else settings.VAULT_SECRET_KEY
-                f = Fernet(fernet_key)
-                encrypted_pass = f.encrypt(payload.password.strip().encode()).decode()
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Lỗi mã hóa mật khẩu Fernet: {e}")
-
-        now_iso = get_utc_iso()
-        if vault_record:
-            vault_payload: Dict[str, Any] = {"updated_at": now_iso}
-            if payload.username is not None:
-                vault_payload["username"] = payload.username.strip()
-            if encrypted_pass:
-                vault_payload["encrypted_password"] = encrypted_pass
-                
-            supabase.table("workspace_credentials_vault").update(vault_payload).eq("id", vault_record["id"]).execute()
-            vault_updated = True
-        else:
-            # Tuân thủ nghiêm ngặt Schema: Thêm account_role và is_active chống lỗi NOT NULL
-            new_vault = {
-                "org_id": org_id,
-                "account_role": current_org.get("role_type", "school"),
-                "username": (payload.username or "").strip(),
-                "encrypted_password": encrypted_pass or "",
-                "is_active": True,
-                "updated_at": now_iso
-            }
-            supabase.table("workspace_credentials_vault").insert(new_vault).execute()
-            vault_updated = True
-
-    ws_cache.invalidate("all_hierarchy_schools")
-
-    return {
-        "status": "success",
-        "message": f"Đã cập nhật thành công phả hệ của '{payload.name or current_org['name']}'!",
-        "vault_updated": vault_updated
-    }
 
 # ===========================================================================
 # [CẬP NHẬT THÊM] Endpoint Tra Cứu & Bóc Tách Chi Tiết User Admin Workspace
@@ -643,34 +587,154 @@ async def get_workspace_countries():
             {"code": "ID", "name": "Indonesia", "flag_emoji": "🇮🇩"},
             {"code": "PH", "name": "Philippines", "flag_emoji": "🇵🇭"},
         ]
-
 @router.put("/organizations/{org_id}")
-async def update_organization_hierarchy(org_id: str, payload: OrgUpdateRequest):
+async def update_organization_and_vault(org_id: str, payload: OrgUpdateRequest):
+    """
+    Cập nhật toàn diện: Tên, Mã, Cấp cha (Lineage), Quốc gia, Thư mục Google Drive,
+    và tự động mã hóa Fernet cho Két Sắt Vault. Tự động Invalidate RAM Cache 1ms.
+    """
+    supabase = get_supabase_client()
+    
+    # Kiểm tra tồn tại
+    check_res = supabase.table("workspace_organizations").select("*").eq("id", org_id).execute()
+    if not check_res.data:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tổ chức yêu cầu.")
+        
+    current_org = check_res.data[0]
+    
+    if payload.parent_id and payload.parent_id == org_id:
+        raise HTTPException(status_code=400, detail="Một đơn vị không thể tự làm cấp cha của chính mình!")
+
+    # 1. Bóc tách folder_id từ link Google Drive
+    drive_id = None
+    if payload.drive_folder_url:
+        clean_url = payload.drive_folder_url.strip()
+        match = re.search(r'folders/([a-zA-Z0-9-_]+)', clean_url)
+        drive_id = match.group(1) if match else clean_url
+
+    # 2. Tự động ánh xạ country_code chuẩn nếu chưa có
+    country_code = payload.country_code
+    if payload.country and not country_code:
+        c_map = {"Vietnam": "VN", "Malaysia": "MY", "Indonesia": "ID", "Philippines": "PH"}
+        country_code = c_map.get(payload.country, "")
+
+    # 3. Cập nhật bảng workspace_organizations
+    update_org_data: Dict[str, Any] = {
+        "name": payload.name.strip(),
+        "code": payload.code.strip() if payload.code else None,
+        "parent_id": payload.parent_id if (payload.parent_id and payload.parent_id.strip()) else None,
+        "country": payload.country.strip() if (payload.country and payload.country != "Unknown") else "Vietnam",
+        "country_code": country_code,
+        "drive_folder_url": payload.drive_folder_url.strip() if payload.drive_folder_url else None,
+        "drive_folder_id": drive_id,
+    }
+
+    supabase.table("workspace_organizations").update(update_org_data).eq("id", org_id).execute()
+
+    # 4. Cập nhật Két Sắt Fernet Vault nếu có mật khẩu hoặc username
+    vault_updated = False
+    if payload.username is not None or payload.password:
+        vault_check = supabase.table("workspace_credentials_vault").select("id").eq("org_id", org_id).execute()
+        vault_record = vault_check.data[0] if vault_check.data else None
+        
+        encrypted_pass = None
+        if payload.password and payload.password.strip():
+            cipher = get_clean_fernet_cipher()
+            if cipher:
+                encrypted_pass = cipher.encrypt(payload.password.strip().encode()).decode()
+            else:
+                encrypted_pass = payload.password.strip()
+
+        now_iso = get_utc_iso()
+        if vault_record:
+            vault_payload: Dict[str, Any] = {"updated_at": now_iso}
+            if payload.username is not None:
+                vault_payload["username"] = payload.username.strip()
+            if encrypted_pass:
+                vault_payload["encrypted_password"] = encrypted_pass
+                
+            supabase.table("workspace_credentials_vault").update(vault_payload).eq("id", vault_record["id"]).execute()
+            vault_updated = True
+        else:
+            new_vault = {
+                "org_id": org_id,
+                "account_role": current_org.get("role_type", "school"),
+                "username": (payload.username or "").strip(),
+                "encrypted_password": encrypted_pass or "",
+                "is_active": True,
+                "updated_at": now_iso
+            }
+            supabase.table("workspace_credentials_vault").insert(new_vault).execute()
+            vault_updated = True
+
+    # 5. Xóa RAM cache để giao diện tải lại nhận ngay dữ liệu mới
+    ws_cache.invalidate("all_hierarchy_schools")
+
+    logger.info(f"✅ Đã cập nhật thành công tổ chức {org_id} (Country: {update_org_data['country']}, Drive: {drive_id})")
+    return {
+        "status": "success",
+        "message": f"Đã cập nhật thành công phả hệ và cấu hình của '{payload.name or current_org['name']}'!",
+        "vault_updated": vault_updated
+    }
+
     """Cập nhật thông tin phả hệ, quốc gia và thư mục Google Drive."""
     db = get_supabase_client()
     try:
-        # Bóc tách folder ID từ link Drive
-        drive_id = extract_drive_folder_id(payload.drive_folder_url)
+        # Bóc tách folder_id từ link Google Drive
+        drive_id = None
+        if payload.drive_folder_url:
+            clean_url = payload.drive_folder_url.strip()
+            match = re.search(r'folders/([a-zA-Z0-9-_]+)', clean_url)
+            drive_id = match.group(1) if match else clean_url
 
+        # Tự động ánh xạ country_code chuẩn nếu chưa có
+        country_code = payload.country_code
+        if payload.country and not country_code:
+            c_map = {"Vietnam": "VN", "Malaysia": "MY", "Indonesia": "ID", "Philippines": "PH"}
+            country_code = c_map.get(payload.country, "")
+
+        # 1. Cập nhật bảng workspace_organizations
         update_fields = {
             "name": payload.name.strip(),
             "code": payload.code.strip() if payload.code else None,
-            "parent_id": payload.parent_id if payload.parent_id else None,
-            "country": payload.country.strip() if payload.country else None,
-            "country_code": payload.country_code.strip() if payload.country_code else None,
+            "parent_id": payload.parent_id if (payload.parent_id and payload.parent_id.strip()) else None,
+            "country": payload.country.strip() if (payload.country and payload.country != "Unknown") else "Vietnam",
+            "country_code": country_code,
             "drive_folder_url": payload.drive_folder_url.strip() if payload.drive_folder_url else None,
             "drive_folder_id": drive_id,
         }
 
-        # Cập nhật thông tin vào workspace_organizations
         db.table("workspace_organizations").update(update_fields).eq("id", org_id).execute()
 
-        # Nếu có cập nhật tài khoản hoặc mật khẩu -> lưu vào Két Sắt Fernet
-        if payload.username or payload.password:
-            # (Giữ nguyên logic cập nhật workspace_credentials_vault của anh)
-            pass
+        # 2. Cập nhật Két Sắt Fernet Vault nếu có mật khẩu mới hoặc username
+        if payload.password and payload.password.strip():
+            from app.api.v1.endpoints.workspace import get_clean_fernet_cipher
+            cipher = get_clean_fernet_cipher()
+            enc_pass = cipher.encrypt(payload.password.strip().encode()).decode() if cipher else payload.password.strip()
 
+            v_res = db.table("workspace_credentials_vault").select("id").eq("org_id", org_id).execute()
+            if v_res.data:
+                db.table("workspace_credentials_vault").update({
+                    "encrypted_password": enc_pass,
+                    "username": payload.username or "",
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }).eq("org_id", org_id).execute()
+            else:
+                db.table("workspace_credentials_vault").insert({
+                    "org_id": org_id,
+                    "account_role": "distributor",
+                    "username": payload.username or "",
+                    "encrypted_password": enc_pass,
+                    "is_active": True,
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }).execute()
+        elif payload.username:
+            db.table("workspace_credentials_vault").update({
+                "username": payload.username
+            }).eq("org_id", org_id).execute()
+
+        logger.info(f"✅ Đã cập nhật thành công tổ chức {org_id} (Country: {update_fields['country']}, Drive: {drive_id})")
         return {"status": "success", "message": "Đã cập nhật phả hệ và cấu hình thành công!"}
     except Exception as e:
-        logger.error(f"Lỗi cập nhật organization: {e}")
+        logger.error(f"Lỗi cập nhật organization {org_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

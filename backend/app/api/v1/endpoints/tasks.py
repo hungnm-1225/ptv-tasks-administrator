@@ -79,7 +79,6 @@ async def run_approved_task_worker(task_id: str, bot_type: str, payload: dict, t
                         payload["partner_credentials"] = lineage.get("partner", {})
                         payload["distributor_credentials"] = lineage.get("distributor", {})
                         payload["country_info"] = lineage.get("country", {})
-                        log_trail += f"[{get_log_time_str()}] [INFO] [{bot_type}] {tag}: Đã phân giải phả hệ thành công cho trường '{school_ident}'.\n"
                     else:
                         log_trail += f"[{get_log_time_str()}] [WARNING] [{bot_type}] {tag}: Không tìm thấy phả hệ trường '{school_ident}', dùng credentials trong payload.\n"
                 except Exception as lineage_err:

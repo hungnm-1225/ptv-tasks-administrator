@@ -93,16 +93,22 @@ export const HierarchyManagerPage: React.FC = () => {
     // 🎯 Mở modal chỉnh sửa & tự động nạp mật khẩu đã giải mã từ Két Sắt
     const handleOpenEdit = async (org: OrganizationItem) => {
         setEditingOrg(org);
+
+        const safeCountry = (org.country && org.country !== 'Unknown')
+            ? org.country
+            : (countriesList[0]?.name || 'Vietnam');
+
         setEditForm({
             name: org.name,
             code: org.code === 'N/A' ? '' : org.code,
             parent_id: org.parent_id || '',
             username: org.username || '',
             password: '',
-            country: org.country || '',
+            country: safeCountry, // 👈 Không bao giờ bị dính "Unknown" nữa!
             drive_folder_url: org.drive_folder_url || ''
         });
         setShowPassword(false);
+
 
         // Nếu tổ chức này đã có mật khẩu trong Vault -> Tự động kéo mật khẩu đã giải mã về
         if (org.has_vault_pass) {
@@ -534,7 +540,7 @@ export const HierarchyManagerPage: React.FC = () => {
                                         placeholder="VD: 10266, PRT_VN_01..."
                                     />
                                 </div>
-                                {/* CHỌN QUỐC GIA (DROPDOWN CÓ CỜ CHUẨN XÁC) */}
+                                {/* CHỌN QUỐC GIA (KHÔNG BAO GIỜ BỊ UNKNOWN) */}
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                                         Quốc Gia Trực Thuộc <span className="text-rose-500 font-bold">*</span>
@@ -544,7 +550,12 @@ export const HierarchyManagerPage: React.FC = () => {
                                         onChange={(e) => setEditForm(prev => ({ ...prev, country: e.target.value }))}
                                         className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer"
                                     >
-                                        {countriesList.map(c => (
+                                        {(countriesList.length > 0 ? countriesList : [
+                                            { code: 'VN', name: 'Vietnam', flag_emoji: '🇻🇳' },
+                                            { code: 'MY', name: 'Malaysia', flag_emoji: '🇲🇾' },
+                                            { code: 'ID', name: 'Indonesia', flag_emoji: '🇮🇩' },
+                                            { code: 'PH', name: 'Philippines', flag_emoji: '🇵🇭' },
+                                        ]).map(c => (
                                             <option key={c.code} value={c.name}>
                                                 {c.flag_emoji} {c.name}
                                             </option>
