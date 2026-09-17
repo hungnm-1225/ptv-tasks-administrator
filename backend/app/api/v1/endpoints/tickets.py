@@ -228,10 +228,9 @@ async def re_summarize_ticket(ticket_id: str):
 @router.post("/{ticket_id}/re-assess-intent")
 async def re_assess_ticket_intent(ticket_id: str):
     """
-    ĐÁNH GIÁ LẠI TOÀN DIỆN Ý ĐỊNH & TÁI LẬP WORKFLOW PROPOSAL (FORCE RE-PLAN):
-    - Ép buộc trích xuất sự thật vận hành mới nhất (Fast-Path hoặc Gemini).
-    - Không bị kẹt bởi cache cũ của revision.
-    - Sinh mới Workflow Proposal và trả về trực tiếp kết quả.
+    ĐÁNH GIÁ LẠI TOÀN DIỆN Ý ĐỊNH & TÁI LẬP WORKFLOW PROPOSAL (SUMMARY-GUIDED):
+    - Tiêm trực tiếp bản tóm tắt (ai_summary) vào Fact Extraction để trích xuất đúng việc hiện tại.
+    - Tự động bốc bằng chứng mới nhất từ tin nhắn phản hồi của khách hàng.
     """
     supabase = get_supabase_client()
     res = supabase.table("inbox_tickets").select("*").eq("id", ticket_id).execute()
@@ -241,6 +240,7 @@ async def re_assess_ticket_intent(ticket_id: str):
     ticket = res.data[0]
     raw_content = ticket.get("raw_content") or ""
     attachments = ticket.get("attachments") or []
+    ai_summary = ticket.get("ai_summary") or ""
 
     # 1. Lấy hoặc cấp phát revision
     revision_id, rev_no, _ = create_or_get_ticket_revision(
@@ -255,13 +255,14 @@ async def re_assess_ticket_intent(ticket_id: str):
 
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    # 2. BẮT BUỘC TRÍCH XUẤT LẠI SỰ THẬT MỚI (BẢN VÁ FAST-PATH V1.2.0)
+    # 2. TRÍCH XUẤT SỰ THẬT MỚI (BÁM SÁT THEO BẢN TÓM TẮT & ĐỀ XUẤT HIỆN TẠI)
     facts_res = gemini_engine.extract_operational_facts(
         subject=ticket.get("subject", ""),
         raw_content=raw_content,
         source=ticket.get("source", "gmail"),
         source_revision_id=revision_id,
-        sender_email=ticket.get("sender_email")
+        sender_email=ticket.get("sender_email"),
+        ai_summary=ai_summary  # 🎯 TRUYỀN TÓM TẮT VÀO ĐÂY!
     )
 
     # 3. GHI NHẬN BẢN ĐÁNH GIÁ MỚI VÀO ticket_ai_assessments
@@ -270,9 +271,9 @@ async def re_assess_ticket_intent(ticket_id: str):
         ins_res = supabase.table("ticket_ai_assessments").insert({
             "ticket_revision_id": revision_id,
             "assessment_kind": "fact_extraction",
-            "model_name": facts_res.model_name or "fast_path",
+            "model_name": facts_res.model_name or "summary_guided_engine",
             "prompt_version": facts_res.prompt_version,
-            "registry_version": "v1.2.0",
+            "registry_version": "v1.3.0",
             "structured_result": facts_res.model_dump(),
             "status": "failed" if facts_res.model_name == "ai_analysis_failed" else "completed",
             "created_at": now_iso
@@ -282,7 +283,7 @@ async def re_assess_ticket_intent(ticket_id: str):
     except Exception as assess_err:
         print(f"⚠️ Lỗi ghi nhận ticket_ai_assessments: {assess_err}")
 
-    # 4. KÍCH HOẠT LẬP KẾ HOẠCH WORKFLOW PROPOSAL MỚI NGAY LẬP TỨC
+    # 4. KÍCH HOẠT LẬP KẾ HOẠCH WORKFLOW PROPOSAL MỚI
     new_workflow = await workflow_planner_service.plan_workflow_for_ticket(
         ticket_id=ticket_id,
         revision_id=revision_id
@@ -293,7 +294,7 @@ async def re_assess_ticket_intent(ticket_id: str):
         existing_meta = ticket.get("metadata") or {}
         if not isinstance(existing_meta, dict):
             existing_meta = {}
-        existing_meta["workflow_outcome"] = "ACTIONABLE" if facts_res.outcome in ["actionable", "ready"] else "NEEDS_INFORMATION"
+        existing_meta["workflow_outcome"] = "ACTIONABLE" if facts_res.outcome in ["actionable", "ready", "candidate_action"] else "NEEDS_INFORMATION"
         existing_meta["evidence_quotes"] = facts_res.raw_evidence_quotes
         supabase.table("inbox_tickets").update({
             "metadata": existing_meta,
@@ -306,10 +307,9 @@ async def re_assess_ticket_intent(ticket_id: str):
 
     return {
         "status": "success",
-        "message": "✨ Đã đánh giá lại toàn diện ý định và sinh Proposal mới thành công!",
+        "message": "✨ Đã đánh giá lại toàn diện ý định bám theo bản tóm tắt!",
         "workflow": new_workflow
     }
-
 
 @router.post("/{ticket_id}/triage")
 async def force_ai_triage(ticket_id: str):

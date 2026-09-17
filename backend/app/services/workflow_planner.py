@@ -511,7 +511,13 @@ class WorkflowPlannerService:
                         resolved_deps.append(dep)
 
                 if cap_id == "workspace.update_user_profile":
-                    last_update_user_step_id = curr_step_id
+                    step_inputs["school_name"] = active_school_name
+                    step_inputs["school_id"] = active_school_id
+                    step_inputs["partner_id"] = (
+                        resolved_school.metadata.get("parent_id") if resolved_school and resolved_school.metadata 
+                        else operation_context["context"].get("partner_id")
+                    )
+                    step_inputs["user_identifiers"] = user_emails
                 elif cap_id == "workspace.poll_account_batch":
                     last_account_poll_step_id = curr_step_id
 
@@ -633,9 +639,21 @@ class WorkflowPlannerService:
         # 🎯 TỰ ĐỘNG BÓC TÊN TRƯỜNG TỪ BẢN TÓM TẮT NẾU CÓ ĐÍNH CHÍNH
         ai_summary_text = ticket.get("ai_summary") or ""
         corrected_school_name = None
-        school_match = re.search(r"(?:thành|là)\s+([A-Za-z0-9\s]+School[A-Za-z0-9\s]*)", ai_summary_text, re.IGNORECASE)
-        if school_match:
-            corrected_school_name = school_match.group(1).strip()
+
+        # Regex non-greedy: Chặn ngay khi gặp dấu ngoặc đóng ), dấu phẩy, dấu chấm hoặc liên từ "và", "đồng thời"
+        school_patterns = [
+            r"(?:thành|là)\s+([A-Za-z0-9\s\.\-']+?)(?:\)|và|,|\.|\n|đồng thời|$)",
+            r"(?:trường|school)\s+([A-Za-z0-9\s\.\-']+?)(?:\)|và|,|\.|\n|$)"
+        ]
+        for pat in school_patterns:
+            m = re.search(pat, ai_summary_text, re.IGNORECASE)
+            if m:
+                extracted = m.group(1).strip()
+                # Chỉ lấy nếu chuỗi có độ dài hợp lý và chứa từ khóa trường học
+                if len(extracted) > 4 and any(k in extracted.lower() for k in ["school", "lorenzo", "academy", "trường"]):
+                    corrected_school_name = extracted
+                    logger.info(f"🏫 [Planner] Tự động phát hiện tên trường đính chính từ tóm tắt: '{corrected_school_name}'")
+                    break
 
         detected_school_str = (
             corrected_school_name
@@ -644,6 +662,11 @@ class WorkflowPlannerService:
             or ticket.get("school_name")
         )
         best_school, candidates = self.resolve_school_entities(detected_school_str)
+
+        # 🎯 NẾU TÌM THẤY TRƯỜNG: ÉP LUÔN VÀO CONTEXT VÀ ENTITIES ĐỂ BƯỚC 01 KHÔNG BAO GIỜ BỊ (Chưa xác định)
+        if best_school:
+            typed_entities.school_name = best_school.name
+            logger.info(f"✅ [Planner] Tự động khớp và gán cứng trường: '{best_school.name}' (ID: {best_school.id})")
 
         status, steps, missing_reqs, plan_warnings = self.build_workflow_proposal(
             assessment=assessment,
