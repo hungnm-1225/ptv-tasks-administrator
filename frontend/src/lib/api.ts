@@ -22,10 +22,13 @@ export class ApiError extends Error {
   }
 }
 
-export async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
+export interface FetchApiOptions extends RequestInit {
+  timeoutMs?: number;
+}
+
+export async function fetchApi<T>(endpoint: string, options?: FetchApiOptions): Promise<T> {
   const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
 
-  // 1. Tự động trích xuất Supabase JWT Access Token để gắn Authorization Bearer
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options?.headers as Record<string, string>),
@@ -41,9 +44,10 @@ export async function fetchApi<T>(endpoint: string, options?: RequestInit): Prom
     console.warn('[fetchApi] Không thể lấy Supabase session token:', err);
   }
 
-  // 2. Thiết lập AbortController để xử lý timeout chống treo request
+  // 🎯 Sử dụng timeout riêng nếu có (VD: 90s cho cào dữ liệu), nếu không dùng mặc định 30s
+  const timeoutDuration = options?.timeoutMs || DEFAULT_TIMEOUT_MS;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
 
   try {
     const response = await fetch(url, {
@@ -54,7 +58,6 @@ export async function fetchApi<T>(endpoint: string, options?: RequestInit): Prom
 
     clearTimeout(timeoutId);
 
-    // 3. Xử lý phản hồi lỗi chi tiết
     if (!response.ok) {
       let errorMessage = `API Error ${response.status}`;
       let errorDetails: any = null;
@@ -71,7 +74,6 @@ export async function fetchApi<T>(endpoint: string, options?: RequestInit): Prom
       throw new ApiError(errorMessage, response.status, errorDetails);
     }
 
-    // Nếu response rỗng (ví dụ 204 No Content)
     if (response.status === 204) {
       return {} as T;
     }
@@ -80,7 +82,7 @@ export async function fetchApi<T>(endpoint: string, options?: RequestInit): Prom
   } catch (error: any) {
     clearTimeout(timeoutId);
     if (error.name === 'AbortError') {
-      throw new ApiError(`Request timeout sau ${DEFAULT_TIMEOUT_MS / 1000}s tới: ${endpoint}`, 408);
+      throw new ApiError(`Request timeout sau ${timeoutDuration / 1000}s tới: ${endpoint}`, 408);
     }
     throw error;
   }

@@ -5,11 +5,10 @@ from fastapi import APIRouter, Query, HTTPException, BackgroundTasks
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from cryptography.fernet import Fernet
+from app.core.supabase import get_supabase_client
 import os
 import logging
-from pydantic import BaseModel
 from app.services.workspace.user_service import WorkspaceUserService
-from app.core.supabase import get_supabase_client
 from app.core.config import settings, get_utc_iso
 from app.core.cache_policy import BoundedMemoryCache, CacheTier
 from app.services.workspace_lineage_service import workspace_lineage_service
@@ -17,8 +16,6 @@ from app.services.workspace.orchestrator_service import workspace_orchestrator_s
 from app.services.workspace.workspace_scanner_service import workspace_scanner_service
 from app.services.keycloak_service import keycloak_service
 from app.services.excel.cof_service import COFService
-from pydantic import BaseModel
-from app.services.workspace.user_service import WorkspaceUserService
 from app.services.workspace_lineage_service import WorkspaceLineageService
 
 
@@ -26,6 +23,18 @@ router = APIRouter()
 
 # ⚡ IN-MEMORY CACHE CHO PHẢ HỆ 480 TRƯỜNG & KHÓA HỌC WORKSPACE (TIER A CATALOG - 1ms)
 ws_cache = BoundedMemoryCache(tier=CacheTier.TIER_A_CATALOG, max_entries=50, default_ttl=900)
+
+def get_clean_fernet_cipher() -> Fernet | None:
+    """Khử sạch dấu ngoặc kép trên Render để khởi tạo Fernet 32-byte chuẩn xác."""
+    raw_key = os.getenv("VAULT_SECRET_KEY", "")
+    if not raw_key:
+        return None
+    cleaned_key = str(raw_key).strip().strip('"').strip("'")
+    try:
+        return Fernet(cleaned_key.encode() if isinstance(cleaned_key, str) else cleaned_key)
+    except Exception as e:
+        logger.error(f"❌ [Vault] Lỗi khởi tạo Fernet cipher: {e}")
+        return None
 
 def sanitize_env_credential(val: str | None) -> str:
     """Khử sạch dấu ngoặc kép hoặc ngoặc đơn bọc ngoài do Render env sinh ra."""
@@ -552,3 +561,40 @@ async def get_user_search_and_detail(payload: UserSearchRequest):
     except Exception as e:
         logger.error(f"❌ [UserDetailAPI] Lỗi tra cứu người dùng: {e}")
         return {"success": False, "message": str(e)}
+
+@router.get("/organizations/{org_id}/vault-password")
+async def get_org_vault_password(org_id: str):
+    """Giải mã mật khẩu Fernet Vault trả về cho Quản trị viên xem."""
+    db = get_supabase_client()
+    try:
+        # 1. Truy vấn Két sắt theo org_id
+        resp = db.table("workspace_credentials_vault").select("encrypted_password, username").eq("org_id", org_id).execute()
+        
+        # 2. Nếu không thấy theo org_id, truy vấn dự phòng theo username của tổ chức
+        if not resp.data or not resp.data[0].get("encrypted_password"):
+            org_res = db.table("workspace_organizations").select("username").eq("id", org_id).execute()
+            if org_res.data and org_res.data[0].get("username"):
+                u_name = org_res.data[0]["username"]
+                resp = db.table("workspace_credentials_vault").select("encrypted_password").eq("username", u_name).execute()
+
+        if not resp.data or not resp.data[0].get("encrypted_password"):
+            logger.warning(f"⚠️ [Vault] Không tìm thấy bản ghi mật khẩu cho org: {org_id}")
+            return {"password": ""}
+
+        enc_pass = resp.data[0]["encrypted_password"]
+
+        # 3. Nếu mật khẩu là plain text (không bắt đầu bằng gAAAAA), trả về luôn
+        if not enc_pass.startswith("gAAAAA"):
+            return {"password": enc_pass}
+
+        # 4. Giải mã đối xứng bằng Fernet
+        cipher = get_clean_fernet_cipher()
+        if not cipher:
+            return {"password": enc_pass}
+
+        decrypted = cipher.decrypt(enc_pass.encode()).decode("utf-8")
+        logger.info(f"🔓 [Vault] Đã giải mã thành công mật khẩu cho org: {org_id}")
+        return {"password": decrypted}
+    except Exception as e:
+        logger.error(f"❌ [Vault] Lỗi giải mã mật khẩu két sắt cho org {org_id}: {e}")
+        return {"password": ""}

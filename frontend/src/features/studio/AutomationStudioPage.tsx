@@ -273,13 +273,34 @@ export const AutomationStudioPage: React.FC = () => {
   const [editDay, setEditDay] = useState<string>('1');
   const [editMonth, setEditMonth] = useState<string>('1');
   const [editYear, setEditYear] = useState<string>('2012');
-  const [editPartnerId, setEditPartnerId] = useState<string>('');
-  const [editSchoolId, setEditSchoolId] = useState<string>('');
 
-  // Dropdown tìm kiếm trường học thông minh (Searchable School Combobox)
+  // 🎯 QUẢN LÝ TRƯỜNG
+  const [editSchoolCode, setEditSchoolCode] = useState<string>('');
+  const [editSchoolName, setEditSchoolName] = useState<string>('');
   const [schoolSearchQuery, setSchoolSearchQuery] = useState<string>('');
   const [isSchoolComboboxOpen, setIsSchoolComboboxOpen] = useState<boolean>(false);
   const schoolComboboxRef = useRef<HTMLDivElement | null>(null);
+
+  // 🎯 QUẢN LÝ ĐỐI TÁC: HIỂN THỊ CẢ TÊN + MÃ (VD: Partner DTTE test - Mã: 60)
+  const [editPartnerCode, setEditPartnerCode] = useState<string>('');
+  const [editPartnerName, setEditPartnerName] = useState<string>('');
+  const [partnerSearchQuery, setPartnerSearchQuery] = useState<string>('');
+  const [isPartnerComboboxOpen, setIsPartnerComboboxOpen] = useState<boolean>(false);
+  const partnerComboboxRef = useRef<HTMLDivElement | null>(null)
+
+  // Danh sách các Partner duy nhất trích xuất từ 480 trường
+  const uniquePartnersList = useMemo(() => {
+    const pMap = new Map<string, { code: string; name: string }>();
+    schoolsList.forEach((s) => {
+      if (s.partner_code && !pMap.has(s.partner_code)) {
+        pMap.set(s.partner_code, {
+          code: s.partner_code,
+          name: s.partner_name || `Partner #${s.partner_code}`,
+        });
+      }
+    });
+    return Array.from(pMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [schoolsList]);
 
   // Polling theo dõi trạng thái tác vụ vừa kích hoạt từ Studio
   useEffect(() => {
@@ -756,6 +777,9 @@ export const AutomationStudioPage: React.FC = () => {
       }
       if (schoolComboboxRef.current && !schoolComboboxRef.current.contains(event.target as Node)) {
         setIsSchoolComboboxOpen(false);
+      }
+      if (partnerComboboxRef.current && !partnerComboboxRef.current.contains(event.target as Node)) {
+        setIsPartnerComboboxOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -1308,6 +1332,7 @@ export const AutomationStudioPage: React.FC = () => {
       const res = await fetchApi<any>('/workspace/users/search-and-detail', {
         method: 'POST',
         body: JSON.stringify({ identifier: cleanIdentifier }),
+        timeoutMs: 90000, // 90s chống timeout
       });
 
       if (!res?.success || !res?.detail) {
@@ -1318,23 +1343,38 @@ export const AutomationStudioPage: React.FC = () => {
       const d = res.detail;
       const s = res.summary || {};
 
-      // Điền thông tin vào form
       setEditFirstName(d.firstName || '');
       setEditLastName(d.lastname || '');
       setEditEmail(d.inputEmailTeacherEdit || s.user_email || cleanIdentifier);
       setEditDay(String(d.day || '1'));
       setEditMonth(String(d.month || '1'));
       setEditYear(String(d.year || '2012'));
-      setEditSchoolId(String(d.school_id || ''));
-      setEditPartnerId(String(d.partner_id || ''));
 
-      // Tìm tên trường trong 480 trường phả hệ để hiển thị lên input
+      // 🎯 PHÂN GIẢI CHÍNH XÁC THEO MÃ SỐ THẬT (10652) - KHÔNG DÙNG UUID!
+      const rawSchoolId = String(d.school_id || '').trim();
+      const rawPartnerId = String(d.partner_id || '').trim();
+
+      // Tìm trường trong 480 trường khớp mã code hoặc tên
       const matched = schoolsList.find(
-        (sch) => sch.school_id === String(d.school_id) || sch.school_code === String(d.school_id)
+        (sch) =>
+          sch.school_code === rawSchoolId ||
+          sch.school_code.replace(/\D/g, '') === rawSchoolId.replace(/\D/g, '') ||
+          sch.school_name.toLowerCase().includes((d.school_name || '').toLowerCase())
       );
-      setSchoolSearchQuery(matched ? matched.school_name : d.school_name || `Trường #${d.school_id}`);
 
-      // Lưu trữ các metadata gốc (country, city, moodle id...)
+      const finalSchoolCode = matched ? matched.school_code : rawSchoolId;
+      const finalSchoolName = matched ? matched.school_name : (d.school_name || `Trường #${rawSchoolId}`);
+      const finalPartnerCode = matched ? matched.partner_code : rawPartnerId;
+      const finalPartnerName = matched ? matched.partner_name : `Partner #${rawPartnerId}`;
+
+      setEditSchoolCode(finalSchoolCode);
+      setEditSchoolName(finalSchoolName);
+      setSchoolSearchQuery(finalSchoolName);
+
+      setEditPartnerCode(finalPartnerCode);
+      setEditPartnerName(finalPartnerName);
+      setPartnerSearchQuery(finalPartnerName);
+
       setLoadedUserProfile({
         userId: res.user_id,
         userLogin: res.user_login || s.user_login || '',
@@ -1344,7 +1384,7 @@ export const AutomationStudioPage: React.FC = () => {
         userRole: d.user_role || s.user_role || 'student',
       });
 
-      toast.success(`🎉 Đã tải xong hồ sơ: ${d.firstName} ${d.lastname} (#${res.user_id})!`);
+      toast.success(`🎉 Đã nạp hồ sơ: ${d.firstName} ${d.lastname} (#${res.user_id})!`);
     } catch (err) {
       toast.error('Lỗi khi dò tìm thông tin: ' + (err as Error).message);
     } finally {
@@ -1707,13 +1747,13 @@ export const AutomationStudioPage: React.FC = () => {
           toast.error('First Name và Last Name không được để trống!');
           return;
         }
-        if (!editSchoolId) {
+        if (!editSchoolCode) {
           toast.error('Vui lòng chọn Trường học cho người dùng!');
           return;
         }
 
         const matchedSchool = schoolsList.find(
-          (s) => s.school_id === editSchoolId || s.school_code === editSchoolId
+          (s) => s.school_code === editSchoolCode
         );
 
         payload = {
@@ -1729,8 +1769,8 @@ export const AutomationStudioPage: React.FC = () => {
           year: editYear,
           country_id: loadedUserProfile.countryId,
           city_id: loadedUserProfile.cityId,
-          school_id: editSchoolId,
-          partner_id: editPartnerId,
+          school_id: matchedSchool?.school_id || editSchoolCode,
+          partner_id: matchedSchool?.partner_code || editPartnerCode,
           id_user_md: loadedUserProfile.idUserMD,
           user_role: loadedUserProfile.userRole,
         };
@@ -1741,8 +1781,8 @@ export const AutomationStudioPage: React.FC = () => {
         summary.detailsList = [
           `Vai trò: ${loadedUserProfile.userRole === 'student' ? 'Học sinh (Student)' : 'Giáo viên (Teacher)'}`,
           `Ngày sinh mới: ${editDay}/${editMonth}/${editYear}`,
-          `Trường học gán: ${matchedSchool?.school_name || editSchoolId}`,
-          `Đối tác quản lý (Partner ID): ${editPartnerId}`,
+          `Trường học gán: ${matchedSchool?.school_name || editSchoolCode}`,
+          `Đối tác quản lý (Partner ID): ${editPartnerCode}`,
           `Moodle User ID: ${loadedUserProfile.idUserMD || 'Không có'}`,
         ];
       }
@@ -4453,13 +4493,75 @@ export const AutomationStudioPage: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* CỘT PHẢI: BỘ ĐÔI TRƯỜNG - ĐỐI TÁC THÔNG MINH */}
+                    {/* CỘT PHẢI: BỘ ĐÔI COMBOBOX TÌM KIẾM & CHỌN TRƯỜNG - PARTNER */}
                     <div className="space-y-3.5">
-                      {/* Combobox Tìm Trường Tự Nhảy Partner */}
+                      {/* 1. COMBOBOX CHỌN ĐỐI TÁC (PARTNER) - CÓ TÊN & MÃ SỐ */}
+                      <div className="relative" ref={partnerComboboxRef}>
+                        <label className="text-[10px] font-bold uppercase text-slate-500 flex items-center justify-between">
+                          <span>Đối Tác Quản Lý (Partner):</span>
+                          {editPartnerCode && (
+                            <span className="font-mono text-purple-600 font-bold">Mã Partner: {editPartnerCode}</span>
+                          )}
+                        </label>
+
+                        <div className="relative mt-1">
+                          <input
+                            type="text"
+                            value={partnerSearchQuery}
+                            onFocus={() => setIsPartnerComboboxOpen(true)}
+                            onChange={(e) => {
+                              setPartnerSearchQuery(e.target.value);
+                              setIsPartnerComboboxOpen(true);
+                            }}
+                            placeholder="Gõ tìm kiếm đối tác (Partner)..."
+                            className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 px-3.5 py-2 text-xs font-semibold text-slate-900 dark:text-white focus:border-purple-500 focus:outline-hidden pr-8"
+                          />
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-3" />
+                        </div>
+
+                        {/* Danh sách gợi ý Partner */}
+                        {isPartnerComboboxOpen && (
+                          <div className="absolute z-40 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-56 overflow-y-auto p-1.5 space-y-1 animate-in fade-in duration-100">
+                            {uniquePartnersList
+                              .filter((p) => {
+                                const q = partnerSearchQuery.trim().toLowerCase();
+                                if (!q) return true;
+                                return p.name.toLowerCase().includes(q) || p.code.includes(q);
+                              })
+                              .map((p) => (
+                                <button
+                                  key={p.code}
+                                  type="button"
+                                  onClick={() => {
+                                    setEditPartnerCode(p.code);
+                                    setEditPartnerName(p.name);
+                                    setPartnerSearchQuery(p.name);
+                                    setIsPartnerComboboxOpen(false);
+                                    toast.success(`Đã chọn: ${p.name} (Mã: ${p.code})`);
+                                  }}
+                                  className={`w-full text-left p-2.5 rounded-xl text-xs flex items-center justify-between cursor-pointer transition ${editPartnerCode === p.code
+                                    ? 'bg-purple-50 dark:bg-purple-950/60 border border-purple-300 dark:border-purple-700'
+                                    : 'hover:bg-slate-50 dark:hover:bg-slate-800'
+                                    }`}
+                                >
+                                  <div>
+                                    <span className="font-bold text-slate-900 dark:text-white">{p.name}</span>
+                                    <span className="text-[10px] text-slate-400 font-mono ml-2">Mã: {p.code}</span>
+                                  </div>
+                                  {editPartnerCode === p.code && <Check className="w-4 h-4 text-purple-600 shrink-0" />}
+                                </button>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 2. COMBOBOX CHỌN TRƯỜNG HỌC (SCHOOL) - HIỆN MÃ THẬT 10652 */}
                       <div className="relative" ref={schoolComboboxRef}>
                         <label className="text-[10px] font-bold uppercase text-slate-500 flex items-center justify-between">
-                          <span>Trường Học (Tìm & Chọn ➔ Tự Nhảy Partner):</span>
-                          <span className="font-mono text-indigo-600 font-bold">Mã: {editSchoolId || 'Chưa gán'}</span>
+                          <span>Trường Học Thụ Hưởng (School):</span>
+                          {editSchoolCode && (
+                            <span className="font-mono text-indigo-600 font-bold">Mã Trường: {editSchoolCode}</span>
+                          )}
                         </label>
 
                         <div className="relative mt-1">
@@ -4471,15 +4573,15 @@ export const AutomationStudioPage: React.FC = () => {
                               setSchoolSearchQuery(e.target.value);
                               setIsSchoolComboboxOpen(true);
                             }}
-                            placeholder="Gõ tên trường học để tìm kiếm..."
+                            placeholder="Gõ tên trường hoặc mã số trường để chọn..."
                             className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 px-3.5 py-2 text-xs font-semibold text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden pr-8"
                           />
                           <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-3" />
                         </div>
 
-                        {/* Danh sách gợi ý trường học */}
+                        {/* Danh sách gợi ý trường học (Ưu tiên các trường thuộc Partner đang chọn) */}
                         {isSchoolComboboxOpen && (
-                          <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-64 overflow-y-auto p-1.5 space-y-1 animate-in fade-in duration-100">
+                          <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-60 overflow-y-auto p-1.5 space-y-1 animate-in fade-in duration-100">
                             {schoolsList
                               .filter((s) => {
                                 const q = schoolSearchQuery.trim().toLowerCase();
@@ -4491,32 +4593,35 @@ export const AutomationStudioPage: React.FC = () => {
                                 );
                               })
                               .sort((a, b) => {
-                                // 🎯 Ghim các trường thuộc Partner đang chọn lên đầu danh sách!
-                                const aMatch = String(a.partner_code) === String(editPartnerId);
-                                const bMatch = String(b.partner_code) === String(editPartnerId);
+                                const aMatch = String(a.partner_code) === String(editPartnerCode);
+                                const bMatch = String(b.partner_code) === String(editPartnerCode);
                                 if (aMatch && !bMatch) return -1;
                                 if (!aMatch && bMatch) return 1;
                                 return 0;
                               })
                               .slice(0, 30)
                               .map((s) => {
-                                const isCurrentPartner = String(s.partner_code) === String(editPartnerId);
+                                const isCurrentPartner = String(s.partner_code) === String(editPartnerCode);
                                 return (
                                   <button
                                     key={s.school_code}
                                     type="button"
                                     onClick={() => {
-                                      setEditSchoolId(s.school_id || s.school_code);
+                                      // 🎯 GÁN ĐÚNG MÃ THẬT (10652), KHÔNG GÁN UUID!
+                                      setEditSchoolCode(s.school_code);
+                                      setEditSchoolName(s.school_name);
                                       setSchoolSearchQuery(s.school_name);
                                       setIsSchoolComboboxOpen(false);
 
-                                      // 🎯 TỰ ĐỘNG ĐỔI PARTNER THEO TRƯỜNG ĐÃ CHỌN!
-                                      if (s.partner_code && String(s.partner_code) !== String(editPartnerId)) {
-                                        setEditPartnerId(s.partner_code);
-                                        toast.info(`💡 Đã tự động cập nhật Partner: ${s.partner_name} (#${s.partner_code})`);
+                                      // 🎯 TỰ ĐỘNG ĐỔI PARTNER TƯƠNG ỨNG (CẢ TÊN + MÃ)!
+                                      if (s.partner_code) {
+                                        setEditPartnerCode(s.partner_code);
+                                        setEditPartnerName(s.partner_name);
+                                        setPartnerSearchQuery(s.partner_name);
+                                        toast.info(`💡 Đã tự động chọn: ${s.partner_name} (Mã: ${s.partner_code})`);
                                       }
                                     }}
-                                    className={`w-full text-left p-2.5 rounded-xl text-xs flex items-center justify-between cursor-pointer transition ${String(editSchoolId) === String(s.school_id || s.school_code)
+                                    className={`w-full text-left p-2.5 rounded-xl text-xs flex items-center justify-between cursor-pointer transition ${editSchoolCode === s.school_code
                                       ? 'bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-300 dark:border-indigo-700'
                                       : 'hover:bg-slate-50 dark:hover:bg-slate-800'
                                       }`}
@@ -4524,17 +4629,17 @@ export const AutomationStudioPage: React.FC = () => {
                                     <div className="truncate pr-2">
                                       <div className="font-bold text-slate-900 dark:text-white truncate flex items-center gap-1.5">
                                         {isCurrentPartner && (
-                                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-bold">
+                                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 font-bold">
                                             Partner này
                                           </span>
                                         )}
                                         <span>{s.school_name}</span>
                                       </div>
                                       <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-                                        ID: {s.school_id || s.school_code} | Thuộc: {s.partner_name}
+                                        Mã: <b className="text-indigo-600 dark:text-indigo-400">{s.school_code}</b> | Thuộc: {s.partner_name}
                                       </div>
                                     </div>
-                                    {String(editSchoolId) === String(s.school_id || s.school_code) && (
+                                    {editSchoolCode === s.school_code && (
                                       <Check className="w-4 h-4 text-indigo-600 shrink-0" />
                                     )}
                                   </button>
@@ -4544,24 +4649,7 @@ export const AutomationStudioPage: React.FC = () => {
                         )}
                       </div>
 
-                      {/* Dropdown Chọn Đối Tác (Partner) */}
-                      <div>
-                        <label className="text-[10px] font-bold uppercase text-slate-500">
-                          Đối Tác Quản Lý (Partner ID):
-                        </label>
-                        <input
-                          type="text"
-                          value={editPartnerId}
-                          onChange={(e) => setEditPartnerId(e.target.value)}
-                          placeholder="Mã số Partner (VD: 60)"
-                          className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 px-3.5 py-2 font-mono text-xs text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
-                        />
-                        <p className="text-[10px] text-slate-400 mt-1">
-                          Khi anh chọn trường ở trên, mã Partner này sẽ tự động nhảy tương ứng!
-                        </p>
-                      </div>
-
-                      {/* Khối Thông Tin Kỹ Thuật Giữ Nguyên */}
+                      {/* Khối Metadata Kỹ Thuật */}
                       <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 text-[11px] text-slate-500 space-y-1">
                         <p>• Quốc gia ID: <b>{loadedUserProfile.countryId}</b> | Thành phố ID: <b>{loadedUserProfile.cityId}</b> (Bảo toàn)</p>
                         <p>• Moodle User ID: <b>{loadedUserProfile.idUserMD || 'Chưa liên kết LMS'}</b></p>
