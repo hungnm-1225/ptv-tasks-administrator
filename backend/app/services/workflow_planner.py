@@ -1,13 +1,13 @@
 # backend/app/services/workflow_planner.py
 """
-Deterministic Workflow Planner Service (Master Enterprise Edition v1.3.0)
+Deterministic Workflow Planner Service (Summary-Guided Architecture v1.4.0)
 Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI
 Chuyên trách:
-- Bộ lập kế hoạch Workflow tất định từ Tri thức Registry (Policy Registry v1.3.0).
-- Khắc phục triệt để lỗi tra cứu Supabase OR-query và hỗ trợ Ambiguity Resolution (Demo/EN/VN).
-- Hỗ trợ Country-Aware Khóa học: Nhận diện trường Quốc tế (Philippines/Malaysia) ➔ Tự động gán khóa EN (#695) kèm Git Repo.
-- Cho phép Multi-Intent Chaining: Hỗ trợ phối hợp Cập nhật User/Trường học + Ghi danh LMS + Đồng bộ Git Repos.
-- Đồng bộ hóa toàn diện các tính năng của Automation Studio sang Unified Inbox.
+- AI Tóm Tắt Dẫn Đường (Summary-Guided): Dựa trên kết quả tóm tắt tiến trình để biết việc ĐÃ LÀM vs việc CÒN TỒN ĐỌNG.
+- Khử triệt để người gửi (Sender Email) ra khỏi danh sách thụ hưởng nếu người gửi chỉ là người đại diện gửi yêu cầu.
+- Tự động nhận diện và Auto-bind tên trường đính chính từ bản tóm tắt (Zero manual click).
+- Triệt tiêu bước tạo tài khoản trùng lặp nếu tài khoản đã được cấp trong quá khứ; chuyển trọng tâm sang Cập nhật User & Ghi danh.
+- Ghép cặp Course ID và Git Repo chuẩn xác theo quốc gia (Country-aware).
 """
 import os
 import json
@@ -47,17 +47,10 @@ async def download_temp_attachment(url: str) -> Optional[str]:
 
 
 class WorkflowPlannerService:
-    """
-    Bộ lập kế hoạch Workflow tất định thông minh:
-    - Nhận diện mọi kiểu viết tắt (SWRP 7, SWRP 9, SWRP 11) -> Phân giải thành tên đầy đủ & ID chuẩn mực.
-    - Country-aware: Tự động đối soát ngôn ngữ môn học theo quốc gia của trường.
-    - Ghép cặp đa khóa học: Mỗi khóa học tự gắn kèm đúng Git Repo của riêng nó.
-    """
-
     def __init__(self):
         self.capabilities_map: Dict[str, Any] = {}
         self.policy_registry: Dict[str, Any] = {}
-        self.policy_version: str = "v1.3.0"
+        self.policy_version: str = "v1.4.0"
         self.workflow_rules: List[Dict[str, Any]] = []
         self._load_registries()
 
@@ -74,7 +67,7 @@ class WorkflowPlannerService:
             if os.path.exists(policy_file):
                 with open(policy_file, "r", encoding="utf-8") as f:
                     p_data = json.load(f)
-                    self.policy_version = p_data.get("policy_version", "v1.3.0")
+                    self.policy_version = p_data.get("policy_version", "v1.4.0")
                     self.policy_registry = p_data.get("intents", {})
 
             wf_file = os.path.join(BRAIN_DIR, "workflow_rules.json")
@@ -87,7 +80,6 @@ class WorkflowPlannerService:
     def is_capability_executable(self, capability_id: str) -> bool:
         cap = self.capabilities_map.get(capability_id)
         if not cap:
-            # Cho phép các handler mới của Studio chạy nếu có handler ngầm
             return True
         return (cap.get("available") is not False) and (cap.get("supported_by_handler") is not False)
 
@@ -100,11 +92,12 @@ class WorkflowPlannerService:
         q_clean = str(query_name).strip()
         supabase = get_supabase_client()
         try:
-            # Loại bỏ các từ khóa nhiễu để tìm kiếm chính xác
-            search_term = re.sub(r"(?i)\b(school|of|academy|trường|thcs|thpt)\b", "", q_clean).strip()
+            # Lọc các từ khóa chung để tìm theo tên riêng cốt lõi
+            search_term = re.sub(r"(?i)\b(school|of|academy|trường|thcs|thpt|college)\b", "", q_clean).strip()
             if not search_term:
                 search_term = q_clean
 
+            # Tìm kiếm mờ thông minh
             res = supabase.table("workspace_organizations")\
                 .select("id, name, code, role_type, parent_id, country")\
                 .eq("role_type", "school")\
@@ -116,7 +109,7 @@ class WorkflowPlannerService:
             candidates: List[WorkflowEntityCandidate] = []
             for s in schools:
                 s_name = s.get("name", "")
-                conf = 0.98 if s_name.lower() == q_clean.lower() else 0.88 if search_term.lower() in s_name.lower() else 0.65
+                conf = 0.99 if s_name.lower() == q_clean.lower() else 0.88 if search_term.lower() in s_name.lower() else 0.65
                 candidates.append(
                     WorkflowEntityCandidate(
                         id=s.get("id"),
@@ -128,7 +121,7 @@ class WorkflowPlannerService:
                 )
 
             candidates.sort(key=lambda x: x.confidence, reverse=True)
-            best_match = candidates[0] if candidates and candidates[0].confidence >= 0.70 else None
+            best_match = candidates[0] if candidates and candidates[0].confidence >= 0.65 else None
             return best_match, candidates
         except Exception as e:
             logger.warning(f"Lỗi phân giải trường học: {e}")
@@ -141,10 +134,7 @@ class WorkflowPlannerService:
         is_teacher: bool = True,
         country_hint: Optional[str] = None
     ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[int]]:
-        """
-        Phân giải tên viết tắt (SWRP 7, SWRP 9, SWRP 11...) ➔ Bốc đúng Git Repo & Course ID thực tế.
-        Khắc phục 100% lỗi Supabase OR-query và ưu tiên Country (Philippines -> EN #695, VN -> #1528).
-        """
+        """Phân giải tên viết tắt ➔ Bốc đúng Git Repo & Course ID thực tế từ CSDL."""
         if not course_query:
             return None, None, None, None
 
@@ -157,7 +147,6 @@ class WorkflowPlannerService:
 
         def _search_in_table(table_name: str) -> List[Dict[str, Any]]:
             try:
-                # 1. Nếu query có ID số trực tiếp
                 id_search = re.search(r"\b(\d{2,6})\b", clean_q)
                 if id_search:
                     cid = int(id_search.group(1))
@@ -165,18 +154,12 @@ class WorkflowPlannerService:
                     if res_id.data:
                         return res_id.data
 
-                # 2. Tìm theo Regex Prefix + Number mà không dùng .or_() phức tạp dễ crash
                 if match:
                     prefix, num = match.group(1), match.group(2)
-                    res = supabase.table(table_name)\
-                        .select("*")\
-                        .ilike("course_name", f"%{prefix}%{num}%")\
-                        .limit(10)\
-                        .execute()
+                    res = supabase.table(table_name).select("*").ilike("course_name", f"%{prefix}%{num}%").limit(10).execute()
                     if res.data:
                         return res.data
 
-                # 3. Fallback tìm theo tên trực tiếp
                 res_direct = supabase.table(table_name).select("*").ilike("course_name", f"%{clean_q}%").limit(5).execute()
                 return res_direct.data or []
             except Exception as ex:
@@ -187,19 +170,14 @@ class WorkflowPlannerService:
         if not courses:
             return clean_q, None, None, None
 
-        # 🎯 CHỌN KHÓA HỌC THÔNG MINH (COUNTRY-AWARE / EXCLUDE DEMO TRỪ KHI YÊU CẦU)
         is_international = bool(country_hint and any(c in str(country_hint).lower() for c in ["philippines", "ph", "malaysia", "my", "indonesia", "id"]))
-        
         best = courses[0]
-        # Nếu có nhiều kết quả, ưu tiên lọc:
         if len(courses) > 1:
             if is_international:
-                # Ưu tiên bản Tiếng Anh (EN / ORIGINAL)
                 en_course = next((c for c in courses if any(k in c.get("course_name", "").upper() for k in ["(EN)", "[ORIGINAL]", "ENGLISH"])), None)
                 if en_course:
                     best = en_course
             else:
-                # Mặc định tránh bản DEMO trừ khi người dùng ghi rõ DEMO
                 if "demo" not in clean_q.lower():
                     prod_course = next((c for c in courses if "[DEMO]" not in c.get("course_name", "").upper()), None)
                     if prod_course:
@@ -209,10 +187,8 @@ class WorkflowPlannerService:
         course_code = best.get("sku") or ""
         course_id_int = best.get("course_id")
 
-        # 🎯 TRÍCH XUẤT GIT REPOSITORY CHUẨN XÁC TỪ JSON CSDL
         git_repos_list = best.get("git_repos") or []
         resolved_repo = None
-
         if isinstance(git_repos_list, str):
             try:
                 git_repos_list = json.loads(git_repos_list)
@@ -241,7 +217,6 @@ class WorkflowPlannerService:
                         resolved_repo = str(repo_url).strip()
                         break
 
-            # Fallback nếu không có nhãn vai trò
             if not resolved_repo and git_repos_list:
                 first_r = git_repos_list[0]
                 if isinstance(first_r, dict):
@@ -264,7 +239,7 @@ class WorkflowPlannerService:
         return current
 
     # =========================================================================
-    # 🏗️ XÂY DỰNG ĐỀ XUẤT WORKFLOW PROPOSAL (BẢN VÁ AN TOÀN V1.3.0)
+    # 🏗️ XÂY DỰNG WORKFLOW PROPOSAL (SUMMARY-GUIDED & SENDER FILTERING)
     # =========================================================================
     def build_workflow_proposal(
         self,
@@ -272,9 +247,16 @@ class WorkflowPlannerService:
         resolved_school: Optional[WorkflowEntityCandidate],
         candidates: List[WorkflowEntityCandidate],
         attachment_url: Optional[str],
-        cof_extracted_data: Optional[Dict[str, Any]] = None
+        cof_extracted_data: Optional[Dict[str, Any]] = None,
+        ai_summary: Optional[str] = None,
+        sender_email: Optional[str] = None
     ) -> Tuple[str, List[WorkflowStepDraft], List[Dict[str, str]], List[str]]:
-        """Lập đề xuất Workflow: Hỗ trợ Chaining nhiều tác vụ và liên thông Studio."""
+        """
+        Lập đề xuất Workflow bám sát bản tóm tắt tiến trình:
+        - Nhận biết việc đã làm vs việc còn tồn đọng.
+        - Khử người gửi khỏi danh sách thụ hưởng nếu chỉ là người gửi yêu cầu hộ.
+        - Tự động gán trường học đích.
+        """
         steps: List[WorkflowStepDraft] = []
         missing_requirements: List[Dict[str, str]] = list(assessment.missing_requirements)
         warnings: List[str] = list(assessment.warnings)
@@ -290,8 +272,39 @@ class WorkflowPlannerService:
         if not isinstance(raw_users, list):
             raw_users = []
 
-        user_emails = [u.get("email") for u in raw_users if isinstance(u, dict) and u.get("email")]
-        has_teacher = any(isinstance(u, dict) and u.get("role") == "teacher" for u in raw_users) or True  # Thường ticket hỗ trợ GV
+        # ---------------------------------------------------------------------
+        # 🛡️ KHỬ NGƯỜI GỬI (SENDER) KHỎI DANH SÁCH THỤ HƯỞNG NẾU GỬI THAY MẶT
+        # ---------------------------------------------------------------------
+        filtered_users = []
+        summary_str = str(ai_summary or "").lower()
+
+        # Kiểm tra xem có ghi rõ số lượng (ví dụ: "cho 3 giáo viên", "3 tài khoản")
+        count_match = re.search(r"(\d+)\s*(giáo viên|tài khoản|gv|teachers?)", summary_str)
+        expected_count = int(count_match.group(1)) if count_match else None
+
+        for u in raw_users:
+            if not isinstance(u, dict):
+                continue
+            u_email = str(u.get("email") or "").strip().lower()
+            if not u_email:
+                continue
+
+            # Nếu email trùng với người gửi VÀ người gửi dùng email ngoài (@gmail, @yahoo)
+            # trong khi các giáo viên khác dùng email trường (@slspi.edu.ph...)
+            is_sender = bool(sender_email and u_email == sender_email.lower())
+            is_generic_domain = any(dom in u_email for dom in ["@gmail.", "@yahoo.", "@outlook.", "@hotmail."])
+
+            if is_sender and is_generic_domain and (expected_count is None or len(raw_users) > expected_count):
+                logger.info(f"🚫 [Sender Filter] Loại trừ email người gửi '{u_email}' vì gửi thay mặt cho danh sách giáo viên của trường.")
+                continue
+
+            filtered_users.append(u)
+
+        if not filtered_users and raw_users:
+            filtered_users = raw_users
+
+        user_emails = [u.get("email") for u in filtered_users if u.get("email")]
+        has_teacher = any(u.get("role") == "teacher" for u in filtered_users) or True
 
         school_country = resolved_school.metadata.get("country") if resolved_school and resolved_school.metadata else None
         active_school_name = (
@@ -299,6 +312,16 @@ class WorkflowPlannerService:
             else (cof_extracted_data.get("school_name") if cof_extracted_data else entities.get("school_name"))
         )
         active_school_id = resolved_school.id if resolved_school else None
+
+        # ---------------------------------------------------------------------
+        # 🎯 PHÂN TÍCH SUMMARY-GUIDED (XÁC ĐỊNH VIỆC ĐÃ HOÀN THÀNH VS VIỆC CẦN LÀM)
+        # ---------------------------------------------------------------------
+        accounts_already_created = any(k in summary_str for k in [
+            "đã gửi thông tin tài khoản", "đã tạo tài khoản", "đã hoàn thành việc tạo", "credentials sent"
+        ])
+        needs_school_update = any(k in summary_str for k in [
+            "cập nhật lại thông tin trường", "đổi tên trường", "tên trường bị nhầm", "cập nhật thông tin tên trường"
+        ])
 
         # ---------------------------------------------------------------------
         # PHÂN NHÁNH 1: FILE COF CHUẨN 5 BƯỚC
@@ -310,7 +333,7 @@ class WorkflowPlannerService:
         )
 
         if is_real_cof_validated:
-            logger.info("📑 [COF Auto DAG Planner] Xác thực file COF chuẩn! Lập chuỗi 5 bước E2E khép kín...")
+            logger.info("📑 [COF Auto DAG Planner] Xác thực file COF chuẩn! Lập chuỗi 5 bước E2E...")
             course_details_list: List[Dict[str, Any]] = []
             for c_cof in cof_extracted_data["courses"]:
                 c_name, c_code, c_repo, c_id = self.resolve_course_from_db(
@@ -368,32 +391,34 @@ class WorkflowPlannerService:
             return "ready", steps, missing_requirements, warnings
 
         # ---------------------------------------------------------------------
-        # PHÂN NHÁNH 2: TICKET TIẾP NHẬN ĐA NĂNG (MULTI-INTENT CHAINING)
+        # PHÂN NHÁNH 2: TICKET SUMMARY-GUIDED (ĐIỀU HƯỚNG TẬP TRUNG VIỆC TỒN ĐỌNG)
         # ---------------------------------------------------------------------
         valid_intents = [i for i in assessment.intents if i.is_valid]
-        if not valid_intents:
-            return "no_action", [], [], ["Không tìm thấy ý định vận hành nào có đầy đủ bằng chứng xác thực."]
 
-        # Lọc danh sách intent được thực thi theo thứ tự logic nghiệp vụ tự nhiên:
-        # 1. update_user_profile (Sửa thông tin trường/user trước)
-        # 2. create_accounts (Tạo tài khoản nếu có)
-        # 3. course_access / unenrol_course (Ghi danh / rút danh sách)
-        # 4. repository_access / remove_repository_access (Git repo độc lập)
-        # 5. reset_password / verify_email / keycloak_lookup
-        INTENT_ORDER = [
-            "update_user_profile", 
-            "create_accounts", 
-            "course_access", 
-            "unenrol_course", 
-            "repository_access", 
-            "remove_repository_access", 
-            "reset_password", 
-            "verify_email", 
-            "keycloak_lookup"
-        ]
-        sorted_intents = sorted(valid_intents, key=lambda x: INTENT_ORDER.index(x.type) if x.type in INTENT_ORDER else 99)
+        # 🎯 ÁNH XẠ INTENT DỰA TRÊN TÓM TẮT THỰC TẾ:
+        planned_intent_types: List[str] = []
 
-        # Phân giải danh mục khóa học từ text email (Country-aware)
+        # 1. Nếu tóm tắt chỉ ra cần cập nhật trường học / thông tin user
+        if needs_school_update:
+            planned_intent_types.append("update_user_profile")
+
+        # 2. Nếu tài khoản CHƯA TẠO và có yêu cầu tạo tài khoản trong intents
+        if not accounts_already_created and any(i.type == "create_accounts" for i in valid_intents):
+            planned_intent_types.append("create_accounts")
+
+        # 3. Yêu cầu ghi danh khóa học (nếu có trong intents hoặc summary)
+        if any(i.type == "course_access" for i in valid_intents):
+            planned_intent_types.append("course_access")
+
+        # 4. Các intents bổ trợ khác (Keycloak, Unenrol, Git độc lập)
+        for vi in valid_intents:
+            if vi.type not in planned_intent_types and vi.type not in ["create_accounts"]:
+                planned_intent_types.append(vi.type)
+
+        if not planned_intent_types:
+            planned_intent_types = [i.type for i in valid_intents]
+
+        # Phân giải danh mục khóa học (Country-aware)
         canonical_courses: List[str] = []
         course_repo_pairings: Dict[str, str] = {}
         for c_raw in entities.get("courses", []):
@@ -410,7 +435,7 @@ class WorkflowPlannerService:
 
         last_update_user_step_id: Optional[str] = None
         last_account_poll_step_id: Optional[str] = None
-        has_course_enroll = any(i.type == "course_access" for i in sorted_intents)
+        has_course_enroll = "course_access" in planned_intent_types
 
         operation_context: Dict[str, Any] = {
             "resolved_school": resolved_school,
@@ -423,8 +448,8 @@ class WorkflowPlannerService:
                 "school_id": active_school_id,
                 "partner_id": resolved_school.metadata.get("parent_id") if resolved_school and resolved_school.metadata else None,
                 "attachment_url": attachment_url,
-                "total_count": len(raw_users),
-                "users": raw_users,
+                "total_count": len(filtered_users),
+                "users": filtered_users,
                 "user_emails": user_emails,
                 "collaborators": user_emails,
                 "role": "teacher" if has_teacher else "student",
@@ -432,10 +457,7 @@ class WorkflowPlannerService:
             }
         }
 
-        for ext_intent in sorted_intents:
-            intent_type = ext_intent.type
-
-            # Bỏ qua git riêng lẻ nếu lms enroll đã gánh auto-sync git
+        for intent_type in planned_intent_types:
             if intent_type == "repository_access" and has_course_enroll and course_repo_pairings:
                 logger.info("ℹ️ Bỏ qua bước Git riêng lẻ vì LMS Enroll đã tự động kèm cấu hình Git Repos.")
                 continue
@@ -473,14 +495,12 @@ class WorkflowPlannerService:
                     else:
                         step_inputs[in_key] = self._resolve_context_value(in_expr, operation_context)
 
-                # Tự động ghim Git Repos vào bước LMS Direct Enroll
                 if cap_id == "lms.direct_enroll":
                     step_inputs["sync_git_repo"] = True
                     step_inputs["course_repo_pairings"] = course_repo_pairings
                     if course_repo_pairings:
                         step_inputs["attached_git_repos"] = list(course_repo_pairings.values())
 
-                # Giải quyết dependencies linh hoạt
                 resolved_deps: List[str] = []
                 for dep in step_cfg.get("depends_on", []):
                     if dep == "create_accounts_batch_poll_if_exists" and last_account_poll_step_id:
@@ -520,7 +540,7 @@ class WorkflowPlannerService:
         return status, steps, missing_requirements, warnings
 
     def validate_workflow_graph(self, steps: List[WorkflowStepDraft]) -> WorkflowValidationResult:
-        """Kiểm định đồ thị DAG và phát hiện chu trình lặp (Kahn's Algorithm)."""
+        """Kiểm định đồ thị DAG và phát hiện chu trình lặp."""
         errors: List[str] = []
         warnings: List[str] = []
         step_ids = {s.step_id for s in steps}
@@ -609,8 +629,17 @@ class WorkflowPlannerService:
                     logger.warning(f"Không thể parse COF: {cof_err}")
 
         typed_entities = assessment.typed_entities or TypedEntities()
+
+        # 🎯 TỰ ĐỘNG BÓC TÊN TRƯỜNG TỪ BẢN TÓM TẮT NẾU CÓ ĐÍNH CHÍNH
+        ai_summary_text = ticket.get("ai_summary") or ""
+        corrected_school_name = None
+        school_match = re.search(r"(?:thành|là)\s+([A-Za-z0-9\s]+School[A-Za-z0-9\s]*)", ai_summary_text, re.IGNORECASE)
+        if school_match:
+            corrected_school_name = school_match.group(1).strip()
+
         detected_school_str = (
-            (cof_extracted_data.get("school_name") if cof_extracted_data else None) 
+            corrected_school_name
+            or (cof_extracted_data.get("school_name") if cof_extracted_data else None) 
             or typed_entities.school_name 
             or ticket.get("school_name")
         )
@@ -621,7 +650,9 @@ class WorkflowPlannerService:
             resolved_school=best_school,
             candidates=candidates,
             attachment_url=attachment_url,
-            cof_extracted_data=cof_extracted_data
+            cof_extracted_data=cof_extracted_data,
+            ai_summary=ai_summary_text,
+            sender_email=ticket.get("sender_email")
         )
 
         val_result = self.validate_workflow_graph(steps)
@@ -641,7 +672,7 @@ class WorkflowPlannerService:
 
         ai_analysis_dict = {
             "summary": ticket.get("ai_summary"),
-            "reason_summary_vi": f"Registry Policy Engine đã sinh {len(steps)} bước thực thi từ chính sách {self.policy_version}.",
+            "reason_summary_vi": f"Registry Policy Engine đã sinh {len(steps)} bước thực thi từ chính sách {self.policy_version} dựa trên tóm tắt tiến trình.",
             "overall_confidence": 0.95 if status in ["ready", "needs_review"] else 0.85,
             "workflow_outcome": "ACTIONABLE" if status in ["ready", "needs_review"] else "NEEDS_INFORMATION",
             "missing_requirements": missing_reqs,
