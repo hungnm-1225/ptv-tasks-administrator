@@ -22,6 +22,7 @@ interface OrganizationItem {
     username: string;
     has_vault_pass: boolean;
     vault_updated_at: string | null;
+    drive_folder_url: string | null;
 }
 
 interface HierarchyResponse {
@@ -41,6 +42,16 @@ export const HierarchyManagerPage: React.FC = () => {
     const [selectedCountry, setSelectedCountry] = useState<string>('all');
     const [selectedPartnerFilter, setSelectedPartnerFilter] = useState<string>('all');
 
+    const [countriesList, setCountriesList] = useState<Array<{ code: string; name: string; flag_emoji: string }>>([]);
+
+    useEffect(() => {
+        // Tải danh mục quốc gia từ backend
+        fetchApi<any[]>('/workspace/countries')
+            .then(res => { if (res) setCountriesList(res); })
+            .catch(() => { });
+        loadHierarchyData();
+    }, []);
+
     // 🎯 State phân trang Local (Client-side Pagination)
     const [currentPage, setCurrentPage] = useState<number>(1);
     const [pageSize, setPageSize] = useState<number>(20);
@@ -52,7 +63,9 @@ export const HierarchyManagerPage: React.FC = () => {
         code: '',
         parent_id: '',
         username: '',
-        password: ''
+        password: '',
+        country: '',
+        drive_folder_url: ''
     });
     const [showPassword, setShowPassword] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -85,7 +98,9 @@ export const HierarchyManagerPage: React.FC = () => {
             code: org.code === 'N/A' ? '' : org.code,
             parent_id: org.parent_id || '',
             username: org.username || '',
-            password: ''
+            password: '',
+            country: org.country || '',
+            drive_folder_url: org.drive_folder_url || ''
         });
         setShowPassword(false);
 
@@ -180,10 +195,10 @@ export const HierarchyManagerPage: React.FC = () => {
                         </div>
                         <div>
                             <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
-                                Quản Trị Phả Hệ & Két Sắt Trường Học
+                                Quản lý thông tin tài khoản và đơn vị trực thuộc
                             </h1>
                             <p className="text-sm text-slate-500 dark:text-slate-400">
-                                Hiệu chỉnh phân cấp 3 tầng (Distributor ➔ Partner ➔ School), tra cứu mật khẩu Fernet Vault.
+                                Chỉnh sửa thông tin tài khảon phân cấp 3 tầng (Distributor ➔ Partner ➔ School)
                             </p>
                         </div>
                     </div>
@@ -235,7 +250,7 @@ export const HierarchyManagerPage: React.FC = () => {
 
                 <div className="bg-white dark:bg-[#131B2B] p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm">
                     <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Két Sắt Đã Khóa (Vault)</span>
+                        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tài khoản đã có thông tin</span>
                         <div className="p-2 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 rounded-lg">
                             <ShieldCheck className="w-4 h-4" />
                         </div>
@@ -274,20 +289,6 @@ export const HierarchyManagerPage: React.FC = () => {
                         <option value="distributor">Nhà phân phối (Distributor)</option>
                     </select>
                 </div>
-
-                {/* Partner Filter */}
-                {data?.partners && (
-                    <select
-                        value={selectedPartnerFilter}
-                        onChange={(e) => setSelectedPartnerFilter(e.target.value)}
-                        className="px-3 py-2 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700/80 rounded-xl text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 max-w-[200px]"
-                    >
-                        <option value="all">Tất cả đối tác quản lý</option>
-                        {data.partners.map(p => (
-                            <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
-                    </select>
-                )}
             </div>
 
             {/* Main Table */}
@@ -298,8 +299,8 @@ export const HierarchyManagerPage: React.FC = () => {
                             <tr className="border-b border-slate-200/80 dark:border-slate-800 text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50/50 dark:bg-slate-900/30">
                                 <th className="py-3.5 px-4">Tổ Chức / Đơn Vị</th>
                                 <th className="py-3.5 px-4">Cấp Bậc</th>
-                                <th className="py-3.5 px-4">Phả Hệ Cha Con (Lineage)</th>
-                                <th className="py-3.5 px-4">Tài Khoản & Két Sắt</th>
+                                <th className="py-3.5 px-4">Trực thuộc</th>
+                                <th className="py-3.5 px-4">Username / Email</th>
                                 <th className="py-3.5 px-4 text-right">Thao Tác</th>
                             </tr>
                         </thead>
@@ -330,7 +331,7 @@ export const HierarchyManagerPage: React.FC = () => {
                                                     {org.name}
                                                 </div>
                                                 <div className="text-xs text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
-                                                    <span>Mã: {org.code}</span>
+                                                    <span>ID: {org.code}</span>
                                                     <span>•</span>
                                                     <span>{org.country}</span>
                                                 </div>
@@ -375,7 +376,7 @@ export const HierarchyManagerPage: React.FC = () => {
                                                     </div>
                                                 )}
                                                 {org.role_type === 'distributor' && (
-                                                    <span className="text-xs text-slate-400 italic">Đơn vị Master cấp cao nhất</span>
+                                                    <span className="text-xs text-slate-400 italic">Admin</span>
                                                 )}
                                             </td>
 
@@ -386,14 +387,11 @@ export const HierarchyManagerPage: React.FC = () => {
                                                         {org.username || <span className="text-slate-400 italic">Chưa cấu hình</span>}
                                                     </span>
                                                     {org.has_vault_pass ? (
-                                                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-md border border-emerald-200/50 dark:border-emerald-900/50" title="Mật khẩu đã được mã hóa an toàn bằng Fernet">
-                                                            <ShieldCheck className="w-3 h-3" />
-                                                            Vault
-                                                        </span>
+                                                        <></>
                                                     ) : (
                                                         <span className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 px-2 py-0.5 rounded-md border border-rose-200/50 dark:border-rose-900/50" title="Chưa cấu hình mật khẩu trong két sắt">
                                                             <ShieldAlert className="w-3 h-3" />
-                                                            Trống pass
+                                                            Thiếu thông tin
                                                         </span>
                                                     )}
                                                 </div>
@@ -495,11 +493,8 @@ export const HierarchyManagerPage: React.FC = () => {
                                     </div>
                                     <div>
                                         <h3 className="font-bold text-slate-900 dark:text-white">
-                                            Hiệu Chỉnh Phả Hệ & Két Sắt
+                                            Chỉnh sửa thông tin
                                         </h3>
-                                        <p className="text-xs text-slate-400">
-                                            Mã UUID: {editingOrg.id}
-                                        </p>
                                     </div>
                                 </div>
                                 <button
@@ -529,7 +524,7 @@ export const HierarchyManagerPage: React.FC = () => {
                                 {/* Mã code */}
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                                        Mã School / Org Code
+                                        ID
                                     </label>
                                     <input
                                         type="text"
@@ -539,13 +534,48 @@ export const HierarchyManagerPage: React.FC = () => {
                                         placeholder="VD: 10266, PRT_VN_01..."
                                     />
                                 </div>
+                                {/* CHỌN QUỐC GIA (DROPDOWN CÓ CỜ CHUẨN XÁC) */}
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                                        Quốc Gia Trực Thuộc <span className="text-rose-500 font-bold">*</span>
+                                    </label>
+                                    <select
+                                        value={editForm.country}
+                                        onChange={(e) => setEditForm(prev => ({ ...prev, country: e.target.value }))}
+                                        className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer"
+                                    >
+                                        {countriesList.map(c => (
+                                            <option key={c.code} value={c.name}>
+                                                {c.flag_emoji} {c.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                {/* CẤU HÌNH GOOGLE DRIVE FOLDER (ĐẶC QUYỀN CHO DISTRIBUTOR) */}
+                                {editingOrg.role_type === 'distributor' && (
+                                    <div className="p-3.5 bg-indigo-50/50 dark:bg-indigo-950/30 rounded-xl border border-indigo-200/70 dark:border-indigo-900/50 space-y-1.5">
+                                        <label className="block text-xs font-bold text-indigo-900 dark:text-indigo-300 flex items-center gap-1.5">
+                                            <span>📁 Thư Mục Google Drive Của Distributor (Lưu COF/TOF):</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={editForm.drive_folder_url}
+                                            onChange={(e) => setEditForm(prev => ({ ...prev, drive_folder_url: e.target.value }))}
+                                            placeholder="https://drive.google.com/drive/folders/1BxiMVs..."
+                                            className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 rounded-xl text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                                        />
+                                        <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                                            Hệ thống sẽ tự động bóc tách Folder ID để cỗ máy upload file COF/TOF trực tiếp vào đây.
+                                        </p>
+                                    </div>
+                                )}
 
                                 {/* GÁN LẠI ĐƠN VỊ QUẢN LÝ CHA (RE-ASSIGN PARENT) */}
                                 {editingOrg.role_type === 'school' && (
                                     <div>
                                         <label className="block text-xs font-semibold text-indigo-600 dark:text-indigo-400 mb-1 flex items-center justify-between">
-                                            <span>Đơn Vị Quản Lý Cha (Partner)</span>
-                                            <span className="text-[11px] font-normal text-slate-400">Chọn đúng đối tác quản trị</span>
+                                            <span>Đối tác Quản Lý (Partner)</span>
                                         </label>
                                         <select
                                             value={editForm.parent_id}
@@ -587,7 +617,7 @@ export const HierarchyManagerPage: React.FC = () => {
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-white">
                                             <KeyRound className="w-4 h-4 text-emerald-500" />
-                                            <span>Két Sắt Tài Khoản Đăng Nhập (Fernet Vault)</span>
+                                            <span>Thông tin Đăng Nhập</span>
                                         </div>
                                         {isLoadingPassword && (
                                             <span className="text-[10px] text-indigo-500 animate-pulse font-mono">
@@ -598,7 +628,7 @@ export const HierarchyManagerPage: React.FC = () => {
 
                                     <div>
                                         <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                                            Tên đăng nhập (Username Workspace)
+                                            Tên đăng nhập/Email
                                         </label>
                                         <input
                                             type="text"
@@ -612,16 +642,8 @@ export const HierarchyManagerPage: React.FC = () => {
                                     <div>
                                         <div className="flex items-center justify-between mb-1">
                                             <label className="text-[11px] font-semibold text-slate-500">
-                                                Mật khẩu tài khoản (Đã mã hóa Fernet)
+                                                Mật khẩu
                                             </label>
-                                            <button
-                                                type="button"
-                                                onClick={() => setShowPassword(!showPassword)}
-                                                className="text-[11px] text-indigo-600 dark:text-indigo-400 font-semibold hover:underline flex items-center gap-1 cursor-pointer"
-                                            >
-                                                {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                                                <span>{showPassword ? 'Ẩn mật khẩu' : 'Xem mật khẩu'}</span>
-                                            </button>
                                         </div>
 
                                         <div className="relative">
@@ -640,9 +662,6 @@ export const HierarchyManagerPage: React.FC = () => {
                                                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                                             </button>
                                         </div>
-                                        <p className="text-[10px] text-slate-400 mt-1">
-                                            Mật khẩu được lưu trữ an toàn bằng mã hóa đối xứng 32-byte Fernet.
-                                        </p>
                                     </div>
                                 </div>
 
