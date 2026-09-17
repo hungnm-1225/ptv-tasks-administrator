@@ -166,8 +166,8 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
 
             # 1. Lấy tài khoản Sales Admin từ payload hoặc biến môi trường đã khử quote
             admin_creds = payload.get("admin_credentials") or {}
-            raw_user = admin_creds.get("username") or os.getenv("TEST_ADMIN_USER") or os.getenv("WORKSPACE_ADMIN_USER", "")
-            raw_pass = admin_creds.get("password") or os.getenv("TEST_ADMIN_PASS") or os.getenv("WORKSPACE_ADMIN_PASS", "")
+            raw_user = admin_creds.get("username") or os.getenv("TEST_ADMIN_USER")
+            raw_pass = admin_creds.get("password") or os.getenv("TEST_ADMIN_PASS")
 
             # Khử dấu ngoặc kép an toàn
             admin_user = str(raw_user).strip().strip('"').strip("'")

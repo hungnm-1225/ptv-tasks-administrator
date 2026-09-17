@@ -84,8 +84,8 @@ async def execute_approved_bot_task(
                 logger.info(f"👤 {task_tag} Kích hoạt Cập nhật hồ sơ & Đổi trường học cho user(s)...")
                 from app.services.workspace.user_service import WorkspaceUserService
                 
-                admin_user = os.getenv("WORKSPACE_ADMIN_USER") or getattr(settings, "WORKSPACE_ADMIN_USER", "salesadmin@dtt.vn")
-                admin_pass = os.getenv("WORKSPACE_ADMIN_PASS") or getattr(settings, "WORKSPACE_ADMIN_PASS", "")
+                admin_user = os.getenv("TEST_ADMIN_USER")
+                admin_pass = os.getenv("TEST_ADMIN_PASS")
                 
                 admin_user = str(admin_user).strip(" '\"")
                 admin_pass = str(admin_pass).strip(" '\"")
