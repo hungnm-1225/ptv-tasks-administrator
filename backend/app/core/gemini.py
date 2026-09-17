@@ -244,7 +244,7 @@ class AIEngine:
         excel_summary: Optional[Dict[str, Any]] = None,
         source_revision_id: Optional[str] = None,
         sender_email: Optional[str] = None,
-        ai_summary: Optional[str] = None  # 🎯 NHẬN THÊM AI_SUMMARY
+        ai_summary: Optional[str] = None
     ) -> VerifiedIntentAssessment:
         sender_clean = (sender_email or "").lower().strip()
 
@@ -275,7 +275,6 @@ class AIEngine:
         # Đưa Compact Context VÀ Tóm tắt tiến trình vào Prompt
         full_content = parsed_thread.compact_prompt_context if parsed_thread.is_thread else (raw_content[:20000] if raw_content else "(Trống)")
         excel_info_str = json.dumps(excel_summary, ensure_ascii=False, indent=2) if excel_summary else "Không có file Excel đính kèm."
-
         summary_guide = f"\n[BẢN TÓM TẮT TIẾN TRÌNH & ĐỀ XUẤT HIỆN TẠI TỪ HỆ THỐNG]:\n{ai_summary}\n" if ai_summary else ""
 
         prompt = (
@@ -288,14 +287,16 @@ class AIEngine:
             "1. Hãy bám sát vào mục [Đề xuất tổng quan] trong bản tóm tắt trên để xác định công việc CẦN LÀM HIỆN TẠI.\n"
             "2. Nếu tóm tắt cho biết tài khoản đã được tạo/đã gửi, TUYỆT ĐỐI KHÔNG trích xuất intent 'create_accounts' nữa!\n"
             "3. Nếu khách hàng yêu cầu đính chính/sửa tên trường hoặc thông tin user, hãy trích xuất intent 'update_user_profile' và trích xuất câu văn khách hàng phản hồi tên trường bị nhầm làm bằng chứng (quote).\n"
-            "4. Trả về JSON chuẩn với format: outcome, intents (kèm quote chính xác từ văn bản), entities (school_name, courses, users).\n"
+            "4. QUY ĐỊNH BẮT BUỘC VỀ ĐỊNH DẠNG JSON:\n"
+            "   - 'outcome': BẮT BUỘC chỉ được là 1 trong 3 chuỗi: 'candidate_action', 'needs_information', hoặc 'no_action'. TUYỆT ĐỐI KHÔNG viết câu giải thích vào trường outcome!\n"
+            "   - 'intents': Danh sách các ý định cần làm hiện tại kèm quote nguyên văn.\n"
+            "   - 'entities': Gồm school_name, courses, users.\n"
         )
 
         parsed_data, used_model = self._call_gemini_with_fallback(prompt, primary_key=self.api_key_facts)
 
-        # Xử lý fallback an toàn nếu Gemini bị Quota
-        if not parsed_data:
-            # Tự động sinh fact từ bản tóm tắt nếu có
+        # Xử lý fallback an toàn nếu Gemini bị Quota hoặc trả về rỗng
+        if not parsed_data or not isinstance(parsed_data, dict):
             if ai_summary and any(k in ai_summary.lower() for k in ["đổi tên trường", "tên trường bị nhầm", "cập nhật lại thông tin trường"]):
                 logger.info("⚡ [Fallback Fast-Path] Tự động suy luận intent 'update_user_profile' từ bản tóm tắt.")
                 parsed_data = {
@@ -326,11 +327,25 @@ class AIEngine:
                     raw_evidence_quotes=[]
                 )
 
+        # 🎯 CHỐT CHẶN VÀNG: ÉP CHUẨN OUTCOME VỀ ĐÚNG 3 LITERAL CỦA PYDANTIC
+        raw_outcome_str = str(parsed_data.get("outcome", "candidate_action")).lower().strip()
+        if any(k in raw_outcome_str for k in ["no_action", "không cần", "thông báo"]):
+            final_outcome = "no_action"
+        elif any(k in raw_outcome_str for k in ["needs_information", "needs_info", "thiếu", "bổ sung"]):
+            final_outcome = "needs_information"
+        else:
+            final_outcome = "candidate_action"
+
         raw_intents = parsed_data.get("intents", [])
+        if not isinstance(raw_intents, list):
+            raw_intents = []
+
         structured_intents: List[ExtractedIntent] = []
         raw_evidence_quotes: List[str] = []
 
         for item in raw_intents:
+            if not isinstance(item, dict):
+                continue
             ev_list = []
             for ev in item.get("evidence", []):
                 quote_str = ev.get("quote", "").strip() if isinstance(ev, dict) else str(ev).strip()
@@ -364,14 +379,14 @@ class AIEngine:
             raw_evidence_quotes = [q for q in raw_evidence_quotes if "creation of accounts" not in q.lower()]
 
         raw_assessment = IntentAssessment(
-            outcome=parsed_data.get("outcome", "candidate_action"),
+            outcome=final_outcome,  # 🎯 DÙNG FINAL_OUTCOME ĐÃ ĐƯỢC ÉP CHUẨN!
             model_name=used_model,
             prompt_version="v2.1_summary_guided",
             intents=structured_intents,
-            entities=parsed_data.get("entities", {}),
+            entities=parsed_data.get("entities", {}) if isinstance(parsed_data.get("entities"), dict) else {},
             extracted_entities=[],
-            missing_requirements=parsed_data.get("missing_requirements", []),
-            warnings=parsed_data.get("warnings", []),
+            missing_requirements=parsed_data.get("missing_requirements", []) if isinstance(parsed_data.get("missing_requirements"), list) else [],
+            warnings=parsed_data.get("warnings", []) if isinstance(parsed_data.get("warnings"), list) else [],
             raw_evidence_quotes=raw_evidence_quotes
         )
 
@@ -388,5 +403,6 @@ class AIEngine:
             raw_content=raw_content,
             source_revision_id=source_revision_id
         )
-    
+
+
 gemini_engine = AIEngine()
