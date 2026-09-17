@@ -5,7 +5,10 @@ from fastapi import APIRouter, Query, HTTPException, BackgroundTasks
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from cryptography.fernet import Fernet
-
+import os
+import logging
+from pydantic import BaseModel
+from app.services.workspace.user_service import WorkspaceUserService
 from app.core.supabase import get_supabase_client
 from app.core.config import settings, get_utc_iso
 from app.core.cache_policy import BoundedMemoryCache, CacheTier
@@ -23,6 +26,16 @@ router = APIRouter()
 
 # ⚡ IN-MEMORY CACHE CHO PHẢ HỆ 480 TRƯỜNG & KHÓA HỌC WORKSPACE (TIER A CATALOG - 1ms)
 ws_cache = BoundedMemoryCache(tier=CacheTier.TIER_A_CATALOG, max_entries=50, default_ttl=900)
+
+def sanitize_env_credential(val: str | None) -> str:
+    """Khử sạch dấu ngoặc kép hoặc ngoặc đơn bọc ngoài do Render env sinh ra."""
+    if not val:
+        return ""
+    cleaned = str(val).strip()
+    # Bóc vỏ ngoặc kép "..." hoặc ngoặc đơn '...'
+    if (cleaned.startswith('"') and cleaned.endswith('"')) or (cleaned.startswith("'") and cleaned.endswith("'")):
+        cleaned = cleaned[1:-1]
+    return cleaned.strip()
 
 class UserSearchRequest(BaseModel):
     identifier: str
@@ -486,13 +499,48 @@ async def update_organization_and_vault(org_id: str, payload: UpdateOrganization
         "vault_updated": vault_updated
     }
 
+# ===========================================================================
+# [CẬP NHẬT THÊM] Endpoint Tra Cứu & Bóc Tách Chi Tiết User Admin Workspace
+# Tự động làm sạch dấu ngoặc kép/đơn của Render cho mật khẩu có ký tự @#!
+# ===========================================================================
+import os
+import logging
+from pydantic import BaseModel
+from app.services.workspace.user_service import WorkspaceUserService
+
+logger = logging.getLogger(__name__)
+
+def sanitize_env_credential(val: str | None) -> str:
+    """Khử sạch dấu ngoặc kép hoặc ngoặc đơn bọc ngoài do Render env sinh ra."""
+    if not val:
+        return ""
+    cleaned = str(val).strip()
+    # Bóc vỏ ngoặc kép "..." hoặc ngoặc đơn '...'
+    if (cleaned.startswith('"') and cleaned.endswith('"')) or (cleaned.startswith("'") and cleaned.endswith("'")):
+        cleaned = cleaned[1:-1]
+    return cleaned.strip()
+
+class UserSearchRequest(BaseModel):
+    identifier: str
+
 @router.post("/users/search-and-detail")
 async def get_user_search_and_detail(payload: UserSearchRequest):
-    """Dò tìm user_id và đọc toàn bộ chi tiết người dùng từ Workspace qua HTTPX."""
-    # Lấy thông tin đăng nhập Admin từ Két sắt Vault hoặc biến môi trường
-    # Mặc định lấy tài khoản Admin của hệ thống
-    admin_user = os.getenv("TEST_ADMIN_USER")
-    admin_pass = os.getenv("TEST_ADMIN_PASS")
+    """
+    Dò tìm user_id và đọc toàn bộ chi tiết người dùng từ Workspace qua HTTPX.
+    Sử dụng tài khoản TEST_ADMIN_USER và TEST_ADMIN_PASS đã qua khử quote an toàn.
+    """
+    raw_user = os.getenv("TEST_ADMIN_USER")
+    raw_pass = os.getenv("TEST_ADMIN_PASS")
+
+    # Khử sạch dấu " hoặc ' để lấy đúng mật khẩu thật chứa @#!
+    admin_user = sanitize_env_credential(raw_user)
+    admin_pass = sanitize_env_credential(raw_pass)
+
+    if not admin_user or not admin_pass:
+        return {
+            "success": False, 
+            "message": "Chưa cấu hình biến môi trường TEST_ADMIN_USER hoặc TEST_ADMIN_PASS trên Render!"
+        }
 
     try:
         data = await WorkspaceUserService.get_user_detail_by_identifier(
@@ -502,5 +550,5 @@ async def get_user_search_and_detail(payload: UserSearchRequest):
         )
         return data
     except Exception as e:
-        logger.error(f"Lỗi tìm kiếm user: {e}")
+        logger.error(f"❌ [UserDetailAPI] Lỗi tra cứu người dùng: {e}")
         return {"success": False, "message": str(e)}
