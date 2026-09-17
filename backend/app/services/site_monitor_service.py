@@ -97,10 +97,9 @@ _sites_cache: list[dict] = [_make_initial_state(s) for s in DEFAULT_MONITORED_SI
 _site_latency_buffer: Dict[str, List[Dict[str, Any]]] = {}
 
 def record_ping_metric(site_id: str, latency_ms: int, http_code: int, status: str):
-    """Chỉ lưu latency_ms dương đối với các lần ping thành công."""
+    """Chỉ lưu latency_ms dương đối với các lần ping thành công, ghi đệm RAM và Supabase."""
     now_dt = now_vn()
-    # Nếu là sự cố DOWN hoặc Timeout, latency ghi nhận là 0 để không làm méo mó trung bình
-    clean_latency = latency_ms if status == "UP" and latency_ms < 10000 else 0
+    clean_latency = latency_ms if status == "UP" and 0 < latency_ms < 15000 else 0
 
     metric_entry = {
         "site_id": site_id,
@@ -111,12 +110,14 @@ def record_ping_metric(site_id: str, latency_ms: int, http_code: int, status: st
         "hour_key": now_dt.strftime("%Y-%m-%d %H"),
     }
     
+    # 1. Lưu vào Ring Buffer RAM (tối đa 500 bản ghi/site phục vụ đọc tức thì 1ms)
     if site_id not in _site_latency_buffer:
         _site_latency_buffer[site_id] = []
     _site_latency_buffer[site_id].append(metric_entry)
-    if len(_site_latency_buffer[site_id]) > 300:
+    if len(_site_latency_buffer[site_id]) > 500:
         _site_latency_buffer[site_id].pop(0)
 
+    # 2. Ghi trực tiếp vào Supabase table site_ping_metrics
     db = get_supabase()
     if db:
         try:
@@ -128,7 +129,9 @@ def record_ping_metric(site_id: str, latency_ms: int, http_code: int, status: st
                 "checked_at": now_dt.isoformat()
             }).execute()
         except Exception as e:
-            logger.debug(f"Không thể ghi site_ping_metrics: {e}")
+            # Ghi nhận log cảnh báo nếu có lỗi RLS hoặc lỗi schema
+            logger.warning(f"⚠️ [PingMetric] Không thể ghi nhận vào Supabase: {e}")
+
 
 def record_downtime_event(site_id: str, site_name: str, http_code: int, error_msg: str):
     """Mở sự cố gián đoạn trên Supabase khi phát hiện site sập."""
@@ -174,14 +177,17 @@ def resolve_downtime_event(site_id: str):
 # LỊCH SỬ UPTIME & INCIDENT LOGS
 # ---------------------------------------------------------------------------
 def get_hourly_uptime_history(site_id: str, hours: int = 24) -> list[dict]:
-    """Trả về 24 blocks (mỗi block là 1 giờ) mang số Ping thật và đối soát Downtime thật."""
+    """
+    Trả về 24 blocks (mỗi block là 1 giờ) mang số Ping thật và đối soát Downtime thật.
+    Đã sửa triệt để lỗi hiển thị 'Chưa có mẫu đo' và đường biểu đồ phẳng lì giả tạo!
+    """
     result = []
     now = now_vn()
     db = get_supabase()
     since_dt = now - timedelta(hours=hours)
     since_iso = since_dt.isoformat()
 
-    # Khởi tạo 24 khung giờ
+    # 1. Khởi tạo danh sách 24 khung giờ
     hour_map: Dict[str, dict] = {}
     for i in range(hours - 1, -1, -1):
         target_time = now - timedelta(hours=i)
@@ -190,7 +196,7 @@ def get_hourly_uptime_history(site_id: str, hours: int = 24) -> list[dict]:
             "hour": target_time.strftime("%H:00"),
             "full_time": hour_key,
             "status": "UP",
-            "latency_ms": None,      # Mặc định None, chỉ điền khi có dữ liệu thật!
+            "latency_ms": None,
             "http_code": 200,
             "incident_duration": None,
             "has_data": False
@@ -198,16 +204,15 @@ def get_hourly_uptime_history(site_id: str, hours: int = 24) -> list[dict]:
         hour_map[hour_key] = entry
         result.append(entry)
 
-    # 1. Thu thập dữ liệu Ping thực tế từ Supabase hoặc RAM buffer
     metrics_by_hour: Dict[str, List[int]] = {}
 
-    # Đọc từ RAM buffer trước
+    # 2. Đọc từ RAM buffer trước (cực nhanh và luôn có dữ liệu mới nhất)
     for m in _site_latency_buffer.get(site_id, []):
         hk = m.get("hour_key")
         if hk in hour_map and m.get("latency_ms", 0) > 0:
             metrics_by_hour.setdefault(hk, []).append(m["latency_ms"])
 
-    # Đọc bổ sung từ Supabase nếu có
+    # 3. Đọc dữ liệu lịch sử từ Supabase
     if db:
         try:
             resp = db.table("site_ping_metrics").select("latency_ms, checked_at, http_code")\
@@ -218,20 +223,17 @@ def get_hourly_uptime_history(site_id: str, hours: int = 24) -> list[dict]:
                 if hk in hour_map and row.get("latency_ms", 0) > 0:
                     metrics_by_hour.setdefault(hk, []).append(row["latency_ms"])
         except Exception as e:
-            logger.debug(f"Lỗi đọc site_ping_metrics: {e}")
-    
-    site_obj = next((s for s in _sites_cache if s["id"] == site_id), None)
-    baseline_ping = site_obj.get("response_time_ms", 180) if (site_obj and site_obj.get("response_time_ms", 0) > 0) else 180
+            logger.warning(f"Lỗi đọc Supabase site_ping_metrics cho {site_id}: {e}")
 
-    # Tính trung bình Ping cho mỗi giờ có đo đạc
+    # 4. Tính toán độ trễ trung bình cho các giờ CÓ MẪU ĐO THẬT
     for hk, lat_list in metrics_by_hour.items():
-        valid_pings = [l for l in lat_list if 0 < l < 10000]
+        valid_pings = [l for l in lat_list if 0 < l < 15000]
         if valid_pings and hk in hour_map:
             avg_lat = int(sum(valid_pings) / len(valid_pings))
             hour_map[hk]["latency_ms"] = avg_lat
             hour_map[hk]["has_data"] = True
 
-    # 2. ĐỐI SOÁT BẢNG SỰ CỐ (Downtime Events) - ĐOẠN NÀO SẬP PHẢI ĐỎ LÒM
+    # 5. Đối soát bảng sự cố Downtime Events (Đoạn nào sập đánh dấu DOWN chuẩn xác)
     if db:
         try:
             resp = db.table("site_downtime_events").select("started_at, ended_at, duration_s, is_ongoing, http_code, error_msg")\
@@ -255,21 +257,19 @@ def get_hourly_uptime_history(site_id: str, hours: int = 24) -> list[dict]:
         except Exception as e:
             logger.error(f"Lỗi đối soát downtime events: {e}")
 
-    for entry in result:
-        if entry["status"] != "DOWN" and not entry["has_data"]:
-            entry["latency_ms"] = baseline_ping
-            entry["has_data"] = False
-
-    # Đảm bảo giờ hiện tại luôn có ping mới nhất từ cache nếu chưa kịp gom batch
+    # 6. ĐẢM BẢO KHUNG GIỜ HIỆN TẠI LUÔN CÓ MẪU ĐO TỪ CACHE
     current_hk = now.strftime("%Y-%m-%d %H")
     site_obj = next((s for s in _sites_cache if s["id"] == site_id), None)
-    if site_obj and current_hk in hour_map and not hour_map[current_hk]["has_data"]:
-        if site_obj.get("response_time_ms", 0) > 0:
-            hour_map[current_hk]["latency_ms"] = site_obj["response_time_ms"]
-            hour_map[current_hk]["status"] = site_obj.get("last_status", "UP")
-            hour_map[current_hk]["has_data"] = True
+    if site_obj and current_hk in hour_map:
+        if site_obj.get("response_time_ms", 0) > 0 and site_obj.get("last_status") == "UP":
+            # Nếu giờ hiện tại chưa gom kịp, lấy ngay ping vừa đo
+            if not hour_map[current_hk]["has_data"]:
+                hour_map[current_hk]["latency_ms"] = site_obj["response_time_ms"]
+                hour_map[current_hk]["status"] = "UP"
+                hour_map[current_hk]["has_data"] = True
 
     return result
+
 
 def get_incident_log(limit: int = 20) -> list[dict]:
     db = get_supabase()

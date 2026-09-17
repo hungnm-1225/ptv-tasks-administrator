@@ -405,7 +405,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(
         safe_job_wrapper, 
         'interval', 
-        minutes=60, 
+        minutes=5, 
         args=[poll_site_uptime_cron, "Quét Site Uptime & Auth Matrix"], 
         id='site_uptime_cron',
         next_run_time=base_start + timedelta(seconds=1200),

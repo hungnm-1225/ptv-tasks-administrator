@@ -329,18 +329,32 @@ async def lookup_keycloak_users(payload: Dict[str, Any]):
 # =============================================================================
 # 5. QUẢN TRỊ PHẢ HỆ 3 TẦNG & CẬP NHẬT KÉT SẮT FERNET
 # =============================================================================
+
+def _infer_country_from_org(org_name: str, org_code: str, dist_name: str) -> str:
+    """Tự động nhận diện quốc gia thông minh từ tên trường/mã trường/nhà phân phối."""
+    combined = f"{org_name} {org_code} {dist_name}".upper()
+    if any(k in combined for k in ["MALAYSIA", "MY_", "_MY"]):
+        return "Malaysia"
+    if any(k in combined for k in ["INDONESIA", "ID_", "_ID"]):
+        return "Indonesia"
+    if any(k in combined for k in ["PHILIPPINES", "ALABANG", "PH_", "_PH", "BEDECO"]):
+        return "Philippines"
+    return "Vietnam"
+
 @router.get("/hierarchy-manage")
 async def get_hierarchy_management_data():
-    """Lấy toàn bộ cây phả hệ 3 cấp kèm trạng thái Két Sắt Fernet."""
+    """Lấy dữ liệu phả hệ chuẩn theo schema Supabase (Đã loại bỏ cột country không tồn tại)."""
     supabase = get_supabase_client()
     try:
+        # 1. Chỉ query các cột thực sự tồn tại trong CSDL
         orgs_res = supabase.table("workspace_organizations")\
-            .select("id, code, name, role_type, parent_id, country")\
+            .select("id, code, name, role_type, parent_id")\
             .order("role_type")\
             .order("name")\
             .execute()
         all_orgs = orgs_res.data or []
         
+        # 2. Lấy credentials vault
         vault_res = supabase.table("workspace_credentials_vault")\
             .select("org_id, username, updated_at")\
             .execute()
@@ -354,21 +368,31 @@ async def get_hierarchy_management_data():
         for o in all_orgs:
             parent_id = o.get("parent_id")
             parent = org_map.get(parent_id, {})
+            
+            # Phân giải Distributor gốc
             dist_id = parent.get("parent_id") if o.get("role_type") == "school" else (parent_id if o.get("role_type") == "partner" else None)
             distributor = org_map.get(dist_id, {}) if dist_id else (parent if o.get("role_type") == "partner" else None)
+            
             v_info = vault_map.get(o["id"], {})
+            
+            org_name = o.get("name") or "Chưa đặt tên"
+            org_code = o.get("code") or "N/A"
+            dist_name = distributor.get("name") if distributor else "N/A"
+            
+            # Nhận diện quốc gia không phụ thuộc cột CSDL
+            country_inferred = _infer_country_from_org(org_name, org_code, dist_name)
             
             enriched_orgs.append({
                 "id": o["id"],
-                "code": o.get("code") or "N/A",
-                "name": o.get("name") or "Chưa đặt tên",
+                "code": org_code,
+                "name": org_name,
                 "role_type": o.get("role_type") or "school",
                 "parent_id": parent_id,
-                "parent_name": parent.get("name") or "Trực tiếp",
+                "parent_name": parent.get("name") or "Trực tiếp (Không qua đối tác)",
                 "parent_code": parent.get("code") or "N/A",
                 "distributor_id": dist_id,
-                "distributor_name": distributor.get("name") if distributor else "N/A",
-                "country": o.get("country") or "Vietnam",
+                "distributor_name": dist_name,
+                "country": country_inferred,
                 "username": v_info.get("username") or "",
                 "has_vault_pass": bool(v_info.get("username")),
                 "vault_updated_at": v_info.get("updated_at")
@@ -387,7 +411,7 @@ async def get_hierarchy_management_data():
 
 @router.put("/organizations/{org_id}")
 async def update_organization_and_vault(org_id: str, payload: UpdateOrganizationPayload):
-    """Cập nhật thông tin tổ chức và mã hóa mật khẩu đối xứng Fernet lưu vào Két sắt."""
+    """Cập nhật phả hệ và mã hóa Fernet bảo vệ an toàn ràng buộc NOT NULL của CSDL."""
     supabase = get_supabase_client()
     
     check_res = supabase.table("workspace_organizations").select("*").eq("id", org_id).execute()
@@ -412,7 +436,7 @@ async def update_organization_and_vault(org_id: str, payload: UpdateOrganization
 
     vault_updated = False
     if payload.username is not None or payload.password:
-        vault_check = supabase.table("workspace_credentials_vault").select("id, encrypted_password").eq("org_id", org_id).execute()
+        vault_check = supabase.table("workspace_credentials_vault").select("id").eq("org_id", org_id).execute()
         vault_record = vault_check.data[0] if vault_check.data else None
         
         encrypted_pass = None
@@ -435,10 +459,13 @@ async def update_organization_and_vault(org_id: str, payload: UpdateOrganization
             supabase.table("workspace_credentials_vault").update(vault_payload).eq("id", vault_record["id"]).execute()
             vault_updated = True
         else:
+            # Tuân thủ nghiêm ngặt Schema: Thêm account_role và is_active chống lỗi NOT NULL
             new_vault = {
                 "org_id": org_id,
+                "account_role": current_org.get("role_type", "school"),
                 "username": (payload.username or "").strip(),
                 "encrypted_password": encrypted_pass or "",
+                "is_active": True,
                 "updated_at": now_iso
             }
             supabase.table("workspace_credentials_vault").insert(new_vault).execute()

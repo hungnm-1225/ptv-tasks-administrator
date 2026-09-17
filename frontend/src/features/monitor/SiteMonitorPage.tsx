@@ -511,9 +511,27 @@ export const SiteMonitorPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (activeTab === 'public') loadPublicSites();
-    if (activeTab === 'cicd_deploy') loadDeployments();
-  }, [activeTab, loadPublicSites, loadDeployments]);
+    // 1. Tải dữ liệu ngay khi mở Tab
+    if (activeTab === 'public') {
+      loadPublicSites(false);
+    } else if (activeTab === 'cicd_deploy') {
+      loadDeployments(false);
+    }
+
+    // 2. Thiết lập Polling ngầm mỗi 30 giây: tự động làm tươi Ping mới nhất & Đồ thị!
+    const interval = setInterval(() => {
+      // Chỉ tự refresh khi người dùng đang bật tab xem và không đang bận bấm nút quét
+      if (document.visibilityState === 'visible' && !checking) {
+        if (activeTab === 'public') {
+          loadPublicSites(false); // false để không hiện màn hình loading giật mắt
+        } else if (activeTab === 'cicd_deploy' && !deployLoading) {
+          loadDeployments(false);
+        }
+      }
+    }, 30000); // 30 giây làm tươi 1 lần
+
+    return () => clearInterval(interval);
+  }, [activeTab, loadPublicSites, loadDeployments, checking, deployLoading]);
 
   // Quét thủ công tức thì
   const handleCheckAllPublic = async () => {
