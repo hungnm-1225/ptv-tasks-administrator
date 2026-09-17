@@ -1332,7 +1332,11 @@ export const AutomationStudioPage: React.FC = () => {
       const res = await fetchApi<any>('/workspace/users/search-and-detail', {
         method: 'POST',
         body: JSON.stringify({ identifier: cleanIdentifier }),
+<<<<<<< HEAD
         timeoutMs: 90000, // 90s chống timeout
+=======
+        timeoutMs: 90000,
+>>>>>>> 21dc7d7966f015b891b10324e85b934b9b4b4c38
       });
 
       if (!res?.success || !res?.detail) {
