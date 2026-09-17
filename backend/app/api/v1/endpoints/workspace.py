@@ -491,8 +491,8 @@ async def get_user_search_and_detail(payload: UserSearchRequest):
     """Dò tìm user_id và đọc toàn bộ chi tiết người dùng từ Workspace qua HTTPX."""
     # Lấy thông tin đăng nhập Admin từ Két sắt Vault hoặc biến môi trường
     # Mặc định lấy tài khoản Admin của hệ thống
-    admin_user = os.getenv("WORKSPACE_ADMIN_USER", "admin")
-    admin_pass = os.getenv("WORKSPACE_ADMIN_PASS", "Leanbot@2024")
+    admin_user = os.getenv("TEST_ADMIN_USER")
+    admin_pass = os.getenv("TEST_ADMIN_PASS")
 
     try:
         data = await WorkspaceUserService.get_user_detail_by_identifier(
