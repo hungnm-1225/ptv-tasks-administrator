@@ -545,7 +545,7 @@ export const SiteMonitorPage: React.FC = () => {
       });
       setSites(updated);
       setSummary(data.summary);
-      toast.success(`Đã quét thật ${data.sites.length} website — ${data.summary.up_count} UP / ${data.summary.down_count} DOWN`);
+      toast.success(`Đã quét ${data.sites.length} websites - ${data.summary.up_count} UP / ${data.summary.down_count} DOWN`);
 
       const inc = await fetchApi<{ incidents: Incident[] }>('/monitor/incidents?limit=20');
       setIncidents(inc.incidents || []);

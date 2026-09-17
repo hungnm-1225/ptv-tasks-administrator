@@ -20,7 +20,6 @@ import {
   Users,
   GraduationCap,
   Calendar,
-  UserCheck,
   X,
   Code2,
   Send,
@@ -36,6 +35,7 @@ import {
   Clock,
   XCircle,
   AtSign,
+  UserCheck,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { fetchApi } from '../../lib/api';
@@ -150,7 +150,7 @@ export const AutomationStudioPage: React.FC = () => {
 
   // 4 Mục chính của Workspace RPA
   const [workspaceMainCategory, setWorkspaceMainCategory] = useState<
-    'approve' | 'create_and_approve' | 'bulk_accounts' | 'lms_enroll'
+    'approve' | 'create_and_approve' | 'bulk_accounts' | 'lms_enroll' | 'update_user'
   >('approve');
 
   // Phân luồng con trong mục "1. Phê Duyệt"
@@ -254,6 +254,32 @@ export const AutomationStudioPage: React.FC = () => {
     logs?: string;
     request_id?: string;
   } | null>(null);
+
+  const [userSearchQuery, setUserSearchQuery] = useState<string>('hsdttemd@pythaverse.net');
+  const [isSearchingUser, setIsSearchingUser] = useState<boolean>(false);
+  const [loadedUserProfile, setLoadedUserProfile] = useState<{
+    userId: string;
+    userLogin: string;
+    countryId: string;
+    cityId: string;
+    idUserMD: string;
+    userRole: string;
+  } | null>(null);
+
+  // Form chỉnh sửa
+  const [editFirstName, setEditFirstName] = useState<string>('');
+  const [editLastName, setEditLastName] = useState<string>('');
+  const [editEmail, setEditEmail] = useState<string>('');
+  const [editDay, setEditDay] = useState<string>('1');
+  const [editMonth, setEditMonth] = useState<string>('1');
+  const [editYear, setEditYear] = useState<string>('2012');
+  const [editPartnerId, setEditPartnerId] = useState<string>('');
+  const [editSchoolId, setEditSchoolId] = useState<string>('');
+
+  // Dropdown tìm kiếm trường học thông minh (Searchable School Combobox)
+  const [schoolSearchQuery, setSchoolSearchQuery] = useState<string>('');
+  const [isSchoolComboboxOpen, setIsSchoolComboboxOpen] = useState<boolean>(false);
+  const schoolComboboxRef = useRef<HTMLDivElement | null>(null);
 
   // Polling theo dõi trạng thái tác vụ vừa kích hoạt từ Studio
   useEffect(() => {
@@ -725,9 +751,11 @@ export const AutomationStudioPage: React.FC = () => {
       if (entityDropdownRef.current && !entityDropdownRef.current.contains(event.target as Node)) {
         setIsEntityDropdownOpen(false);
       }
-      // 👈 Thêm dòng này để tự đóng Dropdown Repo khi click ra ngoài
       if (gitRepoDropdownRef.current && !gitRepoDropdownRef.current.contains(event.target as Node)) {
         setIsGitRepoDropdownOpen(false);
+      }
+      if (schoolComboboxRef.current && !schoolComboboxRef.current.contains(event.target as Node)) {
+        setIsSchoolComboboxOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -1265,6 +1293,65 @@ export const AutomationStudioPage: React.FC = () => {
     setLmsSelectedCourses(lmsSelectedCourses.filter((_, idx) => idx !== index));
   };
 
+  // 🔍 [CẬP NHẬT THÊM] HÀM DÒ TÌM HỒ SƠ TỪ ADMIN WORKSPACE (30s do WordPress)
+  const handleSearchUserProfile = async () => {
+    const cleanIdentifier = userSearchQuery.trim();
+    if (!cleanIdentifier) {
+      toast.error('Vui lòng nhập Email hoặc Username người dùng cần tìm!');
+      return;
+    }
+
+    setIsSearchingUser(true);
+    toast.info(`Đang dò tìm người dùng: ${cleanIdentifier} (có thể mất 15-30s)...`);
+
+    try {
+      const res = await fetchApi<any>('/workspace/users/search-and-detail', {
+        method: 'POST',
+        body: JSON.stringify({ identifier: cleanIdentifier }),
+      });
+
+      if (!res?.success || !res?.detail) {
+        toast.error(res?.message || 'Không tìm thấy người dùng này trên hệ thống Workspace!');
+        return;
+      }
+
+      const d = res.detail;
+      const s = res.summary || {};
+
+      // Điền thông tin vào form
+      setEditFirstName(d.firstName || '');
+      setEditLastName(d.lastname || '');
+      setEditEmail(d.inputEmailTeacherEdit || s.user_email || cleanIdentifier);
+      setEditDay(String(d.day || '1'));
+      setEditMonth(String(d.month || '1'));
+      setEditYear(String(d.year || '2012'));
+      setEditSchoolId(String(d.school_id || ''));
+      setEditPartnerId(String(d.partner_id || ''));
+
+      // Tìm tên trường trong 480 trường phả hệ để hiển thị lên input
+      const matched = schoolsList.find(
+        (sch) => sch.school_id === String(d.school_id) || sch.school_code === String(d.school_id)
+      );
+      setSchoolSearchQuery(matched ? matched.school_name : d.school_name || `Trường #${d.school_id}`);
+
+      // Lưu trữ các metadata gốc (country, city, moodle id...)
+      setLoadedUserProfile({
+        userId: res.user_id,
+        userLogin: res.user_login || s.user_login || '',
+        countryId: String(d.country_id || '3'),
+        cityId: String(d.cityTeacherCompare || '2852'),
+        idUserMD: String(d.idUserMD || ''),
+        userRole: d.user_role || s.user_role || 'student',
+      });
+
+      toast.success(`🎉 Đã tải xong hồ sơ: ${d.firstName} ${d.lastname} (#${res.user_id})!`);
+    } catch (err) {
+      toast.error('Lỗi khi dò tìm thông tin: ' + (err as Error).message);
+    } finally {
+      setIsSearchingUser(false);
+    }
+  };
+
   const handleOpenConfirmModal = () => {
     let payload: Record<string, any> = {
       is_manual_dispatch: true,
@@ -1610,6 +1697,54 @@ export const AutomationStudioPage: React.FC = () => {
             `Tự động cập nhật Role & Gia hạn: Có kích hoạt`,
           ];
         }
+      }
+      else if (workspaceMainCategory === 'update_user') {
+        if (!loadedUserProfile) {
+          toast.error('Vui lòng tìm kiếm và nạp thông tin người dùng trước khi bấm xác nhận!');
+          return;
+        }
+        if (!editFirstName.trim() || !editLastName.trim()) {
+          toast.error('First Name và Last Name không được để trống!');
+          return;
+        }
+        if (!editSchoolId) {
+          toast.error('Vui lòng chọn Trường học cho người dùng!');
+          return;
+        }
+
+        const matchedSchool = schoolsList.find(
+          (s) => s.school_id === editSchoolId || s.school_code === editSchoolId
+        );
+
+        payload = {
+          ...payload,
+          action: 'update_user_profile',
+          user_id: loadedUserProfile.userId,
+          user_login: loadedUserProfile.userLogin,
+          first_name: editFirstName.trim(),
+          last_name: editLastName.trim(),
+          email: editEmail.trim(),
+          day: editDay,
+          month: editMonth,
+          year: editYear,
+          country_id: loadedUserProfile.countryId,
+          city_id: loadedUserProfile.cityId,
+          school_id: editSchoolId,
+          partner_id: editPartnerId,
+          id_user_md: loadedUserProfile.idUserMD,
+          user_role: loadedUserProfile.userRole,
+        };
+
+        summary.engineName = '🏢 Workspace User Profile Engine';
+        summary.actionTitle = `Cập Nhật Hồ Sơ: ${editLastName} ${editFirstName} (#${loadedUserProfile.userId})`;
+        summary.targetEntity = `${loadedUserProfile.userLogin} (${editEmail})`;
+        summary.detailsList = [
+          `Vai trò: ${loadedUserProfile.userRole === 'student' ? 'Học sinh (Student)' : 'Giáo viên (Teacher)'}`,
+          `Ngày sinh mới: ${editDay}/${editMonth}/${editYear}`,
+          `Trường học gán: ${matchedSchool?.school_name || editSchoolId}`,
+          `Đối tác quản lý (Partner ID): ${editPartnerId}`,
+          `Moodle User ID: ${loadedUserProfile.idUserMD || 'Không có'}`,
+        ];
       }
     } else if (selectedBotType === 'git_collaborator') {
       // 🐙 THÊM THÀNH VIÊN VÀO NHIỀU REPOSITORIES CÙNG LÚC (MULTI-REPOS)
@@ -2113,12 +2248,13 @@ export const AutomationStudioPage: React.FC = () => {
               </h2>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 ">
               {[
                 { id: 'approve', label: '1. Phê Duyệt', icon: ClipboardCheck },
                 { id: 'create_and_approve', label: '2. Tạo & Duyệt', icon: Zap },
                 { id: 'bulk_accounts', label: '3. Tạo Tài Khoản', icon: Users },
                 { id: 'lms_enroll', label: '4. Ghi Danh LMS', icon: GraduationCap },
+                { id: 'update_user', label: '5. Cập Nhật User', icon: UserCheck },
               ].map((mTab) => {
                 const MIcon = mTab.icon;
                 const isCur = workspaceMainCategory === mTab.id;
@@ -4164,6 +4300,279 @@ export const AutomationStudioPage: React.FC = () => {
                       </div>
                     </div>
                   )}
+                </div>
+              )}
+            </div>
+          )}
+          {/* ========================================================================= */}
+          {/* WORKFLOW 5: CẬP NHẬT HỒ SƠ NGƯỜI DÙNG (SMART SCHOOL-PARTNER COMBOBOX) */}
+          {/* ========================================================================= */}
+          {workspaceMainCategory === 'update_user' && (
+            <div className="space-y-5 pt-2 animate-in fade-in duration-150">
+              {/* 1. THANH TÌM KIẾM DÒ TÌM USER */}
+              <div className="p-4 rounded-2xl border border-indigo-200/80 dark:border-indigo-900/50 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <span>Dò Tìm Người Dùng Trên Admin Workspace</span>
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-bold bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300">
+                        pythaverse.space
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      Nhập Email hoặc Username để bốc thông tin chi tiết từ hệ thống trường học.
+                    </p>
+                  </div>
+
+                  {loadedUserProfile && (
+                    <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-[11px] font-mono font-bold flex items-center gap-1 self-start sm:self-auto">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>ID: #{loadedUserProfile.userId} ({loadedUserProfile.userRole})</span>
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      value={userSearchQuery}
+                      onChange={(e) => setUserSearchQuery(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleSearchUserProfile(); }}
+                      placeholder="Nhập email hoặc username (VD: hsdttemd@pythaverse.net)..."
+                      className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-2.5 font-mono text-xs text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
+                    />
+                    <Search className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleSearchUserProfile}
+                    disabled={isSearchingUser}
+                    className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold transition shadow-xs flex items-center gap-2 cursor-pointer shrink-0"
+                  >
+                    {isSearchingUser ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Đang dò quét (15-30s)...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="w-4 h-4" />
+                        <span>Dò Tìm Hồ Sơ</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* 2. BENTO CARD CHỈNH SỬA THÔNG TIN */}
+              {loadedUserProfile ? (
+                <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-5 shadow-xs">
+                  <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                    <div className="flex items-center gap-2">
+                      <UserCheck className="w-4 h-4 text-indigo-600" />
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-white">
+                        Chỉnh Sửa Thông Tin Người Dùng
+                      </h4>
+                    </div>
+                    <span className="font-mono text-[11px] text-slate-400">
+                      Username: <b className="text-slate-700 dark:text-slate-300">{loadedUserProfile.userLogin}</b> (Cố định)
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    {/* CỘT TRÁI: HỌ TÊN, EMAIL & NGÀY SINH */}
+                    <div className="space-y-3.5">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-bold uppercase text-slate-500">First Name (*):</label>
+                          <input
+                            type="text"
+                            value={editFirstName}
+                            onChange={(e) => setEditFirstName(e.target.value)}
+                            className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 px-3.5 py-2 text-xs font-semibold text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-bold uppercase text-slate-500">Last Name (*):</label>
+                          <input
+                            type="text"
+                            value={editLastName}
+                            onChange={(e) => setEditLastName(e.target.value)}
+                            className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 px-3.5 py-2 text-xs font-semibold text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold uppercase text-slate-500">Email (*):</label>
+                        <input
+                          type="email"
+                          value={editEmail}
+                          onChange={(e) => setEditEmail(e.target.value)}
+                          className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 px-3.5 py-2 font-mono text-xs text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
+                        />
+                      </div>
+
+                      {/* 3 Dropdown Ngày Sinh */}
+                      <div>
+                        <label className="text-[10px] font-bold uppercase text-slate-500 mb-1 block">Ngày Sinh (*):</label>
+                        <div className="grid grid-cols-3 gap-2">
+                          <select
+                            value={editDay}
+                            onChange={(e) => setEditDay(e.target.value)}
+                            className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs font-mono text-slate-900 dark:text-white"
+                          >
+                            {Array.from({ length: 31 }, (_, i) => String(i + 1)).map((d) => (
+                              <option key={d} value={d}>Ngày {d}</option>
+                            ))}
+                          </select>
+
+                          <select
+                            value={editMonth}
+                            onChange={(e) => setEditMonth(e.target.value)}
+                            className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs font-mono text-slate-900 dark:text-white"
+                          >
+                            {Array.from({ length: 12 }, (_, i) => String(i + 1)).map((m) => (
+                              <option key={m} value={m}>Tháng {m}</option>
+                            ))}
+                          </select>
+
+                          <select
+                            value={editYear}
+                            onChange={(e) => setEditYear(e.target.value)}
+                            className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs font-mono text-slate-900 dark:text-white"
+                          >
+                            {Array.from({ length: 45 }, (_, i) => String(2025 - i)).map((y) => (
+                              <option key={y} value={y}>{y}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* CỘT PHẢI: BỘ ĐÔI TRƯỜNG - ĐỐI TÁC THÔNG MINH */}
+                    <div className="space-y-3.5">
+                      {/* Combobox Tìm Trường Tự Nhảy Partner */}
+                      <div className="relative" ref={schoolComboboxRef}>
+                        <label className="text-[10px] font-bold uppercase text-slate-500 flex items-center justify-between">
+                          <span>Trường Học (Tìm & Chọn ➔ Tự Nhảy Partner):</span>
+                          <span className="font-mono text-indigo-600 font-bold">Mã: {editSchoolId || 'Chưa gán'}</span>
+                        </label>
+
+                        <div className="relative mt-1">
+                          <input
+                            type="text"
+                            value={schoolSearchQuery}
+                            onFocus={() => setIsSchoolComboboxOpen(true)}
+                            onChange={(e) => {
+                              setSchoolSearchQuery(e.target.value);
+                              setIsSchoolComboboxOpen(true);
+                            }}
+                            placeholder="Gõ tên trường học để tìm kiếm..."
+                            className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 px-3.5 py-2 text-xs font-semibold text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden pr-8"
+                          />
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-3" />
+                        </div>
+
+                        {/* Danh sách gợi ý trường học */}
+                        {isSchoolComboboxOpen && (
+                          <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-64 overflow-y-auto p-1.5 space-y-1 animate-in fade-in duration-100">
+                            {schoolsList
+                              .filter((s) => {
+                                const q = schoolSearchQuery.trim().toLowerCase();
+                                if (!q) return true;
+                                return (
+                                  s.school_name.toLowerCase().includes(q) ||
+                                  s.school_code.toLowerCase().includes(q) ||
+                                  s.partner_name.toLowerCase().includes(q)
+                                );
+                              })
+                              .sort((a, b) => {
+                                // 🎯 Ghim các trường thuộc Partner đang chọn lên đầu danh sách!
+                                const aMatch = String(a.partner_code) === String(editPartnerId);
+                                const bMatch = String(b.partner_code) === String(editPartnerId);
+                                if (aMatch && !bMatch) return -1;
+                                if (!aMatch && bMatch) return 1;
+                                return 0;
+                              })
+                              .slice(0, 30)
+                              .map((s) => {
+                                const isCurrentPartner = String(s.partner_code) === String(editPartnerId);
+                                return (
+                                  <button
+                                    key={s.school_code}
+                                    type="button"
+                                    onClick={() => {
+                                      setEditSchoolId(s.school_id || s.school_code);
+                                      setSchoolSearchQuery(s.school_name);
+                                      setIsSchoolComboboxOpen(false);
+
+                                      // 🎯 TỰ ĐỘNG ĐỔI PARTNER THEO TRƯỜNG ĐÃ CHỌN!
+                                      if (s.partner_code && String(s.partner_code) !== String(editPartnerId)) {
+                                        setEditPartnerId(s.partner_code);
+                                        toast.info(`💡 Đã tự động cập nhật Partner: ${s.partner_name} (#${s.partner_code})`);
+                                      }
+                                    }}
+                                    className={`w-full text-left p-2.5 rounded-xl text-xs flex items-center justify-between cursor-pointer transition ${String(editSchoolId) === String(s.school_id || s.school_code)
+                                      ? 'bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-300 dark:border-indigo-700'
+                                      : 'hover:bg-slate-50 dark:hover:bg-slate-800'
+                                      }`}
+                                  >
+                                    <div className="truncate pr-2">
+                                      <div className="font-bold text-slate-900 dark:text-white truncate flex items-center gap-1.5">
+                                        {isCurrentPartner && (
+                                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-bold">
+                                            Partner này
+                                          </span>
+                                        )}
+                                        <span>{s.school_name}</span>
+                                      </div>
+                                      <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                                        ID: {s.school_id || s.school_code} | Thuộc: {s.partner_name}
+                                      </div>
+                                    </div>
+                                    {String(editSchoolId) === String(s.school_id || s.school_code) && (
+                                      <Check className="w-4 h-4 text-indigo-600 shrink-0" />
+                                    )}
+                                  </button>
+                                );
+                              })}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Dropdown Chọn Đối Tác (Partner) */}
+                      <div>
+                        <label className="text-[10px] font-bold uppercase text-slate-500">
+                          Đối Tác Quản Lý (Partner ID):
+                        </label>
+                        <input
+                          type="text"
+                          value={editPartnerId}
+                          onChange={(e) => setEditPartnerId(e.target.value)}
+                          placeholder="Mã số Partner (VD: 60)"
+                          className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 px-3.5 py-2 font-mono text-xs text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
+                        />
+                        <p className="text-[10px] text-slate-400 mt-1">
+                          Khi anh chọn trường ở trên, mã Partner này sẽ tự động nhảy tương ứng!
+                        </p>
+                      </div>
+
+                      {/* Khối Thông Tin Kỹ Thuật Giữ Nguyên */}
+                      <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 text-[11px] text-slate-500 space-y-1">
+                        <p>• Quốc gia ID: <b>{loadedUserProfile.countryId}</b> | Thành phố ID: <b>{loadedUserProfile.cityId}</b> (Bảo toàn)</p>
+                        <p>• Moodle User ID: <b>{loadedUserProfile.idUserMD || 'Chưa liên kết LMS'}</b></p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex h-48 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 p-6 text-center text-xs text-slate-400">
+                  <UserCheck className="h-8 w-8 text-slate-300 dark:text-slate-700 mb-2" />
+                  <span>Vui lòng nhập Email hoặc Username và bấm "Dò Tìm Hồ Sơ" để mở bảng chỉnh sửa.</span>
                 </div>
               )}
             </div>

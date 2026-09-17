@@ -14,11 +14,18 @@ from app.services.workspace.orchestrator_service import workspace_orchestrator_s
 from app.services.workspace.workspace_scanner_service import workspace_scanner_service
 from app.services.keycloak_service import keycloak_service
 from app.services.excel.cof_service import COFService
+from pydantic import BaseModel
+from app.services.workspace.user_service import WorkspaceUserService
+from app.services.workspace_lineage_service import WorkspaceLineageService
+
 
 router = APIRouter()
 
 # ⚡ IN-MEMORY CACHE CHO PHẢ HỆ 480 TRƯỜNG & KHÓA HỌC WORKSPACE (TIER A CATALOG - 1ms)
 ws_cache = BoundedMemoryCache(tier=CacheTier.TIER_A_CATALOG, max_entries=50, default_ttl=900)
+
+class UserSearchRequest(BaseModel):
+    identifier: str
 
 
 class ExtractCOFRequest(BaseModel):
@@ -478,3 +485,22 @@ async def update_organization_and_vault(org_id: str, payload: UpdateOrganization
         "message": f"Đã cập nhật thành công phả hệ của '{payload.name or current_org['name']}'!",
         "vault_updated": vault_updated
     }
+
+@router.post("/users/search-and-detail")
+async def get_user_search_and_detail(payload: UserSearchRequest):
+    """Dò tìm user_id và đọc toàn bộ chi tiết người dùng từ Workspace qua HTTPX."""
+    # Lấy thông tin đăng nhập Admin từ Két sắt Vault hoặc biến môi trường
+    # Mặc định lấy tài khoản Admin của hệ thống
+    admin_user = os.getenv("WORKSPACE_ADMIN_USER", "admin")
+    admin_pass = os.getenv("WORKSPACE_ADMIN_PASS", "Leanbot@2024")
+
+    try:
+        data = await WorkspaceUserService.get_user_detail_by_identifier(
+            admin_user=admin_user,
+            admin_pass=admin_pass,
+            identifier=payload.identifier.strip()
+        )
+        return data
+    except Exception as e:
+        logger.error(f"Lỗi tìm kiếm user: {e}")
+        return {"success": False, "message": str(e)}
