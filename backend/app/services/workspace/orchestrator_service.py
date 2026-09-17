@@ -157,7 +157,59 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
         elif action in ("enroll_students_pipeline", "direct_workspace_enroll"):
             return await self.enroll_students_pipeline(payload)
 
-        # Mặc định fallback về E2E
+        # 8. ĐIỀU PHỐI TÁC VỤ CẬP NHẬT HỒ SƠ NGƯỜI DÙNG WORKSPACE
+        elif action == "update_user_profile":
+            user_id = str(payload.get("user_id", "")).strip()
+            logger.info(f"👤 [WorkspaceRPA] Bắt đầu cập nhật hồ sơ cho User ID: #{user_id}")
+            
+            from app.services.workspace.user_service import WorkspaceUserService
+
+            # 1. Lấy tài khoản Sales Admin từ payload hoặc biến môi trường đã khử quote
+            admin_creds = payload.get("admin_credentials") or {}
+            raw_user = admin_creds.get("username") or os.getenv("TEST_ADMIN_USER") or os.getenv("WORKSPACE_ADMIN_USER", "")
+            raw_pass = admin_creds.get("password") or os.getenv("TEST_ADMIN_PASS") or os.getenv("WORKSPACE_ADMIN_PASS", "")
+
+            # Khử dấu ngoặc kép an toàn
+            admin_user = str(raw_user).strip().strip('"').strip("'")
+            admin_pass = str(raw_pass).strip().strip('"').strip("'")
+
+            if not user_id:
+                raise ValueError("Thiếu user_id trong payload để cập nhật hồ sơ!")
+
+            # 2. Đóng gói form_data gửi lên updateUser.php
+            form_data = {
+                "first_name": payload.get("first_name", ""),
+                "last_name": payload.get("last_name", ""),
+                "user_login": payload.get("user_login", ""),
+                "email": payload.get("email", ""),
+                "day": str(payload.get("day", "1")),
+                "month": str(payload.get("month", "1")),
+                "year": str(payload.get("year", "2012")),
+                "country_id": str(payload.get("country_id", "3")),
+                "city_id": str(payload.get("city_id", "2852")),
+                "school_id": str(payload.get("school_id", "")),
+                "partner_id": str(payload.get("partner_id", "")),
+                "id_user_md": str(payload.get("id_user_md", "")),
+                "user_role": str(payload.get("user_role", "student")),
+            }
+
+            # 3. Bắn request cập nhật qua HTTPX Async (~200ms)
+            result = await WorkspaceUserService.update_user_info(
+                admin_user=admin_user,
+                admin_pass=admin_pass,
+                user_id=user_id,
+                form_data=form_data
+            )
+            
+            if not result.get("success"):
+                raise RuntimeError(f"Cập nhật thất bại từ Workspace: {result.get('message')}")
+
+            logger.info(f"🎉 [WorkspaceRPA] Hoàn tất cập nhật hồ sơ cho User #{user_id}!")
+            return {
+                "status": "success",
+                "message": f"Đã cập nhật thành công hồ sơ cho người dùng {form_data['user_login']} (#{user_id})",
+                "data": result
+            }
         return await self.execute_full_license_hierarchy_chain(
             school_identifier=payload.get("school_name", ""),
             order_details=payload.get("order_details", payload)

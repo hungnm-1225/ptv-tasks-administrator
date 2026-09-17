@@ -1740,7 +1740,7 @@ export const AutomationStudioPage: React.FC = () => {
       }
       else if (workspaceMainCategory === 'update_user') {
         if (!loadedUserProfile) {
-          toast.error('Vui lòng tìm kiếm và nạp thông tin người dùng trước khi bấm xác nhận!');
+          toast.error('Vui lòng tìm kiếm và nạp thông tin người dùng trước!');
           return;
         }
         if (!editFirstName.trim() || !editLastName.trim()) {
@@ -1751,10 +1751,6 @@ export const AutomationStudioPage: React.FC = () => {
           toast.error('Vui lòng chọn Trường học cho người dùng!');
           return;
         }
-
-        const matchedSchool = schoolsList.find(
-          (s) => s.school_code === editSchoolCode
-        );
 
         payload = {
           ...payload,
@@ -1769,21 +1765,24 @@ export const AutomationStudioPage: React.FC = () => {
           year: editYear,
           country_id: loadedUserProfile.countryId,
           city_id: loadedUserProfile.cityId,
-          school_id: matchedSchool?.school_id || editSchoolCode,
-          partner_id: matchedSchool?.partner_code || editPartnerCode,
+          school_id: editSchoolCode, // 🎯 Gửi đúng mã 10266 / 10652!
+          school_name: editSchoolName, // 👈 Thêm tên trường
+          partner_id: editPartnerCode, // 🎯 Gửi đúng mã đối tác (VD: 60)
+          partner_name: editPartnerName,
           id_user_md: loadedUserProfile.idUserMD,
           user_role: loadedUserProfile.userRole,
         };
+
 
         summary.engineName = '🏢 Workspace User Profile Engine';
         summary.actionTitle = `Cập Nhật Hồ Sơ: ${editLastName} ${editFirstName} (#${loadedUserProfile.userId})`;
         summary.targetEntity = `${loadedUserProfile.userLogin} (${editEmail})`;
         summary.detailsList = [
           `Vai trò: ${loadedUserProfile.userRole === 'student' ? 'Học sinh (Student)' : 'Giáo viên (Teacher)'}`,
-          `Ngày sinh mới: ${editDay}/${editMonth}/${editYear}`,
-          `Trường học gán: ${matchedSchool?.school_name || editSchoolCode}`,
-          `Đối tác quản lý (Partner ID): ${editPartnerCode}`,
-          `Moodle User ID: ${loadedUserProfile.idUserMD || 'Không có'}`,
+          `Ngày sinh: ${editDay}/${editMonth}/${editYear}`,
+          `Trường học: ${editSchoolName} (Mã: ${editSchoolCode})`,
+          `Đối tác quản lý: ${editPartnerName} (Mã: ${editPartnerCode})`,
+          `Moodle User ID: ${loadedUserProfile.idUserMD || 'Chưa liên kết'}`,
         ];
       }
     } else if (selectedBotType === 'git_collaborator') {
@@ -4666,7 +4665,7 @@ export const AutomationStudioPage: React.FC = () => {
                                       <div className="font-bold text-slate-900 dark:text-white truncate flex items-center gap-1.5">
                                         {isCurrentPartner && (
                                           <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 font-bold">
-                                            Partner này
+                                            Partner hiện tại
                                           </span>
                                         )}
                                         <span>{s.school_name}</span>
@@ -4687,7 +4686,7 @@ export const AutomationStudioPage: React.FC = () => {
 
                       {/* Khối Metadata Kỹ Thuật */}
                       <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 text-[11px] text-slate-500 space-y-1">
-                        <p>• Quốc gia ID: <b>{loadedUserProfile.countryId}</b> | Thành phố ID: <b>{loadedUserProfile.cityId}</b> (Bảo toàn)</p>
+                        <p>• Quốc gia ID: <b>{loadedUserProfile.countryId}</b> | Thành phố ID: <b>{loadedUserProfile.cityId}</b></p>
                         <p>• Moodle User ID: <b>{loadedUserProfile.idUserMD || 'Chưa liên kết LMS'}</b></p>
                       </div>
                     </div>
