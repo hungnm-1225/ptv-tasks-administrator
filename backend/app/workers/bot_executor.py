@@ -67,7 +67,7 @@ async def execute_approved_bot_task(
     
     try:
         # =====================================================================
-        # 1. NHÓM TASK WORKSPACE RPA (HỆ THỐNG PHẢ HỆ, ĐƠN HÀNG, LICENSE, ENROLL)
+        # 1. NHÓM TASK WORKSPACE RPA (HỆ THỐNG PHẢ HỆ, ĐƠN HÀNG, CẬP NHẬT USER)
         # =====================================================================
         if bot_type == "workspace_rpa":
             # Tự động tải file đính kèm từ Supabase Storage nếu có
@@ -78,7 +78,82 @@ async def execute_approved_bot_task(
                     payload_data["upload_file_path"] = downloaded_file
                     payload_data["cof_file_path"] = downloaded_file
 
-            # 🎯 ĐIỀU HƯỚNG TRỰC TIẾP VÀO NHẠC TRƯỞNG WORKSPACE ORCHESTRATOR DIRECT API
+            # 🎯 XỬ LÝ RIÊNG BIỆT CHO ACTION: UPDATE_USER_PROFILE (CẬP NHẬT TRƯỜNG HỌC & ĐỐI TÁC CHO USER)
+            if action in ["update_user_profile", "update_user"]:
+                logger.info(f"👤 {task_tag} Kích hoạt Cập nhật hồ sơ & Đổi trường học cho user(s)...")
+                from app.services.workspace.user_service import WorkspaceUserService
+                
+                admin_user = os.getenv("WORKSPACE_ADMIN_USER") or getattr(settings, "WORKSPACE_ADMIN_USER", "salesadmin@dtt.vn")
+                admin_pass = os.getenv("WORKSPACE_ADMIN_PASS") or getattr(settings, "WORKSPACE_ADMIN_PASS", "")
+                
+                admin_user = str(admin_user).strip(" '\"")
+                admin_pass = str(admin_pass).strip(" '\"")
+
+                user_service = WorkspaceUserService()
+                users_to_update = payload_data.get("user_identifiers") or [payload_data.get("identifier") or payload_data.get("user_email") or payload_data.get("user_id")]
+                if isinstance(users_to_update, str):
+                    users_to_update = [u.strip() for u in users_to_update.split(",") if u.strip()]
+
+                school_target_code = str(payload_data.get("school_code") or payload_data.get("school_id") or "")
+                partner_target_code = str(payload_data.get("partner_code") or payload_data.get("partner_id") or "")
+                # Khử chữ rác nếu partner_id dính format hiển thị "Quipper (Mã: 180)"
+                m_prt = re.search(r"\b(\d+)\b", partner_target_code)
+                if m_prt:
+                    partner_target_code = m_prt.group(1)
+
+                update_results = []
+                for ident in users_to_update:
+                    if not ident:
+                        continue
+                    try:
+                        # 1. Dò tìm user detail
+                        user_detail_res = await user_service.get_user_detail_by_identifier(admin_user, admin_pass, str(ident).strip())
+                        if not user_detail_res.get("success"):
+                            update_results.append({"identifier": ident, "status": "failed", "error": user_detail_res.get("error", "Không tìm thấy user")})
+                            continue
+
+                        detail = user_detail_res.get("detail", {})
+                        user_wp_id = user_detail_res.get("user_id")
+
+                        # 2. Đóng gói form_data cập nhật trường học mới và đối tác mới
+                        form_data = {
+                            "inputFirstname": detail.get("first_name", ""),
+                            "inputLastname": detail.get("last_name", ""),
+                            "user_login": user_detail_res.get("user_login", ident),
+                            "inputEmail": detail.get("email", ident),
+                            "inputDay": detail.get("day", "1"),
+                            "inputMonth": detail.get("month", "1"),
+                            "inputYear": detail.get("year", "2000"),
+                            "inputCountries": detail.get("country_id", "3"),
+                            "inputCity": detail.get("city_id", "2852"),
+                            "inputSchool": school_target_code or detail.get("school_id", ""),
+                            "inputPartner": partner_target_code or detail.get("partner_id", ""),
+                            "idUserMDTeacher": detail.get("id_user_md", ""),
+                            "user_role": detail.get("user_role", "teacher")
+                        }
+
+                        # 3. Bắn request multipart updateUser.php siêu tốc (~200ms)
+                        up_res = await user_service.update_user_info(admin_user, admin_pass, user_wp_id, form_data)
+                        update_results.append({
+                            "identifier": ident,
+                            "user_id": user_wp_id,
+                            "status": "success" if up_res.get("status") else "failed",
+                            "response": up_res
+                        })
+                    except Exception as user_err:
+                        update_results.append({"identifier": ident, "status": "failed", "error": str(user_err)})
+
+                all_ok = any(r.get("status") == "success" for r in update_results)
+                return {
+                    "status": "success" if all_ok else "failed",
+                    "message": f"Đã cập nhật trường học '{payload_data.get('school_name')}' cho {len(update_results)} giáo viên thành công!",
+                    "details": update_results,
+                    "school_name": payload_data.get("school_name"),
+                    "school_code": school_target_code,
+                    "partner_code": partner_target_code
+                }
+
+            # 🎯 CÁC HÀNH ĐỘNG WORKSPACE KHÁC CHUYỂN TIẾP VÀO ORCHESTRATOR
             return await workspace_orchestrator_service.orchestrate_workspace_rpa(payload_data)
 
         # =====================================================================

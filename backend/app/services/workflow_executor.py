@@ -592,9 +592,12 @@ class WorkflowExecutorService:
     # =========================================================================
     # 🎯 ÁNH XẠ TOÀN DIỆN 19 CAPABILITIES SANG BOT HANDLER (FAIL-CLOSED)
     # =========================================================================
+    # =========================================================================
+    # 🎯 ÁNH XẠ TOÀN DIỆN CAPABILITIES SANG BOT HANDLER (FAIL-CLOSED)
+    # =========================================================================
     @staticmethod
     def _map_capability_to_bot(capability_id: str) -> Tuple[str, str]:
-        """Ánh xạ chuẩn mực 19 Capabilities hệ thống (Fail-Closed Invariant)."""
+        """Ánh xạ chuẩn mực Capabilities hệ thống sang Bot Type và Action."""
         mapping = {
             # Workspace & COF Capabilities
             "workspace.resolve_school": ("workspace_rpa", "resolve_school"),
@@ -615,6 +618,10 @@ class WorkflowExecutorService:
             "workspace.query_distributor_contracts": ("workspace_rpa", "query_distributor_contracts"),
             "workspace.query_partner_orders": ("workspace_rpa", "query_partner_orders"),
 
+            # 🎯 ĐÂY RỒI! BỔ SUNG ÁNH XẠ CHO CAPABILITY CẬP NHẬT HỒ SƠ / ĐỔI TRƯỜNG WORKSPACE:
+            "workspace.update_user_profile": ("workspace_rpa", "update_user_profile"),
+            "workspace.update_user": ("workspace_rpa", "update_user_profile"),
+
             # Moodle LMS Capabilities
             "lms.direct_enroll": ("lms_playwright", "direct_moodle_lms_enroll"),
             "lms.unenrol_users": ("lms_playwright", "unenrol_users_pipeline"),
@@ -626,6 +633,7 @@ class WorkflowExecutorService:
             "keycloak.unlock_account": ("keycloak_api", "set_user_status"),
             "keycloak.verify_email": ("keycloak_api", "mark_email_verified"),
             "keycloak.create_user": ("keycloak_api", "create_user"),
+            "keycloak.bulk_lookup": ("keycloak_api", "bulk_lookup"),
 
             # Pythaverse Git Capabilities
             "git.add_collaborators": ("git_collaborator", "add_repo_collaborators"),
