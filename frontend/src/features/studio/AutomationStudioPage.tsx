@@ -4533,11 +4533,47 @@ export const AutomationStudioPage: React.FC = () => {
                                   key={p.code}
                                   type="button"
                                   onClick={() => {
-                                    setEditPartnerCode(p.code);
-                                    setEditPartnerName(p.name);
-                                    setPartnerSearchQuery(p.name);
+                                    const newPartnerCode = p.code;
+                                    const newPartnerName = p.name;
+
+                                    // 1. Cập nhật Partner đã chọn
+                                    setEditPartnerCode(newPartnerCode);
+                                    setEditPartnerName(newPartnerName);
+                                    setPartnerSearchQuery(newPartnerName);
                                     setIsPartnerComboboxOpen(false);
-                                    toast.success(`Đã chọn: ${p.name} (Mã: ${p.code})`);
+
+                                    // 🎯 2. TỰ ĐỘNG LẤY TRƯỜNG ĐẦU TIÊN CỦA PARTNER NÀY (CHỐNG LỆCH PHẢ HỆ!)
+                                    const partnerSchools = schoolsList.filter(
+                                      (s) => String(s.partner_code) === String(newPartnerCode)
+                                    );
+
+                                    // Kiểm tra xem trường hiện tại có thuộc Partner mới chọn không
+                                    const isCurrentSchoolValid = partnerSchools.some(
+                                      (s) => String(s.school_code) === String(editSchoolCode)
+                                    );
+
+                                    if (!isCurrentSchoolValid) {
+                                      if (partnerSchools.length > 0) {
+                                        // ✅ Tự động lấy trường đầu tiên trong danh sách của Partner đó!
+                                        const firstSchool = partnerSchools[0];
+                                        setEditSchoolCode(firstSchool.school_code);
+                                        setEditSchoolName(firstSchool.school_name);
+                                        setSchoolSearchQuery(firstSchool.school_name);
+                                        toast.info(
+                                          `💡 Đổi Partner: ${newPartnerName} ➔ Tự động chọn trường: ${firstSchool.school_name} (Mã: ${firstSchool.school_code})`
+                                        );
+                                      } else {
+                                        // Nếu Partner này chưa có trường trực thuộc nào
+                                        setEditSchoolCode('');
+                                        setEditSchoolName('');
+                                        setSchoolSearchQuery('');
+                                        toast.warning(
+                                          `⚠️ Đối tác ${newPartnerName} hiện chưa có trường học trực thuộc trong danh bạ.`
+                                        );
+                                      }
+                                    } else {
+                                      toast.success(`Đã chọn: ${newPartnerName} (Mã: ${newPartnerCode})`);
+                                    }
                                   }}
                                   className={`w-full text-left p-2.5 rounded-xl text-xs flex items-center justify-between cursor-pointer transition ${editPartnerCode === p.code
                                     ? 'bg-purple-50 dark:bg-purple-950/60 border border-purple-300 dark:border-purple-700'
