@@ -23,6 +23,7 @@ from fastapi import HTTPException
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # ⚡ IN-MEMORY CACHE CHO PHẢ HỆ 480 TRƯỜNG & KHÓA HỌC WORKSPACE (TIER A CATALOG - 1ms)
 ws_cache = BoundedMemoryCache(tier=CacheTier.TIER_A_CATALOG, max_entries=50, default_ttl=900)
@@ -595,106 +596,33 @@ async def update_organization_and_vault(org_id: str, payload: OrgUpdateRequest):
     """
     supabase = get_supabase_client()
     
-    # Kiểm tra tồn tại
-    check_res = supabase.table("workspace_organizations").select("*").eq("id", org_id).execute()
-    if not check_res.data:
-        raise HTTPException(status_code=404, detail="Không tìm thấy tổ chức yêu cầu.")
-        
-    current_org = check_res.data[0]
-    
-    if payload.parent_id and payload.parent_id == org_id:
-        raise HTTPException(status_code=400, detail="Một đơn vị không thể tự làm cấp cha của chính mình!")
-
-    # 1. Bóc tách folder_id từ link Google Drive
-    drive_id = None
-    if payload.drive_folder_url:
-        clean_url = payload.drive_folder_url.strip()
-        match = re.search(r'folders/([a-zA-Z0-9-_]+)', clean_url)
-        drive_id = match.group(1) if match else clean_url
-
-    # 2. Tự động ánh xạ country_code chuẩn nếu chưa có
-    country_code = payload.country_code
-    if payload.country and not country_code:
-        c_map = {"Vietnam": "VN", "Malaysia": "MY", "Indonesia": "ID", "Philippines": "PH"}
-        country_code = c_map.get(payload.country, "")
-
-    # 3. Cập nhật bảng workspace_organizations
-    update_org_data: Dict[str, Any] = {
-        "name": payload.name.strip(),
-        "code": payload.code.strip() if payload.code else None,
-        "parent_id": payload.parent_id if (payload.parent_id and payload.parent_id.strip()) else None,
-        "country": payload.country.strip() if (payload.country and payload.country != "Unknown") else "Vietnam",
-        "country_code": country_code,
-        "drive_folder_url": payload.drive_folder_url.strip() if payload.drive_folder_url else None,
-        "drive_folder_id": drive_id,
-    }
-
-    supabase.table("workspace_organizations").update(update_org_data).eq("id", org_id).execute()
-
-    # 4. Cập nhật Két Sắt Fernet Vault nếu có mật khẩu hoặc username
-    vault_updated = False
-    if payload.username is not None or payload.password:
-        vault_check = supabase.table("workspace_credentials_vault").select("id").eq("org_id", org_id).execute()
-        vault_record = vault_check.data[0] if vault_check.data else None
-        
-        encrypted_pass = None
-        if payload.password and payload.password.strip():
-            cipher = get_clean_fernet_cipher()
-            if cipher:
-                encrypted_pass = cipher.encrypt(payload.password.strip().encode()).decode()
-            else:
-                encrypted_pass = payload.password.strip()
-
-        now_iso = get_utc_iso()
-        if vault_record:
-            vault_payload: Dict[str, Any] = {"updated_at": now_iso}
-            if payload.username is not None:
-                vault_payload["username"] = payload.username.strip()
-            if encrypted_pass:
-                vault_payload["encrypted_password"] = encrypted_pass
-                
-            supabase.table("workspace_credentials_vault").update(vault_payload).eq("id", vault_record["id"]).execute()
-            vault_updated = True
-        else:
-            new_vault = {
-                "org_id": org_id,
-                "account_role": current_org.get("role_type", "school"),
-                "username": (payload.username or "").strip(),
-                "encrypted_password": encrypted_pass or "",
-                "is_active": True,
-                "updated_at": now_iso
-            }
-            supabase.table("workspace_credentials_vault").insert(new_vault).execute()
-            vault_updated = True
-
-    # 5. Xóa RAM cache để giao diện tải lại nhận ngay dữ liệu mới
-    ws_cache.invalidate("all_hierarchy_schools")
-
-    logger.info(f"✅ Đã cập nhật thành công tổ chức {org_id} (Country: {update_org_data['country']}, Drive: {drive_id})")
-    return {
-        "status": "success",
-        "message": f"Đã cập nhật thành công phả hệ và cấu hình của '{payload.name or current_org['name']}'!",
-        "vault_updated": vault_updated
-    }
-
-    """Cập nhật thông tin phả hệ, quốc gia và thư mục Google Drive."""
-    db = get_supabase_client()
     try:
-        # Bóc tách folder_id từ link Google Drive
+        # 1. Kiểm tra tồn tại
+        check_res = supabase.table("workspace_organizations").select("*").eq("id", org_id).execute()
+        if not check_res.data:
+            raise HTTPException(status_code=404, detail="Không tìm thấy tổ chức yêu cầu.")
+            
+        current_org = check_res.data[0]
+        
+        # 2. Chặn lỗi logic tự làm cha của chính mình
+        if payload.parent_id and payload.parent_id == org_id:
+            raise HTTPException(status_code=400, detail="Một đơn vị không thể tự làm cấp cha của chính mình!")
+
+        # 3. Bóc tách folder_id từ link Google Drive
         drive_id = None
         if payload.drive_folder_url:
             clean_url = payload.drive_folder_url.strip()
             match = re.search(r'folders/([a-zA-Z0-9-_]+)', clean_url)
             drive_id = match.group(1) if match else clean_url
 
-        # Tự động ánh xạ country_code chuẩn nếu chưa có
+        # 4. Tự động ánh xạ country_code chuẩn nếu chưa có
         country_code = payload.country_code
         if payload.country and not country_code:
             c_map = {"Vietnam": "VN", "Malaysia": "MY", "Indonesia": "ID", "Philippines": "PH"}
             country_code = c_map.get(payload.country, "")
 
-        # 1. Cập nhật bảng workspace_organizations
-        update_fields = {
+        # 5. Cập nhật bảng workspace_organizations
+        update_org_data: Dict[str, Any] = {
             "name": payload.name.strip(),
             "code": payload.code.strip() if payload.code else None,
             "parent_id": payload.parent_id if (payload.parent_id and payload.parent_id.strip()) else None,
@@ -704,37 +632,55 @@ async def update_organization_and_vault(org_id: str, payload: OrgUpdateRequest):
             "drive_folder_id": drive_id,
         }
 
-        db.table("workspace_organizations").update(update_fields).eq("id", org_id).execute()
+        supabase.table("workspace_organizations").update(update_org_data).eq("id", org_id).execute()
 
-        # 2. Cập nhật Két Sắt Fernet Vault nếu có mật khẩu mới hoặc username
-        if payload.password and payload.password.strip():
-            from app.api.v1.endpoints.workspace import get_clean_fernet_cipher
-            cipher = get_clean_fernet_cipher()
-            enc_pass = cipher.encrypt(payload.password.strip().encode()).decode() if cipher else payload.password.strip()
+        # 6. Cập nhật Két Sắt Fernet Vault nếu có mật khẩu hoặc username
+        vault_updated = False
+        if payload.username is not None or payload.password:
+            vault_check = supabase.table("workspace_credentials_vault").select("id").eq("org_id", org_id).execute()
+            vault_record = vault_check.data[0] if vault_check.data else None
+            
+            encrypted_pass = None
+            if payload.password and payload.password.strip():
+                cipher = get_clean_fernet_cipher()
+                if cipher:
+                    encrypted_pass = cipher.encrypt(payload.password.strip().encode()).decode()
+                else:
+                    encrypted_pass = payload.password.strip()
 
-            v_res = db.table("workspace_credentials_vault").select("id").eq("org_id", org_id).execute()
-            if v_res.data:
-                db.table("workspace_credentials_vault").update({
-                    "encrypted_password": enc_pass,
-                    "username": payload.username or "",
-                    "updated_at": datetime.now(timezone.utc).isoformat()
-                }).eq("org_id", org_id).execute()
+            now_iso = get_utc_iso()
+            if vault_record:
+                vault_payload: Dict[str, Any] = {"updated_at": now_iso}
+                if payload.username is not None:
+                    vault_payload["username"] = payload.username.strip()
+                if encrypted_pass:
+                    vault_payload["encrypted_password"] = encrypted_pass
+                    
+                supabase.table("workspace_credentials_vault").update(vault_payload).eq("id", vault_record["id"]).execute()
+                vault_updated = True
             else:
-                db.table("workspace_credentials_vault").insert({
+                new_vault = {
                     "org_id": org_id,
-                    "account_role": "distributor",
-                    "username": payload.username or "",
-                    "encrypted_password": enc_pass,
+                    "account_role": current_org.get("role_type", "school"),
+                    "username": (payload.username or "").strip(),
+                    "encrypted_password": encrypted_pass or "",
                     "is_active": True,
-                    "updated_at": datetime.now(timezone.utc).isoformat()
-                }).execute()
-        elif payload.username:
-            db.table("workspace_credentials_vault").update({
-                "username": payload.username
-            }).eq("org_id", org_id).execute()
+                    "updated_at": now_iso
+                }
+                supabase.table("workspace_credentials_vault").insert(new_vault).execute()
+                vault_updated = True
 
-        logger.info(f"✅ Đã cập nhật thành công tổ chức {org_id} (Country: {update_fields['country']}, Drive: {drive_id})")
-        return {"status": "success", "message": "Đã cập nhật phả hệ và cấu hình thành công!"}
+        # 7. Xóa RAM cache để giao diện tải lại nhận ngay dữ liệu mới
+        ws_cache.invalidate("all_hierarchy_schools")
+
+        logger.info(f"✅ Đã cập nhật thành công tổ chức {org_id} (Country: {update_org_data['country']}, Drive: {drive_id})")
+        return {
+            "status": "success",
+            "message": f"Đã cập nhật thành công phả hệ và cấu hình của '{payload.name or current_org['name']}'!",
+            "vault_updated": vault_updated
+        }
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Lỗi cập nhật organization {org_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"❌ Lỗi cập nhật organization {org_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Lỗi máy chủ: {str(e)}")
