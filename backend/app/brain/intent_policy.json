@@ -70,12 +70,14 @@
         },
         "repository_access": {
             "name": "Cấp quyền truy cập Git Pythaverse",
-            "description": "Thêm thành viên vào Repository Git Pythaverse (Mặc định GUEST)",
+            "description": "Thêm thành viên vào Repository Git Pythaverse (Bắt buộc chỉ định rõ vai trò)",
             "required_entities": [
-                "repositories"
+                "repositories",
+                "git_role"
             ],
             "required_inputs": [
-                "repositories"
+                "repositories",
+                "git_role"
             ],
             "min_evidence_quotes": 1,
             "risk_level": "medium_mutation",

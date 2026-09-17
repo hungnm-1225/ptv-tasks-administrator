@@ -235,6 +235,9 @@ class WorkflowPlannerService:
     # =========================================================================
     # 🏗️ XÂY DỰNG ĐỀ XUẤT WORKFLOW PROPOSAL (TỰ ĐỘNG BÓC COF)
     # =========================================================================
+    # =========================================================================
+    # 🏗️ XÂY DỰNG ĐỀ XUẤT WORKFLOW PROPOSAL (BẢN VÁ AN TOÀN V3.6.1)
+    # =========================================================================
     def build_workflow_proposal(
         self,
         assessment: IntentAssessment,
@@ -243,62 +246,18 @@ class WorkflowPlannerService:
         attachment_url: Optional[str],
         cof_extracted_data: Optional[Dict[str, Any]] = None
     ) -> Tuple[str, List[WorkflowStepDraft], List[Dict[str, str]], List[str]]:
-        """Lập đề xuất Workflow Draft: Hỗ trợ tự động phân tích COF 5 bước E2E."""
+        """Lập đề xuất Workflow Draft: Đã chặn triệt để việc vẽ bước linh tinh."""
         steps: List[WorkflowStepDraft] = []
         missing_requirements: List[Dict[str, str]] = list(assessment.missing_requirements)
         warnings: List[str] = list(assessment.warnings)
         step_counter = 1
 
-        if assessment.outcome == "no_action":
-            return "no_action", [], [], ["Không có hành vi tự động hóa nào được yêu cầu."]
+        # 🛑 CHẶN 1: Nếu AI đánh giá không cần thao tác hoặc là bug/inquiry -> Dừng ngay!
+        if assessment.outcome == "no_action" or not assessment.intents:
+            return "no_action", [], [], ["Không có hành vi tự động hóa nào được yêu cầu (Ticket thông báo, hỏi đáp hoặc báo lỗi)."]
 
         typed_entities = assessment.typed_entities
-        if typed_entities is None:
-            missing_requirements.append({
-                "field": "verified_entities",
-                "reason": "Thiếu thực thể đã xác thực (verified_entities)."
-            })
         entities: Dict[str, Any] = typed_entities.model_dump() if isinstance(typed_entities, TypedEntities) else {}
-
-        # 🛡️ KIỂM ĐỊNH NGUYÊN TẮC BẤT DI BẤT DỊCH (FAIL-CLOSED INVARIANTS)
-        for intent in assessment.intents:
-            # 1. Bằng chứng nguyên văn (Evidence-Based Fail-Closed Invariant)
-            if not intent.evidence:
-                missing_requirements.append({
-                    "field": "evidence",
-                    "reason": f"Intent '{intent.type}' không có trích dẫn bằng chứng nguyên văn (Fail-Closed Invariant)."
-                })
-            # 2. Thực thể bắt buộc (Required Entities Invariant)
-            if intent.required_entities:
-                for req_ent in intent.required_entities:
-                    ent_val = entities.get(req_ent)
-                    if ent_val is None or ent_val == [] or ent_val == "":
-                        if not any(m.get("field") == req_ent for m in missing_requirements):
-                            missing_requirements.append({
-                                "field": req_ent,
-                                "reason": f"Thiếu thực thể bắt buộc '{req_ent}' cho hành vi '{intent.type}'."
-                            })
-            # 3. Phân quyền Git (Zero-Mockup Invariant)
-            if intent.type == "repository_access":
-                if not entities.get("git_role"):
-                    if not any(m.get("field") == "git_role" for m in missing_requirements):
-                        missing_requirements.append({
-                            "field": "git_role",
-                            "reason": "Thiếu vai trò phân quyền Git (Zero-Mockup Invariant cấm gán mặc định role GUEST)."
-                        })
-                # Kiểm tra repository_url hợp lệ (không đoán mò từ tên)
-                repo_url = entities.get("repository_url")
-                raw_repos = entities.get("repositories", [])
-                has_valid_url = (
-                    (repo_url and isinstance(repo_url, str) and repo_url.startswith("http")) or
-                    (raw_repos and any(isinstance(r, str) and r.startswith("http") for r in raw_repos))
-                )
-                if not has_valid_url:
-                    if not any(m.get("field") == "repository_url" for m in missing_requirements):
-                        missing_requirements.append({
-                            "field": "repository_url",
-                            "reason": "Thiếu đường dẫn kho lưu trữ Git hợp lệ (repository_url). Zero Guessing Invariant cấm suy đoán URL từ tên repo."
-                        })
 
         raw_users = entities.get("users", [])
         if not isinstance(raw_users, list):
@@ -307,58 +266,6 @@ class WorkflowPlannerService:
         user_emails = [u.get("email") for u in raw_users if isinstance(u, dict) and u.get("email")]
         has_teacher = any(isinstance(u, dict) and u.get("role") == "teacher" for u in raw_users)
 
-        has_course_enroll = any(i.type == "course_access" for i in assessment.intents if i.is_valid)
-        is_cof_ticket = bool(cof_extracted_data or (attachment_url and any(ext in str(attachment_url).lower() for ext in ["cof", ".xlsx", ".xls"])))
-
-        detected_courses = entities.get("courses", [])
-
-        # 🧠 BẢN ĐỒ PHÂN GIẢI KHÓA HỌC & BẮT CẶP GIT REPOS
-        canonical_courses: List[str] = []
-        course_repo_pairings: Dict[str, str] = {}
-        course_details_list: List[Dict[str, Any]] = []
-
-        # Nếu có dữ liệu bóc tách COF chính xác từ file đính kèm
-        if cof_extracted_data and cof_extracted_data.get("courses"):
-            for c_cof in cof_extracted_data["courses"]:
-                c_name, c_code, c_repo, c_id = self.resolve_course_from_db(
-                    course_query=str(c_cof.get("course_id") or c_cof.get("course_name")),
-                    is_cof=True,
-                    is_teacher=has_teacher
-                )
-                canonical_courses.append(c_name)
-                if c_repo:
-                    course_repo_pairings[c_name] = c_repo
-
-                course_details_list.append({
-                    "category": c_cof.get("category", "SWRP"),
-                    "course_id": c_id or int(c_cof.get("course_id", 1)),
-                    "course_name": c_name,
-                    "licenses": c_cof.get("licenses", 50),
-                    "start_date": c_cof.get("start_date", "2026-09-16"),
-                    "end_date": c_cof.get("end_date", "2027-09-16"),
-                })
-        else:
-            for c_raw in detected_courses:
-                c_name, c_code, c_repo, c_id = self.resolve_course_from_db(
-                    course_query=c_raw,
-                    is_cof=is_cof_ticket,
-                    is_teacher=has_teacher
-                )
-                if c_name and c_name not in canonical_courses:
-                    canonical_courses.append(c_name)
-                    if c_repo:
-                        course_repo_pairings[c_name] = c_repo
-
-                    course_details_list.append({
-                        "category": "SWRP",
-                        "course_id": c_id or 1,
-                        "course_name": c_name,
-                        "licenses": 50,
-                        "start_date": "2026-09-16",
-                        "end_date": "2027-09-16",
-                    })
-
-        final_git_role = entities.get("git_role")
         active_school_name = (
             resolved_school.name if resolved_school 
             else (cof_extracted_data.get("school_name") if cof_extracted_data else entities.get("school_name"))
@@ -366,10 +273,52 @@ class WorkflowPlannerService:
         active_school_id = resolved_school.id if resolved_school else None
 
         # =====================================================================
-        # 🎯 KỊCH BẢN ĐẶC BIỆT: TỰ ĐỘNG SINH CHUỖI 5 BƯỚC CHO TICKET CÓ COF
+        # 🎯 CHẶN 2: CHỈ KÍCH HOẠT CHUỖI COF 5 BƯỚC KHI THỰC SỰ LÀ FILE COF ĐÃ BÓC TÁCH THÀNH CÔNG!
+        # Tuyệt đối không kích hoạt chỉ vì attachment có đuôi .xlsx hay có detected_courses!
         # =====================================================================
-        if is_cof_ticket and (cof_extracted_data or course_details_list):
-            logger.info("📑 [COF Auto DAG Planner] Phát hiện file COF! Tự động lập chuỗi 5 bước E2E khép kín...")
+        is_real_cof_validated = bool(
+            cof_extracted_data 
+            and isinstance(cof_extracted_data.get("courses"), list) 
+            and len(cof_extracted_data["courses"]) > 0
+        )
+
+        if is_real_cof_validated:
+            logger.info("📑 [COF Auto DAG Planner] Xác thực file COF chuẩn! Lập chuỗi 5 bước E2E khép kín...")
+
+            course_details_list: List[Dict[str, Any]] = []
+            for c_cof in cof_extracted_data["courses"]:
+                c_name, c_code, c_repo, c_id = self.resolve_course_from_db(
+                    course_query=str(c_cof.get("course_id") or c_cof.get("course_name")),
+                    is_cof=True,
+                    is_teacher=has_teacher
+                )
+                
+                # TUÂN THỦ ZERO-MOCKUP: Lấy số lượng thực tế từ file COF, không bịa số 50!
+                real_licenses = c_cof.get("licenses") or c_cof.get("quantity")
+                if not real_licenses:
+                    missing_requirements.append({
+                        "field": f"licenses_{c_name}",
+                        "message": f"Khóa học '{c_name}' trong file COF không ghi rõ số lượng bản quyền."
+                    })
+
+                course_details_list.append({
+                    "category": c_cof.get("category", "SWRP"),
+                    "course_id": c_id or int(c_cof.get("course_id", 1)),
+                    "course_name": c_name,
+                    "licenses": real_licenses,
+                    "start_date": c_cof.get("start_date"),
+                    "end_date": c_cof.get("end_date"),
+                })
+
+            if not active_school_name:
+                missing_requirements.append({
+                    "field": "school_name",
+                    "message": "Không nhận diện được tên trường học hợp lệ từ file COF."
+                })
+
+            # Nếu thiếu thông tin cốt tử -> Đẩy về needs_information ngay, cấm vẽ bước ảo!
+            if missing_requirements:
+                return "needs_information", [], missing_requirements, warnings
 
             # Bước 1: School Tạo Order
             s1_id = f"step_{step_counter:02d}"
@@ -383,12 +332,12 @@ class WorkflowPlannerService:
                     "school_name": active_school_name,
                     "courses": course_details_list,
                     "contact_info": "Admin Automation Hub (operation@pythaverse.space)",
-                    "additional_notes": f"Auto-created from COF ({active_school_name})"
+                    "additional_notes": f"Auto-created from verified COF ({active_school_name})"
                 },
                 depends_on=[]
             ))
 
-            # Bước 2: Partner Phê Duyệt & Cấp Bù License
+            # Bước 2: Partner Cấp Bù License
             s2_id = f"step_{step_counter:02d}"
             step_counter += 1
             steps.append(WorkflowStepDraft(
@@ -404,7 +353,7 @@ class WorkflowPlannerService:
                 depends_on=[s1_id]
             ))
 
-            # Bước 3: Nộp Batch Tạo Tài Khoản Hàng Loạt
+            # Bước 3: Bulk Accounts Creation
             s3_id = f"step_{step_counter:02d}"
             step_counter += 1
             steps.append(WorkflowStepDraft(
@@ -415,12 +364,12 @@ class WorkflowPlannerService:
                 inputs={
                     "school_name": active_school_name,
                     "attachment_url": attachment_url,
-                    "total_count": cof_extracted_data.get("students_count", 50) if cof_extracted_data else 50
+                    "total_count": cof_extracted_data.get("students_count", len(raw_users))
                 },
                 depends_on=[s2_id]
             ))
 
-            # Bước 4: Thăm Dò Tiến Độ Batch (Poll Batch)
+            # Bước 4: Poll Batch Tiến Độ
             s4_id = f"step_{step_counter:02d}"
             step_counter += 1
             steps.append(WorkflowStepDraft(
@@ -434,7 +383,7 @@ class WorkflowPlannerService:
                 depends_on=[s3_id]
             ))
 
-            # Bước 5: Ghi Danh Đa Môn Học & Đồng Bộ Pythaverse Git
+            # Bước 5: Ghi danh & Đồng Bộ Git
             s5_id = f"step_{step_counter:02d}"
             step_counter += 1
             steps.append(WorkflowStepDraft(
@@ -445,8 +394,8 @@ class WorkflowPlannerService:
                 inputs={
                     "school_name": active_school_name,
                     "courses_plan": course_details_list,
-                    "class_assignments": cof_extracted_data.get("ordered_trays", {}) if cof_extracted_data else {},
-                    "teachers_allocation": cof_extracted_data.get("teachers_allocation", []) if cof_extracted_data else [],
+                    "class_assignments": cof_extracted_data.get("ordered_trays", {}),
+                    "teachers_allocation": cof_extracted_data.get("teachers_allocation", []),
                     "auto_sync_git": True
                 },
                 depends_on=[s4_id]
@@ -455,9 +404,42 @@ class WorkflowPlannerService:
             return "ready", steps, missing_requirements, warnings
 
         # =====================================================================
-        # 🎯 KỊCH BẢN TIÊU CHUẨN: LẬP PLAN TỪ INTENTS CỦA TICKET EMAIL THƯỜNG
+        # 🎯 CHẶN 3: LỌC DOMINANT INTENT CHO EMAIL THÔNG THƯỜNG
+        # Tuyệt đối không loop gom rác mọi intent! Chỉ chọn intent có confidence cao nhất!
         # =====================================================================
+        valid_intents = [i for i in assessment.intents if i.is_valid]
+        if not valid_intents:
+            return "no_action", [], [], ["Không tìm thấy ý định vận hành nào có đầy đủ bằng chứng xác thực."]
+
+        # Sắp xếp lấy Intent có độ tin cậy cao nhất (Dominant Intent)
+        valid_intents.sort(key=lambda x: x.confidence, reverse=True)
+        dominant_intent = valid_intents[0]
+
+        # Cho phép combo tự nhiên: create_accounts + course_access (nếu cả 2 đều tự tin >= 0.85)
+        allowed_intents = [dominant_intent]
+        if dominant_intent.type == "create_accounts":
+            course_intent = next((i for i in valid_intents if i.type == "course_access" and i.confidence >= 0.85), None)
+            if course_intent:
+                allowed_intents.append(course_intent)
+
+        # Phân giải danh mục khóa học từ text email
+        canonical_courses: List[str] = []
+        course_repo_pairings: Dict[str, str] = {}
+        for c_raw in entities.get("courses", []):
+            c_name, c_code, c_repo, c_id = self.resolve_course_from_db(
+                course_query=c_raw,
+                is_cof=False,
+                is_teacher=has_teacher
+            )
+            if c_name and c_name not in canonical_courses:
+                canonical_courses.append(c_name)
+                if c_repo:
+                    course_repo_pairings[c_name] = c_repo
+
+        final_git_role = entities.get("git_role")
         account_batch_poll_step_id: Optional[str] = None
+        has_course_enroll = any(i.type == "course_access" for i in allowed_intents)
+
         operation_context: Dict[str, Any] = {
             "resolved_school": resolved_school,
             "entities": {
@@ -479,11 +461,11 @@ class WorkflowPlannerService:
             }
         }
 
-        for extracted_intent in assessment.intents:
-            if not extracted_intent.is_valid:
-                continue
-
+        # Chỉ sinh bước cho các intent ĐÃ ĐƯỢC CHỌN LỌC (allowed_intents)
+        for extracted_intent in allowed_intents:
             intent_type = extracted_intent.type
+
+            # Triệt tiêu bước Git riêng lẻ nếu đã có bước LMS Enroll (vì LMS Enroll đã tự động sync Git)
             if intent_type == "repository_access" and has_course_enroll:
                 logger.info("ℹ️ Bỏ qua bước Git riêng lẻ vì LMS Enroll đã tự động đảm nhiệm cả luồng đồng bộ Git Repo.")
                 continue
@@ -491,6 +473,18 @@ class WorkflowPlannerService:
             policy = self.policy_registry.get(intent_type)
             if not policy:
                 continue
+
+            # Kiểm tra ràng buộc bắt buộc của chính sách (Required Inputs)
+            req_inputs = policy.get("required_inputs", [])
+            for r_in in req_inputs:
+                if r_in == "school_name" and not active_school_name:
+                    missing_requirements.append({"field": "school_name", "message": "Yêu cầu tạo tài khoản thiếu thông tin trường học."})
+                elif r_in == "courses" and not canonical_courses:
+                    missing_requirements.append({"field": "courses", "message": "Yêu cầu ghi danh thiếu danh sách khóa học cụ thể."})
+                elif r_in == "target_email" and not operation_context["context"]["target_email"]:
+                    missing_requirements.append({"field": "target_email", "message": "Yêu cầu đặt lại mật khẩu thiếu email tài khoản đích."})
+                elif r_in == "repositories" and not entities.get("repositories"):
+                    missing_requirements.append({"field": "repositories", "message": "Yêu cầu cấp quyền Git thiếu link hoặc tên repository."})
 
             pipeline = policy.get("capability_pipeline", [])
             intent_step_id_map: Dict[str, str] = {}
@@ -567,6 +561,7 @@ class WorkflowPlannerService:
 
         return status, steps, missing_requirements, warnings
 
+        
     def validate_workflow_graph(self, steps: List[WorkflowStepDraft]) -> WorkflowValidationResult:
         """Kiểm định đồ thị DAG và phát hiện chu trình lặp (Kahn's Algorithm)."""
         errors: List[str] = []
