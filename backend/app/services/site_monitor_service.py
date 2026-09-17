@@ -261,12 +261,11 @@ def get_hourly_uptime_history(site_id: str, hours: int = 24) -> list[dict]:
     current_hk = now.strftime("%Y-%m-%d %H")
     site_obj = next((s for s in _sites_cache if s["id"] == site_id), None)
     if site_obj and current_hk in hour_map:
-        if site_obj.get("response_time_ms", 0) > 0 and site_obj.get("last_status") == "UP":
-            # Nếu giờ hiện tại chưa gom kịp, lấy ngay ping vừa đo
-            if not hour_map[current_hk]["has_data"]:
-                hour_map[current_hk]["latency_ms"] = site_obj["response_time_ms"]
-                hour_map[current_hk]["status"] = "UP"
-                hour_map[current_hk]["has_data"] = True
+        # Nhưng nếu cron vừa ping nhát đầu tiên mà chưa kịp vào DB, lấy ngay giá trị mới nhất làm gốc:
+        if not hour_map[current_hk]["has_data"] and site_obj.get("response_time_ms", 0) > 0:
+            hour_map[current_hk]["latency_ms"] = site_obj["response_time_ms"]
+            hour_map[current_hk]["status"] = site_obj.get("last_status", "UP")
+            hour_map[current_hk]["has_data"] = True
 
     return result
 
