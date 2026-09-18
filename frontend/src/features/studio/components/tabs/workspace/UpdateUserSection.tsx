@@ -184,10 +184,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
 
                     {/* Badge trạng thái thông minh: Khi đang search thì ẩn ID cũ đi, hiện Spinner! */}
                     {isSearchingUser ? (
-                        <span className="px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 text-[11px] font-mono font-bold flex items-center gap-1.5 animate-pulse self-start sm:self-auto">
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600 dark:text-indigo-400" />
-                            <span>Đang dò tìm CSDL...</span>
-                        </span>
+                        <></>
                     ) : loadedUserProfile ? (
                         <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-[11px] font-mono font-bold flex items-center gap-1 self-start sm:self-auto shadow-xs">
                             <CheckCircle2 className="w-3.5 h-3.5" />

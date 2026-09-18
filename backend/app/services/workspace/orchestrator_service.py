@@ -203,7 +203,7 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
             return {
                 "status": "success",
                 "message": clean_msg,
-                "execution_logs": f"🎯 HOÀN TẤT CẬP NHẬT HỒ SƠ WORKSPACE\nUser #{user_id}: {form_data['user_login']} ({form_data['email']})",
+                "execution_logs": f"✓ Đã cập nhật hồ sơ User #{user_id} ({form_data['user_login']})",
                 "data": result
             }
 

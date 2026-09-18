@@ -53,25 +53,53 @@ class WorkspaceContractService(WorkspaceBaseService):
             now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             
             supabase = get_supabase_client()
+            # 🎯 ĐÃ KHỚP SCHEMA: contract_code, sender_name, raw_payload
             update_res = supabase.table("workspace_contracts_cache").update({
                 "status": new_status,
-                "synced_at": now_utc
+                "updated_at": now_utc,
+                "last_synced_at": now_utc
             }).ilike("contract_code", pattern).execute()
 
             if not update_res.data:
                 supabase.table("workspace_contracts_cache").insert({
                     "contract_code": clean_code,
                     "contract_type": contract_type.upper(),
+                    "sender_name": "Partner",
                     "status": new_status,
-                    "total_licenses": 50,
-                    "synced_at": now_utc,
-                    "raw_data": {"auto_synced": True}
+                    "raw_payload": {"auto_synced": True},
+                    "last_synced_at": now_utc,
+                    "updated_at": now_utc
                 }).execute()
 
             self._invalidate_workspace_ram_cache("contracts")
             logger.info(f"💾 [DB SYNC] {contract_type} Contract [{clean_code}] ➔ Status: '{new_status}'")
         except Exception as e:
             logger.warning(f"⚠️ [DB SYNC] Lỗi cập nhật Contract: {e}")
+
+    async def _record_created_contract_db(self, contract_code: str, contract_type: str, status: str, **kwargs):
+        if not contract_code:
+            return
+        try:
+            from app.core.supabase import get_supabase_client
+            now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            supabase = get_supabase_client()
+            
+            # 🎯 ĐÃ KHỚP SCHEMA: sender_name, raw_payload, last_synced_at
+            record = {
+                "contract_code": contract_code,
+                "contract_type": contract_type.upper(),
+                "sender_name": kwargs.get("partner_name") or kwargs.get("sender_name", "Partner"),
+                "status": status,
+                "courses_data": kwargs.get("courses", []),
+                "raw_payload": kwargs,
+                "last_synced_at": now_utc,
+                "updated_at": now_utc
+            }
+            supabase.table("workspace_contracts_cache").upsert(record, on_conflict="contract_code").execute()
+            self._invalidate_workspace_ram_cache("contracts")
+            logger.info(f"💾 [DB SYNC] Lưu Contract [{contract_code}] ({contract_type}) ➔ Status: '{status}'")
+        except Exception as e:
+            logger.warning(f"⚠️ [DB SYNC] Lỗi ghi nhận Contract: {e}")
 
     async def _record_created_contract_db(self, contract_code: str, contract_type: str, status: str, **kwargs):
         if not contract_code:
