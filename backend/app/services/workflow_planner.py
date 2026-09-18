@@ -312,9 +312,33 @@ class WorkflowPlannerService:
         if assessment.outcome == "no_action" or not assessment.intents:
             return "no_action", [], [], ["Không có hành vi tự động hóa nào được yêu cầu."]
 
+        # 🛑 FAIL-CLOSED INVARIANT 1: Từng intent bắt buộc phải có trích dẫn bằng chứng
+        for intent in assessment.intents:
+            if not intent.evidence:
+                missing_requirements.append({
+                    "field": "evidence",
+                    "message": f"Ý định '{intent.type}' không có trích dẫn bằng chứng xác thực từ nội dung yêu cầu."
+                })
+                intent.is_valid = False
+
+        # 🛑 FAIL-CLOSED INVARIANT 2: Không được nâng cấp thực thể thô (legacy entities) thành input thực thi
+        if assessment.entities and not assessment.typed_entities:
+            missing_requirements.append({
+                "field": "verified_entities",
+                "message": "Các thực thể chưa được xác thực thông qua TypedEntities."
+            })
+
         entities_dict = assessment.entities if isinstance(assessment.entities, dict) else {}
         typed_entities = assessment.typed_entities
         entities: Dict[str, Any] = typed_entities.model_dump() if isinstance(typed_entities, TypedEntities) else {}
+
+        # 🛑 FAIL-CLOSED INVARIANT 3: Không tự ý đoán URL repository khi chỉ có tên repo
+        if any(i.type == "repository_access" for i in assessment.intents if i.is_valid):
+            if entities.get("repositories") and not entities.get("repository_url"):
+                missing_requirements.append({
+                    "field": "repository_url",
+                    "message": "Yêu cầu cấp quyền Git cần URL repository hợp lệ (không tự ý đoán URL)."
+                })
 
         # Danh sách giáo viên chuẩn hóa
         raw_users = (
@@ -498,6 +522,12 @@ class WorkflowPlannerService:
                     missing_requirements.append({"field": "courses", "message": "Yêu cầu cần xác định khóa học cụ thể."})
                 elif r_in in ["user_identifiers", "user_emails"] and not user_emails:
                     missing_requirements.append({"field": "user_emails", "message": "Yêu cầu cần danh sách email tài khoản."})
+                elif r_in == "repositories" and not entities.get("repositories") and not entities.get("repository_url"):
+                    missing_requirements.append({"field": "repositories", "message": "Yêu cầu cấp quyền Git thiếu link hoặc tên repository."})
+                elif r_in == "git_role" and not entities.get("git_role"):
+                    missing_requirements.append({"field": "git_role", "message": "Yêu cầu cấp quyền Git thiếu vai trò (Role)."})
+                elif r_in == "target_email" and not operation_context["context"]["target_email"]:
+                    missing_requirements.append({"field": "target_email", "message": "Yêu cầu thiếu email tài khoản đích."})
 
             pipeline = policy.get("capability_pipeline", [])
             for step_cfg in pipeline:
@@ -551,8 +581,9 @@ class WorkflowPlannerService:
                     depends_on=[]
                 ))
 
-        if missing_requirements:
+        if missing_requirements or assessment.outcome == "needs_information":
             status = "needs_information"
+            steps = []
         elif warnings:
             status = "needs_review"
         elif steps:
@@ -579,7 +610,9 @@ class WorkflowPlannerService:
                     in_degree[s.step_id] += 1
 
             cap_def = self.capabilities_map.get(s.capability_id)
-            if cap_def and cap_def.get("risk_level") == "high_mutation":
+            if not cap_def or not cap_def.get("supported_by_handler", True) or not cap_def.get("available", True):
+                errors.append(f"Capability '{s.capability_id}' không khả dụng để thực thi hoặc đang bị vô hiệu hóa.")
+            elif cap_def.get("risk_level") == "high_mutation":
                 warnings.append(f"Bước '{s.name}' có mức rủi ro cao (high_mutation). Bắt buộc xác nhận phê duyệt.")
 
         from collections import deque

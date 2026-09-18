@@ -1069,9 +1069,6 @@ export const UnifiedInboxPage: React.FC = () => {
         <div className="p-16 text-center rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-3">
           <Inbox className="w-12 h-12 text-slate-300 mx-auto" />
           <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300">Không tìm thấy ticket nào</h3>
-          <p className="text-xs text-slate-400 max-w-sm mx-auto">
-            Không có ticket phù hợp với bộ lọc hiện tại. Thử thay đổi điều kiện tìm kiếm hoặc bấm Quét Mới.
-          </p>
         </div>
       ) : (
         <div className="space-y-4">

@@ -485,10 +485,10 @@
       "consumes": [],
       "execution_type": "async_playwright",
       "risk_level": "high_mutation",
-      "supported_by_handler": false,
+      "supported_by_handler": true,
       "requires_explicit_evidence": true,
       "requires_manual_confirmation": true,
-      "available": false
+      "available": true
     },
     {
       "id": "keycloak.reset_password",
@@ -647,6 +647,101 @@
       "consumes": [],
       "execution_type": "sync_api",
       "risk_level": "low_mutation",
+      "supported_by_handler": true,
+      "requires_explicit_evidence": true,
+      "requires_manual_confirmation": false,
+      "available": true
+    },
+    {
+      "id": "workspace.update_user_profile",
+      "name": "Update User Profile & Assign School",
+      "description": "Dò tìm user qua getDataUser.php và cập nhật trường học, đối tác, họ tên, ngày sinh qua updateUser.php",
+      "domain": "School Workspace",
+      "bot_type": "workspace_rpa",
+      "action": "update_user_profile",
+      "required_inputs": [
+        "school_name",
+        "user_identifiers"
+      ],
+      "optional_inputs": [
+        "school_id",
+        "partner_id"
+      ],
+      "input_schema": {
+        "school_name": "string",
+        "user_identifiers": "array|string"
+      },
+      "output_schema": {
+        "updated_users_count": "integer"
+      },
+      "produces": [
+        "updated_users",
+        "failed_users",
+        "updated_users_count"
+      ],
+      "consumes": [],
+      "execution_type": "async_httpx",
+      "risk_level": "medium_mutation",
+      "supported_by_handler": true,
+      "requires_explicit_evidence": true,
+      "requires_manual_confirmation": false,
+      "available": true
+    },
+    {
+      "id": "git.remove_collaborators",
+      "name": "Remove Git Repository Collaborators",
+      "description": "Gỡ bỏ quyền thành viên khỏi kho mã nguồn Pythaverse Git",
+      "domain": "Pythaverse Git",
+      "bot_type": "git_collaborator",
+      "action": "remove_repo_collaborators",
+      "required_inputs": [
+        "repo_url",
+        "collaborators"
+      ],
+      "optional_inputs": [],
+      "input_schema": {
+        "repo_url": "string",
+        "collaborators": "array|string"
+      },
+      "output_schema": {
+        "removed_users_count": "integer"
+      },
+      "produces": [
+        "removed_users",
+        "failed_users"
+      ],
+      "consumes": [],
+      "execution_type": "async_httpx",
+      "risk_level": "medium_mutation",
+      "supported_by_handler": true,
+      "requires_explicit_evidence": true,
+      "requires_manual_confirmation": false,
+      "available": true
+    },
+    {
+      "id": "keycloak.bulk_lookup",
+      "name": "Bulk Lookup Keycloak Users",
+      "description": "Tra cứu thông tin danh tính và trạng thái tài khoản trực tuyến trên Keycloak eID",
+      "domain": "Keycloak Auth",
+      "bot_type": "keycloak_api",
+      "action": "bulk_lookup",
+      "required_inputs": [
+        "identifiers"
+      ],
+      "optional_inputs": [],
+      "input_schema": {
+        "identifiers": "array|string"
+      },
+      "output_schema": {
+        "found_users": "array"
+      },
+      "produces": [
+        "found_users",
+        "missing_users"
+      ],
+      "consumes": [],
+      "execution_type": "sync_api",
+      "risk_level": "read_only",
       "supported_by_handler": true,
       "requires_explicit_evidence": true,
       "requires_manual_confirmation": false,
