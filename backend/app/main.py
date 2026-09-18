@@ -401,14 +401,14 @@ async def lifespan(app: FastAPI):
         replace_existing=True
     )
 
-    # 5. Quét Live Uptime định kỳ mỗi 60 phút (HTTP API - Chạy sau 20 phút / 1200s)
+    # 5. Quét Live Uptime định kỳ mỗi 5 phút (Chạy ngay sau 20s khi server vừa thức dậy!)
     scheduler.add_job(
         safe_job_wrapper, 
         'interval', 
         minutes=5, 
         args=[poll_site_uptime_cron, "Quét Site Uptime & Auth Matrix"], 
         id='site_uptime_cron',
-        next_run_time=base_start + timedelta(seconds=1200),
+        next_run_time=base_start + timedelta(seconds=20),
         misfire_grace_time=300,
         max_instances=1,
         coalesce=True,
