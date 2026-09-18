@@ -5,7 +5,10 @@ Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI
 Chuyên trách: 
 - Gán License và phân bổ Group LMS cho Học Sinh & Giáo Viên trên School Workspace qua Direct API.
 - Hỗ trợ Ma trận Đa Khóa Học (Multi-Course), Đa Phân Nhóm (Multi-Group) và Giáo viên dạy nhiều môn.
+- In-Memory School Session Cache (TTL 2h): Lưu phiên đăng nhập theo từng trường, bypass Playwright 0ms launch.
+- Tự động nhả Semaphore: Chỉ chiếm Playwright Slot 3s lúc bốc Cookie, giải phóng toàn bộ luồng HTTPX.
 - TỰ ĐỘNG ĐỒNG BỘ PYTHAVERSE GIT: Tra cứu git_repos từ CSDL Supabase theo Course ID và phân quyền tự động.
+- Xuất báo cáo execution_logs tinh gọn chuẩn mực cho Live Terminal.
 """
 import os
 import re
@@ -31,19 +34,44 @@ logger = logging.getLogger(__name__)
 class WorkspaceEnrollService(WorkspaceBaseService):
     """
     Dịch vụ Ghi danh & Phân phối License trên School Workspace:
-    ĐỘNG CƠ HYBRID V3.6:
-    - Playwright bốc Session School đúng 3 giây ➔ Đóng Chromium giải phóng RAM.
+    ĐỘNG CƠ HYBRID V3.6 + PER-SCHOOL SESSION CACHE:
+    - Playwright bốc Session School đúng 3 giây ➔ Lưu RAM Cache ➔ Đóng Chromium giải phóng RAM.
     - HTTPX Direct API: Tạo Group, Gán học sinh (Role 9) & Giáo viên (Role 7) đa môn học.
-    - TỰ ĐỘNG ĐỒNG BỘ GIT: Móc nối Course ID ➔ git_repos ➔ Tự động thêm vào GitBucket!
+    - TỰ ĐỒNG BỘ GIT: Móc nối Course ID ➔ git_repos ➔ Thêm Collaborators tự động.
     """
 
+    def __init__(self):
+        super().__init__()
+        # ⚡ BỘ ĐỆM SESSION THEO TỪNG TRƯỜNG HỌC (RAM < 10KB)
+        # Cấu trúc: { "school_username": { "cookies": dict, "school_id": str, "cached_at": float } }
+        self._cached_school_sessions: Dict[str, Dict[str, Any]] = {}
+        self._cache_ttl_seconds: int = 7200  # 2 giờ
+        self._session_locks: Dict[str, asyncio.Lock] = {}
+
+    def _get_school_lock(self, username: str) -> asyncio.Lock:
+        """Tạo lock riêng cho từng trường để tránh tranh chấp đăng nhập cùng tài khoản."""
+        if username not in self._session_locks:
+            self._session_locks[username] = asyncio.Lock()
+        return self._session_locks[username]
+
     # =========================================================================
-    # 🛠️ HELPER NỘI BỘ: BỐC SESSION PLAYWRIGHT CỰC NHANH
+    # ⚡ 1. KIỂM TRA & BỐC SESSION PLAYWRIGHT (CÓ ĐỆM RAM 2 GIỜ)
     # =========================================================================
+    async def _is_school_session_valid(self, cookies: Dict[str, str], school_id: str) -> bool:
+        """Kiểm tra siêu tốc (30ms) xem Session trường còn quyền API hay không."""
+        try:
+            test_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/courses/getListEnrolledCourse.php?school_id={school_id}"
+            async with httpx.AsyncClient(cookies=cookies, timeout=4.0, follow_redirects=False) as client:
+                res = await client.get(test_url)
+                return res.status_code == 200 and "login" not in str(res.url)
+        except Exception:
+            return False
+
     async def _steal_school_session(self, username: str, password: str) -> Tuple[Dict[str, str], str]:
         """Đăng nhập Playwright 3s, lấy Cookie và School ID rồi đóng Chromium ngay."""
         async with async_playwright() as p:
-            browser: Browser = await p.chromium.launch(headless=True, args=LOW_RAM_ARGS)
+            # 🎯 ĐÃ SỬA: Dùng đúng biến LOW_RAM_CHROMIUM_ARGS
+            browser: Browser = await p.chromium.launch(headless=True, args=LOW_RAM_CHROMIUM_ARGS)
             context = await browser.new_context(
                 viewport={"width": 1280, "height": 800},
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0"
@@ -74,6 +102,41 @@ class WorkspaceEnrollService(WorkspaceBaseService):
                 await browser.close()
                 gc.collect()
 
+    async def _get_or_steal_school_session(self, username: str, password: str) -> Tuple[Dict[str, str], str]:
+        """Lấy session trường từ Cache; chỉ chiếm Playwright Semaphore đúng 3s khi cần đăng nhập mới."""
+        now = time.time()
+        cached = self._cached_school_sessions.get(username)
+
+        # 1. Kiểm tra cache RAM của trường này
+        if cached and (now - cached.get("cached_at", 0) < self._cache_ttl_seconds):
+            cookies = cached.get("cookies", {})
+            school_id = cached.get("school_id", "")
+            if await self._is_school_session_valid(cookies, school_id):
+                logger.info(f"⚡ [Workspace Cache] Tái sử dụng School Session cho [{username}] (School ID: {school_id}, 0ms launch)!")
+                return cookies, school_id
+            else:
+                logger.warning(f"⚠️ [Workspace Cache] Session của trường [{username}] đã hết hạn, chuẩn bị gia hạn mới...")
+                self._cached_school_sessions.pop(username, None)
+
+        # 2. Xếp hàng Lock riêng của trường
+        async with self._get_school_lock(username):
+            now = time.time()
+            cached = self._cached_school_sessions.get(username)
+            if cached and (now - cached.get("cached_at", 0) < self._cache_ttl_seconds):
+                return cached.get("cookies", {}), cached.get("school_id", "")
+
+            # 🎯 CHỈ CHIẾM SEMAPHORE ĐÚNG 3S LÚC NÀY - BỐC XONG NHẢ RA NGAY!
+            async with acquire_playwright_slot(f"School Auth [{username}]", timeout=60.0, lane="admin"):
+                cookies, school_id = await self._steal_school_session(username, password)
+                if cookies and school_id:
+                    self._cached_school_sessions[username] = {
+                        "cookies": cookies,
+                        "school_id": school_id,
+                        "cached_at": time.time()
+                    }
+                    logger.info(f"✨ [Workspace Cache] Đã lưu School Session mới cho [{username}] vào RAM.")
+                return cookies, school_id
+
     @staticmethod
     def _to_multipart(data_dict: Dict[str, Any]) -> Dict[str, Tuple[None, str]]:
         return {k: (None, str(v) if v is not None else "") for k, v in data_dict.items()}
@@ -95,11 +158,9 @@ class WorkspaceEnrollService(WorkspaceBaseService):
         supabase = get_supabase_client()
 
         try:
-            # Tra cứu bảng workspace_courses
             res = supabase.table("workspace_courses").select("course_id, course_name, git_repos").in_("course_id", course_ids).execute()
             db_courses = res.data or []
 
-            # Nếu chưa thấy, tra cứu thêm bảng lms_courses
             if not db_courses:
                 res2 = supabase.table("lms_courses").select("course_id, course_name, git_repos").in_("course_id", course_ids).execute()
                 db_courses = res2.data or []
@@ -117,12 +178,10 @@ class WorkspaceEnrollService(WorkspaceBaseService):
                 if not isinstance(raw_repos, list):
                     continue
 
-                # Gom danh sách học sinh thuộc khóa này
                 course_students: List[str] = []
                 for cls in class_assignments.get(cid_str, []):
                     course_students.extend([str(s).strip().lower() for s in cls.get("students", []) if str(s).strip()])
 
-                # Gom danh sách giáo viên phụ trách khóa này
                 course_teachers: List[str] = []
                 for t in teachers_alloc:
                     t_email = str(t.get("email") or "").strip().lower()
@@ -139,7 +198,6 @@ class WorkspaceEnrollService(WorkspaceBaseService):
                     if not repo_url:
                         continue
 
-                    # Phân loại đối tượng thêm vào Repo: Teacher-only hay All (HS + GV)
                     if target == "teacher_only":
                         target_users = list(set(course_teachers))
                         role = "GUEST"
@@ -148,7 +206,6 @@ class WorkspaceEnrollService(WorkspaceBaseService):
                         role = "GUEST"
 
                     if target_users:
-                        # Kiểm tra xem repo này đã có trong plan chưa, nếu có thì gộp users
                         existing = next((p for p in git_sync_plan if p["repo_url"] == repo_url), None)
                         if existing:
                             existing["users"] = list(set(existing["users"] + target_users))
@@ -172,7 +229,7 @@ class WorkspaceEnrollService(WorkspaceBaseService):
     async def enroll_students_pipeline(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
         Cổng tiếp nhận chính:
-        1. Bốc session School Workspace.
+        1. Bốc session School Workspace (Ưu tiên Cache RAM, nhả Semaphore ngay sau khi bốc).
         2. Duyệt qua Ma trận Đa Khóa Học (Multi-Course), tạo Group và gán học sinh/giáo viên.
         3. Tự động tra cứu CSDL Supabase theo Course ID và đồng bộ vào Pythaverse Git!
         """
@@ -195,204 +252,226 @@ class WorkspaceEnrollService(WorkspaceBaseService):
         teachers_alloc = payload.get("teachers_allocation") or []
         should_auto_sync_git = payload.get("auto_sync_git", True)
 
-        async with acquire_playwright_slot("School Workspace Enroll Pipeline", lane="admin"):
-            try:
-                # 2. Bốc Session đúng 3s
-                cookies, school_id = await self._steal_school_session(school_user, school_pass)
+        try:
+            # 2. Lấy Session (Có Cache RAM 2h, nhả Playwright Semaphore ngay sau khi bốc)
+            cookies, school_id = await self._get_or_steal_school_session(school_user, school_pass)
 
-                async with httpx.AsyncClient(
-                    base_url=BASE_WORKSPACE_URL,
-                    cookies=cookies,
-                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0"},
-                    timeout=30.0
-                ) as client:
+            async with httpx.AsyncClient(
+                base_url=BASE_WORKSPACE_URL,
+                cookies=cookies,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0"},
+                timeout=30.0
+            ) as client:
 
-                    # 3. Đọc Metadata danh sách gói khóa học và danh bạ học sinh/giáo viên
-                    meta_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/courses/getListEnrolledCourse.php?school_id={school_id}"
-                    meta_res = await client.get(meta_url)
-                    if meta_res.status_code != 200:
-                        return {"status": "failed", "error": f"Lỗi đọc metadata khóa học ({meta_res.status_code}): {meta_res.text}"}
+                # 3. Đọc Metadata danh sách gói khóa học và danh bạ học sinh/giáo viên
+                meta_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/courses/getListEnrolledCourse.php?school_id={school_id}"
+                meta_res = await client.get(meta_url)
+                if meta_res.status_code != 200:
+                    return {"status": "failed", "error": f"Lỗi đọc metadata khóa học ({meta_res.status_code}): {meta_res.text}"}
 
-                    meta_data = meta_res.json()
-                    packages = meta_data.get("coursePackage", [])
-                    list_students = meta_data.get("listStudent", [])
-                    list_teachers = meta_data.get("listTeacher", [])
+                meta_data = meta_res.json()
+                packages = meta_data.get("coursePackage", [])
+                list_students = meta_data.get("listStudent", [])
+                list_teachers = meta_data.get("listTeacher", [])
 
-                    student_dir = {s["user_email"].lower(): s for s in list_students if s.get("user_email")}
-                    teacher_dir = {t["user_email"].lower(): t for t in list_teachers if t.get("user_email")}
+                student_dir = {s["user_email"].lower(): s for s in list_students if s.get("user_email")}
+                teacher_dir = {t["user_email"].lower(): t for t in list_teachers if t.get("user_email")}
 
-                    total_students_enrolled = 0
-                    total_teachers_enrolled = 0
-                    created_groups_count = 0
-                    processed_courses_count = 0
+                total_students_enrolled = 0
+                total_teachers_enrolled = 0
+                created_groups_count = 0
+                processed_courses_count = 0
+                course_summaries: List[Dict[str, Any]] = []
 
-                    # 4. DUYỆT QUA TỪNG KHÓA HỌC TRONG MA TRẬN (MULTI-COURSE LOOP)
-                    for c_item in courses_plan:
-                        c_id = int(c_item.get("course_id") or c_item.get("id", 0))
-                        if not c_id:
+                # 4. DUYỆT QUA TỪNG KHÓA HỌC TRONG MA TRẬN (MULTI-COURSE LOOP)
+                for c_item in courses_plan:
+                    c_id = int(c_item.get("course_id") or c_item.get("id", 0))
+                    if not c_id:
+                        continue
+
+                    matched_pkg = next((p for p in packages if p.get("course_id") == c_id), None)
+                    if not matched_pkg:
+                        logger.warning(f"⚠️ Không tìm thấy gói đã mua cho Khóa #{c_id} trên Workspace!")
+                        continue
+
+                    c_name = matched_pkg.get("course_name") or f"Course #{c_id}"
+                    pkg_id = str(matched_pkg.get("id"))
+                    start_ts = matched_pkg.get("course_enroll_start_date_bigint") or int(time.time())
+                    end_ts = matched_pkg.get("course_enroll_end_date_bigint") or int(time.time() + 365 * 86400)
+                    existing_groups = matched_pkg.get("groups", [])
+
+                    assigned_classes = class_assignments.get(str(c_id), [])
+                    logger.info(f"📚 Đang xử lý Khóa #{c_id} ({c_name}) gồm {len(assigned_classes)} lớp:")
+                    course_new_groups = 0
+
+                    # A. Xử lý từng Group học sinh
+                    for cls in assigned_classes:
+                        grp_name = cls.get("lmsGroupName") or cls.get("rawClassName")
+                        if not grp_name:
                             continue
 
-                        # Khớp Package ID đã mua
-                        matched_pkg = next((p for p in packages if p.get("course_id") == c_id), None)
-                        if not matched_pkg:
-                            logger.warning(f"⚠️ Không tìm thấy gói đã mua cho Khóa #{c_id} trên Workspace!")
+                        group_id = None
+                        matched_grp = next((g for g in existing_groups if g.get("group_name") == grp_name), None)
+                        if matched_grp:
+                            group_id = matched_grp.get("group_id")
+                        else:
+                            grp_payload = {"course_id": str(c_id), "group_name": grp_name, "school_id": school_id}
+                            grp_res = await client.post(
+                                f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/courses/createGroup.php",
+                                files=self._to_multipart(grp_payload)
+                            )
+                            if grp_res.status_code == 200 and grp_res.json().get("success"):
+                                created_data = grp_res.json().get("data", [])
+                                if created_data:
+                                    group_id = created_data[0].get("id")
+                                    created_groups_count += 1
+                                    course_new_groups += 1
+                                    existing_groups.append({"group_id": group_id, "group_name": grp_name})
+
+                        if not group_id:
                             continue
 
-                        pkg_id = str(matched_pkg.get("id"))
-                        start_ts = matched_pkg.get("course_enroll_start_date_bigint") or int(time.time())
-                        end_ts = matched_pkg.get("course_enroll_end_date_bigint") or int(time.time() + 365 * 86400)
-                        existing_groups = matched_pkg.get("groups", [])
+                        cls_students = cls.get("students", []) or []
+                        matched_st_records = [student_dir[s.lower()] for s in cls_students if str(s).lower() in student_dir]
 
-                        # Lấy danh sách các lớp được xếp vào khóa học này
-                        assigned_classes = class_assignments.get(str(c_id), [])
-                        logger.info(f"📚 Đang xử lý Khóa #{c_id} ({matched_pkg.get('course_name')}) gồm {len(assigned_classes)} lớp:")
+                        if matched_st_records:
+                            st_payload = {
+                                "id": pkg_id,
+                                "course_use": str(len(matched_st_records)),
+                                "role_name": "student",
+                                "school_id": school_id,
+                                "type": "enrol",
+                                "enrol_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            }
+                            for idx, st in enumerate(matched_st_records):
+                                moodle_uid = st.get("moodle_user_id") or st.get("ID")
+                                wp_uid = st.get("ID")
+                                st_payload[f"enrolments[{idx}][userid]"] = str(moodle_uid)
+                                st_payload[f"enrolments[{idx}][courseid]"] = str(c_id)
+                                st_payload[f"enrolments[{idx}][roleid]"] = "9"
+                                st_payload[f"enrolments[{idx}][suspend]"] = "0"
+                                st_payload[f"enrolments[{idx}][timestart]"] = str(start_ts)
+                                st_payload[f"enrolments[{idx}][timeend]"] = str(end_ts)
+                                st_payload[f"enrolments[{idx}][wp_user_id]"] = str(wp_uid)
 
-                        # A. Xử lý từng Group học sinh
-                        for cls in assigned_classes:
-                            grp_name = cls.get("lmsGroupName") or cls.get("rawClassName")
-                            if not grp_name:
+                                st_payload[f"enrolmentsGroup[{idx}][userid]"] = str(moodle_uid)
+                                st_payload[f"enrolmentsGroup[{idx}][groupid]"] = str(group_id)
+                                st_payload[f"enrolmentsGroup[{idx}][wp_user_id]"] = str(wp_uid)
+
+                            await client.post(
+                                f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/courses/enrolMultipleUser.php",
+                                files=self._to_multipart(st_payload)
+                            )
+                            total_students_enrolled += len(matched_st_records)
+
+                    # B. Gán các Giáo viên phụ trách khóa học này
+                    for t_item in teachers_alloc:
+                        t_email = str(t_item.get("email") or "").lower()
+                        assigned_cids = [str(c) for c in t_item.get("assignedCourses", [])]
+
+                        if str(c_id) not in assigned_cids or t_email not in teacher_dir:
+                            continue
+
+                        tc_record = teacher_dir[t_email]
+                        moodle_uid = tc_record.get("moodle_user_id") or tc_record.get("ID")
+                        wp_uid = tc_record.get("ID")
+
+                        t_groups = t_item.get("assignedLmsGroups", [])
+                        for g_name in t_groups:
+                            matched_grp = next((g for g in existing_groups if g.get("group_name") == g_name), None)
+                            if not matched_grp:
                                 continue
 
-                            # Tìm hoặc tạo Group mới qua createGroup.php
-                            group_id = None
-                            matched_grp = next((g for g in existing_groups if g.get("group_name") == grp_name), None)
-                            if matched_grp:
-                                group_id = matched_grp.get("group_id")
-                            else:
-                                grp_payload = {"course_id": str(c_id), "group_name": grp_name, "school_id": school_id}
-                                grp_res = await client.post(
-                                    f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/courses/createGroup.php",
-                                    files=self._to_multipart(grp_payload)
-                                )
-                                if grp_res.status_code == 200 and grp_res.json().get("success"):
-                                    created_data = grp_res.json().get("data", [])
-                                    if created_data:
-                                        group_id = created_data[0].get("id")
-                                        created_groups_count += 1
-                                        # Cập nhật cache local existing_groups
-                                        existing_groups.append({"group_id": group_id, "group_name": grp_name})
+                            grp_id = matched_grp.get("group_id")
+                            tc_payload = {
+                                "id": pkg_id,
+                                "course_use": "1",
+                                "role_name": "teacher",
+                                "school_id": school_id,
+                                "type": "enrol",
+                                "enrol_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "enrolments[0][userid]": str(moodle_uid),
+                                "enrolments[0][courseid]": str(c_id),
+                                "enrolments[0][roleid]": "7",
+                                "enrolments[0][suspend]": "0",
+                                "enrolments[0][timestart]": str(start_ts),
+                                "enrolments[0][timeend]": str(end_ts),
+                                "enrolments[0][wp_user_id]": str(wp_uid),
+                                "enrolmentsGroup[0][userid]": str(moodle_uid),
+                                "enrolmentsGroup[0][groupid]": str(grp_id),
+                                "enrolmentsGroup[0][wp_user_id]": str(wp_uid)
+                            }
+                            await client.post(
+                                f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/courses/enrolMultipleUser.php",
+                                files=self._to_multipart(tc_payload)
+                            )
+                            total_teachers_enrolled += 1
 
-                            if not group_id:
-                                continue
+                    processed_courses_count += 1
+                    course_summaries.append({
+                        "id": c_id,
+                        "name": c_name,
+                        "class_count": len(assigned_classes),
+                        "groups_created": course_new_groups
+                    })
 
-                            # Gán danh sách học sinh của lớp này
-                            cls_students = cls.get("students", []) or []
-                            matched_st_records = [student_dir[s.lower()] for s in cls_students if str(s).lower() in student_dir]
+            # =====================================================================
+            # 5. 🐙 TỰ ĐỘNG ĐỒNG BỘ PYTHAVERSE GIT REPOSITORIES
+            # =====================================================================
+            git_summary = "Không có Repo liên kết cần đồng bộ."
+            if should_auto_sync_git:
+                course_ids = [int(c.get("course_id") or c.get("id")) for c in courses_plan if (c.get("course_id") or c.get("id"))]
+                git_plan = self._resolve_git_repos_for_courses(course_ids, class_assignments, teachers_alloc)
 
-                            if matched_st_records:
-                                st_payload = {
-                                    "id": pkg_id,
-                                    "course_use": str(len(matched_st_records)),
-                                    "role_name": "student",
-                                    "school_id": school_id,
-                                    "type": "enrol",
-                                    "enrol_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                }
-                                for idx, st in enumerate(matched_st_records):
-                                    moodle_uid = st.get("moodle_user_id") or st.get("ID")
-                                    wp_uid = st.get("ID")
-                                    st_payload[f"enrolments[{idx}][userid]"] = str(moodle_uid)
-                                    st_payload[f"enrolments[{idx}][courseid]"] = str(c_id)
-                                    st_payload[f"enrolments[{idx}][roleid]"] = "9"
-                                    st_payload[f"enrolments[{idx}][suspend]"] = "0"
-                                    st_payload[f"enrolments[{idx}][timestart]"] = str(start_ts)
-                                    st_payload[f"enrolments[{idx}][timeend]"] = str(end_ts)
-                                    st_payload[f"enrolments[{idx}][wp_user_id]"] = str(wp_uid)
+                if git_plan:
+                    logger.info(f"\n🐙 [Auto Git Sync] Đang tự động gán quyền cho {len(git_plan)} Repositories liên kết...")
+                    git_res = await git_playwright_service.add_collaborators_pipeline({
+                        "repos_plan": git_plan,
+                        "action": "add"
+                    })
+                    git_summary = git_res.get("message") or "Đồng bộ Git hoàn tất."
+                    logger.info(f"🎉 [Git Sync Hoàn Tất]: {git_summary}")
 
-                                    st_payload[f"enrolmentsGroup[{idx}][userid]"] = str(moodle_uid)
-                                    st_payload[f"enrolmentsGroup[{idx}][groupid]"] = str(group_id)
-                                    st_payload[f"enrolmentsGroup[{idx}][wp_user_id]"] = str(wp_uid)
+            elapsed = round((time.time() - t0), 2)
+            summary_msg = (
+                f"Đã gán thành công {total_students_enrolled} lượt Học sinh & {total_teachers_enrolled} lượt Giáo viên "
+                f"vào {processed_courses_count} Khóa học ({created_groups_count} Group mới) trên Workspace trong {elapsed}s! "
+                f"🐙 Git Sync: {git_summary}"
+            )
 
-                                await client.post(
-                                    f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/courses/enrolMultipleUser.php",
-                                    files=self._to_multipart(st_payload)
-                                )
-                                total_students_enrolled += len(matched_st_records)
+            # =====================================================================
+            # 📝 TẠO BÁO CÁO LOG TINH GỌN THEO YÊU CẦU CHO LIVE TERMINAL
+            # =====================================================================
+            report_lines: List[str] = [
+                f"🎯 HOÀN TẤT GHI DANH WORKSPACE ({school_name})",
+                f"Học sinh (9): {total_students_enrolled} lượt ghi danh",
+                f"Giáo viên (7): {total_teachers_enrolled} lượt phân công"
+            ]
 
-                        # B. Gán các Giáo viên phụ trách khóa học này
-                        for t_item in teachers_alloc:
-                            t_email = str(t_item.get("email") or "").lower()
-                            assigned_cids = [str(c) for c in t_item.get("assignedCourses", [])]
+            for cs in course_summaries:
+                grp_txt = f" | {cs['groups_created']} Group mới" if cs['groups_created'] > 0 else ""
+                report_lines.append(f"📚 KHÓA #{cs['id']} ({cs['name']}) [{cs['class_count']} lớp{grp_txt}]")
 
-                            if str(c_id) not in assigned_cids or t_email not in teacher_dir:
-                                continue
+            if should_auto_sync_git and git_plan:
+                report_lines.append(f"🐙 Git Sync: {git_summary}")
 
-                            tc_record = teacher_dir[t_email]
-                            moodle_uid = tc_record.get("moodle_user_id") or tc_record.get("ID")
-                            wp_uid = tc_record.get("ID")
+            logger.info(f"🏆 [HOÀN THÀNH XUẤT SẮC TOÀN TRÌNH] {summary_msg}")
 
-                            t_groups = t_item.get("assignedLmsGroups", [])
-                            for g_name in t_groups:
-                                matched_grp = next((g for g in existing_groups if g.get("group_name") == g_name), None)
-                                if not matched_grp:
-                                    continue
+            return {
+                "status": "success",
+                "message": summary_msg,
+                "execution_logs": "\n".join(report_lines),
+                "school_name": school_name,
+                "total_students_enrolled": total_students_enrolled,
+                "total_teachers_enrolled": total_teachers_enrolled,
+                "created_groups_count": created_groups_count,
+                "git_sync_summary": git_summary,
+                "elapsed_seconds": elapsed
+            }
 
-                                grp_id = matched_grp.get("group_id")
-                                tc_payload = {
-                                    "id": pkg_id,
-                                    "course_use": "1",
-                                    "role_name": "teacher",
-                                    "school_id": school_id,
-                                    "type": "enrol",
-                                    "enrol_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                    "enrolments[0][userid]": str(moodle_uid),
-                                    "enrolments[0][courseid]": str(c_id),
-                                    "enrolments[0][roleid]": "7",
-                                    "enrolments[0][suspend]": "0",
-                                    "enrolments[0][timestart]": str(start_ts),
-                                    "enrolments[0][timeend]": str(end_ts),
-                                    "enrolments[0][wp_user_id]": str(wp_uid),
-                                    "enrolmentsGroup[0][userid]": str(moodle_uid),
-                                    "enrolmentsGroup[0][groupid]": str(grp_id),
-                                    "enrolmentsGroup[0][wp_user_id]": str(wp_uid)
-                                }
-                                await client.post(
-                                    f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/courses/enrolMultipleUser.php",
-                                    files=self._to_multipart(tc_payload)
-                                )
-                                total_teachers_enrolled += 1
-
-                        processed_courses_count += 1
-
-                # =====================================================================
-                # 5. 🐙 TỰ ĐỘNG ĐỒNG BỘ PYTHAVERSE GIT REPOSITORIES
-                # =====================================================================
-                git_summary = "Không có Repo liên kết cần đồng bộ."
-                if should_auto_sync_git:
-                    course_ids = [int(c.get("course_id") or c.get("id")) for c in courses_plan if (c.get("course_id") or c.get("id"))]
-                    git_plan = self._resolve_git_repos_for_courses(course_ids, class_assignments, teachers_alloc)
-
-                    if git_plan:
-                        logger.info(f"\n🐙 [Auto Git Sync] Đang tự động gán quyền cho {len(git_plan)} Repositories liên kết...")
-                        git_res = await git_playwright_service.add_collaborators_pipeline({
-                            "repos_plan": git_plan,
-                            "action": "add"
-                        })
-                        git_summary = git_res.get("message") or "Đồng bộ Git hoàn tất."
-                        logger.info(f"🎉 [Git Sync Hoàn Tất]: {git_summary}")
-
-                elapsed = round((time.time() - t0), 2)
-                summary_msg = (
-                    f"Đã gán thành công {total_students_enrolled} lượt Học sinh & {total_teachers_enrolled} lượt Giáo viên "
-                    f"vào {processed_courses_count} Khóa học ({created_groups_count} Group mới) trên Workspace trong {elapsed}s! "
-                    f"🐙 Git Sync: {git_summary}"
-                )
-                logger.info(f"🏆 [HOÀN THÀNH XUẤT SẮC TOÀN TRÌNH] {summary_msg}")
-
-                return {
-                    "status": "success",
-                    "message": summary_msg,
-                    "school_name": school_name,
-                    "total_students_enrolled": total_students_enrolled,
-                    "total_teachers_enrolled": total_teachers_enrolled,
-                    "created_groups_count": created_groups_count,
-                    "git_sync_summary": git_summary,
-                    "elapsed_seconds": elapsed
-                }
-
-            except Exception as e:
-                logger.error(f"❌ Lỗi School Workspace Enroll Pipeline: {e}", exc_info=True)
-                return {"status": "failed", "error": str(e)}
+        except Exception as e:
+            logger.error(f"❌ Lỗi School Workspace Enroll Pipeline: {e}", exc_info=True)
+            return {"status": "failed", "error": str(e), "execution_logs": f"❌ LỖI GHI DANH WORKSPACE: {str(e)}"}
 
 
 workspace_enroll_service = WorkspaceEnrollService()

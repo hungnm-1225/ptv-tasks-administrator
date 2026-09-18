@@ -49,6 +49,14 @@ def clean_email_identifier(raw: Any) -> str:
 
 
 class KeycloakService:
+    """
+    Dịch vụ quản trị tập trung Keycloak IDP (eid.pythaverse.space):
+    - Tầng 1: Direct REST API 300ms với In-Memory Token Caching + Double-Checked Lock.
+    - Cơ chế tự chữa lành: Tự hủy cache token khi gặp lỗi 401/403.
+    - Sàng lọc danh tính song song: asyncio.gather + KEYCLOAK_SEMAPHORE(10).
+    - Tầng 2: Playwright RPA Console Fallback khi REST API gặp sự cố.
+    """
+
     def __init__(self):
         self.raw_server_url = settings.KEYCLOAK_SERVER_URL.rstrip('/')
         self.target_realm = settings.KEYCLOAK_REALM or 'idp'
@@ -56,50 +64,72 @@ class KeycloakService:
         self.admin_pass = settings.KEYCLOAK_ADMIN_PASS
         self.client_id = settings.KEYCLOAK_CLIENT_ID or 'admin-cli'
         
-        # ⚡ BỘ ĐỆM TOKEN IN-MEMORY CHỐNG GỌI LẶP LẠI
+        # ⚡ BỘ ĐỆM TOKEN IN-MEMORY VỚI DOUBLE-CHECKED LOCK
         self._cached_token: Optional[str] = None
         self._token_expires_at: float = 0.0
+        self._token_lock: Optional[asyncio.Lock] = None
+
+    def _get_lock(self) -> asyncio.Lock:
+        """Khởi tạo Lock lười (Lazy Initialization) để gắn chặt với Event Loop hiện tại."""
+        if self._token_lock is None:
+            self._token_lock = asyncio.Lock()
+        return self._token_lock
+
+    def invalidate_token_cache(self) -> None:
+        """Hủy bỏ token cache ngay lập tức khi phát hiện token hết hạn hoặc bị từ chối (401/403)."""
+        self._cached_token = None
+        self._token_expires_at = 0.0
+        logger.warning("🔄 [Keycloak Cache] Đã thu hồi cache token (phát hiện 401/403 hoặc yêu cầu làm mới).")
 
     # =========================================================================
-    # ⚡ TẦNG 1: DIRECT REST API VỚI IN-MEMORY TOKEN CACHING & BROWSER HEADERS
+    # ⚡ TẦNG 1: DIRECT REST API VỚI TOKEN CACHING & DOUBLE-CHECKED LOCKING
     # =========================================================================
-    async def _get_admin_token(self, client: httpx.AsyncClient) -> Optional[str]:
-        """Lấy Admin Token trực tiếp qua HTTPX (Có đệm RAM, tái sử dụng token còn hạn)."""
+    async def _get_admin_token(self, client: httpx.AsyncClient, force_refresh: bool = False) -> Optional[str]:
+        """Lấy Admin Token trực tiếp qua HTTPX (Có đệm RAM, Double-Checked Lock chống Stampede)."""
         now = time.time()
-        if self._cached_token and now < self._token_expires_at:
+        # 1. Kiểm tra nhanh không cần Lock
+        if not force_refresh and self._cached_token and now < self._token_expires_at:
             return self._cached_token
 
-        urls_to_try = [
-            f"{self.raw_server_url}/auth/realms/master/protocol/openid-connect/token",
-            f"{self.raw_server_url}/realms/master/protocol/openid-connect/token"
-        ]
+        # 2. Xếp hàng Lock để chỉ DUY NHẤT 1 luồng được xin token mới
+        async with self._get_lock():
+            now = time.time()
+            # Double-check: kiểm tra lại xem luồng đi trước đã vừa lấy token xong chưa
+            if not force_refresh and self._cached_token and now < self._token_expires_at:
+                return self._cached_token
 
-        for token_url in urls_to_try:
-            try:
-                res = await client.post(
-                    token_url,
-                    data={
-                        "client_id": self.client_id,
-                        "username": self.admin_user,
-                        "password": self.admin_pass,
-                        "grant_type": "password"
-                    },
-                    headers=BROWSER_HEADERS,
-                    timeout=10.0
-                )
-                if res.status_code == 200:
-                    data = res.json()
-                    token = data.get("access_token")
-                    expires_in = int(data.get("expires_in", 60))
-                    if token:
-                        self._cached_token = token
-                        # Trừ hao 15 giây an toàn chống lệch xung nhịp
-                        self._token_expires_at = now + max(expires_in - 15, 10)
-                        return token
-            except Exception as e:
-                logger.debug(f"Thử token tại {token_url} thất bại: {e}")
+            urls_to_try = [
+                f"{self.raw_server_url}/auth/realms/master/protocol/openid-connect/token",
+                f"{self.raw_server_url}/realms/master/protocol/openid-connect/token"
+            ]
 
-        return None
+            for token_url in urls_to_try:
+                try:
+                    res = await client.post(
+                        token_url,
+                        data={
+                            "client_id": self.client_id,
+                            "username": self.admin_user,
+                            "password": self.admin_pass,
+                            "grant_type": "password"
+                        },
+                        headers=BROWSER_HEADERS,
+                        timeout=10.0
+                    )
+                    if res.status_code == 200:
+                        data = res.json()
+                        token = data.get("access_token")
+                        expires_in = int(data.get("expires_in", 60))
+                        if token:
+                            self._cached_token = token
+                            # Trừ hao 15 giây an toàn chống lệch xung nhịp (Clock Drift)
+                            self._token_expires_at = now + max(expires_in - 15, 10)
+                            logger.info("✨ [Keycloak Cache] Đã gia hạn Admin Token mới thành công (RAM đệm an toàn).")
+                            return token
+                except Exception as e:
+                    logger.debug(f"Thử token tại {token_url} thất bại: {e}")
+
+            return None
 
     # =========================================================================
     # 🔍 BỘ CHUẨN HÓA & SÀNG LỌC DANH TÍNH CHẶT CHẼ (ZERO-ASSUMPTION)
@@ -152,19 +182,25 @@ class KeycloakService:
                         # 1. Tìm theo Email chính xác (Dùng params an toàn chống lỗi dấu +)
                         if "@" in ident:
                             resp = await client.get(f"{base_api}/users", params={"email": ident, "exact": "true"}, headers=auth_headers)
-                            if resp.status_code == 200 and isinstance(resp.json(), list) and resp.json():
+                            if resp.status_code in (401, 403):
+                                self.invalidate_token_cache()
+                            elif resp.status_code == 200 and isinstance(resp.json(), list) and resp.json():
                                 users = resp.json()
 
                         # 2. Tìm theo Username chính xác
                         if not users:
                             resp = await client.get(f"{base_api}/users", params={"username": ident, "exact": "true"}, headers=auth_headers)
-                            if resp.status_code == 200 and isinstance(resp.json(), list) and resp.json():
+                            if resp.status_code in (401, 403):
+                                self.invalidate_token_cache()
+                            elif resp.status_code == 200 and isinstance(resp.json(), list) and resp.json():
                                 users = resp.json()
 
                         # 3. Tìm kiếm mở rộng nếu chưa thấy
                         if not users:
                             resp = await client.get(f"{base_api}/users", params={"search": ident}, headers=auth_headers)
-                            if resp.status_code == 200 and isinstance(resp.json(), list):
+                            if resp.status_code in (401, 403):
+                                self.invalidate_token_cache()
+                            elif resp.status_code == 200 and isinstance(resp.json(), list):
                                 for u in resp.json():
                                     if (u.get("username") or "").lower() == ident or (u.get("email") or "").lower() == ident:
                                         users = [u]
@@ -241,16 +277,19 @@ class KeycloakService:
             async def _process_single_user(clean_id: str) -> Dict[str, Any]:
                 async with KEYCLOAK_SEMAPHORE:
                     try:
-                        # 1. Tìm User (Params an toàn chống lỗi dấu +)
                         users = []
                         if "@" in clean_id:
                             search_res = await client.get(f"{base_api}/users", params={"email": clean_id, "exact": "true"}, headers=auth_headers)
-                            if search_res.status_code == 200 and isinstance(search_res.json(), list):
+                            if search_res.status_code in (401, 403):
+                                self.invalidate_token_cache()
+                            elif search_res.status_code == 200 and isinstance(search_res.json(), list):
                                 users = search_res.json()
 
                         if not users:
                             search_res = await client.get(f"{base_api}/users", params={"username": clean_id, "exact": "true"}, headers=auth_headers)
-                            if search_res.status_code == 200 and isinstance(search_res.json(), list):
+                            if search_res.status_code in (401, 403):
+                                self.invalidate_token_cache()
+                            elif search_res.status_code == 200 and isinstance(search_res.json(), list):
                                 users = search_res.json()
 
                         if not users:
@@ -260,7 +299,7 @@ class KeycloakService:
                         user_email = (users[0].get("email") or clean_id).strip().lower()
                         logs = []
 
-                        # 2. Cập nhật Enabled / EmailVerified
+                        # Cập nhật Enabled / EmailVerified
                         user_payload = {}
                         if desired_enabled is not None:
                             user_payload["enabled"] = desired_enabled
@@ -272,10 +311,13 @@ class KeycloakService:
 
                         if user_payload:
                             put_res = await client.put(f"{base_api}/users/{user_id}", json=user_payload, headers=auth_headers)
+                            if put_res.status_code in (401, 403):
+                                self.invalidate_token_cache()
+                                raise Exception("Lỗi xác thực Token (401/403), đã xóa cache.")
                             if put_res.status_code not in (200, 204):
                                 raise Exception(f"Lỗi cập nhật user ({put_res.status_code}): {put_res.text}")
 
-                        # 3. Đặt lại Mật khẩu
+                        # Đặt lại Mật khẩu
                         if should_reset_pass:
                             if custom_password:
                                 pass_val = custom_password
@@ -291,6 +333,9 @@ class KeycloakService:
                                 json={"type": "password", "value": pass_val, "temporary": temporary},
                                 headers=auth_headers
                             )
+                            if pass_res.status_code in (401, 403):
+                                self.invalidate_token_cache()
+                                raise Exception("Lỗi xác thực Token khi đổi pass (401/403).")
                             if pass_res.status_code not in (200, 204):
                                 raise Exception(f"Lỗi reset password ({pass_res.status_code}): {pass_res.text}")
 
@@ -304,7 +349,6 @@ class KeycloakService:
                     except Exception as ex:
                         return {"identifier": clean_id, "status": "failed", "message": str(ex)}
 
-            # Bắn song song toàn bộ danh sách người dùng!
             tasks = [_process_single_user(cid) for cid in cleaned_ids]
             results = await asyncio.gather(*tasks)
 
@@ -504,7 +548,6 @@ class KeycloakService:
         )
         temporary = payload.get("force_change_on_first_login", payload.get("temporary", False))
 
-        # Ưu tiên thực thi qua Tầng 1: REST API siêu tốc
         res = await self.execute_via_rest_api(
             identifiers=raw_list,
             desired_enabled=desired_enabled,
@@ -515,7 +558,6 @@ class KeycloakService:
             temporary=temporary
         )
 
-        # Nếu REST API thất bại hoàn toàn (mất token/mạng chặn) ➔ Fallback sang Tầng 2: RPA
         if res is None:
             res = await self.execute_via_playwright_rpa(
                 identifiers=raw_list,
@@ -577,17 +619,23 @@ class KeycloakService:
                         users = []
                         if "@" in ident:
                             resp = await client.get(f"{base_api}/users", params={"email": ident, "exact": "true"}, headers=auth_headers)
-                            if resp.status_code == 200 and isinstance(resp.json(), list) and resp.json():
+                            if resp.status_code in (401, 403):
+                                self.invalidate_token_cache()
+                            elif resp.status_code == 200 and isinstance(resp.json(), list) and resp.json():
                                 users = resp.json()
 
                         if not users:
                             resp = await client.get(f"{base_api}/users", params={"username": ident, "exact": "true"}, headers=auth_headers)
-                            if resp.status_code == 200 and isinstance(resp.json(), list) and resp.json():
+                            if resp.status_code in (401, 403):
+                                self.invalidate_token_cache()
+                            elif resp.status_code == 200 and isinstance(resp.json(), list) and resp.json():
                                 users = resp.json()
 
                         if not users and "@" in ident:
                             resp = await client.get(f"{base_api}/users", params={"search": ident}, headers=auth_headers)
-                            if resp.status_code == 200 and isinstance(resp.json(), list):
+                            if resp.status_code in (401, 403):
+                                self.invalidate_token_cache()
+                            elif resp.status_code == 200 and isinstance(resp.json(), list):
                                 for u in resp.json():
                                     if (u.get("email") or "").lower() == ident or (u.get("username") or "").lower() == ident:
                                         users = [u]
@@ -643,13 +691,18 @@ class KeycloakService:
             async def _sync_single(email: str):
                 async with KEYCLOAK_SEMAPHORE:
                     try:
-                        # 1. Tìm user chính xác theo Email (Params an toàn chống lỗi dấu +)
                         resp = await client.get(f"{base_api}/users", params={"email": email, "exact": "true"}, headers=auth_headers)
-                        users = resp.json() if resp.status_code == 200 and isinstance(resp.json(), list) else []
+                        if resp.status_code in (401, 403):
+                            self.invalidate_token_cache()
+                            users = []
+                        else:
+                            users = resp.json() if resp.status_code == 200 and isinstance(resp.json(), list) else []
 
                         if not users:
                             resp = await client.get(f"{base_api}/users", params={"search": email}, headers=auth_headers)
-                            if resp.status_code == 200 and isinstance(resp.json(), list):
+                            if resp.status_code in (401, 403):
+                                self.invalidate_token_cache()
+                            elif resp.status_code == 200 and isinstance(resp.json(), list):
                                 for u in resp.json():
                                     if (u.get("email") or "").lower() == email:
                                         users = [u]
@@ -663,7 +716,7 @@ class KeycloakService:
                         user_id = user_data.get("id")
                         real_username = (user_data.get("username") or "").strip()
 
-                        # 2. Reset mật khẩu về Email
+                        # Reset mật khẩu về Email
                         pass_payload = {
                             "type": "password",
                             "value": email.lower(),
@@ -674,6 +727,8 @@ class KeycloakService:
                             json=pass_payload,
                             headers=auth_headers
                         )
+                        if put_res.status_code in (401, 403):
+                            self.invalidate_token_cache()
 
                         if put_res.status_code in (200, 204):
                             logger.info(f"✅ [Keycloak Sync] Đã reset pass về email cho {email} (Real Username: {real_username})")

@@ -5,7 +5,7 @@ import gc
 import re
 import os
 import time
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Set
 import httpx
 from playwright.async_api import async_playwright, Browser, BrowserContext
 
@@ -35,20 +35,40 @@ def clean_repo_settings_url(raw_url: str) -> str:
     return f"{clean}/settings/collaborators"
 
 
+def extract_short_repo_name(raw_url: str) -> str:
+    """Rút gọn URL dài thành định dạng ngắn gọn owner/repo (Ví dụ: pythaverse/stem-robotics-gr7)."""
+    if not raw_url:
+        return ""
+    clean = raw_url.strip().rstrip("/")
+    if clean.endswith(".git"):
+        clean = clean[:-4]
+    clean = re.sub(r"/settings(/collaborators)?$", "", clean)
+    parts = clean.split("/")
+    if len(parts) >= 2:
+        return f"{parts[-2]}/{parts[-1]}"
+    return clean
+
+
 class GitPlaywrightService:
     """
     Dịch vụ quản trị Pythaverse Git (GitBucket - git.pythaverse.space):
-    ĐỘNG CƠ HYBRID V3.6:
-    - Sàng lọc qua Keycloak Gateway: Loại bỏ 100% tài khoản chưa có trên Keycloak.
-    - Playwright bốc Session OIDC duy nhất 1 lần (3-5s) -> Đóng Chromium giải phóng RAM.
-    - HTTPX Async Engine: Thêm/Gỡ Collaborator đa Role (GUEST/DEVELOPER/ADMIN) trên NHIỀU REPO (~300ms/repo).
-    - Xuất báo cáo kiểm định minh bạch từng con người (Added, Existing, Removed, Not Logged In, Not Found Keycloak).
+    ĐỘNG CƠ HYBRID V3.6 + GLOBAL JIT DEDUP + CONCURRENCY SEMAPHORE:
+    - Sàng lọc qua Keycloak Gateway: Lọc sạch tài khoản không tồn tại trên Keycloak.
+    - Global JIT Deduplication: Check JIT 1 lượt cho toàn bộ người dùng duy nhất, loại ngay ai chưa login.
+    - Session Cache In-Memory (TTL 2h): Bypass Playwright 0ms launch khi session còn sống.
+    - Multi-Repo Parallel Execution: asyncio.Semaphore(3) xử lý 3 repo cùng lúc, chống SQLite lock.
+    - Hỗ trợ toàn diện 2 Pipelines: add_collaborators_pipeline & remove_collaborators_pipeline.
     """
 
     def __init__(self):
         self.base_url = (getattr(settings, "GIT_SERVER_URL", None) or "https://git.pythaverse.space").rstrip("/")
         self.admin_user = getattr(settings, "GIT_ADMIN_USER", None) or "ptvadmin"
         self.admin_pass = str(getattr(settings, "GIT_ADMIN_PASS", "")).strip().strip("'\"")
+
+        # 🚀 BỘ NHỚ ĐỆM IN-MEMORY SESSION CACHE (< 500 Bytes RAM)
+        self._cached_cookies: Optional[Dict[str, str]] = None
+        self._cached_at: float = 0.0
+        self._cache_ttl_seconds: int = 7200  # Lưu phiên trong 2 giờ
 
     def _determine_headless(self, override_headless: Optional[bool] = None) -> bool:
         if override_headless is not None:
@@ -115,15 +135,24 @@ class GitPlaywrightService:
         return payload, not_found
 
     # =========================================================================
-    # 🔑 2. BỐC SESSION OIDC QUA PLAYWRIGHT (CHỈ 3-5S RỒI ĐÓNG TRÌNH DUYỆT)
+    # ⚡ 2. QUẢN TRỊ BỘ NHỚ ĐỆM SESSION CACHE & AUTH GATEWAY
     # =========================================================================
+    async def _is_session_valid(self, cookies: Dict[str, str]) -> bool:
+        """Kiểm tra siêu tốc (20ms) xem Session Cookie còn quyền Admin hay không."""
+        try:
+            async with httpx.AsyncClient(timeout=4.0, follow_redirects=False) as client:
+                res = await client.get(f"{self.base_url}/settings/account", cookies=cookies)
+                return res.status_code == 200
+        except Exception:
+            return False
+
     async def _steal_git_session(self, is_headless: bool = True) -> Optional[Dict[str, str]]:
-        """Đăng nhập Keycloak SSO vào GitBucket đúng 1 lần, lấy Cookie rồi đóng ngay."""
-        logger.info(f"🔑 [Session Stealer] Đăng nhập Git qua Keycloak OIDC cho: [{self.admin_user}]...")
+        """Đăng nhập Keycloak SSO vào GitBucket qua Chromium Low-RAM đúng 1 lần, lấy Cookie rồi đóng ngay."""
+        logger.info(f"🔑 [Session Stealer] Mở Playwright đăng nhập Git qua SSO Keycloak cho: [{self.admin_user}]...")
         t0 = time.time()
 
         if not self.admin_pass:
-            logger.error("❌ Không tìm thấy GIT_ADMIN_PASS trong file .env!")
+            logger.error("❌ Không tìm thấy GIT_ADMIN_PASS trong file cấu hình!")
             return None
 
         async with async_playwright() as p:
@@ -140,7 +169,7 @@ class GitPlaywrightService:
                 await page.goto(f"{self.base_url}/signin", wait_until="domcontentloaded", timeout=35000)
 
                 if "signin" not in page.url and await page.locator("a[href*='/signout'], img.avatar-mini").count() > 0:
-                    logger.info("✅ Đã có sẵn phiên đăng nhập!")
+                    logger.info("✅ Đã có sẵn phiên đăng nhập trên trình duyệt!")
                 else:
                     oidc_btn = page.locator("form[action*='/signin/oidc'] input[type='submit'], input[value*='Sign in with Pythaverse eID'], a:has-text('Pythaverse eID')").first
                     if await oidc_btn.count() > 0:
@@ -176,6 +205,23 @@ class GitPlaywrightService:
                 await browser.close()
                 gc.collect()
 
+    async def _get_or_steal_session(self, is_headless: bool) -> Optional[Dict[str, str]]:
+        """Lấy session từ Cache; chỉ mở Chromium khi chưa có hoặc phiên bị hết hạn."""
+        if self._cached_cookies and (time.time() - self._cached_at < self._cache_ttl_seconds):
+            if await self._is_session_valid(self._cached_cookies):
+                logger.info("⚡ [Session Cache] Tái sử dụng Git Admin Session (0ms - Bỏ qua Playwright)!")
+                return self._cached_cookies
+            else:
+                logger.warning("⚠️ [Session Cache] Session Git cũ đã hết hạn, chuẩn bị gia hạn mới...")
+                self._cached_cookies = None
+
+        async with acquire_playwright_slot("Git Session Stealer", timeout=60.0, lane="admin"):
+            cookies = await self._steal_git_session(is_headless=is_headless)
+            if cookies:
+                self._cached_cookies = cookies
+                self._cached_at = time.time()
+            return cookies
+
     # =========================================================================
     # 🔍 3. KIỂM TRA TỒN TẠI JIT TRÊN GITBUCKET (20ms)
     # =========================================================================
@@ -193,17 +239,17 @@ class GitPlaywrightService:
             return False
 
     # =========================================================================
-    # ⚡ 4. THỰC THI TRÊN 1 REPO (DIRECT HTTPX: THÊM / CẬP NHẬT ROLE / GỠ BỎ)
+    # ⚡ 4. THỰC THI TRÊN 1 REPO (THUẦN DIRECT HTTPX - KHÔNG CHECK LẠI JIT)
     # =========================================================================
     async def _process_single_repo_httpx(
         self,
         client: httpx.AsyncClient,
         raw_repo_url: str,
-        users: List[str],
+        valid_users: List[str],
         target_role: str = "GUEST",
         action: str = "add"
     ) -> Dict[str, Any]:
-        """Thực thi thêm hoặc gỡ Collaborator trên 1 Repo thuần Direct HTTPX (~300ms)."""
+        """Thực thi thêm hoặc gỡ Collaborator trên 1 Repo thuần Direct HTTPX (~150ms)."""
         settings_url = clean_repo_settings_url(raw_repo_url)
         role = target_role.upper()
         if role not in ["ADMIN", "DEVELOPER", "GUEST"]:
@@ -212,7 +258,7 @@ class GitPlaywrightService:
         is_remove_action = action in ["remove", "remove_collaborator", "remove_repo_collaborators", "delete"]
         action_title = "GỠ BỎ" if is_remove_action else f"GÁN ROLE [{role}]"
 
-        logger.info(f"📂 Đang xử lý: {settings_url} | Hành động: {action_title} | Users: {len(users)}")
+        logger.info(f"📂 Đang xử lý: {settings_url} | Hành động: {action_title} | Users: {len(valid_users)}")
         t0 = time.time()
 
         repo_res: Dict[str, Any] = {
@@ -228,16 +274,14 @@ class GitPlaywrightService:
         }
 
         try:
-            # 1. Đọc danh sách Collaborators hiện tại từ trang settings
             get_res = await client.get(settings_url)
             if get_res.status_code != 200:
-                err_msg = f"Không tìm thấy Repo hoặc thiếu quyền Quản trị (Status {get_res.status_code}): {settings_url}"
-                logger.error(f"❌ {err_msg}")
+                err_msg = f"Không tìm thấy Repo hoặc thiếu quyền Quản trị (Status {get_res.status_code})"
+                logger.error(f"❌ {err_msg}: {settings_url}")
                 repo_res["errors"].append({"user": "*", "error": err_msg})
                 repo_res["status"] = "failed"
                 return repo_res
 
-            # Trích xuất chuỗi collaborators cũ từ thẻ hidden input
             collab_match = re.search(r'name=["\']collaborators["\']\s+value=["\']([^"\']*)["\']', get_res.text)
             current_collab_str = collab_match.group(1) if collab_match else ""
 
@@ -251,54 +295,28 @@ class GitPlaywrightService:
 
             new_changes = False
 
-            # =================================================================
-            # TRƯỜNG HỢP A: GỠ BỎ COLLABORATORS (REMOVE)
-            # =================================================================
             if is_remove_action:
-                for u in users:
+                for u in valid_users:
                     u_clean = u.strip()
                     if u_clean in current_collaborators:
                         del current_collaborators[u_clean]
                         repo_res["removed"].append(u_clean)
                         new_changes = True
-                        logger.info(f"  🗑️ Đã gỡ bỏ '{u_clean}' khỏi repo.")
                     else:
-                        logger.info(f"  ℹ️ '{u_clean}' vốn không có trong repo.")
                         repo_res["already_exists"].append(u_clean)
-
-            # =================================================================
-            # TRƯỜNG HỢP B: THÊM MỚI HOẶC CẬP NHẬT ROLE (ADD / UPDATE)
-            # =================================================================
             else:
-                # Kiểm tra tồn tại JIT song song cho danh sách user
-                existence_tasks = [self._check_user_existence(client, u) for u in users]
-                existence_results = await asyncio.gather(*existence_tasks)
-
-                for u, exists_on_git in zip(users, existence_results):
+                for u in valid_users:
                     u_clean = u.strip()
-
-                    # Nếu chưa từng login Git
-                    if not exists_on_git:
-                        logger.warning(f"  ⚠️ '{u_clean}' CHƯA TỪNG LOGIN Git (Chưa có JIT) ➔ Bỏ qua!")
-                        repo_res["not_logged_in_git"].append(u_clean)
-                        continue
-
-                    # Nếu đã có trong danh sách
                     if u_clean in current_collaborators:
                         if current_collaborators[u_clean] != role:
                             current_collaborators[u_clean] = role
                             new_changes = True
-                            logger.info(f"  ℹ️ '{u_clean}' đã có sẵn ➔ Cập nhật Role sang [{role}]")
-                        else:
-                            logger.info(f"  ℹ️ '{u_clean}' đã có sẵn với Role [{role}].")
                         repo_res["already_exists"].append(u_clean)
                     else:
                         current_collaborators[u_clean] = role
                         repo_res["added"].append(u_clean)
                         new_changes = True
-                        logger.info(f"  ✨ Thêm mới: '{u_clean}' ➔ Role [{role}]")
 
-            # 2. Bắn 1 request POST lưu toàn bộ nếu có thay đổi
             if new_changes:
                 new_collab_str = ",".join([f"{u}:{r}" for u, r in current_collaborators.items()]) + ("," if current_collaborators else "")
                 form_payload = {
@@ -306,7 +324,6 @@ class GitPlaywrightService:
                     "userName-group": "",
                     "collaborators": new_collab_str
                 }
-                # Bổ sung các param radio role cho từng collaborator
                 for u, r in current_collaborators.items():
                     form_payload[u] = r
 
@@ -316,16 +333,15 @@ class GitPlaywrightService:
                     headers={"Content-Type": "application/x-www-form-urlencoded"}
                 )
                 elapsed = round((time.time() - t0) * 1000, 1)
-
                 if post_res.status_code in [200, 302, 303]:
-                    logger.info(f"🎉 LƯU THAY ĐỔI REPO THÀNH CÔNG TRONG {elapsed}ms!")
+                    logger.info(f"🎉 Lưu thay đổi Repo thành công trong {elapsed}ms!")
                 else:
                     logger.error(f"❌ Lưu thất bại ({post_res.status_code}): {post_res.text}")
             else:
                 elapsed = round((time.time() - t0) * 1000, 1)
                 logger.info(f"ℹ️ Không có thay đổi nào cần lưu ({elapsed}ms).")
 
-            total_users = len(users)
+            total_users = len(valid_users)
             success_cnt = len(repo_res["added"]) + len(repo_res["already_exists"]) + len(repo_res["removed"])
             repo_res["status"] = "success" if success_cnt == total_users else ("partial_success" if success_cnt > 0 else "failed")
             return repo_res
@@ -337,25 +353,26 @@ class GitPlaywrightService:
             return repo_res
 
     # =========================================================================
-    # 🚀 5. ĐIỀU PHỐI MULTI-REPO PIPELINE CHÍNH THỨC
+    # 🚀 5. ĐIỀU PHỐI MULTI-REPO PIPELINE CHÍNH THỨC VỚI JIT DEDUP & SEMAPHORE
     # =========================================================================
-    async def _internal_add_collaborators(
+    async def _internal_process_collaborators(
         self,
         payload: Dict[str, Any],
+        raw_user_role_map: Dict[str, str],
         not_found_in_keycloak: List[str],
-        is_headless: bool
+        is_headless: bool,
+        action: str = "add"
     ) -> Dict[str, Any]:
-        """Điều phối thêm/gỡ thành viên cho danh sách Repositories."""
+        """Bộ điều phối cốt lõi: Dedup JIT đầu vào ➔ Chạy 3 Repos song song ➔ Báo cáo tinh gọn."""
         repos_plan: List[Dict[str, Any]] = []
-        global_action = payload.get("action") or "add"
+        is_remove_flow = action in ["remove", "remove_collaborator", "delete"]
 
-        # Chuẩn hóa cấu trúc kế hoạch Repos
         if payload.get("repos_plan") and isinstance(payload.get("repos_plan"), list):
             for item in payload["repos_plan"]:
                 r_url = item.get("repo_url", "").strip()
                 r_users = self._sanitize_users(item.get("users", []))
                 r_role = (item.get("role") or payload.get("role") or "GUEST").upper()
-                r_act = item.get("action") or global_action
+                r_act = item.get("action") or action
                 if r_url and r_users:
                     repos_plan.append({"repo_url": r_url, "users": r_users, "role": r_role, "action": r_act})
 
@@ -364,43 +381,32 @@ class GitPlaywrightService:
             shared_role = (payload.get("role") or "GUEST").upper()
             for u in payload["repo_urls"]:
                 if str(u).strip():
-                    repos_plan.append({"repo_url": str(u).strip(), "users": shared_users, "role": shared_role, "action": global_action})
+                    repos_plan.append({"repo_url": str(u).strip(), "users": shared_users, "role": shared_role, "action": action})
 
         elif payload.get("repo_url"):
             shared_users = self._sanitize_users(payload.get("users", []))
             shared_role = (payload.get("role") or "GUEST").upper()
-            repos_plan.append({"repo_url": payload["repo_url"].strip(), "users": shared_users, "role": shared_role, "action": global_action})
+            repos_plan.append({"repo_url": payload["repo_url"].strip(), "users": shared_users, "role": shared_role, "action": action})
 
         if not repos_plan:
-            report_lines = [
-                "❌ [THẤT BẠI] KHÔNG CÓ NGƯỜI DÙNG HỢP LỆ ĐỂ THAO TÁC TRÊN GIT:",
-                f"• Không tìm thấy tài khoản Keycloak cho: {', '.join(not_found_in_keycloak)}"
-            ]
-            report_msg = "\n".join(report_lines)
+            err_line = f"Không tồn tại ❌: {', '.join(not_found_in_keycloak)}" if not_found_in_keycloak else "Không có người dùng hợp lệ."
             return {
                 "status": "failed",
-                "error": "Tất cả tài khoản đầu vào đều không tồn tại trên Keycloak.",
-                "message": report_msg,
-                "execution_logs": report_msg,
+                "error": "Tất cả tài khoản đầu vào đều không tồn tại trên hệ thống.",
+                "message": f"Thao tác thất bại. {err_line}",
+                "execution_logs": f"❌ LỖI ĐIỀU PHỐI GIT COLLABORATORS\n{err_line}",
                 "breakdown": {
-                    "added": [],
-                    "already_exists": [],
-                    "removed": [],
-                    "not_logged_in_git": [],
-                    "not_found_in_keycloak": not_found_in_keycloak,
-                    "errors": []
+                    "added": [], "already_exists": [], "removed": [],
+                    "not_logged_in_git": [], "not_found_in_keycloak": not_found_in_keycloak, "errors": []
                 }
             }
 
-        logger.info(f"🚀 BẮT ĐẦU THAO TÁC TRÊN {len(repos_plan)} REPOS QUA DIRECT API...")
-        all_results: List[Dict[str, Any]] = []
-
-        # 1. Bốc session OIDC duy nhất 1 lần (3-5s)
-        cookies = await self._steal_git_session(is_headless=is_headless)
+        # 1. Lấy Session OIDC (Ưu tiên Cache, chỉ bật Playwright khi hết hạn)
+        cookies = await self._get_or_steal_session(is_headless=is_headless)
         if not cookies:
             return {"status": "failed", "error": "Không thể đăng nhập Pythaverse Git qua Pythaverse eID SSO."}
 
-        # 2. Chạy toàn bộ các Repos qua HTTPX thuần túy
+        # Khởi tạo HTTPX Client dùng chung session
         async with httpx.AsyncClient(
             base_url=self.base_url,
             cookies=cookies,
@@ -408,66 +414,106 @@ class GitPlaywrightService:
             timeout=25.0,
             follow_redirects=True
         ) as client:
-            for r_idx, plan in enumerate(repos_plan, 1):
-                logger.info(f"\n👉 XỬ LÝ REPO [{r_idx}/{len(repos_plan)}]: {plan['repo_url']} (Role: {plan['role']})")
-                res = await self._process_single_repo_httpx(
-                    client=client,
-                    raw_repo_url=plan["repo_url"],
-                    users=plan["users"],
-                    target_role=plan["role"],
-                    action=plan["action"]
-                )
-                all_results.append(res)
 
-        # 3. Tổng hợp báo cáo minh bạch từng con người (khớp 100% định dạng UI cũ)
+            all_not_logged_in: List[str] = []
+
+            # =================================================================
+            # 🎯 2. GLOBAL JIT DEDUPLICATION (Chỉ áp dụng khi THÊM mới)
+            # =================================================================
+            if not is_remove_flow:
+                # Gom toàn bộ user của tất cả các repo thành 1 tập hợp duy nhất
+                unique_users: Set[str] = set()
+                for p in repos_plan:
+                    unique_users.update(p["users"])
+
+                logger.info(f"🔍 [JIT Dedup] Kiểm tra JIT song song cho {len(unique_users)} người dùng duy nhất...")
+                unique_users_list = list(unique_users)
+                jit_tasks = [self._check_user_existence(client, u) for u in unique_users_list]
+                jit_results = await asyncio.gather(*jit_tasks)
+
+                # Bảng tra cứu JIT trong RAM
+                jit_lookup: Dict[str, bool] = dict(zip(unique_users_list, jit_results))
+
+                # Lọc ra danh sách chưa login PGit toàn cục
+                all_not_logged_in = [u for u, exists in jit_lookup.items() if not exists]
+
+                # Tinh lọc lại repos_plan: CHỈ GIỮ LẠI USER ĐÃ JIT THÀNH CÔNG!
+                # (Loại bỏ luôn từ đầu để Repo con không tốn công xử lý)
+                for p in repos_plan:
+                    p["users"] = [u for u in p["users"] if jit_lookup.get(u, False)]
+            else:
+                logger.info("ℹ️ [Remove Flow] Bỏ qua kiểm tra JIT vì chỉ thực hiện gỡ bỏ Collaborator.")
+
+            # =================================================================
+            # ⚡ 3. THỰC THI REPOS SONG SONG CÓ KIỂM SOÁT (Semaphore 3)
+            # =================================================================
+            repo_semaphore = asyncio.Semaphore(3)  # Tối đa 3 Repos cùng lúc chống SQLite Lock
+            logger.info(f"🚀 [Concurrency] Bắt đầu thực thi {len(repos_plan)} Repos với Semaphore(3)...")
+
+            async def _run_single_repo(plan: Dict[str, Any]) -> Dict[str, Any]:
+                async with repo_semaphore:
+                    return await self._process_single_repo_httpx(
+                        client=client,
+                        raw_repo_url=plan["repo_url"],
+                        valid_users=plan["users"],
+                        target_role=plan["role"],
+                        action=plan["action"]
+                    )
+
+            all_results = await asyncio.gather(*[_run_single_repo(p) for p in repos_plan])
+
+        # 4. Gom danh sách thống kê
         all_added = list(dict.fromkeys([u for r in all_results for u in r.get("added", [])]))
         all_already = list(dict.fromkeys([u for r in all_results for u in r.get("already_exists", [])]))
         all_removed = list(dict.fromkeys([u for r in all_results for u in r.get("removed", [])]))
-        all_not_logged_in = list(dict.fromkeys([u for r in all_results for u in r.get("not_logged_in_git", [])]))
         all_errors = [e for r in all_results for e in r.get("errors", [])]
 
-        report_lines = [
-            f"📊 BÁO CÁO PHÂN BỔ GIT COLLABORATORS ({len(repos_plan)} REPO):",
-            "--------------------------------------------------"
+        # =====================================================================
+        # 📝 TẠO BÁO CÁO LOG TINH GỌN THEO YÊU CẦU CỦA QUẢN TRỊ VIÊN
+        # =====================================================================
+        action_headline = "GỠ BỎ" if is_remove_flow else "ĐIỀU PHỐI"
+        report_lines: List[str] = [
+            f"🎯 HOÀN TẤT {action_headline} GIT COLLABORATORS ({len(repos_plan)} REPOS)"
         ]
 
-        if all_added:
-            report_lines.append(f"✅ ĐÃ THÊM MỚI THÀNH CÔNG ({len(all_added)} người):")
-            report_lines.append(f"   • {', '.join(all_added)}")
+        if is_remove_flow:
+            # Luồng gỡ: Hiện danh sách người cần gỡ
+            all_target_remove = list(dict.fromkeys([u for p in repos_plan for u in p.get("users", [])]))
+            if all_target_remove:
+                report_lines.append(f"Gỡ bỏ: {', '.join(all_target_remove)}")
+        else:
+            # Luồng thêm: Hiện nhóm Role (Chỉ hiện Role có người)
+            role_labels = [("ADMIN", "Admin"), ("DEVELOPER", "Developer"), ("GUEST", "Guest")]
+            for role_key, role_title in role_labels:
+                matched_users = [u for u, r in raw_user_role_map.items() if r.upper() == role_key]
+                if matched_users:
+                    report_lines.append(f"{role_title}: {', '.join(matched_users)}")
 
-        if all_already:
-            report_lines.append(f"ℹ️ ĐÃ CÓ SẴN TRONG REPO ({len(all_already)} người):")
-            report_lines.append(f"   • {', '.join(all_already)}")
+        # Tóm tắt từng Repo 1 dòng
+        for r in all_results:
+            short_name = extract_short_repo_name(r.get("repo_url", ""))
+            if is_remove_flow:
+                rem_cnt = len(r.get("removed", []))
+                alr_cnt = len(r.get("already_exists", []))
+                report_lines.append(f"📁 REPO: {short_name} [Đã gỡ ({rem_cnt}) | Vốn không có ({alr_cnt})]")
+            else:
+                add_cnt = len(r.get("added", []))
+                alr_cnt = len(r.get("already_exists", []))
+                report_lines.append(f"📁 REPO: {short_name} [Thêm mới ({add_cnt}) | Có sẵn ({alr_cnt})]")
 
-        if all_removed:
-            report_lines.append(f"🗑️ ĐÃ GỠ BỎ THÀNH CÔNG ({len(all_removed)} người):")
-            report_lines.append(f"   • {', '.join(all_removed)}")
-
+        # Báo lỗi có chọn lọc (Chỉ hiện khi có lỗi)
         if all_not_logged_in:
-            report_lines.append(f"⚠️ BỎ QUA - CHƯA LOGIN GIT LẦN NÀO ({len(all_not_logged_in)} người):")
-            report_lines.append(f"   • {', '.join(all_not_logged_in)}")
-            report_lines.append("   (Tài khoản có trên Keycloak nhưng chưa từng login git.pythaverse.space)")
+            report_lines.append(f"Chưa login PGit ⚠️: {', '.join(all_not_logged_in)}")
 
         if not_found_in_keycloak:
-            report_lines.append(f"❌ LOẠI BỎ - KHÔNG TỒN TẠI TRÊN KEYCLOAK ({len(not_found_in_keycloak)} người):")
-            report_lines.append(f"   • {', '.join(not_found_in_keycloak)}")
+            report_lines.append(f"Không tồn tại ❌: {', '.join(not_found_in_keycloak)}")
 
         if all_errors:
-            report_lines.append(f"⛔ LỖI PHÁT SINH ({len(all_errors)} lỗi):")
             for err_item in all_errors:
-                report_lines.append(f"   • {err_item.get('user')}: {err_item.get('error')}")
+                report_lines.append(f"Lỗi repo ⛔: {err_item.get('error')}")
 
-        summary_line = (
-            f"Tổng kết: {len(all_added)} Thêm mới | {len(all_already)} Đã có sẵn | {len(all_removed)} Đã gỡ | "
-            f"{len(all_not_logged_in)} Chưa login Git | {len(not_found_in_keycloak)} Không có Keycloak"
-        )
-        report_lines.append(summary_line)
-
-        overall_status = "success" if all_added or all_already or all_removed else "failed"
-        short_summary_msg = (
-            f"Hoàn tất {len(repos_plan)} Repos: {len(all_added)} Thêm, {len(all_already)} Đã có, "
-            f"{len(all_removed)} Đã gỡ, {len(all_not_logged_in)} Chưa login Git."
-        )
+        overall_status = "success" if (all_added or all_already or all_removed) else "failed"
+        short_summary_msg = f"Hoàn tất {len(repos_plan)} Repos: {len(all_added)} Thêm, {len(all_removed)} Gỡ, {len(all_already)} Có sẵn."
 
         return {
             "status": overall_status,
@@ -485,30 +531,79 @@ class GitPlaywrightService:
         }
 
     # =========================================================================
-    # 🏁 CỔNG TIẾP NHẬN NGOÀI CÙNG (GIỮ NGUYÊN 100% INTERFACE VỚI BOT EXECUTOR)
+    # 🏁 6. CỔNG TIẾP NHẬN: THÊM CỘNG TÁC VIÊN (ADD COLLABORATORS)
     # =========================================================================
     async def add_collaborators_pipeline(self, payload: Dict[str, Any], headless: Optional[bool] = None) -> Dict[str, Any]:
-        """Cổng tiếp nhận chính: Sàng lọc Keycloak ➔ Chiếm slot VIP ➔ Thực thi siêu tốc."""
+        """Cổng tiếp nhận Thêm quyền: Sàng lọc Keycloak ➔ JIT Dedup ➔ Direct API song song."""
+        raw_user_role_map: Dict[str, str] = {}
+        global_role = (payload.get("role") or "GUEST").upper()
+
+        if payload.get("repos_plan") and isinstance(payload.get("repos_plan"), list):
+            for item in payload["repos_plan"]:
+                r_role = (item.get("role") or global_role).upper()
+                for u in self._sanitize_users(item.get("users", [])):
+                    raw_user_role_map[u] = r_role
+        else:
+            all_u = self._sanitize_users(payload.get("users", payload.get("collaborators", payload.get("emails", []))))
+            for u in all_u:
+                raw_user_role_map[u] = global_role
+
         normalized_payload, not_found_in_keycloak = await self._normalize_and_filter_users_via_keycloak(payload)
 
         is_headless = self._determine_headless(headless)
         repo_count = len(normalized_payload.get("repos_plan") or normalized_payload.get("repo_urls") or [1])
-        timeout_seconds = max(120.0, float(repo_count * 20.0))
+        timeout_seconds = max(60.0, float(repo_count * 15.0))
 
-        # Chiếm Semaphore chạy Playwright bốc session
-        async with acquire_playwright_slot("Git Collaborators Pipeline", timeout=timeout_seconds, lane="admin"):
-            try:
-                return await asyncio.wait_for(
-                    self._internal_add_collaborators(
-                        payload=normalized_payload,
-                        not_found_in_keycloak=not_found_in_keycloak,
-                        is_headless=is_headless
-                    ),
-                    timeout=timeout_seconds
-                )
-            except asyncio.TimeoutError:
-                logger.error(f"❌ Quá thời gian thực thi (Timeout {timeout_seconds}s) khi thao tác Git Multi-Repo.")
-                return {"status": "failed", "error": f"Tác vụ Git bị Timeout ({timeout_seconds}s)."}
+        try:
+            return await asyncio.wait_for(
+                self._internal_process_collaborators(
+                    payload=normalized_payload,
+                    raw_user_role_map=raw_user_role_map,
+                    not_found_in_keycloak=not_found_in_keycloak,
+                    is_headless=is_headless,
+                    action="add"
+                ),
+                timeout=timeout_seconds
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"❌ Quá thời gian thực thi (Timeout {timeout_seconds}s) khi thêm Git Collaborators.")
+            return {"status": "failed", "error": f"Tác vụ Git bị Timeout ({timeout_seconds}s)."}
+
+    # =========================================================================
+    # 🏁 7. CỔNG TIẾP NHẬN: GỠ CỘNG TÁC VIÊN (REMOVE COLLABORATORS)
+    # =========================================================================
+    async def remove_collaborators_pipeline(self, payload: Dict[str, Any], headless: Optional[bool] = None) -> Dict[str, Any]:
+        """Cổng tiếp nhận Gỡ quyền: Sàng lọc Keycloak ➔ Bỏ qua JIT ➔ Direct API song song."""
+        raw_user_role_map: Dict[str, str] = {}
+        if payload.get("repos_plan") and isinstance(payload.get("repos_plan"), list):
+            for item in payload["repos_plan"]:
+                for u in self._sanitize_users(item.get("users", [])):
+                    raw_user_role_map[u] = "REMOVE"
+        else:
+            all_u = self._sanitize_users(payload.get("users", payload.get("collaborators", payload.get("emails", []))))
+            for u in all_u:
+                raw_user_role_map[u] = "REMOVE"
+
+        normalized_payload, not_found_in_keycloak = await self._normalize_and_filter_users_via_keycloak(payload)
+
+        is_headless = self._determine_headless(headless)
+        repo_count = len(normalized_payload.get("repos_plan") or normalized_payload.get("repo_urls") or [1])
+        timeout_seconds = max(60.0, float(repo_count * 15.0))
+
+        try:
+            return await asyncio.wait_for(
+                self._internal_process_collaborators(
+                    payload=normalized_payload,
+                    raw_user_role_map=raw_user_role_map,
+                    not_found_in_keycloak=not_found_in_keycloak,
+                    is_headless=is_headless,
+                    action="remove"
+                ),
+                timeout=timeout_seconds
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"❌ Quá thời gian thực thi (Timeout {timeout_seconds}s) khi gỡ Git Collaborators.")
+            return {"status": "failed", "error": f"Tác vụ Git bị Timeout ({timeout_seconds}s)."}
 
 
 git_playwright_service = GitPlaywrightService()

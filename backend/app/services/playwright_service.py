@@ -4,10 +4,12 @@ Moodle PLearn High-Speed Production Service (Engine V3.6 Master Edition)
 Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI
 Chuyên trách:
 - Ghi danh theo lô Multi-Role (Học sinh 9, Giáo viên 7, Quản lý 1) siêu tốc qua Direct HTTPX WebService.
+- Session Cache In-Memory (TTL 2h): Bypass Playwright 0ms launch khi session còn sống.
 - Tìm kiếm User ID song song qua asyncio.gather (chịu tải hàng trăm tài khoản trong vài trăm ms).
 - Smart Fallback tự chữa lành: Ép Mono-Role & Sửa hạn ngày tức thì cho người dùng đã tồn tại.
 - Phân nhóm thông minh: Fuzzy Match tìm Group gần đúng & Tự động tạo Group mới.
 - Hủy ghi danh (Unenrol) siêu tốc qua core_enrol_unenrol_user_enrolment.
+- Xuất báo cáo execution_logs tinh gọn chuẩn mực cho Live Terminal.
 """
 import re
 import os
@@ -17,7 +19,7 @@ import asyncio
 import gc
 import difflib
 import urllib.parse
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Set
 from datetime import datetime
 import httpx
 from playwright.async_api import async_playwright, Browser
@@ -41,12 +43,148 @@ MOODLE_SEARCH_SEMAPHORE = asyncio.Semaphore(10)
 class PlaywrightLMSService:
     """
     Cỗ máy Hybrid Moodle PLearn Production Engine (V3.6):
-    - Pha 1: Playwright bốc Cookies & sesskey trong ~3s rồi đóng ngay Chromium (RAM < 25MB).
+    - Pha 1: Playwright bốc Cookies & sesskey (3-4s) ➔ Lưu RAM Cache 2h ➔ Đóng Chromium (RAM < 25MB).
     - Pha 2: Thực thi 100% bằng Direct HTTPX Async WebService không click chuột giao diện!
     """
 
     def __init__(self):
         self.headless = True
+
+        # ⚡ BỘ ĐỆM SESSION & SESSKEY IN-MEMORY (RAM < 1KB)
+        self._cached_cookies: Optional[Dict[str, str]] = None
+        self._cached_sesskey: Optional[str] = None
+        self._cached_at: float = 0.0
+        self._cache_ttl_seconds: int = 7200  # Lưu phiên Moodle trong 2 giờ
+        self._session_lock: Optional[asyncio.Lock] = None
+
+    def _get_lock(self) -> asyncio.Lock:
+        """Khởi tạo Lock lười (Lazy Initialization) để an toàn với Event Loop."""
+        if self._session_lock is None:
+            self._session_lock = asyncio.Lock()
+        return self._session_lock
+
+    def invalidate_session_cache(self) -> None:
+        """Hủy bỏ token/cookie cache của Moodle khi phát hiện phiên hết hạn."""
+        self._cached_cookies = None
+        self._cached_sesskey = None
+        self._cached_at = 0.0
+        logger.warning("🔄 [Moodle Cache] Đã thu hồi cache Session Moodle.")
+
+    # =========================================================================
+    # ⚡ 1. KIỂM TRA & BỐC SESSION PLAYWRIGHT (CÓ CACHE 2 GIỜ)
+    # =========================================================================
+    async def _is_session_valid(self, cookies: Dict[str, str]) -> bool:
+        """Kiểm tra siêu tốc (20ms) xem Moodle Session còn sống hay không."""
+        try:
+            async with httpx.AsyncClient(base_url=MOODLE_BASE_URL, cookies=cookies, timeout=4.0, follow_redirects=False) as client:
+                res = await client.get("/my/")
+                # Nếu còn sống, Moodle trả về 200 trang Dashboard
+                # Nếu hết hạn, Moodle redirect 302/303 về /login/index.php
+                return res.status_code == 200
+        except Exception:
+            return False
+
+    async def _steal_moodle_session(self) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
+        """Đăng nhập Keycloak SSO, bốc Cookies & sesskey, đóng trình duyệt ngay lập tức."""
+        async with acquire_playwright_slot("Moodle SSO Session Stealer", timeout=60.0, lane="admin"):
+            async with async_playwright() as p:
+                browser: Browser = await p.chromium.launch(headless=self.headless, args=LOW_RAM_CHROMIUM_ARGS)
+                context = await browser.new_context(
+                    viewport={"width": 1280, "height": 800},
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0"
+                )
+                await setup_low_ram_routes(context)
+                page = await context.new_page()
+
+                try:
+                    admin_user = str(os.getenv("TEST_ADMIN_USER") or getattr(settings, "TEST_ADMIN_USER", "")).strip().strip("'\"")
+                    admin_pass = str(os.getenv("TEST_ADMIN_PASS") or getattr(settings, "TEST_ADMIN_PASS", "")).strip().strip("'\"")
+
+                    if not admin_pass:
+                        logger.error("❌ Không tìm thấy mật khẩu quản trị Keycloak trong cấu hình .env!")
+                        return None, None
+
+                    logger.info("🔑 [Playwright] Mở cổng đăng nhập Keycloak SSO vào Moodle...")
+                    await page.goto(f"{MOODLE_BASE_URL}/login/index.php", wait_until="domcontentloaded", timeout=40000)
+
+                    username_input = page.locator("input#username, input[name='username'], #username").first
+                    if await username_input.count() > 0 and await username_input.is_visible():
+                        await username_input.fill(admin_user)
+                        await page.fill("input#password, input[name='password'], #password", admin_pass)
+                        login_btn = page.locator("input#kc-login, button[type='submit']").first
+                        try:
+                            async with page.expect_navigation(wait_until="domcontentloaded", timeout=25000):
+                                await login_btn.click()
+                        except Exception:
+                            pass
+
+                    user_menu = page.locator(".usermenu, a[title='User menu'], .userinitials, a[href*='/login/logout.php']").first
+                    try:
+                        await user_menu.wait_for(state="visible", timeout=20000)
+                        logger.info("✅ Xác nhận phiên đăng nhập Moodle thành công!")
+                    except Exception:
+                        if "login" not in page.url:
+                            logger.info(f"✅ Đã vào Moodle an toàn (URL: {page.url})")
+                        await page.wait_for_timeout(1500)
+
+                    sesskey = ""
+                    for _ in range(5):
+                        try:
+                            sesskey = await page.evaluate("() => (window.M && window.M.cfg && window.M.cfg.sesskey) ? window.M.cfg.sesskey : ''")
+                            if sesskey:
+                                break
+                        except Exception:
+                            await asyncio.sleep(0.5)
+
+                    if not sesskey:
+                        content = await page.content()
+                        sk_m = re.search(r'sesskey["\']?\s*[:=]\s*["\']([a-zA-Z0-9]+)["\']', content)
+                        if sk_m:
+                            sesskey = sk_m.group(1)
+
+                    cookies_list = await context.cookies()
+                    cookies_dict = {c["name"]: c["value"] for c in cookies_list}
+
+                    if sesskey and "MoodleSession" in cookies_dict:
+                        logger.info(f"🎯 [Session Stealer] Bốc sesskey: {sesskey} thành công! Đóng Chromium ngay.")
+                        return cookies_dict, sesskey
+
+                    logger.error("❌ Không lấy đủ sesskey hoặc MoodleSession!")
+                    return None, None
+
+                except Exception as e:
+                    logger.error(f"❌ Lỗi ngoại lệ khi bốc Session Moodle: {e}", exc_info=True)
+                    return None, None
+                finally:
+                    logger.info("🧹 [RAM Zero] Đã đóng Chromium, giải phóng 100% bộ nhớ!")
+                    await browser.close()
+                    gc.collect()
+
+    async def _get_or_steal_session(self) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
+        """Lấy Moodle Session từ RAM; chỉ bật Playwright khi cache trống hoặc hết hạn."""
+        now = time.time()
+        # 1. Kiểm tra nhanh cache RAM
+        if self._cached_cookies and self._cached_sesskey and (now - self._cached_at < self._cache_ttl_seconds):
+            if await self._is_session_valid(self._cached_cookies):
+                logger.info("⚡ [Moodle Cache] Tái sử dụng Moodle Admin Session (0ms - Bỏ qua Playwright)!")
+                return self._cached_cookies, self._cached_sesskey
+            else:
+                logger.warning("⚠️ [Moodle Cache] Moodle Session cũ đã hết hạn, chuẩn bị gia hạn mới...")
+                self.invalidate_session_cache()
+
+        # 2. Xếp hàng Double-Checked Lock
+        async with self._get_lock():
+            now = time.time()
+            if self._cached_cookies and self._cached_sesskey and (now - self._cached_at < self._cache_ttl_seconds):
+                return self._cached_cookies, self._cached_sesskey
+
+            cookies_dict, sesskey = await self._steal_moodle_session()
+            if cookies_dict and sesskey:
+                self._cached_cookies = cookies_dict
+                self._cached_sesskey = sesskey
+                self._cached_at = time.time()
+                logger.info(f"✨ [Moodle Cache] Đã đệm Session Moodle mới vào RAM (sesskey: {sesskey})")
+            return cookies_dict, sesskey
 
     # =========================================================================
     # 🔍 BỘ CHUẨN HÓA DANH TÍNH USERNAME ➔ EMAIL QUA KEYCLOAK IDP
@@ -121,86 +259,6 @@ class PlaywrightLMSService:
         return {"day": str(dt.day), "month": str(dt.month), "year": str(dt.year)}
 
     # =========================================================================
-    # 🔑 BỐC SESSION PLAYWRIGHT (CHỈ 3-4S RỒI ĐÓNG CHROMIUM NGAY)
-    # =========================================================================
-    async def _steal_moodle_session(self) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
-        """Đăng nhập Keycloak SSO, bốc Cookies & sesskey, đóng trình duyệt ngay lập tức."""
-        async with acquire_playwright_slot("Moodle SSO Session Stealer", timeout=60.0):
-            async with async_playwright() as p:
-                browser: Browser = await p.chromium.launch(headless=self.headless, args=LOW_RAM_CHROMIUM_ARGS)
-                context = await browser.new_context(
-                    viewport={"width": 1280, "height": 800},
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0"
-                )
-                await setup_low_ram_routes(context)
-                page = await context.new_page()
-
-                try:
-                    admin_user = str(os.getenv("TEST_ADMIN_USER") or getattr(settings, "TEST_ADMIN_USER", "")).strip().strip("'\"")
-                    admin_pass = str(os.getenv("TEST_ADMIN_PASS") or getattr(settings, "TEST_ADMIN_PASS", "")).strip().strip("'\"")
-
-                    if not admin_pass:
-                        logger.error("❌ Không tìm thấy mật khẩu quản trị Keycloak trong cấu hình .env!")
-                        return None, None
-
-                    logger.info("🔑 [Playwright] Mở cổng đăng nhập Keycloak SSO...")
-                    await page.goto(f"{MOODLE_BASE_URL}/login/index.php", wait_until="domcontentloaded", timeout=40000)
-
-                    username_input = page.locator("input#username, input[name='username'], #username").first
-                    if await username_input.count() > 0 and await username_input.is_visible():
-                        await username_input.fill(admin_user)
-                        await page.fill("input#password, input[name='password'], #password", admin_pass)
-                        login_btn = page.locator("input#kc-login, button[type='submit']").first
-                        try:
-                            async with page.expect_navigation(wait_until="domcontentloaded", timeout=25000):
-                                await login_btn.click()
-                        except Exception:
-                            pass
-
-                    # ⚓ Mỏ neo chờ Moodle redirect hoàn tất
-                    user_menu = page.locator(".usermenu, a[title='User menu'], .userinitials, a[href*='/login/logout.php']").first
-                    try:
-                        await user_menu.wait_for(state="visible", timeout=20000)
-                        logger.info("✅ Xác nhận phiên đăng nhập Moodle thành công!")
-                    except Exception:
-                        if "login" not in page.url:
-                            logger.info(f"✅ Đã vào Moodle an toàn (URL: {page.url})")
-                        await page.wait_for_timeout(1500)
-
-                    sesskey = ""
-                    for _ in range(5):
-                        try:
-                            sesskey = await page.evaluate("() => (window.M && window.M.cfg && window.M.cfg.sesskey) ? window.M.cfg.sesskey : ''")
-                            if sesskey:
-                                break
-                        except Exception:
-                            await asyncio.sleep(0.5)
-
-                    if not sesskey:
-                        content = await page.content()
-                        sk_m = re.search(r'sesskey["\']?\s*[:=]\s*["\']([a-zA-Z0-9]+)["\']', content)
-                        if sk_m:
-                            sesskey = sk_m.group(1)
-
-                    cookies_list = await context.cookies()
-                    cookies_dict = {c["name"]: c["value"] for c in cookies_list}
-
-                    if sesskey and "MoodleSession" in cookies_dict:
-                        logger.info(f"🎯 [Session Stealer] Bốc sesskey: {sesskey} thành công! Đóng Chromium ngay.")
-                        return cookies_dict, sesskey
-
-                    logger.error("❌ Không lấy đủ sesskey hoặc MoodleSession!")
-                    return None, None
-
-                except Exception as e:
-                    logger.error(f"❌ Lỗi ngoại lệ khi bốc Session Moodle: {e}", exc_info=True)
-                    return None, None
-                finally:
-                    logger.info("🧹 [RAM Zero] Đã đóng Chromium, giải phóng 100% bộ nhớ!")
-                    await browser.close()
-                    gc.collect()
-
-    # =========================================================================
     # 🔍 METADATA & BẢNG PARTICIPANTS (DIRECT AJAX)
     # =========================================================================
     async def _fetch_course_metadata_and_participants(
@@ -261,7 +319,6 @@ class PlaywrightLMSService:
                 t_html = table_res.json()[0].get("data", {}).get("html", "")
                 rows = re.findall(r'<tr[^>]*id="user-index-participants-[^"]*"[^>]*>(.*?)</tr>', t_html, re.DOTALL)
                 for r_html in rows:
-                    # Bắt email độc lập với theme (hỗ trợ cả mailto: lẫn cell c2)
                     email_m = re.search(r'mailto:([^"\'>\s]+)', r_html) or re.search(r'<td[^>]*class="cell c2"[^>]*>(.*?)</td>', r_html, re.DOTALL)
                     ue_m = re.search(r'rel="(\d+)"[^>]*data-action="editenrolment"', r_html) or re.search(r'ue=(\d+)', r_html)
                     role_m = re.search(r'data-itemid="(\d+):(\d+)"[^>]*data-value="([^"]*)"', r_html)
@@ -374,7 +431,7 @@ class PlaywrightLMSService:
             return None, 0
 
     # =========================================================================
-    # 🚀 PIPELINE GHI DANH DIRECT HTTPX (SONG SONG HÓA TÌM KIẾM USER)
+    # 🚀 PIPELINE GHI DANH DIRECT HTTPX (SONG SONG HÓA VÀ CACHE SESSION)
     # =========================================================================
     async def _internal_enroll_pipeline(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Thực thi toàn bộ quy trình ghi danh siêu tốc qua Direct HTTPX WebService."""
@@ -414,8 +471,8 @@ class PlaywrightLMSService:
         if total_requested == 0:
             return {"status": "failed", "error": "Không có email hoặc username hợp lệ nào được cung cấp."}
 
-        # BƯỚC 1: BỐC SESSION COOKIE VÀ SESSKEY (CHỈ ~3S PLAYWRIGHT)
-        cookies_dict, sesskey = await self._steal_moodle_session()
+        # BƯỚC 1: LẤY SESSION COOKIE VÀ SESSKEY (ƯU TIÊN CACHE RAM 2 GIỜ)
+        cookies_dict, sesskey = await self._get_or_steal_session()
         if not cookies_dict or not sesskey:
             return {"status": "failed", "error": "Không thể lấy phiên đăng nhập Moodle qua Keycloak SSO."}
 
@@ -472,7 +529,6 @@ class PlaywrightLMSService:
                     if not emails:
                         continue
 
-                    # Tách người đã có vs người mới cần tìm kiếm
                     existing_in_course: List[Tuple[str, Dict[str, Any]]] = []
                     new_emails_to_search: List[str] = []
 
@@ -510,7 +566,7 @@ class PlaywrightLMSService:
 
                         course_results["extended_access"].append({"email": clean_email, "role": role_label, "valid_until": end_date_str or "Existing"})
 
-                    # 2. 🎯 TÌM KIẾM SONG SONG NGƯỜI MỚI QUA ASYNCIO.GATHER (300MS CHO 50 NGƯỜI)
+                    # 2. 🎯 TÌM KIẾM SONG SONG NGƯỜI MỚI QUA ASYNCIO.GATHER
                     if new_emails_to_search:
                         async def _search_single_potential_user(clean_em: str):
                             async with MOODLE_SEARCH_SEMAPHORE:
@@ -578,10 +634,49 @@ class PlaywrightLMSService:
 
         overall_status = "success" if all_failed == 0 else ("partial_success" if (all_enrolled + all_extended) > 0 else "failed")
 
+        # =====================================================================
+        # 📝 TẠO BÁO CÁO LOG TINH GỌN THEO YÊU CẦU CHO LIVE TERMINAL
+        # =====================================================================
+        report_lines: List[str] = [
+            f"🎯 HOÀN TẤT GHI DANH MOODLE PLEARN ({total_courses} KHÓA HỌC)"
+        ]
+
+        # Khối 1: Tóm tắt Role nào có người dùng nào
+        if students:
+            report_lines.append(f"Học sinh (9): {', '.join(students)}")
+        if teachers:
+            report_lines.append(f"Giáo viên (7): {', '.join(teachers)}")
+        if managers:
+            report_lines.append(f"Quản lý (1): {', '.join(managers)}")
+
+        # Khối 2: Tóm tắt từng Khóa học 1 dòng
+        for c in batch_course_results:
+            c_name = c.get("course_name", f"Course #{c.get('course_id')}")
+            c_id = c.get("course_id")
+            enrolled_cnt = len(c.get("enrolled_new", []))
+            extended_cnt = len(c.get("extended_access", []))
+            g_created = c.get("group_created")
+            group_info = f" | Group: {g_created}" if g_created else ""
+            
+            if c.get("error"):
+                report_lines.append(f"📚 KHÓA: {c_name} (ID: {c_id}) ⛔ LỖI: {c['error']}")
+            else:
+                report_lines.append(f"📚 KHÓA: {c_name} (ID: {c_id}) [Mới ({enrolled_cnt}) | Gia hạn/Đổi Role ({extended_cnt}){group_info}]")
+
+        # Khối 3: Báo lỗi có chọn lọc (Chỉ hiện khi có người không tìm thấy)
+        missing_emails = list(dict.fromkeys([
+            nf.get("email") for c in batch_course_results for nf in c.get("not_found", []) if nf.get("email")
+        ]))
+        if missing_emails:
+            report_lines.append(f"Không tìm thấy trên Moodle ❌: {', '.join(missing_emails)}")
+
+        short_summary_msg = f"Hoàn tất {total_courses} khóa: {all_enrolled} Mới, {all_extended} Gia hạn/Đổi Role, {all_failed} Lỗi."
+
         return {
             "status": overall_status,
             "courses_count": total_courses,
-            "message": f"⚡ [HTTPX DIRECT] Hoàn tất {total_courses} khóa học cho {total_requested} người dùng (Mới: {all_enrolled}, Gia hạn/Đổi Role: {all_extended}, Thất bại: {all_failed})!",
+            "message": short_summary_msg,
+            "execution_logs": "\n".join(report_lines),
             "summary": {
                 "total_courses": total_courses,
                 "total_requested_per_course": total_requested,
@@ -597,7 +692,7 @@ class PlaywrightLMSService:
         raw_courses = payload.get("courses", [])
         courses_count = len(raw_courses) if raw_courses else 1
         
-        pipeline_timeout = min(600.0, max(300.0, courses_count * 60.0))
+        pipeline_timeout = min(600.0, max(180.0, courses_count * 40.0))
         logger.info(f"⏱️ [Timeout Safeguard] Đặt trần thời gian cho luồng LMS Enroller: {pipeline_timeout}s")
 
         try:
@@ -607,7 +702,7 @@ class PlaywrightLMSService:
             return {"status": "failed", "error": f"Tác vụ LMS Enroll bị quá hạn thời gian (Timeout {pipeline_timeout}s)."}
 
     async def unenrol_users_pipeline(self, payload_or_course_id: Any, emails: Optional[List[str]] = None) -> Dict[str, Any]:
-        """Hủy ghi danh người dùng qua API core_enrol_unenrol_user_enrolment."""
+        """Hủy ghi danh người dùng qua API core_enrol_unenrol_user_enrolment (Có RAM Cache Session)."""
         if isinstance(payload_or_course_id, dict):
             raw_courses = payload_or_course_id.get("courses", [])
             if not raw_courses and payload_or_course_id.get("course_id"):
@@ -627,7 +722,7 @@ class PlaywrightLMSService:
         if not clean_emails:
             return {"status": "failed", "error": "Danh sách email hoặc username cần hủy ghi danh rỗng."}
 
-        cookies_dict, sesskey = await self._steal_moodle_session()
+        cookies_dict, sesskey = await self._get_or_steal_session()
         if not cookies_dict or not sesskey:
             return {"status": "failed", "error": "Không thể lấy session đăng nhập Moodle."}
 
@@ -655,14 +750,27 @@ class PlaywrightLMSService:
                 all_courses_results.append(c_res)
 
         total_unenrolled = sum(len(r["unenrolled"]) for r in all_courses_results)
+        
+        # Báo cáo tinh gọn cho Unenrol
+        report_lines = [
+            f"🎯 HOÀN TẤT HỦY GHI DANH MOODLE ({len(raw_courses)} KHÓA HỌC)",
+            f"Người dùng cần gỡ: {', '.join(clean_emails)}"
+        ]
+        for r in all_courses_results:
+            c_id = r.get("course_id")
+            rem_cnt = len(r.get("unenrolled", []))
+            not_f_cnt = len(r.get("not_found", []))
+            report_lines.append(f"📚 KHÓA #{c_id} [Đã gỡ ({rem_cnt}) | Vốn không có ({not_f_cnt})]")
+
         return {
             "status": "success" if total_unenrolled > 0 else "failed",
             "message": f"Đã xử lý hủy ghi danh cho {total_unenrolled} lượt người dùng.",
+            "execution_logs": "\n".join(report_lines),
             "details": all_courses_results
         }
 
     async def modify_user_role(self, course_id: str, email: str, new_role_label: str, mode: str = "mono") -> Dict[str, Any]:
-        """Cập nhật Mono-Role độc lập tức thì."""
+        """Cập nhật Mono-Role độc lập tức thì (Có RAM Cache Session)."""
         normalized = await self._normalize_identifiers_to_emails([email])
         if not normalized:
             return {"status": "failed", "error": f"Không tìm thấy tài khoản '{email}' trên hệ thống."}
@@ -671,7 +779,7 @@ class PlaywrightLMSService:
         role_map = {"student": "9", "non-editing teacher": "7", "teacher": "5", "manager": "1"}
         r_val = role_map.get(new_role_label.lower().strip(), "9")
 
-        cookies_dict, sesskey = await self._steal_moodle_session()
+        cookies_dict, sesskey = await self._get_or_steal_session()
         if not cookies_dict or not sesskey:
             return {"status": "failed", "error": "Không thể lấy session đăng nhập Moodle."}
 
