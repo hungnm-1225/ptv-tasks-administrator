@@ -101,27 +101,6 @@ class WorkspaceContractService(WorkspaceBaseService):
         except Exception as e:
             logger.warning(f"⚠️ [DB SYNC] Lỗi ghi nhận Contract: {e}")
 
-    async def _record_created_contract_db(self, contract_code: str, contract_type: str, status: str, **kwargs):
-        if not contract_code:
-            return
-        try:
-            from app.core.supabase import get_supabase_client
-            now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            supabase = get_supabase_client()
-            record = {
-                "contract_code": contract_code,
-                "contract_type": contract_type.upper(),
-                "status": status,
-                "total_licenses": 100,
-                "synced_at": now_utc,
-                "raw_data": kwargs
-            }
-            supabase.table("workspace_contracts_cache").upsert(record, on_conflict="contract_code").execute()
-            self._invalidate_workspace_ram_cache("contracts")
-            logger.info(f"💾 [DB SYNC] Lưu Contract [{contract_code}] ({contract_type}) ➔ Status: '{status}'")
-        except Exception as e:
-            logger.warning(f"⚠️ [DB SYNC] Lỗi ghi nhận Contract: {e}")
-
     # =========================================================================
     # 📝 1. PARTNER TẠO PRT CONTRACT (DIRECT API - ĐÃ TỐI ƯU LOG)
     # =========================================================================
