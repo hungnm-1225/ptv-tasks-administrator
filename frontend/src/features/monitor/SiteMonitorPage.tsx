@@ -98,7 +98,7 @@ function formatDate(isoOrTs: string | number): string {
   } catch { return String(isoOrTs); }
 }
 
-// ─── ĐỒ THỊ PING NHẤP NHÔ & DOWNTIME DOWNDETECTOR STYLE ─────────────────────
+// ─── ĐỒ THỊ PING UỐN LƯỢN ĐÃ ĐƯỢC THIẾT KẾ KHÓA BIÊN AN TOÀN ─────────────
 interface UptimeLineChartProps {
   siteId: string;
   history?: HourlyHistoryItem[];
@@ -121,6 +121,7 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
     y: number;
   } | null>(null);
 
+  // 1. Chuẩn hóa 24 điểm giờ
   const points: HourlyHistoryItem[] = useMemo(() => {
     if (history && history.length === 24) return history;
     const nowHour = new Date().getHours();
@@ -136,72 +137,91 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
     });
   }, [history, currentLatency]);
 
+  // 2. Kích thước khung vẽ
+  const width = 500;
+  const height = 64;
+  const paddingX = 10;
+  const minY = 8;   // Đỉnh cao nhất (tránh đụng mép trên)
+  const maxY = 54;  // Đáy cơ sở (đường baseline)
+
+  // 3. Tính toán dải Latency hợp lệ để scale tỷ lệ
   const validLatencies = points
     .map(p => p.latency_ms)
-    .filter((l): l is number => typeof l === 'number' && l > 0 && l < 8000);
+    .filter((l): l is number => typeof l === 'number' && l > 0 && l < 15000);
 
   const minLat = validLatencies.length > 0 ? Math.min(...validLatencies) : 50;
-  const maxLat = validLatencies.length > 0 ? Math.max(...validLatencies, minLat + 80) : 400;
+  const maxLat = validLatencies.length > 0 ? Math.max(...validLatencies, minLat + 100) : 500;
+
+  // 4. Tính toán tọa độ (x, y) - CÓ CLAMP KHÓA BIÊN 100% CHỐNG RĂNG BẰNG
+  const coords = useMemo(() => {
+    return points.map((p, i) => {
+      const x = paddingX + (i / 23) * (width - paddingX * 2);
+      let y: number;
+
+      if (p.status === 'DOWN') {
+        y = minY + 2; // Điểm sập nằm sát đỉnh báo động đỏ
+      } else if (p.latency_ms && p.latency_ms > 0) {
+        // Kẹp chặt normalized trong khoảng [0, 1]
+        const normalized = Math.max(0, Math.min(1, (p.latency_ms - minLat) / (maxLat - minLat || 1)));
+        // Scale mượt mà giữa maxY và minY
+        y = maxY - normalized * (maxY - minY - 6);
+      } else {
+        // Chưa có dữ liệu: Nằm êm đềm ở đường đáy
+        y = maxY;
+      }
+
+      // Khóa cứng y không bao giờ được vượt ra ngoài [minY, maxY]
+      y = Math.max(minY, Math.min(maxY, y));
+
+      return { x, y, item: p, index: i };
+    });
+  }, [points, minLat, maxLat]);
 
   if (loading && history.length === 0) {
     return (
       <div className="h-16 w-full rounded-xl bg-slate-100 dark:bg-slate-800/50 animate-pulse flex items-center justify-center">
-        <span className="text-[11px] text-slate-400 font-mono">Đang tải biểu đồ độ trễ hạ tầng...</span>
+        <span className="text-[11px] text-slate-400 font-mono">Đang nạp mẫu đo hạ tầng...</span>
       </div>
     );
   }
 
-  const width = 500;
-  const height = 68;
-  const paddingX = 10;
-  const paddingTop = 8;
-  const paddingBottom = 12;
-
-  const coords = points.map((p, i) => {
-    const x = paddingX + (i / 23) * (width - paddingX * 2);
-    let y: number;
-
-    if (p.status === 'DOWN') {
-      y = paddingTop + 2;
-    } else if (p.latency_ms && p.latency_ms > 0) {
-      const normalized = (p.latency_ms - minLat) / (maxLat - minLat || 1);
-      y = (height - paddingBottom) - normalized * (height - paddingTop - paddingBottom - 8);
-    } else {
-      y = height - paddingBottom;
-    }
-
-    return { x, y, item: p, index: i };
-  });
-
+  // 5. Thuật toán Monotone Bezier mượt mà (Có kẹp biên control points)
   const getSplinePath = (pts: typeof coords) => {
     if (pts.length < 2) return '';
-    let path = `M ${pts[0].x} ${pts[0].y}`;
+    let path = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
     for (let i = 0; i < pts.length - 1; i++) {
       const p0 = pts[Math.max(0, i - 1)];
       const p1 = pts[i];
       const p2 = pts[i + 1];
       const p3 = pts[Math.min(pts.length - 1, i + 2)];
 
-      const cp1x = p1.x + (p2.x - p0.x) / 5.5;
-      const cp1y = p1.y + (p2.y - p0.y) / 5.5;
-      const cp2x = p2.x - (p3.x - p1.x) / 5.5;
-      const cp2y = p2.y - (p3.y - p1.y) / 5.5;
+      // Hệ số nội suy mượt mà 6.0 chuẩn Catmull-Rom
+      const dx1 = (p2.x - p0.x) / 6.0;
+      const dy1 = (p2.y - p0.y) / 6.0;
+      const dx2 = (p3.x - p1.x) / 6.0;
+      const dy2 = (p3.y - p1.y) / 6.0;
 
-      path += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.x.toFixed(1)}`;
+      const cp1x = p1.x + dx1;
+      // Khóa cứng control point không được vượt biên
+      const cp1y = Math.max(minY, Math.min(maxY, p1.y + dy1));
+      const cp2x = p2.x - dx2;
+      const cp2y = Math.max(minY, Math.min(maxY, p2.y - dy2));
+
+      path += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
     }
     return path;
   };
 
   const linePath = getSplinePath(coords);
-  const areaPath = `${linePath} L ${coords[coords.length - 1].x} ${height} L ${coords[0].x} ${height} Z`;
+  const areaPath = `${linePath} L ${coords[coords.length - 1].x.toFixed(1)} ${height} L ${coords[0].x.toFixed(1)} ${height} Z`;
 
-  // Chỉ báo 'Có sự cố' khi thực tế có khung giờ DOWN hoặc uptime < 99.5%
   const hasRecentIncident = points.some(p => p.status === 'DOWN') || uptime_pct < 99.5;
 
   return (
     <div className="space-y-1.5 select-none relative">
-      <div className="relative w-full h-16 overflow-visible">
-        <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible" preserveAspectRatio="none">
+      {/* 🎯 ĐÃ BỌC OVERFLOW-HIDDEN TRIỆT TIÊU 100% VIỆC TRÀN SANG CARD KHÁC */}
+      <div className="relative w-full h-16 overflow-hidden rounded-xl bg-slate-50/50 dark:bg-slate-950/30">
+        <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-hidden" preserveAspectRatio="none">
           <defs>
             <linearGradient id={`gradient-x-${siteId}`} x1="0%" y1="0%" x2="100%" y2="0%">
               {points.map((p, idx) => {
@@ -209,7 +229,7 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
                 let stopColor = '#10b981';
                 if (p.status === 'DOWN') {
                   stopColor = '#f43f5e';
-                } else if (p.status === 'WARNING' || (p.latency_ms && p.latency_ms > 500)) {
+                } else if (p.status === 'WARNING' || (p.latency_ms && p.latency_ms > 800)) {
                   stopColor = '#f59e0b';
                 }
                 return <stop key={idx} offset={offset} stopColor={stopColor} />;
@@ -217,8 +237,8 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
             </linearGradient>
 
             <linearGradient id={`fade-mask-${siteId}`} x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stopColor="#ffffff" stopOpacity="0.45" />
-              <stop offset="60%" stopColor="#ffffff" stopOpacity="0.15" />
+              <stop offset="0%" stopColor="#ffffff" stopOpacity="0.35" />
+              <stop offset="80%" stopColor="#ffffff" stopOpacity="0.05" />
               <stop offset="100%" stopColor="#ffffff" stopOpacity="0.0" />
             </linearGradient>
 
@@ -227,6 +247,7 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
             </mask>
           </defs>
 
+          {/* DẢI CỘT BÁO SẬP (DOWNTIME BANDS) */}
           {coords.map((c, i) => {
             if (c.item.status !== 'DOWN') return null;
             const colWidth = (width - paddingX * 2) / 23;
@@ -237,25 +258,37 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
                 y="0"
                 width={colWidth}
                 height={height}
-                className="fill-rose-500/15 dark:fill-rose-500/25 animate-pulse pointer-events-none"
+                className="fill-rose-500/20 dark:fill-rose-500/30 animate-pulse pointer-events-none"
               />
             );
           })}
 
+          {/* ĐƯỜNG CHỈ TIÊU CƠ SỞ BASELINE */}
           <line
             x1={paddingX}
-            y1={height - paddingBottom}
+            y1={maxY}
             x2={width - paddingX}
-            y2={height - paddingBottom}
+            y2={maxY}
             stroke="currentColor"
             className="text-slate-200 dark:text-slate-800"
             strokeWidth="1"
             strokeDasharray="4 4"
           />
 
+          {/* VÙNG ĐỔ BÓNG NỀN MỀM MẠI */}
           <path d={areaPath} fill={`url(#gradient-x-${siteId})`} mask={`url(#area-mask-${siteId})`} />
-          <path d={linePath} fill="none" stroke={`url(#gradient-x-${siteId})`} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
 
+          {/* ĐƯỜNG CONG PING CHÍNH */}
+          <path
+            d={linePath}
+            fill="none"
+            stroke={`url(#gradient-x-${siteId})`}
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+
+          {/* CÁC ĐIỂM NÚT (DATA NODES) */}
           {coords.map((c, i) => {
             const isDown = c.item.status === 'DOWN';
             const isHovered = hoveredPoint?.index === i;
@@ -272,12 +305,12 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
                 <circle
                   cx={c.x}
                   cy={c.y}
-                  r={isDown ? (isHovered ? '4.5' : '3.5') : (isHovered ? '3.5' : '2')}
-                  className={`pointer-events-none transition-all duration-200 ${isDown
-                    ? 'fill-rose-500 stroke-white dark:stroke-slate-900 stroke-2 ring-4 ring-rose-500/30'
+                  r={isDown ? (isHovered ? '4' : '3') : (isHovered ? '3' : '1.8')}
+                  className={`pointer-events-none transition-all duration-150 ${isDown
+                    ? 'fill-rose-500 stroke-white dark:stroke-slate-900 stroke-2 ring-2 ring-rose-500/40'
                     : c.item.has_data
                       ? 'fill-emerald-500 dark:fill-emerald-400'
-                      : 'fill-slate-300 dark:fill-slate-700 opacity-40'
+                      : 'fill-slate-300 dark:fill-slate-700 opacity-30'
                     }`}
                 />
               </g>
@@ -285,9 +318,10 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
           })}
         </svg>
 
+        {/* TOOLTIP HIỆN THÔNG TIN CHI TIẾT */}
         {hoveredPoint && (
           <div
-            className={`absolute bottom-full mb-1 z-30 pointer-events-none transition-transform duration-75 ${hoveredPoint.index < 3 ? 'left-0' : hoveredPoint.index > 20 ? 'right-0' : '-translate-x-1/2'}`}
+            className={`absolute bottom-full mb-1 z-30 pointer-events-none transition-transform duration-75 ${hoveredPoint.index < 3 ? 'left-2' : hoveredPoint.index > 20 ? 'right-2' : '-translate-x-1/2'}`}
             style={hoveredPoint.index >= 3 && hoveredPoint.index <= 20 ? { left: `${(hoveredPoint.index / 23) * 100}%` } : undefined}
           >
             <div className="bg-slate-900/95 dark:bg-slate-950 text-white text-[11px] font-mono rounded-xl px-3 py-2 shadow-2xl border border-slate-700 whitespace-nowrap flex flex-col gap-0.5 backdrop-blur-md">
@@ -310,6 +344,7 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
         )}
       </div>
 
+      {/* DẢI THỜI GIAN & LIVE UPTIME CHUẨN XÁC */}
       <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500 font-mono pt-1">
         <span>24h trước</span>
         <div className="flex items-center gap-1">
@@ -375,7 +410,6 @@ export const SiteMonitorPage: React.FC = () => {
   const [selectedDeployTitle, setSelectedDeployTitle] = useState('');
   const [copied, setCopied] = useState(false);
 
-  // ⚡ TẢI TAB GIÁM SÁT UPTIME
   const loadPublicSites = useCallback(async (forceSpinner = false) => {
     if (forceSpinner) setLoading(true);
     try {
@@ -406,7 +440,6 @@ export const SiteMonitorPage: React.FC = () => {
     }
   }, []);
 
-  // ⚡ TẢI TAB CI/CD DEPLOYS
   const loadDeployments = useCallback(async (forceSpinner = false) => {
     if (forceSpinner) setDeployLoading(true);
     try {
@@ -428,7 +461,7 @@ export const SiteMonitorPage: React.FC = () => {
     }
   }, []);
 
-  // 🎯 TỰ ĐỘNG POLL LÀM MỚI MỖI 30 GIÂY
+  // 🎯 TỰ ĐỘNG POLL LÀM TƯƠI MỖI 30 GIÂY
   useEffect(() => {
     if (activeTab === 'public') {
       loadPublicSites(false);
@@ -449,7 +482,6 @@ export const SiteMonitorPage: React.FC = () => {
     return () => clearInterval(interval);
   }, [activeTab, loadPublicSites, loadDeployments, checking, deployLoading]);
 
-  // Quét thủ công tức thì
   const handleCheckAllPublic = async () => {
     setChecking(true);
     setSites(prev => prev.map(s => s.enabled ? { ...s, last_status: 'CHECKING' as const } : s));
@@ -499,20 +531,14 @@ export const SiteMonitorPage: React.FC = () => {
     return sites.filter(s => s.last_status === statusFilter);
   }, [sites, statusFilter]);
 
-  // 🎯 TƯ DUY ĐỈNH CAO CỦA ANH: TÌM BẢN DEPLOY ĐANG THỰC SỰ ACTIVE (READY/LIVE MỚI NHẤT)
+  // 🎯 TÌM BẢN DEPLOY ĐANG THỰC SỰ LIVE (READY/LIVE ĐẦU TIÊN TRONG DANH SÁCH)
   const activeVercelDeployId = useMemo(() => {
-    const liveDeploy = vercelDeploys.find(d => {
-      const st = (d.state || d.status || '').toUpperCase();
-      return st === 'READY';
-    });
+    const liveDeploy = vercelDeploys.find(d => (d.state || d.status || '').toUpperCase() === 'READY');
     return liveDeploy ? liveDeploy.id : null;
   }, [vercelDeploys]);
 
   const activeRenderDeployId = useMemo(() => {
-    const liveDeploy = renderDeploys.find(d => {
-      const st = (d.status || d.state || '').toLowerCase();
-      return st === 'live';
-    });
+    const liveDeploy = renderDeploys.find(d => (d.status || d.state || '').toLowerCase() === 'live');
     return liveDeploy ? liveDeploy.id : null;
   }, [renderDeploys]);
 
@@ -713,11 +739,11 @@ export const SiteMonitorPage: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 2: CI/CD DEPLOY MONITOR (ĐÃ SỬA: BẢN READY/LIVE MỚI NHẤT MANG VIỀN XANH ACTIVE) */}
+      {/* TAB 2: CI/CD DEPLOY MONITOR */}
       {activeTab === 'cicd_deploy' && (
         <div className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* ── CỘT TRÁI: VERCEL (FRONTEND) ── */}
+            {/* VERCEL */}
             <div className="space-y-4">
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex items-center justify-between shadow-xs">
                 <div className="flex items-center gap-3">
@@ -764,7 +790,6 @@ export const SiteMonitorPage: React.FC = () => {
                               {st || 'READY'}
                             </span>
 
-                            {/* 🎯 VIỀN XANH CHỈ GẮN CHO BẢN READY MỚI NHẤT */}
                             {isCurrentActiveLive && (
                               <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400">
                                 ● Đang chạy hiện tại
@@ -801,7 +826,7 @@ export const SiteMonitorPage: React.FC = () => {
               </div>
             </div>
 
-            {/* ── CỘT PHẢI: RENDER.COM (BACKEND) ── */}
+            {/* RENDER */}
             <div className="space-y-4">
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex items-center justify-between shadow-xs">
                 <div className="flex items-center gap-3">
@@ -848,7 +873,6 @@ export const SiteMonitorPage: React.FC = () => {
                               {item.status || 'live'}
                             </span>
 
-                            {/* 🎯 VIỀN XANH CHỈ GẮN CHO BẢN LIVE MỚI NHẤT */}
                             {isCurrentActiveLive && (
                               <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400">
                                 ● Đang chạy hiện tại
