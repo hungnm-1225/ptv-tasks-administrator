@@ -171,7 +171,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                         <div className="space-y-3.5">
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
-                                    <label className="text-[10px] font-bold uppercase text-slate-500">First Name (*):</label>
+                                    <label className="text-[10px] font-bold uppercase text-slate-500">First Name (<span className="text-rose-500 font-bold">*</span>):</label>
                                     <input
                                         type="text"
                                         value={editFirstName}
@@ -181,7 +181,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                 </div>
 
                                 <div>
-                                    <label className="text-[10px] font-bold uppercase text-slate-500">Last Name (*):</label>
+                                    <label className="text-[10px] font-bold uppercase text-slate-500">Last Name (<span className="text-rose-500 font-bold">*</span>):</label>
                                     <input
                                         type="text"
                                         value={editLastName}
@@ -192,7 +192,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                             </div>
 
                             <div>
-                                <label className="text-[10px] font-bold uppercase text-slate-500">Email (*):</label>
+                                <label className="text-[10px] font-bold uppercase text-slate-500">Email (<span className="text-rose-500 font-bold">*</span>):</label>
                                 <input
                                     type="email"
                                     value={editEmail}
@@ -203,7 +203,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
 
                             {/* 3 Dropdown Ngày Sinh */}
                             <div>
-                                <label className="text-[10px] font-bold uppercase text-slate-500 mb-1 block">Ngày Sinh (*):</label>
+                                <label className="text-[10px] font-bold uppercase text-slate-500 mb-1 block">Ngày Sinh (<span className="text-rose-500 font-bold">*</span>):</label>
                                 <div className="grid grid-cols-3 gap-2">
                                     <select
                                         value={editDay}

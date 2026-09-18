@@ -135,24 +135,53 @@ async def execute_approved_bot_task(
 
                         # 3. Bắn request multipart updateUser.php siêu tốc (~200ms)
                         up_res = await user_service.update_user_info(admin_user, admin_pass, user_wp_id, form_data)
+                        is_user_ok = bool(
+                            up_res.get("success") is True 
+                            or up_res.get("status") in [True, "success", 1, "1", "ok"]
+                            or (isinstance(up_res.get("response"), dict) and up_res["response"].get("success"))
+                        )
+                        detected_role = str(detail.get("user_role") or "tài khoản").lower().strip()
+                        role_vi_map = {
+                            "teacher": "giáo viên",
+                            "student": "học sinh",
+                            "school": "trường học",
+                            "partner": "đối tác",
+                            "distributor": "nhà phân phối"
+                        }
+                        role_label = role_vi_map.get(detected_role, "tài khoản")
                         update_results.append({
                             "identifier": ident,
                             "user_id": user_wp_id,
-                            "status": "success" if up_res.get("status") else "failed",
-                            "response": up_res
+                            "role": role_label,
+                            "status": "success" if is_user_ok else "failed",
+                            "response": up_res,
+                            "error": None if is_user_ok else up_res.get("error") or up_res.get("message") or "Lỗi cập nhật WP"
                         })
                     except Exception as user_err:
                         update_results.append({"identifier": ident, "status": "failed", "error": str(user_err)})
 
-                all_ok = any(r.get("status") == "success" for r in update_results)
-                return {
-                    "status": "success" if all_ok else "failed",
-                    "message": f"Đã cập nhật trường học '{payload_data.get('school_name')}' cho {len(update_results)} giáo viên thành công!",
-                    "details": update_results,
-                    "school_name": payload_data.get("school_name"),
-                    "school_code": school_target_code,
-                    "partner_code": partner_target_code
-                }
+                success_count = sum(1 for r in update_results if r.get("status") == "success")
+                
+                # Gom nhóm các role đã update thành công (VD: "3 học sinh" hoặc "3 giáo viên")
+                roles_updated = {r.get("role", "tài khoản") for r in update_results if r.get("status") == "success"}
+                role_text = ", ".join(roles_updated) if roles_updated else "tài khoản"
+                failed_count = len(update_results) - success_count
+                if success_count > 0:
+                    return {
+                        "status": "success",
+                        "message": f"Đã cập nhật trường học '{payload_data.get('school_name')}' cho {success_count} {role_text} thành công!",
+                        "details": update_results,
+                        "school_name": payload_data.get("school_name"),
+                        "school_code": school_target_code,
+                        "partner_code": partner_target_code
+                    }
+                else:
+                    err_details = [f"{r.get('identifier')}: {r.get('error')}" for r in update_results if r.get("error")]
+                    return {
+                        "status": "failed",
+                        "message": f"Cập nhật trường học thất bại: {'; '.join(err_details)}",
+                        "details": update_results
+                    }
 
             # 🎯 CÁC HÀNH ĐỘNG WORKSPACE KHÁC CHUYỂN TIẾP VÀO ORCHESTRATOR
             return await workspace_orchestrator_service.orchestrate_workspace_rpa(payload_data)
