@@ -78,12 +78,44 @@ def _find_matching_db_order_code(remote_sch_code: str, remote_prt_code: str, all
 
 
 def _batch_upsert(table_name: str, records: List[Dict[str, Any]], on_conflict: str, chunk_size: int = 50):
-    """Helper ghi dữ liệu lên Supabase theo từng Batch 50 bản ghi."""
+    """
+    Helper ghi dữ liệu lên Supabase theo từng Batch 50 bản ghi:
+    🎯 TỰ ĐỘNG KHỬ TRÙNG LẬP THEO KHÓA on_conflict:
+    Triệt tiêu vĩnh viễn lỗi Postgres 21000 ('ON CONFLICT DO UPDATE cannot affect row a second time').
+    """
     if not records:
         return
+
+    # 1. Khử trùng lặp khóa on_conflict và gộp courses_data thông minh
+    unique_map: Dict[str, Dict[str, Any]] = {}
+    for r in records:
+        k = str(r.get(on_conflict, "")).strip()
+        if not k:
+            continue
+
+        if k in unique_map:
+            existing = unique_map[k]
+            # Nếu bản ghi cũ chưa có courses_data mà bản ghi sau có -> Bù vào
+            if not existing.get("courses_data") and r.get("courses_data"):
+                existing["courses_data"] = r["courses_data"]
+            elif existing.get("courses_data") and r.get("courses_data"):
+                # Gộp cả 2 danh sách khóa học lại nếu đơn hàng có nhiều môn
+                existing_cids = {str(c.get("course_id")) for c in existing["courses_data"]}
+                for new_c in r["courses_data"]:
+                    if str(new_c.get("course_id")) not in existing_cids:
+                        existing["courses_data"].append(new_c)
+            # Giữ trạng thái mới nhất
+            if r.get("status"):
+                existing["status"] = r["status"]
+        else:
+            unique_map[k] = r
+
+    deduped_records = list(unique_map.values())
     supabase = get_supabase_client()
-    for i in range(0, len(records), chunk_size):
-        chunk = records[i:i + chunk_size]
+
+    # 2. Gửi từng lô 50 bản ghi sạch sẽ không bao giờ bị trùng lặp
+    for i in range(0, len(deduped_records), chunk_size):
+        chunk = deduped_records[i:i + chunk_size]
         try:
             supabase.table(table_name).upsert(chunk, on_conflict=on_conflict).execute()
         except Exception as e:
