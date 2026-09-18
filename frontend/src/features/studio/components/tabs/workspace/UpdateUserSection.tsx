@@ -139,7 +139,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                         {isSearchingUser ? (
                             <>
                                 <Loader2 className="w-4 h-4 animate-spin" />
-                                <span>Đang dò quét (15-30s)...</span>
+                                <span>Đang tìm kiếm thông tin (Có thể mất 15-30s)...</span>
                             </>
                         ) : (
                             <>

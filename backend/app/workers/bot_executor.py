@@ -97,7 +97,6 @@ async def execute_approved_bot_task(
 
                 school_target_code = str(payload_data.get("school_code") or payload_data.get("school_id") or "")
                 partner_target_code = str(payload_data.get("partner_code") or payload_data.get("partner_id") or "")
-                # Khử chữ rác nếu partner_id dính format hiển thị "Quipper (Mã: 180)"
                 m_prt = re.search(r"\b(\d+)\b", partner_target_code)
                 if m_prt:
                     partner_target_code = m_prt.group(1)
@@ -107,7 +106,7 @@ async def execute_approved_bot_task(
                     if not ident:
                         continue
                     try:
-                        # 1. Dò tìm user detail
+                        # 1. Lấy chi tiết user hiện tại trên WordPress
                         user_detail_res = await user_service.get_user_detail_by_identifier(admin_user, admin_pass, str(ident).strip())
                         if not user_detail_res.get("success"):
                             update_results.append({"identifier": ident, "status": "failed", "error": user_detail_res.get("error", "Không tìm thấy user")})
@@ -118,37 +117,34 @@ async def execute_approved_bot_task(
 
                         # 2. Đóng gói form_data cập nhật trường học mới và đối tác mới
                         form_data = {
-                            "inputFirstname": detail.get("first_name", ""),
-                            "inputLastname": detail.get("last_name", ""),
-                            "user_login": user_detail_res.get("user_login", ident),
-                            "inputEmail": detail.get("email", ident),
-                            "inputDay": detail.get("day", "1"),
-                            "inputMonth": detail.get("month", "1"),
-                            "inputYear": detail.get("year", "2000"),
-                            "inputCountries": detail.get("country_id", "3"),
-                            "inputCity": detail.get("city_id", "2852"),
-                            "inputSchool": school_target_code or detail.get("school_id", ""),
-                            "inputPartner": partner_target_code or detail.get("partner_id", ""),
-                            "idUserMDTeacher": detail.get("id_user_md", ""),
-                            "user_role": detail.get("user_role", "teacher")
+                            "first_name": detail.get("firstname") or detail.get("first_name"),
+                            "last_name": detail.get("lastname") or detail.get("last_name"),
+                            "user_login": user_detail_res.get("user_login") or detail.get("user_login") or ident,
+                            "email": detail.get("email") or ident,
+                            "day": str(detail.get("day") or "1"),
+                            "month": str(detail.get("month") or "1"),
+                            "year": str(detail.get("year") or "2000"),
+                            "country_id": str(detail.get("country_id") or detail.get("countryId") or "3"),
+                            "city_id": str(detail.get("city_id") or detail.get("cityId") or "2852"),
+                            "school_id": str(school_target_code or detail.get("school_id") or ""),
+                            "partner_id": str(partner_target_code or detail.get("partner_id") or ""),
+                            "id_user_md": str(detail.get("idUserMD") or detail.get("id_user_md") or ""),
+                            "user_role": str(detail.get("user_role") or detail.get("role") or "student")
                         }
 
                         # 3. Bắn request multipart updateUser.php siêu tốc (~200ms)
                         up_res = await user_service.update_user_info(admin_user, admin_pass, user_wp_id, form_data)
+                        
                         is_user_ok = bool(
                             up_res.get("success") is True 
                             or up_res.get("status") in [True, "success", 1, "1", "ok"]
                             or (isinstance(up_res.get("response"), dict) and up_res["response"].get("success"))
                         )
-                        detected_role = str(detail.get("user_role") or "tài khoản").lower().strip()
-                        role_vi_map = {
-                            "teacher": "giáo viên",
-                            "student": "học sinh",
-                            "school": "trường học",
-                            "partner": "đối tác",
-                            "distributor": "nhà phân phối"
-                        }
+
+                        detected_role = str(form_data["user_role"] or "tài khoản").lower().strip()
+                        role_vi_map = {"teacher": "giáo viên", "student": "học sinh", "manager": "quản lý", "admin": "quản trị viên"}
                         role_label = role_vi_map.get(detected_role, "tài khoản")
+
                         update_results.append({
                             "identifier": ident,
                             "user_id": user_wp_id,
@@ -161,11 +157,9 @@ async def execute_approved_bot_task(
                         update_results.append({"identifier": ident, "status": "failed", "error": str(user_err)})
 
                 success_count = sum(1 for r in update_results if r.get("status") == "success")
-                
-                # Gom nhóm các role đã update thành công (VD: "3 học sinh" hoặc "3 giáo viên")
                 roles_updated = {r.get("role", "tài khoản") for r in update_results if r.get("status") == "success"}
                 role_text = ", ".join(roles_updated) if roles_updated else "tài khoản"
-                failed_count = len(update_results) - success_count
+
                 if success_count > 0:
                     return {
                         "status": "success",
@@ -183,9 +177,7 @@ async def execute_approved_bot_task(
                         "details": update_results
                     }
 
-            # 🎯 CÁC HÀNH ĐỘNG WORKSPACE KHÁC CHUYỂN TIẾP VÀO ORCHESTRATOR
             return await workspace_orchestrator_service.orchestrate_workspace_rpa(payload_data)
-
         # =====================================================================
         # 2. NHÓM TASK LMS DIRECT ENROLLER (MOODLE HYBRID WEBSERVICE)
         # =====================================================================
