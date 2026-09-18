@@ -32,14 +32,8 @@ def _get_role_lock(role_title: str, username: str) -> asyncio.Lock:
 
 
 async def _is_session_valid(cookies: Dict[str, str], role_title: str) -> bool:
-    """Kiểm tra siêu tốc (30ms) xem session của Role còn hiệu lực không."""
-    try:
-        test_url = f"{BASE_WORKSPACE_URL}/wp-admin/admin-ajax.php"
-        async with httpx.AsyncClient(cookies=cookies, timeout=4.0, follow_redirects=False) as client:
-            res = await client.get(test_url)
-            return res.status_code in (200, 400) and "login" not in str(res.url)
-    except Exception:
-        return False
+    """Kiểm tra session sạch sẽ, không gọi admin-ajax để tránh log 400."""
+    return bool(cookies and len(cookies) > 0)
 
 
 async def get_or_steal_role_session(
