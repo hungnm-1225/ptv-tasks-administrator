@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 # =============================================================================
 # ⚡ BỘ NHỚ ĐỆM SESSION MULTI-ROLE DÙNG CHUNG CHO TOÀN BỘ WORKSPACE (RAM < 20KB)
-# Cấu trúc: { (role_title_clean, username_clean): { "cookies": dict, "identity": dict, "cached_at": float } }
 # =============================================================================
 _WORKSPACE_SESSION_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
 _WORKSPACE_LOCKS: Dict[Tuple[str, str], asyncio.Lock] = {}
@@ -42,17 +41,12 @@ async def get_or_steal_role_session(
     password: str,
     role_title: str
 ) -> Tuple[Dict[str, str], Dict[str, Any]]:
-    """
-    Hàm bốc session dùng chung đa phân hệ (School/Partner/Distributor/Sales Admin):
-    - Có Cache RAM 2h (0ms launch, bỏ qua Playwright).
-    - Chỉ chiếm Playwright Semaphore đúng 3s khi cache hết hạn rồi nhả ngay!
-    """
+    """Hàm bốc session dùng chung đa phân hệ có Cache RAM 2h."""
     now = time.time()
     clean_role = role_title.strip().lower()
     clean_user = username.strip().lower()
     cache_key = (clean_role, clean_user)
 
-    # 1. Kiểm tra cache còn hạn không
     cached = _WORKSPACE_SESSION_CACHE.get(cache_key)
     if cached and (now - cached.get("cached_at", 0) < WORKSPACE_SESSION_TTL):
         cookies = cached.get("cookies", {})
@@ -61,17 +55,14 @@ async def get_or_steal_role_session(
             logger.info(f"⚡ [Workspace Cache] Tái sử dụng Session [{role_title}] cho '{username}' (0ms)!")
             return cookies, identity
         else:
-            logger.warning(f"⚠️ [Workspace Cache] Session [{role_title}] của '{username}' hết hạn, chuẩn bị gia hạn...")
             _WORKSPACE_SESSION_CACHE.pop(cache_key, None)
 
-    # 2. Xếp hàng Lock riêng của (role, user)
     async with _get_role_lock(role_title, username):
         now = time.time()
         cached = _WORKSPACE_SESSION_CACHE.get(cache_key)
         if cached and (now - cached.get("cached_at", 0) < WORKSPACE_SESSION_TTL):
             return cached.get("cookies", {}), cached.get("identity", {})
 
-        # 🎯 CHỈ CHIẾM PLAYWRIGHT SEMAPHORE ĐÚNG 3S LÚC NÀY
         async with acquire_playwright_slot(f"Workspace Auth [{role_title} - {username}]", timeout=60.0, lane="admin"):
             async with async_playwright() as p:
                 browser, context, page = await service_instance._create_context(p)
@@ -80,7 +71,6 @@ async def get_or_steal_role_session(
                     if not is_ok:
                         raise RuntimeError(f"Đăng nhập [{role_title}] thất bại: {login_err}")
 
-                    # Chuyển hướng đặc trị cho Sales Admin Dashboard
                     if clean_role in ("sales admin", "sales_admin"):
                         try:
                             await page.goto(f"{BASE_WORKSPACE_URL}/sales-admin-workspace/dashboard", wait_until="domcontentloaded", timeout=30000)
@@ -119,20 +109,16 @@ async def get_or_steal_role_session(
 class WorkspaceOrderService(WorkspaceBaseService):
     """
     Xử lý các nghiệp vụ School Order & Partner Approve.
-    ĐỘNG CƠ HYBRID V3.6: Session Cache 2h -> Direct HTTPX API (~150ms).
+    HỖ TRỢ ĐA KHÓA HỌC (MULTI-COURSE ENGINE) 100% TOÀN TRÌNH.
     """
 
     async def _steal_role_session(self, username: str, password: str, role_title: str) -> Tuple[Dict[str, str], Dict[str, Any]]:
-        """Ủy quyền sang hàm bốc session tập trung có Cache RAM 2h."""
         return await get_or_steal_role_session(self, username, password, role_title)
 
     @staticmethod
     def _to_multipart(data_dict: Dict[str, Any]) -> Dict[str, Tuple[None, str]]:
         return {k: (None, str(v) if v is not None else "") for k, v in data_dict.items()}
 
-    # =========================================================================
-    # 💾 ĐỒNG BỘ CSDL SUPABASE & CACHE
-    # =========================================================================
     def _invalidate_workspace_ram_cache(self, cache_type: str = "all"):
         try:
             from app.api.v1.endpoints.workspace import ws_cache
@@ -152,7 +138,6 @@ class WorkspaceOrderService(WorkspaceBaseService):
             clean_code = str(order_identifier).strip()
             now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             supabase = get_supabase_client()
-            # 🎯 ĐÃ KHỚP SCHEMA: Cột order_code và last_synced_at / updated_at
             supabase.table("workspace_orders_cache").update({
                 "status": new_status,
                 "updated_at": now_utc,
@@ -170,8 +155,6 @@ class WorkspaceOrderService(WorkspaceBaseService):
             from app.core.supabase import get_supabase_client
             now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             supabase = get_supabase_client()
-            
-            # 🎯 ĐÃ KHỚP SCHEMA: order_code, raw_payload, courses_data
             record = {
                 "order_code": order_code,
                 "school_name": school_name,
@@ -197,8 +180,6 @@ class WorkspaceOrderService(WorkspaceBaseService):
             from app.core.supabase import get_supabase_client
             now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             supabase = get_supabase_client()
-            
-            # 🎯 ĐÃ KHỚP SCHEMA: sender_name, raw_payload, courses_data
             record = {
                 "contract_code": contract_code,
                 "contract_type": contract_type.upper(),
@@ -211,14 +192,15 @@ class WorkspaceOrderService(WorkspaceBaseService):
             }
             supabase.table("workspace_contracts_cache").upsert(record, on_conflict="contract_code").execute()
             self._invalidate_workspace_ram_cache("contracts")
+            logger.info(f"💾 [DB SYNC] Lưu Contract [{contract_code}] ({contract_type}) ➔ Status: '{status}'")
         except Exception as e:
             logger.warning(f"⚠️ [DB SYNC] Lỗi ghi nhận Contract: {e}")
 
     # =========================================================================
-    # 🏫 1. SCHOOL TẠO ORDER (DIRECT API - ĐÃ TỐI ƯU LOG)
+    # 🏫 1. SCHOOL TẠO ORDER (HỖ TRỢ ĐA KHÓA HỌC MULTI-COURSE)
     # =========================================================================
     async def school_create_order(self, credentials: Dict[str, str], order_data: Dict[str, Any]) -> Dict[str, Any]:
-        """School tạo Order qua Direct API schoolCreateOrder.php (Không giữ Semaphore)."""
+        """School tạo Order với đầy đủ tất cả các khóa học có trong danh sách."""
         try:
             cookies, identity = await self._steal_role_session(
                 credentials.get("username", ""), 
@@ -228,24 +210,37 @@ class WorkspaceOrderService(WorkspaceBaseService):
             school_id = identity.get("school_id") or "10266"
 
             courses = order_data.get("courses", [])
-            c_first = courses[0] if courses else {}
-            cat_val = c_first.get("category", order_data.get("category", "SWRP"))
-            course_id_val = str(c_first.get("course_id", order_data.get("course_id", 1)))
-            lic_qty = str(c_first.get("licenses", order_data.get("licenses", 50)))
-            s_date = normalize_date_iso(c_first.get("start_date", order_data.get("start_date", "2026-09-16")))
-            e_date = normalize_date_iso(c_first.get("end_date", order_data.get("end_date", "2027-09-16")))
+            if not courses:
+                courses = [{
+                    "category": order_data.get("category", "SWRP"),
+                    "course_id": order_data.get("course_id", 1),
+                    "licenses": order_data.get("licenses", 50),
+                    "start_date": order_data.get("start_date", "2026-09-16"),
+                    "end_date": order_data.get("end_date", "2027-09-16")
+                }]
 
             payload = {
                 "school_id": str(school_id),
-                "courses[0][courseId]": course_id_val,
-                "courses[0][studentCount]": lic_qty,
-                "courses[0][startDate]": s_date,
-                "courses[0][endDate]": e_date,
-                "courses[0][licenseCategory]": cat_val,
                 "contactInfoId": order_data.get("contact_info", "Admin Automation Hub (hungnm@dtt.vn)"),
                 "notes": order_data.get("additional_notes", "Order auto-generated by PTV Automation Hub"),
                 "type": "course"
             }
+
+            # 🎯 ĐÓNG GÓI TOÀN BỘ CÁC MÔN HỌC (MULTI-COURSE LOOP)
+            summary_parts = []
+            for idx, c in enumerate(courses):
+                cat_val = c.get("category", "SWRP")
+                cid_val = str(c.get("course_id", 1))
+                lic_qty = str(c.get("licenses", 50))
+                s_date = normalize_date_iso(c.get("start_date", "2026-09-16"))
+                e_date = normalize_date_iso(c.get("end_date", "2027-09-16"))
+
+                payload[f"courses[{idx}][courseId]"] = cid_val
+                payload[f"courses[{idx}][studentCount]"] = lic_qty
+                payload[f"courses[{idx}][startDate]"] = s_date
+                payload[f"courses[{idx}][endDate]"] = e_date
+                payload[f"courses[{idx}][licenseCategory]"] = cat_val
+                summary_parts.append(f"#{cid_val} ({lic_qty} SL)")
 
             url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/orders_management/schoolCreateOrder.php"
             async with httpx.AsyncClient(base_url=BASE_WORKSPACE_URL, cookies=cookies, timeout=25.0) as client:
@@ -259,9 +254,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                         o_code = o_info.get("school_order_id_format") or f"SCH-{o_id}"
                         
                         await self._record_created_order_db(o_code, credentials.get("username", "School"), order_data)
-                        
-                        # 📝 Log ngắn gọn, cô đọng đầy đủ thông tin cốt lõi
-                        clean_summary = f"Order: {o_code} | {cat_val} #{course_id_val} | SL: {lic_qty} | Hạn: {s_date} -> {e_date}"
+                        clean_summary = f"Order: {o_code} | {len(courses)} Khóa [{', '.join(summary_parts)}]"
                         logger.info(f"✅ [School Order] {clean_summary}")
                         return {
                             "status": "success",
@@ -278,7 +271,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
             return {"status": "failed", "error": str(e)}
 
     # =========================================================================
-    # 🤝 2. PARTNER DUYỆT SCHOOL ORDER (DIRECT API - ĐÃ TỐI ƯU LOG)
+    # 🤝 2. PARTNER DUYỆT SCHOOL ORDER (ĐA KHÓA HỌC MULTI-COURSE ALLOCATION)
     # =========================================================================
     async def partner_approve_school_order(
         self, 
@@ -287,7 +280,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
         auto_create_prt_if_short: bool = True,
         courses_needed: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
-        """Partner duyệt School Order qua Direct API updateStatusOrder.php (Không giữ Semaphore)."""
+        """Partner duyệt School Order cấp đủ 100% tất cả các môn trong đơn hàng."""
         try:
             cookies, identity = await self._steal_role_session(
                 credentials.get("username", ""), 
@@ -300,49 +293,95 @@ class WorkspaceOrderService(WorkspaceBaseService):
             num_order_id = clean_num_match.group(0) if clean_num_match else str(order_identifier)
 
             async with httpx.AsyncClient(base_url=BASE_WORKSPACE_URL, cookies=cookies, timeout=25.0) as client:
-                # 1. Lấy chi tiết đơn
+                # 1. Lấy chi tiết toàn bộ các môn trong đơn
                 detail_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/partner_workspace_v3/api/orders_management/getOrderDetail.php?order_id={num_order_id}"
                 d_res = await client.get(detail_url)
                 detail_data = d_res.json() if d_res.status_code == 200 else {}
                 courses_req = detail_data.get("detail_package", {}).get("courses", [])
 
-                target_course_id = 780
-                qty_needed = 5
-                if courses_req:
-                    target_course_id = courses_req[0].get("course_id", 780)
-                    qty_needed = int(courses_req[0].get("course_count", 5))
+                if not courses_req and courses_needed:
+                    courses_req = [
+                        {"course_id": c.get("course_id"), "course_count": c.get("licenses", 5), "course_name": c.get("course_name", "")}
+                        for c in courses_needed
+                    ]
+
+                if not courses_req:
+                    return {"status": "failed", "error": f"Không tìm thấy chi tiết môn học của Order #{num_order_id}"}
 
                 # 2. Quét kho License Pool của Partner
                 pool_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/partner_workspace_v3/api/order_sale/getPartnerPoolLicense.php?partner_id={partner_id}"
                 p_res = await client.get(pool_url)
                 pool_courses = p_res.json().get("data", {}).get("pool_courses", []) if p_res.status_code == 200 else []
 
-                # 3. So khớp Pool ID khả dụng
-                matched_pool_id = None
-                for p in pool_courses:
-                    if int(p.get("item_quantity", 0)) >= qty_needed:
-                        matched_pool_id = p.get("id")
-                        break
+                # Bản sao số dư kho để trừ dần (Virtual Pool Balance)
+                pool_balance = {str(p.get("id")): int(p.get("item_quantity", 0)) for p in pool_courses}
 
-                # ĐỦ LICENSE -> DUYỆT ĐƠN
-                if matched_pool_id:
+                allocated_courses = []
+                short_courses = []
+
+                # 🎯 3. DUYỆT TỪNG MÔN TRONG ĐƠN ĐỂ TÌM POOL KHỚP
+                for req in courses_req:
+                    cid = str(req.get("course_id", ""))
+                    c_name = req.get("course_name", f"Khóa #{cid}")
+                    qty = int(req.get("course_count", 0))
+
+                    matched_pool = None
+                    # Bước A: Tìm pool có đúng course_id và đủ số lượng
+                    for p in pool_courses:
+                        pid = str(p.get("id"))
+                        p_cid = str(p.get("course_id", ""))
+                        if p_cid == cid and pool_balance.get(pid, 0) >= qty:
+                            matched_pool = p
+                            break
+
+                    # Bước B: Fallback tìm pool bất kỳ còn đủ số lượng (nếu là pool dùng chung)
+                    if not matched_pool:
+                        for p in pool_courses:
+                            pid = str(p.get("id"))
+                            if pool_balance.get(pid, 0) >= qty:
+                                matched_pool = p
+                                break
+
+                    if matched_pool:
+                        pid = str(matched_pool.get("id"))
+                        pool_balance[pid] -= qty  # Trừ số dư ảo
+                        allocated_courses.append({
+                            "course_id": cid,
+                            "course_name": c_name,
+                            "quantity": qty,
+                            "pool_id": pid
+                        })
+                    else:
+                        short_courses.append({
+                            "course_id": cid,
+                            "course_name": c_name,
+                            "quantity": qty
+                        })
+
+                # 🟢 NẾU TẤT CẢ CÁC MÔN ĐỀU ĐỦ LICENSE ➔ DUYỆT ĐƠN 100%
+                if not short_courses and len(allocated_courses) == len(courses_req):
                     approve_payload = {
                         "order_id": str(num_order_id),
                         "status": "1",
                         "partner_id": str(partner_id),
-                        "courses[0][course_id]": str(target_course_id),
-                        "courses[0][quantity]": str(qty_needed),
-                        "courses[0][pool_id]": str(matched_pool_id),
                         "username": credentials.get("username", "partnerdtte"),
                         "order_code": order_identifier or f"SCH-{num_order_id}",
                         "license_type": "course"
                     }
+
+                    details_str_list = []
+                    for idx, c in enumerate(allocated_courses):
+                        approve_payload[f"courses[{idx}][course_id]"] = str(c["course_id"])
+                        approve_payload[f"courses[{idx}][quantity]"] = str(c["quantity"])
+                        approve_payload[f"courses[{idx}][pool_id]"] = str(c["pool_id"])
+                        details_str_list.append(f"#{c['course_id']} (SL: {c['quantity']}, Pool #{c['pool_id']})")
+
                     ap_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/partner_workspace_v3/api/orders_management/updateStatusOrder.php"
                     res = await client.post(ap_url, files=self._to_multipart(approve_payload))
                     
                     if res.status_code in (200, 201):
                         await self._sync_order_status_db(order_identifier, "Approved", credentials.get("username"))
-                        clean_msg = f"Duyệt Order: {order_identifier} | Khóa #{target_course_id} (SL: {qty_needed}) | Pool #{matched_pool_id}"
+                        clean_msg = f"Duyệt Order: {order_identifier} ({len(allocated_courses)} khóa) | {' + '.join(details_str_list)}"
                         logger.info(f"✅ [Partner Order] {clean_msg}")
                         return {
                             "status": "success",
@@ -350,29 +389,40 @@ class WorkspaceOrderService(WorkspaceBaseService):
                             "message": clean_msg
                         }
 
-                # THIẾU LICENSE -> TẠO PRT CONTRACT GỬI DISTRIBUTOR CẤP BÙ
+                # 🔴 NẾU CÓ BẤT KỲ MÔN NÀO THIẾU ➔ TỰ ĐỘNG TẠO PRT CONTRACT GỒM TẤT CẢ CÁC MÔN THIẾU
+                short_desc = ", ".join([f"#{c['course_id']} (cần {c['quantity']})" for c in short_courses])
+                logger.warning(f"⚠️ Kho Partner thiếu License cho Order [{order_identifier}]: {short_desc}")
+
                 if auto_create_prt_if_short:
                     topup_payload = {
                         "partner_id": str(partner_id),
                         "order_type": "License",
-                        "order_notes": f"Auto-topup for School Order {order_identifier}",
+                        "order_notes": f"Auto-topup for Order {order_identifier}: {short_desc}",
                         "status": "pending_distributor_review",
-                        "total_amount": "100",
-                        "courses[0][course_id]": "1344",
-                        "courses[0][course_name]": "SWRP 1: STREAM Explorers (EN)",
-                        "courses[0][student_count]": str(qty_needed * 2 if qty_needed < 50 else qty_needed),
-                        "courses[0][category]": "SWRP",
-                        "courses[0][unit_price]": "10",
-                        "courses[0][total_amount]": "100"
+                        "total_amount": "100"
                     }
+
+                    for idx, sc in enumerate(short_courses):
+                        qty_topup = sc["quantity"] * 2 if sc["quantity"] < 50 else sc["quantity"]
+                        topup_payload[f"courses[{idx}][course_id]"] = str(sc["course_id"])
+                        topup_payload[f"courses[{idx}][course_name]"] = str(sc["course_name"])
+                        topup_payload[f"courses[{idx}][student_count]"] = str(qty_topup)
+                        topup_payload[f"courses[{idx}][category]"] = "SWRP"
+                        topup_payload[f"courses[{idx}][unit_price]"] = "10"
+                        topup_payload[f"courses[{idx}][total_amount]"] = str(qty_topup * 10)
+
                     prt_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/partner_workspace_v3/api/order_sale/createOrderSale.php"
                     prt_res = await client.post(prt_url, files=self._to_multipart(topup_payload))
                     
                     if prt_res.status_code == 200:
                         prt_data = prt_res.json().get("data", {})
                         prt_code = prt_data.get("order_code")
-                        await self._record_created_contract_db(prt_code, "PRT", "Awaiting Distributor", partner_name=credentials.get("username"))
-                        clean_msg = f"Thiếu License Order {order_identifier} (cần {qty_needed}) ➔ Tạo PRT: {prt_code}"
+                        await self._record_created_contract_db(
+                            prt_code, "PRT", "Awaiting Distributor", 
+                            partner_name=credentials.get("username"),
+                            courses=short_courses
+                        )
+                        clean_msg = f"Thiếu License Order {order_identifier} ({short_desc}) ➔ Tạo PRT: {prt_code}"
                         logger.warning(f"⚠️ [Partner Order] {clean_msg}")
                         return {
                             "status": "insufficient_pool_created_prt",
@@ -384,7 +434,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                 return {
                     "status": "insufficient_pool",
                     "order_identifier": order_identifier,
-                    "message": f"Thiếu License Order {order_identifier} (cần {qty_needed})"
+                    "message": f"Thiếu License Order {order_identifier}: {short_desc}"
                 }
 
         except Exception as e:
@@ -392,10 +442,10 @@ class WorkspaceOrderService(WorkspaceBaseService):
             return {"status": "failed", "error": str(e)}
 
     # =========================================================================
-    # 🔍 3. FETCH CHI TIẾT ĐƠN HÀNG
+    # 🔍 3. FETCH CHI TIẾT ĐƠN HÀNG (TRÍCH XUẤT 100% CÁC KHÓA HỌC)
     # =========================================================================
     async def fetch_school_order_detailed_courses(self, credentials: Dict[str, str], order_identifier: str) -> Dict[str, Any]:
-        """Trích xuất chi tiết môn học qua Direct API getOrderDetail.php."""
+        """Trích xuất danh sách tất cả môn học trong Order."""
         clean_num_match = re.search(r"\d+$", str(order_identifier))
         num_order_id = clean_num_match.group(0) if clean_num_match else str(order_identifier)
         detail_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/distributor_workspace_v3/api/orders_management/getOrderDetail.php?order_id={num_order_id}"
@@ -421,7 +471,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
             return {"status": "failed", "error": str(e), "courses": []}
 
     # =========================================================================
-    # 🔍 CÁC HÀM TRUY VẤN DỮ LIỆU CŨ (GIỮ TƯƠNG THÍCH NGƯỢC)
+    # 🔍 CÁC HÀM TRUY VẤN DỮ LIỆU CŨ
     # =========================================================================
     async def fetch_partner_pending_school_orders(self, credentials: Dict[str, str]) -> Dict[str, Any]:
         try:
