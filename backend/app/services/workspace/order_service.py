@@ -171,6 +171,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
             now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             supabase = get_supabase_client()
             
+            # 🎯 ĐÃ KHỚP SCHEMA: order_code, raw_payload, courses_data
             record = {
                 "order_code": order_code,
                 "school_name": school_name,
@@ -197,6 +198,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
             now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             supabase = get_supabase_client()
             
+            # 🎯 ĐÃ KHỚP SCHEMA: sender_name, raw_payload, courses_data
             record = {
                 "contract_code": contract_code,
                 "contract_type": contract_type.upper(),
@@ -206,54 +208,6 @@ class WorkspaceOrderService(WorkspaceBaseService):
                 "raw_payload": kwargs,
                 "last_synced_at": now_utc,
                 "updated_at": now_utc
-            }
-            supabase.table("workspace_contracts_cache").upsert(record, on_conflict="contract_code").execute()
-            self._invalidate_workspace_ram_cache("contracts")
-        except Exception as e:
-            logger.warning(f"⚠️ [DB SYNC] Lỗi ghi nhận Contract: {e}")
-
-    async def _record_created_order_db(self, order_id: str, school_name: str, order_data: Dict[str, Any]):
-        if not order_id:
-            return
-        try:
-            from app.core.supabase import get_supabase_client
-            now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            supabase = get_supabase_client()
-            courses = order_data.get("courses", [])
-            total_lic = sum(int(c.get("licenses", 0)) for c in courses) if courses else int(order_data.get("licenses", 50))
-            
-            record = {
-                "order_id": order_id,
-                "school_name": school_name,
-                "partner_name": order_data.get("partner_name", "Partner"),
-                "distributor_code": order_data.get("distributor_code", "N/A"),
-                "order_date": now_utc,
-                "total_licenses": total_lic,
-                "status": "Awaiting Partner",
-                "synced_at": now_utc,
-                "raw_data": order_data
-            }
-            supabase.table("workspace_orders_cache").upsert(record, on_conflict="order_id").execute()
-            self._invalidate_workspace_ram_cache("orders")
-            logger.info(f"💾 [DB SYNC] Lưu Order [{order_id}] ➔ Awaiting Partner")
-        except Exception as e:
-            logger.warning(f"⚠️ [DB SYNC] Lỗi ghi nhận Order mới: {e}")
-
-    async def _record_created_contract_db(self, contract_code: str, contract_type: str, status: str, **kwargs):
-        if not contract_code:
-            return
-        try:
-            from app.core.supabase import get_supabase_client
-            now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            supabase = get_supabase_client()
-            record = {
-                "contract_code": contract_code,
-                "contract_type": contract_type.upper(),
-                "status": status,
-                "total_licenses": 50,
-                "partner_name": kwargs.get("partner_name", "Partner"),
-                "synced_at": now_utc,
-                "raw_data": kwargs
             }
             supabase.table("workspace_contracts_cache").upsert(record, on_conflict="contract_code").execute()
             self._invalidate_workspace_ram_cache("contracts")

@@ -84,7 +84,6 @@ class WorkspaceContractService(WorkspaceBaseService):
             now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             supabase = get_supabase_client()
             
-            # 🎯 ĐÃ KHỚP SCHEMA: sender_name, raw_payload, last_synced_at
             record = {
                 "contract_code": contract_code,
                 "contract_type": contract_type.upper(),
