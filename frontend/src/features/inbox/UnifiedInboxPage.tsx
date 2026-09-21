@@ -1746,68 +1746,71 @@ export const UnifiedInboxPage: React.FC = () => {
                       )}
                     </div>
                   ) : activeWorkflow.status === 'needs_information' ? (
-                    /* 🟡 TRẠNG THÁI 2: NEEDS_INFORMATION (CHECKLIST THIẾU THÔNG TIN) */
-                    <div className="p-6 rounded-3xl bg-amber-500/10 border-2 border-amber-500/40 space-y-4 shadow-sm">
-                      <div className="flex items-center gap-3 text-amber-700 dark:text-amber-400">
-                        <div className="p-2 rounded-xl bg-amber-500 text-white shadow-sm">
-                          <ListChecks className="w-5 h-5" />
+                    /* 🟡 TRẠNG THÁI 2: NEEDS_INFORMATION (VỪA HIỆN CHECKLIST THIẾU, VỪA HIỆN ĐỒ THỊ BƯỚC ĐỂ SỬA) */
+                    <div className="space-y-4">
+                      <div className="p-5 rounded-2xl bg-amber-500/10 border-2 border-amber-500/30 space-y-3 shadow-xs">
+                        <div className="flex items-center gap-3 text-amber-800 dark:text-amber-300">
+                          <div className="p-2 rounded-xl bg-amber-500 text-white shadow-xs">
+                            <ListChecks className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <h4 className="text-xs font-black uppercase tracking-wider">
+                              Yêu Cầu Cần Bổ Sung Thông Tin Trước Khi Khởi Chạy
+                            </h4>
+                            <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
+                              Hệ thống đã tự động dựng sẵn các bước dự thảo bên dưới. Quản trị viên vui lòng hoàn thiện các trường màu vàng hoặc bấm "Chỉnh sửa luồng".
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <h4 className="text-sm font-black uppercase tracking-wider">
-                            Danh Sách Thông Tin Cần Bổ Sung (Missing Requirements Checklist)
-                          </h4>
-                          <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
-                            Hệ thống kích hoạt van an toàn (Fail-Closed). Yêu cầu chưa đủ dữ kiện để tạo bước thực thi tự động.
-                          </p>
-                        </div>
-                      </div>
 
-                      <div className="space-y-2 pt-2">
-                        {activeWorkflow.ai_analysis?.missing_requirements && activeWorkflow.ai_analysis.missing_requirements.length > 0 ? (
-                          activeWorkflow.ai_analysis.missing_requirements.map((item: any, idx: number) => (
+                        <div className="space-y-2 pt-1">
+                          {activeWorkflow.ai_analysis?.missing_requirements?.map((item: any, idx: number) => (
                             <div
                               key={idx}
-                              className="flex items-start gap-3 p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-900/60 shadow-2xs"
+                              className="flex items-start gap-2.5 p-3 rounded-xl bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-900/60 text-xs shadow-2xs"
                             >
-                              <div className="p-1 rounded-lg bg-rose-100 dark:bg-rose-950/60 text-rose-600 mt-0.5 shrink-0">
-                                <AlertTriangle className="w-3.5 h-3.5" />
-                              </div>
-                              <div className="text-xs space-y-0.5">
-                                <div className="font-black text-slate-900 dark:text-white flex items-center gap-2">
-                                  <span>Trường thông tin:</span>
-                                  <span className="font-mono px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-indigo-600 dark:text-indigo-400">
-                                    {item.field || 'Chưa xác định'}
-                                  </span>
-                                </div>
-                                <p className="text-slate-600 dark:text-slate-300 font-medium">
+                              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                              <div className="space-y-0.5">
+                                <span className="font-bold text-slate-900 dark:text-white font-mono mr-1">
+                                  [{item.field || 'Thiếu thông tin'}]:
+                                </span>
+                                <span className="text-slate-700 dark:text-slate-300">
                                   {item.message || JSON.stringify(item)}
-                                </p>
+                                </span>
                               </div>
                             </div>
-                          ))
-                        ) : (
-                          <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/40 text-xs text-slate-600 dark:text-slate-300">
-                            Không tìm thấy danh sách người dùng, file COF hoặc khóa học cụ thể. Vui lòng liên hệ người gửi để bổ sung.
-                          </div>
-                        )}
+                          ))}
+                        </div>
                       </div>
 
-                      {(activeWorkflow.steps || []).length > 0 && (
-                        <div className="rounded-2xl border border-sky-200 bg-sky-50/70 p-3.5 dark:border-sky-900/60 dark:bg-slate-900">
-                          <p className="mb-2 text-[10px] font-extrabold uppercase tracking-wider text-sky-800 dark:text-sky-300">
-                            Các bước đã đủ căn cứ để đề xuất (chưa thể chạy)
-                          </p>
-                          <ul className="space-y-1.5">
-                            {activeWorkflow.steps.map((step) => (
-                              <li key={step.step_id} className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
-                                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-sky-700" />
-                                <span>{step.name}</span>
-                              </li>
-                            ))}
-                          </ul>
-                          <p className="mt-2 text-[11px] text-slate-500">Bổ sung các mục màu vàng, sau đó đánh giá lại để tạo proposal đầy đủ trước khi duyệt.</p>
+                      {/* VẪN HIỂN THỊ WORKFLOW BUILDER ĐỂ QUẢN TRỊ VIÊN XEM & CHỈNH SỬA */}
+                      <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3 flex-wrap gap-2">
+                          <div className="flex items-center gap-2">
+                            <Layers className="w-4 h-4 text-indigo-600" />
+                            <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                              Đồ Thị Các Bước Dự Thảo ({activeWorkflow.steps?.length || 0} bước)
+                            </h4>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingWorkflow(!isEditingWorkflow)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition cursor-pointer"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            <span>{isEditingWorkflow ? 'Đóng Chỉnh Sửa' : 'Chỉnh Sửa Luồng Này'}</span>
+                          </button>
                         </div>
-                      )}
+
+                        <WorkflowBuilder
+                          steps={activeWorkflow.steps || []}
+                          capabilities={capabilities}
+                          isEditable={isEditingWorkflow}
+                          onStepsChange={handleStepsChange}
+                          onRetryStep={handleRetryStep}
+                        />
+                      </div>
                     </div>
                   ) : activeWorkflow.status === 'no_action' ? (
                     /* ⚪ TRẠNG THÁI 3: NO_ACTION (KHÔNG THỰC HIỆN TỰ ĐỘNG) */

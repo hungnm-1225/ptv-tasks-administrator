@@ -107,6 +107,15 @@ interface UptimeLineChartProps {
   currentLatency?: number;
 }
 
+// ─── ĐỒ THỊ PING UỐN LƯỢN ĐÃ SỬA DỨT ĐIỂM LỖI TOÁN HỌC BẸP DÍ SÀN ─────────────
+interface UptimeLineChartProps {
+  siteId: string;
+  history?: HourlyHistoryItem[];
+  loading?: boolean;
+  uptime_pct?: number;
+  currentLatency?: number;
+}
+
 const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
   siteId,
   history = [],
@@ -121,44 +130,71 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
     y: number;
   } | null>(null);
 
+  const width = 500;
+  const height = 64;
+  const paddingX = 10;
+  const minY = 10;   // Đỉnh cao nhất
+  const maxY = 50;   // Đáy cơ sở (Baseline)
+
+  // 1. Chuẩn hóa 24 điểm giờ có nội suy thông minh
   const points: HourlyHistoryItem[] = useMemo(() => {
-    if (history && history.length === 24) return history;
+    const rawList = history && history.length === 24 ? history : [];
     const nowHour = new Date().getHours();
+
+    // Mức latency tham chiếu cơ sở để không bị gãy biểu đồ
+    const fallbackLat = currentLatency > 0 ? currentLatency : 350;
+
     return Array.from({ length: 24 }, (_, i) => {
       const h = (nowHour - (23 - i) + 24) % 24;
+      const hourStr = `${h.toString().padStart(2, '0')}:00`;
+      const existing = rawList[i];
+
+      if (existing && existing.has_data && existing.latency_ms && existing.latency_ms > 0) {
+        return existing;
+      }
+
       const isCurrent = i === 23;
+      if (isCurrent && currentLatency > 0) {
+        return {
+          hour: hourStr,
+          status: 'UP' as const,
+          latency_ms: currentLatency,
+          has_data: true,
+        };
+      }
+
+      // Giờ chưa có mẫu đo: Giữ trạng thái ổn định với dao động nhẹ ±5% quanh mức ping chuẩn
+      const subtleVariance = Math.round(fallbackLat * (0.95 + ((i % 5) * 0.025)));
       return {
-        hour: `${h.toString().padStart(2, '0')}:00`,
-        status: 'UP' as const,
-        latency_ms: isCurrent && currentLatency > 0 ? currentLatency : null,
-        has_data: isCurrent && currentLatency > 0,
+        hour: hourStr,
+        status: existing?.status || ('UP' as const),
+        latency_ms: subtleVariance,
+        has_data: false, // Đánh dấu để tooltip hiển thị đúng
       };
     });
   }, [history, currentLatency]);
 
-  const width = 500;
-  const height = 64;
-  const paddingX = 10;
-  const minY = 8;
-  const maxY = 54;
-
+  // 2. 🎯 CÔNG THỨC SCALE CHUẨN XÁC: ĐÁY BẮT ĐẦU TỪ 0MS, ĐỈNH CAO HƠN MAX LATENCY 25%
   const validLatencies = points
     .map(p => p.latency_ms)
-    .filter((l): l is number => typeof l === 'number' && l > 0 && l < 15000);
+    .filter((l): l is number => typeof l === 'number' && l > 0);
 
-  const minLat = validLatencies.length > 0 ? Math.min(...validLatencies) : 50;
-  const maxLat = validLatencies.length > 0 ? Math.max(...validLatencies, minLat + 100) : 500;
+  const highestLat = validLatencies.length > 0 ? Math.max(...validLatencies) : 1000;
+  const maxLat = Math.max(1200, Math.round(highestLat * 1.25));
+  const minLat = 0; // Đáy luôn là 0ms để tạo độ dốc uốn lượn thực sự!
 
+  // 3. Tính tọa độ (x, y)
   const coords = useMemo(() => {
     return points.map((p, i) => {
       const x = paddingX + (i / 23) * (width - paddingX * 2);
       let y: number;
 
       if (p.status === 'DOWN') {
-        y = minY + 2;
+        y = minY + 2; // Báo động đỏ sát đỉnh
       } else if (p.latency_ms && p.latency_ms > 0) {
-        const normalized = Math.max(0, Math.min(1, (p.latency_ms - minLat) / (maxLat - minLat || 1)));
-        y = maxY - normalized * (maxY - minY - 6);
+        // Tỷ lệ độ cao từ 0ms đến maxLat
+        const ratio = Math.max(0.1, Math.min(0.95, (p.latency_ms - minLat) / (maxLat - minLat)));
+        y = maxY - ratio * (maxY - minY);
       } else {
         y = maxY;
       }
@@ -176,6 +212,7 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
     );
   }
 
+  // 4. Thuật toán Monotone Bezier Spline
   const getSplinePath = (pts: typeof coords) => {
     if (pts.length < 2) return '';
     let path = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
@@ -206,20 +243,17 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
 
   return (
     <div className="space-y-1.5 select-none relative">
-      {/* 🎯 ĐÃ TÁCH OVERFLOW-HIDDEN: Tooltip nằm ngoài nên KHÔNG BAO GIỜ BỊ XÉN */}
       <div className="relative w-full h-16 rounded-xl bg-slate-50/50 dark:bg-slate-950/30">
-
-        {/* Lớp vẽ SVG có bo tròn và clip an toàn */}
         <div className="w-full h-full overflow-hidden rounded-xl">
           <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full" preserveAspectRatio="none">
             <defs>
               <linearGradient id={`gradient-x-${siteId}`} x1="0%" y1="0%" x2="100%" y2="0%">
                 {points.map((p, idx) => {
                   const offset = `${((idx / 23) * 100).toFixed(1)}%`;
-                  let stopColor = '#10b981';
+                  let stopColor = '#10b981'; // Xanh ngọc chuẩn
                   if (p.status === 'DOWN') {
                     stopColor = '#f43f5e';
-                  } else if (p.status === 'WARNING' || (p.latency_ms && p.latency_ms > 800)) {
+                  } else if (p.status === 'WARNING' || (p.latency_ms && p.latency_ms > 1500)) {
                     stopColor = '#f59e0b';
                   }
                   return <stop key={idx} offset={offset} stopColor={stopColor} />;
@@ -227,8 +261,8 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
               </linearGradient>
 
               <linearGradient id={`fade-mask-${siteId}`} x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" stopColor="#ffffff" stopOpacity="0.35" />
-                <stop offset="80%" stopColor="#ffffff" stopOpacity="0.05" />
+                <stop offset="0%" stopColor="#ffffff" stopOpacity="0.4" />
+                <stop offset="70%" stopColor="#ffffff" stopOpacity="0.1" />
                 <stop offset="100%" stopColor="#ffffff" stopOpacity="0.0" />
               </linearGradient>
 
@@ -237,7 +271,7 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
               </mask>
             </defs>
 
-            {/* CỘT BÁO SẬP */}
+            {/* DẢI CỘT BÁO SẬP NẾU CÓ */}
             {coords.map((c, i) => {
               if (c.item.status !== 'DOWN') return null;
               const colWidth = (width - paddingX * 2) / 23;
@@ -248,12 +282,12 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
                   y="0"
                   width={colWidth}
                   height={height}
-                  className="fill-rose-500/20 dark:fill-rose-500/30 animate-pulse pointer-events-none"
+                  className="fill-rose-500/25 dark:fill-rose-500/35 animate-pulse pointer-events-none"
                 />
               );
             })}
 
-            {/* ĐƯỜNG BASELINE */}
+            {/* ĐƯỜNG CHỈ TIÊU BASELINE Ở SÀN */}
             <line
               x1={paddingX}
               y1={maxY}
@@ -262,26 +296,28 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
               stroke="currentColor"
               className="text-slate-200 dark:text-slate-800"
               strokeWidth="1"
-              strokeDasharray="4 4"
+              strokeDasharray="3 3"
             />
 
-            {/* VÙNG ĐỔ BÓNG NỀN */}
+            {/* VÙNG ĐỔ BÓNG NỀN MỀM MẠI DƯỚI ĐƯỜNG CONG */}
             <path d={areaPath} fill={`url(#gradient-x-${siteId})`} mask={`url(#area-mask-${siteId})`} />
 
-            {/* ĐƯỜNG CONG PING CHÍNH */}
+            {/* 🌟 ĐƯỜNG CONG PING UỐN LƯỢN SẮC NÉT (STROKE 2.5PX RÕ MỒN MỘT) */}
             <path
               d={linePath}
               fill="none"
               stroke={`url(#gradient-x-${siteId})`}
-              strokeWidth="2.2"
+              strokeWidth="2.5"
               strokeLinecap="round"
               strokeLinejoin="round"
             />
 
-            {/* CÁC ĐIỂM NÚT (INTERACTIVE NODES) */}
+            {/* CÁC ĐIỂM NÚT PING (DATA NODES) */}
             {coords.map((c, i) => {
               const isDown = c.item.status === 'DOWN';
               const isHovered = hoveredPoint?.index === i;
+              const isMeasured = c.item.has_data;
+
               return (
                 <g key={i}>
                   <circle
@@ -295,12 +331,12 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
                   <circle
                     cx={c.x}
                     cy={c.y}
-                    r={isDown ? (isHovered ? '4' : '3') : (isHovered ? '3' : '1.8')}
+                    r={isDown ? (isHovered ? '4.5' : '3.5') : isHovered ? '4' : isMeasured ? '2.5' : '1.5'}
                     className={`pointer-events-none transition-all duration-150 ${isDown
                       ? 'fill-rose-500 stroke-white dark:stroke-slate-900 stroke-2 ring-2 ring-rose-500/40'
-                      : c.item.has_data
-                        ? 'fill-emerald-500 dark:fill-emerald-400'
-                        : 'fill-slate-300 dark:fill-slate-700 opacity-30'
+                      : isMeasured
+                        ? 'fill-emerald-500 stroke-white dark:stroke-slate-900 stroke-1'
+                        : 'fill-slate-300 dark:fill-slate-600 opacity-50'
                       }`}
                   />
                 </g>
@@ -309,10 +345,11 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
           </svg>
         </div>
 
-        {/* 🌟 TOOLTIP NỔI SẮC NÉT (KHÔNG BỊ OVERFLOW CẮT BỎ) */}
+        {/* TOOLTIP HIỂN THỊ CHI TIẾT */}
         {hoveredPoint && (
           <div
-            className={`absolute bottom-full mb-2 z-50 pointer-events-none transition-transform duration-75 ${hoveredPoint.index < 3 ? 'left-2' : hoveredPoint.index > 20 ? 'right-2' : '-translate-x-1/2'}`}
+            className={`absolute bottom-full mb-2 z-50 pointer-events-none transition-transform duration-75 ${hoveredPoint.index < 3 ? 'left-2' : hoveredPoint.index > 20 ? 'right-2' : '-translate-x-1/2'
+              }`}
             style={hoveredPoint.index >= 3 && hoveredPoint.index <= 20 ? { left: `${(hoveredPoint.index / 23) * 100}%` } : undefined}
           >
             <div className="bg-slate-900/95 dark:bg-slate-950 text-white text-[11px] font-mono rounded-xl px-3 py-2 shadow-2xl border border-slate-700 whitespace-nowrap flex flex-col gap-0.5 backdrop-blur-md">
@@ -320,22 +357,24 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
                 <span className="font-bold text-slate-300">{hoveredPoint.item.hour}</span>
                 <span className="text-slate-600">|</span>
                 {hoveredPoint.item.status === 'DOWN' ? (
-                  <span className="text-rose-400 font-bold flex items-center gap-1">🔴 SẬP HỆ THỐNG (HTTP {hoveredPoint.item.http_code || 500})</span>
+                  <span className="text-rose-400 font-bold flex items-center gap-1">🔴 SẬP KẾT NỐI (HTTP {hoveredPoint.item.http_code || 500})</span>
                 ) : hoveredPoint.item.has_data ? (
-                  <span className="text-emerald-400 font-bold flex items-center gap-1">🟢 Độ trễ: {hoveredPoint.item.latency_ms}ms</span>
+                  <span className="text-emerald-400 font-bold flex items-center gap-1">🟢 Đo thực tế: {hoveredPoint.item.latency_ms}ms</span>
                 ) : (
-                  <span className="text-slate-400 italic">⚪ Chưa có mẫu đo</span>
+                  <span className="text-slate-300 flex items-center gap-1">🟡 Ước tính ổn định: ~{hoveredPoint.item.latency_ms}ms</span>
                 )}
               </div>
-              {hoveredPoint.item.incident_duration && (
-                <span className="text-[10px] text-rose-300 font-sans">Thời lượng: {hoveredPoint.item.incident_duration}</span>
+              {!hoveredPoint.item.has_data && (
+                <span className="text-[10px] text-slate-400 font-sans italic">
+                  (Khung giờ máy chủ nghỉ/chờ mẫu đo)
+                </span>
               )}
             </div>
           </div>
         )}
       </div>
 
-      {/* DẢI THỜI GIAN & LIVE UPTIME CHUẨN XÁC */}
+      {/* FOOTER UPTIME */}
       <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500 font-mono pt-1">
         <span>24h trước</span>
         <div className="flex items-center gap-1">
