@@ -255,7 +255,7 @@ class GitPlaywrightService:
         if role not in ["ADMIN", "DEVELOPER", "GUEST"]:
             role = "GUEST"
 
-        is_remove_action = action in ["remove", "remove_collaborator", "remove_repo_collaborators", "delete"]
+        is_remove_action = action in ["remove", "remove_collaborator", "remove_collaborators", "remove_repo_collaborators", "delete"]
         action_title = "GỠ BỎ" if is_remove_action else f"GÁN ROLE [{role}]"
 
         logger.info(f"📂 Đang xử lý: {settings_url} | Hành động: {action_title} | Users: {len(valid_users)}")
@@ -275,31 +275,32 @@ class GitPlaywrightService:
 
         try:
             get_res = await client.get(settings_url)
-            if get_res.status_code != 200:
-                err_msg = f"Không tìm thấy Repo hoặc thiếu quyền Quản trị (Status {get_res.status_code})"
-                logger.error(f"❌ {err_msg}: {settings_url}")
+
+            # 🚨 CHỐT CHẶN 1: PHÁT HIỆN BỊ REDIRECT DO MẤT QUYỀN HOẶC HẾT HẠN PHIÊN
+            final_url = str(get_res.url)
+            if get_res.status_code != 200 or not final_url.endswith("/settings/collaborators"):
+                err_msg = f"MẤT QUYỀN QUẢN TRỊ: Bị chuyển hướng sang '{final_url}'. Tài khoản bot không có quyền Admin trên Repo này hoặc Session hết hạn!"
+                logger.error(f"🛑 {err_msg} tại {settings_url}")
+                # Hủy ngay cache session cũ để ép Playwright đăng nhập lại phiên mới ở lần sau
+                self._cached_cookies = None
                 repo_res["errors"].append({"user": "*", "error": err_msg})
                 repo_res["status"] = "failed"
                 return repo_res
 
             # =================================================================
-            # 🎯 BÓC TÁCH COLLABORATORS CHUẨN THEO ĐÚNG DOM GITBUCKET THỰC TẾ
+            # 🎯 BÓC TÁCH COLLABORATORS TỪ DOM THỰC TẾ
             # =================================================================
             current_collaborators: Dict[str, str] = {}
-            li_items = []
-
             ul_match = re.search(r'<ul[^>]+id=["\']collaborator-list["\'][^>]*>(.*?)</ul>', get_res.text, re.DOTALL)
+            
             if ul_match:
                 ul_content = ul_match.group(1)
                 li_items = re.findall(r'<li[^>]*>(.*?)</li>', ul_content, re.DOTALL)
                 for li in li_items:
-                    # Lấy username từ <a href="/{username}">{username}</a>
                     u_match = re.search(r'<a[^>]+href=["\']/([a-zA-Z0-9_\.\-]+)["\'][^>]*>\s*\1\s*</a>', li)
                     if not u_match:
-                        # Fallback lấy từ name của input radio
                         u_match = re.search(r'<input[^>]+type=["\']radio["\'][^>]+name=["\']([a-zA-Z0-9_\.\-]+)["\']', li)
 
-                    # Lấy role từ label có class "active"
                     r_match = re.search(r'<label[^>]+class=["\'][^"\']*\bactive\b[^"\']*["\'][^>]*>.*?value=["\']([A-Z]+)["\']', li, re.DOTALL)
 
                     if u_match:
@@ -309,19 +310,20 @@ class GitPlaywrightService:
 
             logger.info(f"🔍 [DOM Parser] Đã quét thấy {len(current_collaborators)} thành viên hiện tại trong Repo.")
 
-            # 🛡️ KHIÊN CHẮN AN TOÀN (FAIL-SAFE SHIELD)
-            if ul_match and li_items and len(current_collaborators) == 0:
-                err_msg = f"CẢNH BÁO AN TOÀN: Phát hiện {len(li_items)} thẻ thành viên nhưng Parser không đọc được. Hủy POST để chống mất dữ liệu!"
-                logger.error(f"🛑 {err_msg} tại {settings_url}")
-                repo_res["errors"].append({"user": "*", "error": err_msg})
-                repo_res["status"] = "failed"
-                return repo_res
+            # 🚨 CHỐT CHẶN 2: BẢO VỆ TÀI KHOẢN ADMIN BOT
+            # Đảm bảo tài khoản bot (admin_user) LUÔN LUÔN được giữ lại trong danh sách với quyền ADMIN
+            if self.admin_user and self.admin_user not in current_collaborators:
+                logger.info(f"🛡️ Tự động bảo toàn tài khoản Bot [{self.admin_user}: ADMIN] trong danh sách.")
+                current_collaborators[self.admin_user] = "ADMIN"
 
             new_changes = False
 
             if is_remove_action:
                 for u in valid_users:
                     u_clean = u.strip()
+                    # Không bao giờ cho phép gỡ bỏ chính tài khoản Bot
+                    if u_clean.lower() == self.admin_user.lower():
+                        continue
                     if u_clean in current_collaborators:
                         del current_collaborators[u_clean]
                         repo_res["removed"].append(u_clean)
@@ -356,11 +358,20 @@ class GitPlaywrightService:
                     data=form_payload,
                     headers={"Content-Type": "application/x-www-form-urlencoded"}
                 )
+                
                 elapsed = round((time.time() - t0) * 1000, 1)
-                if post_res.status_code in [200, 302, 303]:
-                    logger.info(f"🎉 Lưu thay đổi Repo thành công trong {elapsed}ms!")
-                else:
-                    logger.error(f"❌ Lưu thất bại ({post_res.status_code}): {post_res.text}")
+                final_post_url = str(post_res.url)
+
+                # 🚨 CHỐT CHẶN 3: KIỂM TRA POST THỰC SỰ THÀNH CÔNG HAY BỊ REDIRECT VỀ DASHBOARD
+                if "dashboard/repos" in final_post_url or post_res.status_code >= 400:
+                    err_msg = f"LƯU THẤT BẠI: Máy chủ từ chối cập nhật và chuyển hướng về '{final_post_url}'!"
+                    logger.error(f"❌ {err_msg}")
+                    self._cached_cookies = None
+                    repo_res["errors"].append({"user": "*", "error": err_msg})
+                    repo_res["status"] = "failed"
+                    return repo_res
+
+                logger.info(f"🎉 Lưu thay đổi Repo thành công trong {elapsed}ms (Giữ nguyên {len(current_collaborators)} thành viên)!")
             else:
                 elapsed = round((time.time() - t0) * 1000, 1)
                 logger.info(f"ℹ️ Không có thay đổi nào cần lưu ({elapsed}ms).")
@@ -372,6 +383,7 @@ class GitPlaywrightService:
 
         except Exception as e:
             logger.error(f"❌ Lỗi khi xử lý Repo {raw_repo_url}: {e}")
+            self._cached_cookies = None
             repo_res["status"] = "failed"
             repo_res["errors"].append({"user": "*", "error": str(e)})
             return repo_res
