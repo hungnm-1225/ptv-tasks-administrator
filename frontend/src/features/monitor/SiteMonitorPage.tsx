@@ -116,6 +116,46 @@ interface UptimeLineChartProps {
   currentLatency?: number;
 }
 
+// ─── SKELETON LOADING CHO TAB 2: CI/CD DEPLOY MONITOR ───────────────────────
+const DeployListSkeleton: React.FC = () => (
+  <div className="space-y-3 animate-pulse">
+    {[1, 2, 3, 4].map((i) => (
+      <div
+        key={i}
+        className="rounded-2xl p-4 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-3 shadow-xs"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-2 flex-1">
+            <div className="flex items-center gap-2">
+              {/* Tên Repository / Project */}
+              <div className="h-4 w-36 bg-slate-200 dark:bg-slate-800 rounded-md" />
+              {/* Badge Trạng thái */}
+              <div className="h-4 w-14 bg-slate-100 dark:bg-slate-800 rounded-full" />
+              {/* Badge Đang chạy hiện tại (Mô phỏng card đầu tiên) */}
+              {i === 1 && (
+                <div className="h-4 w-28 bg-emerald-100/70 dark:bg-emerald-950/40 rounded-full" />
+              )}
+            </div>
+            {/* Git Branch & Commit Message */}
+            <div className="flex items-center gap-2 pt-0.5">
+              <div className="w-3.5 h-3.5 bg-slate-200 dark:bg-slate-800 rounded-full shrink-0" />
+              <div className="h-3.5 w-4/5 bg-slate-200/70 dark:bg-slate-800/70 rounded" />
+            </div>
+          </div>
+          {/* Nút Logs */}
+          <div className="h-7 w-16 bg-slate-200 dark:bg-slate-800 rounded-lg shrink-0" />
+        </div>
+
+        {/* Footer: Author & Timestamp */}
+        <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
+          <div className="h-3 w-24 bg-slate-100 dark:bg-slate-800 rounded" />
+          <div className="h-3 w-28 bg-slate-100 dark:bg-slate-800 rounded" />
+        </div>
+      </div>
+    ))}
+  </div>
+);
+
 const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
   siteId,
   history = [],
@@ -772,7 +812,8 @@ export const SiteMonitorPage: React.FC = () => {
       {activeTab === 'cicd_deploy' && (
         <div className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* VERCEL */}
+
+            {/* VERCEL DEPLOYMENTS */}
             <div className="space-y-4">
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex items-center justify-between shadow-xs">
                 <div className="flex items-center gap-3">
@@ -789,73 +830,82 @@ export const SiteMonitorPage: React.FC = () => {
                 </span>
               </div>
 
-              <div className="space-y-3">
-                {vercelDeploys.map((item) => {
-                  const isCurrentActiveLive = item.id === activeVercelDeployId;
-                  const st = (item.state || item.status || '').toUpperCase();
-                  const isBuilding = st === 'BUILDING' || st === 'INITIALIZING' || st === 'QUEUED';
+              {/* 🎯 SKELETON LOADING KHI ĐANG TẢI VERCEL */}
+              {deployLoading && vercelDeploys.length === 0 ? (
+                <DeployListSkeleton />
+              ) : vercelDeploys.length === 0 ? (
+                <div className="p-10 text-center rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-400 font-medium">
+                  Chưa có lịch sử triển khai Vercel nào.
+                </div>
+              ) : (
+                <div className={`space-y-3 transition-opacity duration-200 ${deployLoading ? 'opacity-60' : 'opacity-100'}`}>
+                  {vercelDeploys.map((item) => {
+                    const isCurrentActiveLive = item.id === activeVercelDeployId;
+                    const st = (item.state || item.status || '').toUpperCase();
+                    const isBuilding = st === 'BUILDING' || st === 'INITIALIZING' || st === 'QUEUED';
 
-                  return (
-                    <div
-                      key={item.id}
-                      className={`rounded-2xl p-4 border transition ${isCurrentActiveLive
-                        ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-400 dark:border-emerald-600/60 shadow-sm ring-1 ring-emerald-500/30'
-                        : isBuilding
-                          ? 'bg-sky-50/40 dark:bg-sky-950/20 border-sky-400 dark:border-sky-600/60 ring-1 ring-sky-500/30'
-                          : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 opacity-75 hover:opacity-100'
-                        }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-xs text-slate-900 dark:text-white">{item.name}</span>
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${st === 'READY'
-                              ? 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-500/20 dark:text-emerald-300'
-                              : isBuilding
-                                ? 'bg-sky-100 text-sky-800 border-sky-300 dark:bg-sky-500/20 dark:text-sky-300 flex items-center gap-1'
-                                : 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-500/20 dark:text-rose-300'
-                              }`}>
-                              {isBuilding && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
-                              {st || 'READY'}
-                            </span>
+                    return (
+                      <div
+                        key={item.id}
+                        className={`rounded-2xl p-4 border transition ${isCurrentActiveLive
+                          ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-400 dark:border-emerald-600/60 shadow-sm ring-1 ring-emerald-500/30'
+                          : isBuilding
+                            ? 'bg-sky-50/40 dark:bg-sky-950/20 border-sky-400 dark:border-sky-600/60 ring-1 ring-sky-500/30'
+                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 opacity-75 hover:opacity-100'
+                          }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-xs text-slate-900 dark:text-white">{item.name}</span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${st === 'READY'
+                                ? 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-500/20 dark:text-emerald-300'
+                                : isBuilding
+                                  ? 'bg-sky-100 text-sky-800 border-sky-300 dark:bg-sky-500/20 dark:text-sky-300 flex items-center gap-1'
+                                  : 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-500/20 dark:text-rose-300'
+                                }`}>
+                                {isBuilding && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
+                                {st || 'READY'}
+                              </span>
 
-                            {isCurrentActiveLive && (
-                              <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                                ● Đang chạy hiện tại
-                              </span>
-                            )}
-                            {isBuilding && (
-                              <span className="text-[10px] font-mono font-bold text-sky-600 dark:text-sky-400">
-                                ● Đang triển khai bản mới...
-                              </span>
-                            )}
+                              {isCurrentActiveLive && (
+                                <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                  ● Đang chạy hiện tại
+                                </span>
+                              )}
+                              {isBuilding && (
+                                <span className="text-[10px] font-mono font-bold text-sky-600 dark:text-sky-400">
+                                  ● Đang triển khai bản mới...
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                              <GitBranch className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <span className="font-medium truncate max-w-[280px]">{item.commit_msg}</span>
+                            </p>
                           </div>
-                          <p className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
-                            <GitBranch className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            <span className="font-medium truncate max-w-[280px]">{item.commit_msg}</span>
-                          </p>
+
+                          <button
+                            onClick={() => handleViewLogs(item)}
+                            className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white text-[11px] font-semibold rounded-lg transition cursor-pointer"
+                          >
+                            <Terminal className="w-3.5 h-3.5" />
+                            <span>Logs</span>
+                          </button>
                         </div>
 
-                        <button
-                          onClick={() => handleViewLogs(item)}
-                          className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white text-[11px] font-semibold rounded-lg transition cursor-pointer"
-                        >
-                          <Terminal className="w-3.5 h-3.5" />
-                          <span>Logs</span>
-                        </button>
+                        <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400 font-mono">
+                          <span>by {item.commit_author}</span>
+                          <span>{formatDate(item.created_at)}</span>
+                        </div>
                       </div>
-
-                      <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400 font-mono">
-                        <span>by {item.commit_author}</span>
-                        <span>{formatDate(item.created_at)}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
-            {/* RENDER */}
+            {/* RENDER DEPLOYMENTS */}
             <div className="space-y-4">
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex items-center justify-between shadow-xs">
                 <div className="flex items-center gap-3">
@@ -872,71 +922,81 @@ export const SiteMonitorPage: React.FC = () => {
                 </span>
               </div>
 
-              <div className="space-y-3">
-                {renderDeploys.map((item) => {
-                  const isCurrentActiveLive = item.id === activeRenderDeployId;
-                  const st = (item.status || item.state || '').toLowerCase();
-                  const isBuilding = st.includes('progress') || st === 'created' || st === 'building';
+              {/* 🎯 SKELETON LOADING KHI ĐANG TẢI RENDER */}
+              {deployLoading && renderDeploys.length === 0 ? (
+                <DeployListSkeleton />
+              ) : renderDeploys.length === 0 ? (
+                <div className="p-10 text-center rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-400 font-medium">
+                  Chưa có lịch sử triển khai Render nào.
+                </div>
+              ) : (
+                <div className={`space-y-3 transition-opacity duration-200 ${deployLoading ? 'opacity-60' : 'opacity-100'}`}>
+                  {renderDeploys.map((item) => {
+                    const isCurrentActiveLive = item.id === activeRenderDeployId;
+                    const st = (item.status || item.state || '').toLowerCase();
+                    const isBuilding = st.includes('progress') || st === 'created' || st === 'building';
 
-                  return (
-                    <div
-                      key={item.id}
-                      className={`rounded-2xl p-4 border transition ${isCurrentActiveLive
-                        ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-400 dark:border-emerald-600/60 shadow-sm ring-1 ring-emerald-500/30'
-                        : isBuilding
-                          ? 'bg-sky-50/40 dark:bg-sky-950/20 border-sky-400 dark:border-sky-600/60 ring-1 ring-sky-500/30'
-                          : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 opacity-75 hover:opacity-100'
-                        }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-xs text-slate-900 dark:text-white">{item.name}</span>
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${st === 'live'
-                              ? 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-500/20 dark:text-emerald-300'
-                              : isBuilding
-                                ? 'bg-sky-100 text-sky-800 border-sky-300 dark:bg-sky-500/20 dark:text-sky-300 flex items-center gap-1'
-                                : 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-500/20 dark:text-rose-300'
-                              }`}>
-                              {isBuilding && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
-                              {item.status || 'live'}
-                            </span>
+                    return (
+                      <div
+                        key={item.id}
+                        className={`rounded-2xl p-4 border transition ${isCurrentActiveLive
+                          ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-400 dark:border-emerald-600/60 shadow-sm ring-1 ring-emerald-500/30'
+                          : isBuilding
+                            ? 'bg-sky-50/40 dark:bg-sky-950/20 border-sky-400 dark:border-sky-600/60 ring-1 ring-sky-500/30'
+                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 opacity-75 hover:opacity-100'
+                          }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-xs text-slate-900 dark:text-white">{item.name}</span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${st === 'live'
+                                ? 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-500/20 dark:text-emerald-300'
+                                : isBuilding
+                                  ? 'bg-sky-100 text-sky-800 border-sky-300 dark:bg-sky-500/20 dark:text-sky-300 flex items-center gap-1'
+                                  : 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-500/20 dark:text-rose-300'
+                                }`}>
+                                {isBuilding && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
+                                {item.status || 'live'}
+                              </span>
 
-                            {isCurrentActiveLive && (
-                              <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                                ● Đang chạy hiện tại
-                              </span>
-                            )}
-                            {isBuilding && (
-                              <span className="text-[10px] font-mono font-bold text-sky-600 dark:text-sky-400">
-                                ● Đang cập nhật container...
-                              </span>
-                            )}
+                              {isCurrentActiveLive && (
+                                <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                  ● Đang chạy hiện tại
+                                </span>
+                              )}
+                              {isBuilding && (
+                                <span className="text-[10px] font-mono font-bold text-sky-600 dark:text-sky-400">
+                                  ● Đang cập nhật container...
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                              <GitBranch className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <span className="font-medium truncate max-w-[280px]">{item.commit_msg}</span>
+                            </p>
                           </div>
-                          <p className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
-                            <GitBranch className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            <span className="font-medium truncate max-w-[280px]">{item.commit_msg}</span>
-                          </p>
+
+                          <button
+                            onClick={() => handleViewLogs(item)}
+                            className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white text-[11px] font-semibold rounded-lg transition cursor-pointer"
+                          >
+                            <Terminal className="w-3.5 h-3.5" />
+                            <span>Logs</span>
+                          </button>
                         </div>
 
-                        <button
-                          onClick={() => handleViewLogs(item)}
-                          className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white text-[11px] font-semibold rounded-lg transition cursor-pointer"
-                        >
-                          <Terminal className="w-3.5 h-3.5" />
-                          <span>Logs</span>
-                        </button>
+                        <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400 font-mono">
+                          <span>by {item.commit_author}</span>
+                          <span>{formatDate(item.created_at)}</span>
+                        </div>
                       </div>
-
-                      <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400 font-mono">
-                        <span>by {item.commit_author}</span>
-                        <span>{formatDate(item.created_at)}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
+
           </div>
         </div>
       )}
