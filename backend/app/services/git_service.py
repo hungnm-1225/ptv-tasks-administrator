@@ -282,11 +282,15 @@ class GitPlaywrightService:
                 repo_res["status"] = "failed"
                 return repo_res
 
+            # =================================================================
+            # 🎯 BÓC TÁCH COLLABORATORS CHUẨN THEO ĐÚNG DOM GITBUCKET THỰC TẾ
+            # =================================================================
             current_collaborators: Dict[str, str] = {}
+            li_items = []
+
             ul_match = re.search(r'<ul[^>]+id=["\']collaborator-list["\'][^>]*>(.*?)</ul>', get_res.text, re.DOTALL)
             if ul_match:
                 ul_content = ul_match.group(1)
-                # Tách từng thẻ <li>
                 li_items = re.findall(r'<li[^>]*>(.*?)</li>', ul_content, re.DOTALL)
                 for li in li_items:
                     # Lấy username từ <a href="/{username}">{username}</a>
@@ -304,12 +308,15 @@ class GitPlaywrightService:
                         current_collaborators[uname] = urole
 
             logger.info(f"🔍 [DOM Parser] Đã quét thấy {len(current_collaborators)} thành viên hiện tại trong Repo.")
+
+            # 🛡️ KHIÊN CHẮN AN TOÀN (FAIL-SAFE SHIELD)
             if ul_match and li_items and len(current_collaborators) == 0:
-                err_msg = f"CẢNH BÁO AN TOÀN: Phát hiện {len(li_items)} thẻ thành viên nhưng Parser không đọc được. Hủy POST để chống ghi đè!"
+                err_msg = f"CẢNH BÁO AN TOÀN: Phát hiện {len(li_items)} thẻ thành viên nhưng Parser không đọc được. Hủy POST để chống mất dữ liệu!"
                 logger.error(f"🛑 {err_msg} tại {settings_url}")
                 repo_res["errors"].append({"user": "*", "error": err_msg})
                 repo_res["status"] = "failed"
                 return repo_res
+
             new_changes = False
 
             if is_remove_action:
