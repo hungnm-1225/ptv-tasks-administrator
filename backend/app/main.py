@@ -38,6 +38,7 @@ from app.services.site_monitor_service import poll_site_uptime_cron
 from app.services.workspace.account_service import workspace_account_service
 from app.services.workspace.workspace_scanner_service import workspace_scanner_service
 from app.services.excel.cof_service import COFService
+from app.services.session_keepalive_service import run_session_keepalive_cron
 
 # Import API Router
 from app.api.v1.router import api_router
@@ -359,6 +360,20 @@ async def lifespan(app: FastAPI):
         ],
         id="distributor_cache_scanner_cron",
         next_run_time=base_start + timedelta(seconds=900),
+        misfire_grace_time=300,
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True
+    )
+    
+    # 7. 🌟 GIỮ ẤM SONG SONG 7 PHÂN HỆ MỖI 15 PHÚT (Chạy ở giây thứ 45 - Payload < 5KB)
+    scheduler.add_job(
+        safe_job_wrapper, 
+        'interval', 
+        minutes=15, 
+        args=[run_session_keepalive_cron, "Giữ Ấm 7 Phân Hệ Pythaverse", "keepalive_cron"],
+        id='keepalive_cron',
+        next_run_time=base_start + timedelta(seconds=45),
         misfire_grace_time=300,
         max_instances=1,
         coalesce=True,

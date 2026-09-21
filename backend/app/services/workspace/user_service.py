@@ -23,9 +23,33 @@ class WorkspaceUserService(WorkspaceBaseService):
 
     @classmethod
     async def _get_admin_session_cookies(cls, admin_user: str, admin_pass: str) -> Dict[str, str]:
-        """Lấy session Sales Admin có RAM Cache 2h (Bypass Playwright khi còn hạn)."""
+        """
+        Lấy session Sales Admin:
+        1. Ưu tiên đọc từ Session Keep-Alive Service (RAM/Supabase) - Tốc độ 1ms, Zero Playwright!
+        2. Nếu chưa có, fallback qua get_or_steal_role_session và lưu ngược lại vào Keep-Alive.
+        """
+        from app.services.session_keepalive_service import session_keepalive_service
+
+        # 🎯 1. ĐỌC TỪ BỘ GIỮ ẤM TẬP TRUNG (PERSIST TRÊN SUPABASE & RAM)
+        cached_cookies = await session_keepalive_service.get_session_cookies("sales_admin")
+        if cached_cookies:
+            logger.info("⚡ [UserService] Sử dụng Session Sales Admin ấm nóng từ Keep-Alive (Zero Playwright)!")
+            return cached_cookies
+
+        # 🎯 2. NẾU CHƯA CÓ TRONG KHO, MỚI BỐC TỪ PLAYWRIGHT QUA HÀM CŨ
+        logger.info("🔑 [UserService] Chưa có session trong kho, đang mở Playwright bốc Session Sales Admin mới...")
         base_service = WorkspaceBaseService()
-        cookies, _ = await get_or_steal_role_session(base_service, admin_user, admin_pass, "Sales Admin")
+        cookies, identity = await get_or_steal_role_session(base_service, admin_user, admin_pass, "Sales Admin")
+
+        # 🎯 3. LƯU NGƯỢC LẠI VÀO SUPABASE ĐỂ CRONJOB 15 PHÚT GIỮ ẤM TIẾP QUẢN
+        if cookies:
+            await session_keepalive_service.save_session_cookies(
+                session_key="sales_admin",
+                system_name="Sales Admin Workspace",
+                cookies=cookies,
+                metadata={"admin_user": admin_user, "identity": identity}
+            )
+
         return cookies
 
     @classmethod
