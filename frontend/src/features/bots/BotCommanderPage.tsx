@@ -171,12 +171,17 @@ export const BotCommanderPage: React.FC = () => {
     }
 
     try {
-      const [statusData, logsData] = await Promise.all([
+      const [statusRes, logsRes] = await Promise.allSettled([
         fetchApi<Record<string, WorkerTelemetry>>('/bots/status'),
         fetchApi<BotTerminalLog[]>('/bots/logs')
       ]);
-      setBotStatus(statusData);
-      setLogs(logsData);
+
+      if (statusRes.status === 'fulfilled' && statusRes.value) {
+        setBotStatus(statusRes.value);
+      }
+      if (logsRes.status === 'fulfilled' && logsRes.value) {
+        setLogs(logsRes.value);
+      }
       if (showToast) toast.success('Đã cập nhật trạng thái Workers & Logs thời gian thực!');
     } catch (err) {
       console.error('Lỗi khi nạp dữ liệu Bot Commander:', err);
