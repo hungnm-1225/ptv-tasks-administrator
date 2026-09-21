@@ -98,7 +98,7 @@ function formatDate(isoOrTs: string | number): string {
   } catch { return String(isoOrTs); }
 }
 
-// ─── ĐỒ THỊ PING UỐN LƯỢN ĐÃ ĐƯỢC THIẾT KẾ KHÓA BIÊN AN TOÀN ─────────────
+// ─── ĐỒ THỊ PING UỐN LƯỢN ĐÃ SỬA LỖI TOOLTIP TÀNG HÌNH ─────────────
 interface UptimeLineChartProps {
   siteId: string;
   history?: HourlyHistoryItem[];
@@ -121,7 +121,6 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
     y: number;
   } | null>(null);
 
-  // 1. Chuẩn hóa 24 điểm giờ
   const points: HourlyHistoryItem[] = useMemo(() => {
     if (history && history.length === 24) return history;
     const nowHour = new Date().getHours();
@@ -137,14 +136,12 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
     });
   }, [history, currentLatency]);
 
-  // 2. Kích thước khung vẽ
   const width = 500;
   const height = 64;
   const paddingX = 10;
-  const minY = 8;   // Đỉnh cao nhất (tránh đụng mép trên)
-  const maxY = 54;  // Đáy cơ sở (đường baseline)
+  const minY = 8;
+  const maxY = 54;
 
-  // 3. Tính toán dải Latency hợp lệ để scale tỷ lệ
   const validLatencies = points
     .map(p => p.latency_ms)
     .filter((l): l is number => typeof l === 'number' && l > 0 && l < 15000);
@@ -152,27 +149,21 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
   const minLat = validLatencies.length > 0 ? Math.min(...validLatencies) : 50;
   const maxLat = validLatencies.length > 0 ? Math.max(...validLatencies, minLat + 100) : 500;
 
-  // 4. Tính toán tọa độ (x, y) - CÓ CLAMP KHÓA BIÊN 100% CHỐNG RĂNG BẰNG
   const coords = useMemo(() => {
     return points.map((p, i) => {
       const x = paddingX + (i / 23) * (width - paddingX * 2);
       let y: number;
 
       if (p.status === 'DOWN') {
-        y = minY + 2; // Điểm sập nằm sát đỉnh báo động đỏ
+        y = minY + 2;
       } else if (p.latency_ms && p.latency_ms > 0) {
-        // Kẹp chặt normalized trong khoảng [0, 1]
         const normalized = Math.max(0, Math.min(1, (p.latency_ms - minLat) / (maxLat - minLat || 1)));
-        // Scale mượt mà giữa maxY và minY
         y = maxY - normalized * (maxY - minY - 6);
       } else {
-        // Chưa có dữ liệu: Nằm êm đềm ở đường đáy
         y = maxY;
       }
 
-      // Khóa cứng y không bao giờ được vượt ra ngoài [minY, maxY]
       y = Math.max(minY, Math.min(maxY, y));
-
       return { x, y, item: p, index: i };
     });
   }, [points, minLat, maxLat]);
@@ -185,7 +176,6 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
     );
   }
 
-  // 5. Thuật toán Monotone Bezier mượt mà (Có kẹp biên control points)
   const getSplinePath = (pts: typeof coords) => {
     if (pts.length < 2) return '';
     let path = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
@@ -195,14 +185,12 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
       const p2 = pts[i + 1];
       const p3 = pts[Math.min(pts.length - 1, i + 2)];
 
-      // Hệ số nội suy mượt mà 6.0 chuẩn Catmull-Rom
       const dx1 = (p2.x - p0.x) / 6.0;
       const dy1 = (p2.y - p0.y) / 6.0;
       const dx2 = (p3.x - p1.x) / 6.0;
       const dy2 = (p3.y - p1.y) / 6.0;
 
       const cp1x = p1.x + dx1;
-      // Khóa cứng control point không được vượt biên
       const cp1y = Math.max(minY, Math.min(maxY, p1.y + dy1));
       const cp2x = p2.x - dx2;
       const cp2y = Math.max(minY, Math.min(maxY, p2.y - dy2));
@@ -214,114 +202,117 @@ const UptimeLineChart: React.FC<UptimeLineChartProps> = ({
 
   const linePath = getSplinePath(coords);
   const areaPath = `${linePath} L ${coords[coords.length - 1].x.toFixed(1)} ${height} L ${coords[0].x.toFixed(1)} ${height} Z`;
-
   const hasRecentIncident = points.some(p => p.status === 'DOWN') || uptime_pct < 99.5;
 
   return (
     <div className="space-y-1.5 select-none relative">
-      {/* 🎯 ĐÃ BỌC OVERFLOW-HIDDEN TRIỆT TIÊU 100% VIỆC TRÀN SANG CARD KHÁC */}
-      <div className="relative w-full h-16 overflow-hidden rounded-xl bg-slate-50/50 dark:bg-slate-950/30">
-        <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-hidden" preserveAspectRatio="none">
-          <defs>
-            <linearGradient id={`gradient-x-${siteId}`} x1="0%" y1="0%" x2="100%" y2="0%">
-              {points.map((p, idx) => {
-                const offset = `${((idx / 23) * 100).toFixed(1)}%`;
-                let stopColor = '#10b981';
-                if (p.status === 'DOWN') {
-                  stopColor = '#f43f5e';
-                } else if (p.status === 'WARNING' || (p.latency_ms && p.latency_ms > 800)) {
-                  stopColor = '#f59e0b';
-                }
-                return <stop key={idx} offset={offset} stopColor={stopColor} />;
-              })}
-            </linearGradient>
+      {/* 🎯 ĐÃ TÁCH OVERFLOW-HIDDEN: Tooltip nằm ngoài nên KHÔNG BAO GIỜ BỊ XÉN */}
+      <div className="relative w-full h-16 rounded-xl bg-slate-50/50 dark:bg-slate-950/30">
 
-            <linearGradient id={`fade-mask-${siteId}`} x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stopColor="#ffffff" stopOpacity="0.35" />
-              <stop offset="80%" stopColor="#ffffff" stopOpacity="0.05" />
-              <stop offset="100%" stopColor="#ffffff" stopOpacity="0.0" />
-            </linearGradient>
+        {/* Lớp vẽ SVG có bo tròn và clip an toàn */}
+        <div className="w-full h-full overflow-hidden rounded-xl">
+          <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id={`gradient-x-${siteId}`} x1="0%" y1="0%" x2="100%" y2="0%">
+                {points.map((p, idx) => {
+                  const offset = `${((idx / 23) * 100).toFixed(1)}%`;
+                  let stopColor = '#10b981';
+                  if (p.status === 'DOWN') {
+                    stopColor = '#f43f5e';
+                  } else if (p.status === 'WARNING' || (p.latency_ms && p.latency_ms > 800)) {
+                    stopColor = '#f59e0b';
+                  }
+                  return <stop key={idx} offset={offset} stopColor={stopColor} />;
+                })}
+              </linearGradient>
 
-            <mask id={`area-mask-${siteId}`}>
-              <rect x="0" y="0" width={width} height={height} fill={`url(#fade-mask-${siteId})`} />
-            </mask>
-          </defs>
+              <linearGradient id={`fade-mask-${siteId}`} x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stopColor="#ffffff" stopOpacity="0.35" />
+                <stop offset="80%" stopColor="#ffffff" stopOpacity="0.05" />
+                <stop offset="100%" stopColor="#ffffff" stopOpacity="0.0" />
+              </linearGradient>
 
-          {/* DẢI CỘT BÁO SẬP (DOWNTIME BANDS) */}
-          {coords.map((c, i) => {
-            if (c.item.status !== 'DOWN') return null;
-            const colWidth = (width - paddingX * 2) / 23;
-            return (
-              <rect
-                key={`down-band-${i}`}
-                x={c.x - colWidth / 2}
-                y="0"
-                width={colWidth}
-                height={height}
-                className="fill-rose-500/20 dark:fill-rose-500/30 animate-pulse pointer-events-none"
-              />
-            );
-          })}
+              <mask id={`area-mask-${siteId}`}>
+                <rect x="0" y="0" width={width} height={height} fill={`url(#fade-mask-${siteId})`} />
+              </mask>
+            </defs>
 
-          {/* ĐƯỜNG CHỈ TIÊU CƠ SỞ BASELINE */}
-          <line
-            x1={paddingX}
-            y1={maxY}
-            x2={width - paddingX}
-            y2={maxY}
-            stroke="currentColor"
-            className="text-slate-200 dark:text-slate-800"
-            strokeWidth="1"
-            strokeDasharray="4 4"
-          />
-
-          {/* VÙNG ĐỔ BÓNG NỀN MỀM MẠI */}
-          <path d={areaPath} fill={`url(#gradient-x-${siteId})`} mask={`url(#area-mask-${siteId})`} />
-
-          {/* ĐƯỜNG CONG PING CHÍNH */}
-          <path
-            d={linePath}
-            fill="none"
-            stroke={`url(#gradient-x-${siteId})`}
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-
-          {/* CÁC ĐIỂM NÚT (DATA NODES) */}
-          {coords.map((c, i) => {
-            const isDown = c.item.status === 'DOWN';
-            const isHovered = hoveredPoint?.index === i;
-            return (
-              <g key={i}>
-                <circle
-                  cx={c.x}
-                  cy={c.y}
-                  r="8"
-                  className="fill-transparent cursor-pointer"
-                  onMouseEnter={() => setHoveredPoint(c)}
-                  onMouseLeave={() => setHoveredPoint(null)}
+            {/* CỘT BÁO SẬP */}
+            {coords.map((c, i) => {
+              if (c.item.status !== 'DOWN') return null;
+              const colWidth = (width - paddingX * 2) / 23;
+              return (
+                <rect
+                  key={`down-band-${i}`}
+                  x={c.x - colWidth / 2}
+                  y="0"
+                  width={colWidth}
+                  height={height}
+                  className="fill-rose-500/20 dark:fill-rose-500/30 animate-pulse pointer-events-none"
                 />
-                <circle
-                  cx={c.x}
-                  cy={c.y}
-                  r={isDown ? (isHovered ? '4' : '3') : (isHovered ? '3' : '1.8')}
-                  className={`pointer-events-none transition-all duration-150 ${isDown
-                    ? 'fill-rose-500 stroke-white dark:stroke-slate-900 stroke-2 ring-2 ring-rose-500/40'
-                    : c.item.has_data
-                      ? 'fill-emerald-500 dark:fill-emerald-400'
-                      : 'fill-slate-300 dark:fill-slate-700 opacity-30'
-                    }`}
-                />
-              </g>
-            );
-          })}
-        </svg>
+              );
+            })}
 
-        {/* TOOLTIP HIỆN THÔNG TIN CHI TIẾT */}
+            {/* ĐƯỜNG BASELINE */}
+            <line
+              x1={paddingX}
+              y1={maxY}
+              x2={width - paddingX}
+              y2={maxY}
+              stroke="currentColor"
+              className="text-slate-200 dark:text-slate-800"
+              strokeWidth="1"
+              strokeDasharray="4 4"
+            />
+
+            {/* VÙNG ĐỔ BÓNG NỀN */}
+            <path d={areaPath} fill={`url(#gradient-x-${siteId})`} mask={`url(#area-mask-${siteId})`} />
+
+            {/* ĐƯỜNG CONG PING CHÍNH */}
+            <path
+              d={linePath}
+              fill="none"
+              stroke={`url(#gradient-x-${siteId})`}
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+
+            {/* CÁC ĐIỂM NÚT (INTERACTIVE NODES) */}
+            {coords.map((c, i) => {
+              const isDown = c.item.status === 'DOWN';
+              const isHovered = hoveredPoint?.index === i;
+              return (
+                <g key={i}>
+                  <circle
+                    cx={c.x}
+                    cy={c.y}
+                    r="10"
+                    className="fill-transparent cursor-pointer"
+                    onMouseEnter={() => setHoveredPoint(c)}
+                    onMouseLeave={() => setHoveredPoint(null)}
+                  />
+                  <circle
+                    cx={c.x}
+                    cy={c.y}
+                    r={isDown ? (isHovered ? '4' : '3') : (isHovered ? '3' : '1.8')}
+                    className={`pointer-events-none transition-all duration-150 ${isDown
+                      ? 'fill-rose-500 stroke-white dark:stroke-slate-900 stroke-2 ring-2 ring-rose-500/40'
+                      : c.item.has_data
+                        ? 'fill-emerald-500 dark:fill-emerald-400'
+                        : 'fill-slate-300 dark:fill-slate-700 opacity-30'
+                      }`}
+                  />
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+
+        {/* 🌟 TOOLTIP NỔI SẮC NÉT (KHÔNG BỊ OVERFLOW CẮT BỎ) */}
         {hoveredPoint && (
           <div
-            className={`absolute bottom-full mb-1 z-30 pointer-events-none transition-transform duration-75 ${hoveredPoint.index < 3 ? 'left-2' : hoveredPoint.index > 20 ? 'right-2' : '-translate-x-1/2'}`}
+            className={`absolute bottom-full mb-2 z-50 pointer-events-none transition-transform duration-75 ${hoveredPoint.index < 3 ? 'left-2' : hoveredPoint.index > 20 ? 'right-2' : '-translate-x-1/2'}`}
             style={hoveredPoint.index >= 3 && hoveredPoint.index <= 20 ? { left: `${(hoveredPoint.index / 23) * 100}%` } : undefined}
           >
             <div className="bg-slate-900/95 dark:bg-slate-950 text-white text-[11px] font-mono rounded-xl px-3 py-2 shadow-2xl border border-slate-700 whitespace-nowrap flex flex-col gap-0.5 backdrop-blur-md">
@@ -461,7 +452,7 @@ export const SiteMonitorPage: React.FC = () => {
     }
   }, []);
 
-  // 🎯 TỰ ĐỘNG POLL LÀM TƯƠI MỖI 30 GIÂY
+  // 🎯 TỰ ĐỘNG LÀM TƯƠI MỖI 30 GIÂY
   useEffect(() => {
     if (activeTab === 'public') {
       loadPublicSites(false);
@@ -531,7 +522,6 @@ export const SiteMonitorPage: React.FC = () => {
     return sites.filter(s => s.last_status === statusFilter);
   }, [sites, statusFilter]);
 
-  // 🎯 TÌM BẢN DEPLOY ĐANG THỰC SỰ LIVE (READY/LIVE ĐẦU TIÊN TRONG DANH SÁCH)
   const activeVercelDeployId = useMemo(() => {
     const liveDeploy = vercelDeploys.find(d => (d.state || d.status || '').toUpperCase() === 'READY');
     return liveDeploy ? liveDeploy.id : null;

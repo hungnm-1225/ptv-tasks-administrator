@@ -28,6 +28,7 @@ import {
   Layers,
   Search,
   Check,
+  Globe,
   Plus,
   Wand2,
   Clock,
@@ -1570,86 +1571,105 @@ export const UnifiedInboxPage: React.FC = () => {
                         )}
                       </div>
 
-                      {/* Phân giải trường học */}
-                      <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/30 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-extrabold uppercase text-slate-400 flex items-center gap-1">
-                            <Building2 className="w-3 h-3 text-indigo-500" />
-                            <span>Trường Học Mục Tiêu (Detected School):</span>
-                          </span>
-
-                          {activeWorkflow.ai_analysis?.detected_school && (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                              ✓ Khớp {activeWorkflow.ai_analysis.detected_school.confidence
-                                ? `${Math.round(activeWorkflow.ai_analysis.detected_school.confidence * 100)}%`
-                                : 'Đã xác nhận'}
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="relative" ref={schoolPickerRef}>
-                          <div
-                            onClick={() => setIsSchoolPickerOpen(!isSchoolPickerOpen)}
-                            className={`flex items-center justify-between p-3 rounded-xl border transition cursor-pointer shadow-xs ${activeWorkflow.ai_analysis?.detected_school?.name
-                              ? 'border-emerald-300 dark:border-emerald-800/60 bg-emerald-50/70 dark:bg-emerald-950/30 hover:bg-emerald-100/60'
-                              : 'border-amber-400 dark:border-amber-700 bg-amber-100/80 dark:bg-amber-950/40 hover:bg-amber-100'
-                              }`}
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <Building2 className={`w-4 h-4 shrink-0 ${activeWorkflow.ai_analysis?.detected_school?.name ? 'text-emerald-600' : 'text-amber-700 dark:text-amber-400'
-                                }`} />
-                              <span className={`text-xs font-black truncate ${activeWorkflow.ai_analysis?.detected_school?.name
-                                ? 'text-slate-900 dark:text-white'
-                                : 'text-amber-950 dark:text-amber-200'
-                                }`}>
-                                {activeWorkflow.ai_analysis?.detected_school?.name ||
-                                  '⚠️ Chưa xác định chắc chắn trường học (Nhấp để chọn)'}
+                      {/* 🎯 PHÂN GIẢI TRƯỜNG HỌC (ĐÃ DECOUPLE: CHỈ HIỂN THỊ KHI TÁC VỤ CẦN TRƯỜNG HỌC) */}
+                      {activeWorkflow.ai_analysis?.school_required === false ? (
+                        <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Globe className="w-4 h-4 text-sky-600 dark:text-sky-400" />
+                            <div className="space-y-0.5">
+                              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">
+                                Phạm Vi Vận Hành:
+                              </span>
+                              <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                                Toàn Cục / Nền Tảng Độc Lập (Git, Keycloak, Đối tác ngoài)
                               </span>
                             </div>
+                          </div>
+                          <span className="px-2.5 py-1 rounded-lg text-[10px] font-extrabold bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300 border border-sky-200 dark:border-sky-800">
+                            Không cần School
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/30 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-extrabold uppercase text-slate-400 flex items-center gap-1">
+                              <Building2 className="w-3 h-3 text-indigo-500" />
+                              <span>Trường Học Mục Tiêu (Detected School):</span>
+                            </span>
 
-                            <div className="flex items-center gap-1.5 shrink-0 text-indigo-700 dark:text-indigo-400 font-bold">
-                              <span className="text-xs underline">Thay đổi</span>
-                              <ChevronDown className="w-4 h-4" />
-                            </div>
+                            {activeWorkflow.ai_analysis?.detected_school && (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                                ✓ Khớp {activeWorkflow.ai_analysis.detected_school.confidence
+                                  ? `${Math.round(activeWorkflow.ai_analysis.detected_school.confidence * 100)}%`
+                                  : 'Đã xác nhận'}
+                              </span>
+                            )}
                           </div>
 
-                          {isSchoolPickerOpen && (
-                            <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-300 dark:border-slate-700 p-2 z-50 max-h-60 overflow-y-auto space-y-1 animate-in fade-in zoom-in-95 duration-100">
-                              <div className="relative w-full">
-                                <input
-                                  type="text"
-                                  value={schoolSearchQuery}
-                                  onChange={(e) => setSchoolSearchQuery(e.target.value)}
-                                  placeholder="Nhập tên trường hoặc mã trường..."
-                                  className="w-full h-10 pl-9 pr-3 text-xs font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-900 border-2 border-amber-400 dark:border-amber-600 rounded-xl shadow-xs outline-none focus:ring-2 focus:ring-amber-500/30 placeholder:text-slate-400"
-                                />
-                                <Search className="w-4 h-4 text-amber-600 dark:text-amber-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <div className="relative" ref={schoolPickerRef}>
+                            <div
+                              onClick={() => setIsSchoolPickerOpen(!isSchoolPickerOpen)}
+                              className={`flex items-center justify-between p-3 rounded-xl border transition cursor-pointer shadow-xs ${activeWorkflow.ai_analysis?.detected_school?.name
+                                ? 'border-emerald-300 dark:border-emerald-800/60 bg-emerald-50/70 dark:bg-emerald-950/30 hover:bg-emerald-100/60'
+                                : 'border-amber-400 dark:border-amber-700 bg-amber-100/80 dark:bg-amber-950/40 hover:bg-amber-100'
+                                }`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <Building2 className={`w-4 h-4 shrink-0 ${activeWorkflow.ai_analysis?.detected_school?.name ? 'text-emerald-600' : 'text-amber-700 dark:text-amber-400'
+                                  }`} />
+                                <span className={`text-xs font-black truncate ${activeWorkflow.ai_analysis?.detected_school?.name
+                                  ? 'text-slate-900 dark:text-white'
+                                  : 'text-amber-950 dark:text-amber-200'
+                                  }`}>
+                                  {activeWorkflow.ai_analysis?.detected_school?.name ||
+                                    '⚠️ Chưa xác định chắc chắn trường học (Nhấp để chọn)'}
+                                </span>
                               </div>
 
-                              {filteredSchools.length === 0 ? (
-                                <div className="p-3 text-center text-xs text-slate-400">Không tìm thấy trường nào.</div>
-                              ) : (
-                                filteredSchools.map((s) => (
-                                  <button
-                                    key={s.school_id}
-                                    type="button"
-                                    onClick={() => handleSelectSchool(s)}
-                                    className="w-full text-left p-2 rounded-lg text-xs hover:bg-indigo-50 dark:hover:bg-slate-800 transition flex items-center justify-between cursor-pointer"
-                                  >
-                                    <div className="truncate pr-2">
-                                      <div className="font-bold text-slate-800 dark:text-slate-200">{s.school_name}</div>
-                                      <div className="text-[10px] text-slate-400 font-mono">
-                                        Mã: {s.school_code} | Đối tác: {s.partner_name}
-                                      </div>
-                                    </div>
-                                    <Check className="w-3.5 h-3.5 text-indigo-600 opacity-0 group-hover:opacity-100" />
-                                  </button>
-                                ))
-                              )}
+                              <div className="flex items-center gap-1.5 shrink-0 text-indigo-700 dark:text-indigo-400 font-bold">
+                                <span className="text-xs underline">Thay đổi</span>
+                                <ChevronDown className="w-4 h-4" />
+                              </div>
                             </div>
-                          )}
+
+                            {isSchoolPickerOpen && (
+                              <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-300 dark:border-slate-700 p-2 z-50 max-h-60 overflow-y-auto space-y-1 animate-in fade-in zoom-in-95 duration-100">
+                                <div className="relative w-full">
+                                  <input
+                                    type="text"
+                                    value={schoolSearchQuery}
+                                    onChange={(e) => setSchoolSearchQuery(e.target.value)}
+                                    placeholder="Nhập tên trường hoặc mã trường..."
+                                    className="w-full h-10 pl-9 pr-3 text-xs font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-900 border-2 border-amber-400 dark:border-amber-600 rounded-xl shadow-xs outline-none focus:ring-2 focus:ring-amber-500/30 placeholder:text-slate-400"
+                                  />
+                                  <Search className="w-4 h-4 text-amber-600 dark:text-amber-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                </div>
+
+                                {filteredSchools.length === 0 ? (
+                                  <div className="p-3 text-center text-xs text-slate-400">Không tìm thấy trường nào.</div>
+                                ) : (
+                                  filteredSchools.map((s) => (
+                                    <button
+                                      key={s.school_id}
+                                      type="button"
+                                      onClick={() => handleSelectSchool(s)}
+                                      className="w-full text-left p-2 rounded-lg text-xs hover:bg-indigo-50 dark:hover:bg-slate-800 transition flex items-center justify-between cursor-pointer"
+                                    >
+                                      <div className="truncate pr-2">
+                                        <div className="font-bold text-slate-800 dark:text-slate-200">{s.school_name}</div>
+                                        <div className="text-[10px] text-slate-400 font-mono">
+                                          Mã: {s.school_code} | Đối tác: {s.partner_name}
+                                        </div>
+                                      </div>
+                                      <Check className="w-3.5 h-3.5 text-indigo-600 opacity-0 group-hover:opacity-100" />
+                                    </button>
+                                  ))
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                       {/* Khóa học & Git Role */}
                       <div className="flex items-center gap-2 flex-wrap text-xs">

@@ -1,13 +1,11 @@
-# backend/app/services/email_thread_service.py
+#backend/app/services/email_thread_service.py
 """
-Email & osTicket Thread Lifecycle & Segmentation Service (Master Enterprise v3.0)
+Email & osTicket Thread Lifecycle & Segmentation Service (Master Enterprise v4.0)
 Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI
-Mục đích:
-- Hỗ trợ cả 2 chuẩn hội thoại:
-  1. osTicket / Pythaverse Hub Chronological (--- [LƯỢT X] USER/STAFF ---) từ cũ đến mới.
-  2. Gmail / Outlook Top-Posting (Tin mới nhất nằm trên cùng).
-- Tự động nhận diện các lượt STAFF đã xử lý xong để chặn không chạy lại yêu cầu cũ.
-- Bốc chính xác tin nhắn yêu cầu mới nhất ở Lượt cuối cùng để cấp cho AI Fact & Planner.
+Chuyên trách:
+- Khử sạch 100% "Show trimmed content" (gmail_quote, blockquote, On...wrote).
+- Bóc tách Gmail Top-Posting thành các lượt hội thoại (Turns) độc lập như osTicket.
+- Nhận diện lượt gửi của nhân viên DTT (@dtt.vn) vs khách hàng để trích xuất đúng Actionable Request.
 """
 import re
 from typing import List, Dict, Any, Optional, Tuple
@@ -29,12 +27,13 @@ class ThreadTurn:
 class ParsedThreadResult:
     is_thread: bool
     total_turns: int
-    current_message: str
-    original_message: str
+    current_message: str              # Tin nhắn mới nhất cần xử lý (ưu tiên của khách hàng)
+    original_message: str             # Tin nhắn khởi đầu luồng
+    latest_user_message: str          # Yêu cầu gần nhất của khách hàng (bỏ qua tin nhắn kỹ sư báo xong)
     history_turns: List[ThreadTurn]
     participants: List[str]
     is_latest_from_internal: bool
-    lifecycle_state: str  # 'WAITING_CUSTOMER_INFO' | 'ACTIONABLE' | 'RESOLVED_CONFIRMATION' | 'SINGLE_MESSAGE'
+    lifecycle_state: str              # 'WAITING_CUSTOMER_INFO' | 'ACTIONABLE' | 'RESOLVED_CONFIRMATION' | 'SINGLE_MESSAGE'
     compact_prompt_context: str
     accounts_already_created: bool = False
     requested_school_correction: Optional[str] = None
@@ -44,24 +43,26 @@ class EmailThreadService:
     INTERNAL_DOMAINS = ("@dtt.vn", "@pythaverse.space")
     ADMIN_EMAILS = {"hung.nguyenmanh@dtt.vn"}
 
-    # Pattern nhận diện định dạng phân lượt của osTicket Hub
+    # Pattern nhận diện phân lượt của osTicket Hub
     LUOT_PATTERN = re.compile(
         r"---+\s*\[LƯỢT\s*(\d+)\]\s*(USER|STAFF|Khách hàng|Hỗ trợ|[\w\s]+)\s*(?:\((.*?)\))?:\s*(.*?)(?:\s*\((.*?)\))?\s*---+",
         re.IGNORECASE
     )
 
-    SPLIT_PATTERNS = [
-        r"\n\s*(?:Vào\s+[\w\s,]+vào\s+lúc\s+[\d:]+|Vào\s+[\w\s,]+đã\s+viết\s*:)",
-        r"\n\s*On\s+[\w\s,:]+wrote\s*:",
-        r"\n\s*-{3,}\s*(?:Original Message|Tin nhắn gốc)\s*-{3,}",
-        r"\n\s*_{10,}",
-        r"\n\s*From:\s+.*?\nSent:\s+.*?\nTo:\s+",
-    ]
+    # Các điểm ngắt dòng khi người dùng Reply/Reply All (Show trimmed content)
+    GMAIL_SPLIT_REGEX = re.compile(
+        r"(?:\n\s*On\s+[A-Za-z]{3},\s+[A-Za-z]{3}\s+\d+.*?(?:wrote|đã viết)\s*:|"
+        r"\n\s*Vào\s+[\w\s,]+(?:vào lúc|đã viết)\s*[\d:]*.*?:|"
+        r"\n\s*-{3,}\s*(?:Original Message|Tin nhắn gốc)\s*-{3,}|"
+        r"\n\s*_{10,}|"
+        r"\n\s*From:\s+.*?\nSent:\s+.*?\nTo:\s+)",
+        re.IGNORECASE | re.DOTALL
+    )
 
     FULFILLMENT_PATTERNS = [
+        r"i have completed",
         r"your request has been done",
         r"here is the login credential",
-        r"i have completed",
         r"đã hoàn thành",
         r"đã xử lý xong",
         r"đã cấp tài khoản",
@@ -76,6 +77,24 @@ class EmailThreadService:
         return any(e_clean.endswith(dom) for dom in cls.INTERNAL_DOMAINS)
 
     @classmethod
+    def clean_trimmed_quotes(cls, text: str) -> str:
+        """Cắt bỏ toàn bộ các khối quoted reply lặp lại của Gmail."""
+        if not text:
+            return ""
+        # 1. Cắt từ điểm xuất hiện header On ... wrote:
+        parts = cls.GMAIL_SPLIT_REGEX.split(text)
+        clean_first_part = parts[0] if parts else text
+
+        # 2. Xóa các dòng bắt đầu bằng dấu trích dẫn '>'
+        lines = []
+        for line in clean_first_part.split("\n"):
+            stripped = line.strip()
+            if not stripped.startswith(">"):
+                lines.append(line)
+
+        return "\n".join(lines).strip()
+
+    @classmethod
     def parse_thread(cls, raw_content: str, sender_email: Optional[str] = None) -> ParsedThreadResult:
         content = (raw_content or "").replace("\r\n", "\n").strip()
         sender_clean = (sender_email or "").strip().lower()
@@ -83,7 +102,8 @@ class EmailThreadService:
         if not content:
             return ParsedThreadResult(
                 is_thread=False, total_turns=0, current_message="", original_message="",
-                history_turns=[], participants=[], is_latest_from_internal=cls.is_internal_email(sender_clean),
+                latest_user_message="", history_turns=[], participants=[],
+                is_latest_from_internal=cls.is_internal_email(sender_clean),
                 lifecycle_state="SINGLE_MESSAGE", compact_prompt_context=""
             )
 
@@ -102,7 +122,7 @@ class EmailThreadService:
                 is_staff = "STAFF" in raw_role or "HỖ TRỢ" in raw_role or any(a in author_name.lower() for a in ["hung", "dtt"])
                 start_body = m.end()
                 end_body = luot_matches[idx + 1].start() if idx + 1 < len(luot_matches) else len(content)
-                body = content[start_body:end_body].strip()
+                body = cls.clean_trimmed_quotes(content[start_body:end_body])
 
                 turns.append(ThreadTurn(
                     turn_index=turn_idx,
@@ -114,103 +134,84 @@ class EmailThreadService:
                     body=body
                 ))
 
-            # Sắp xếp theo số thứ tự lượt
             turns.sort(key=lambda t: t.turn_index)
             latest_turn = turns[-1]
             is_latest_internal = latest_turn.is_internal
 
-            # Kiểm tra xem Staff đã từng cấp tài khoản chưa
+            # Tìm tin nhắn gần nhất của KHÁCH HÀNG (bỏ qua nhân viên)
+            customer_turns = [t for t in turns if not t.is_internal]
+            latest_customer_msg = customer_turns[-1].body if customer_turns else latest_turn.body
+
             accounts_created = any(
                 t.is_internal and any(re.search(p, t.body, re.IGNORECASE) for p in cls.FULFILLMENT_PATTERNS)
                 for t in turns
             )
 
-            # Lấy các lượt phản hồi của khách hàng SAU lượt hỗ trợ cuối cùng của Staff
-            last_staff_idx = max([i for i, t in enumerate(turns) if t.is_internal], default=-1)
-            pending_user_turns = turns[last_staff_idx + 1:] if last_staff_idx >= 0 else turns
+            lifecycle_state = "RESOLVED_CONFIRMATION" if (is_latest_internal and accounts_created) else ("WAITING_CUSTOMER_INFO" if is_latest_internal else "ACTIONABLE")
 
-            # Tìm xem có yêu cầu sửa trường không
-            correction_school = None
-            for ut in pending_user_turns:
-                m_sch = re.search(r"School\s*Name\s*:\s*([^\n\r]+)", ut.body, re.IGNORECASE)
-                if m_sch:
-                    correction_school = m_sch.group(1).strip()
-                    break
-
-            if is_latest_internal:
-                lifecycle_state = "WAITING_CUSTOMER_INFO"
-            else:
-                lifecycle_state = "ACTIONABLE"
-
-            # Dựng tin nhắn hiện tại từ các lượt chưa được giải quyết của khách
-            current_actionable_text = "\n\n".join([f"[LƯỢT {t.turn_index} - {t.author_name}]:\n{t.body}" for t in pending_user_turns])
-            if not current_actionable_text:
-                current_actionable_text = latest_turn.body
-
-            # Dựng compact context siêu rõ ràng cho Gemini
-            history_summary = []
-            for t in turns[:last_staff_idx + 1]:
-                history_summary.append(f"- LƯỢT {t.turn_index} ({t.role} - {t.author_name}): {t.body[:200]}...")
-
-            compact_context = f"""=== NGỮ CẢNH TIẾN TRÌNH VÉ (TỔNG HỢP TỪ LỊCH SỬ HỘI THOẠI) ===
-[TRẠNG THÁI ĐÃ XỬ LÝ]: Nhân viên hỗ trợ đã hoàn tất việc tạo tài khoản và gửi thông tin đăng nhập ở LƯỢT 2.
-[YÊU CẦU MỚI NHẤT HIỆN TẠI CỦA KHÁCH HÀNG (BẮT BUỘC BÁM SÁT VÀO ĐÂY)]:
-{current_actionable_text}
-
-[LỊCH SỬ XỬ LÝ TRƯỚC ĐÓ CỦA NHÂN VIÊN]:
-{chr(10).join(history_summary)}
-"""
             return ParsedThreadResult(
                 is_thread=True,
                 total_turns=len(turns),
-                current_message=current_actionable_text,
+                current_message=latest_turn.body,
                 original_message=turns[0].body,
+                latest_user_message=latest_customer_msg,
                 history_turns=turns,
                 participants=[t.author_name for t in turns if t.author_name],
                 is_latest_from_internal=is_latest_internal,
                 lifecycle_state=lifecycle_state,
-                compact_prompt_context=compact_context,
+                compact_prompt_context=latest_customer_msg,
                 accounts_already_created=accounts_created,
-                requested_school_correction=correction_school
+                requested_school_correction=None
             )
 
         # =====================================================================
-        # TRƯỜNG HỢP B: ĐỊNH DẠNG EMAIL CHUẨN GMAIL / OUTLOOK (TOP-POSTING)
+        # TRƯỜNG HỢP B: ĐỊNH DẠNG GMAIL TOP-POSTING (CÓ NÚT "SHOW TRIMMED CONTENT")
         # =====================================================================
-        split_pos = len(content)
-        for p in cls.SPLIT_PATTERNS:
-            m = re.search(p, content, re.IGNORECASE)
-            if m and m.start() < split_pos:
-                split_pos = m.start()
+        # Phân tách email thành các phần tử dựa trên điểm ngắt On ... wrote:
+        raw_splits = cls.GMAIL_SPLIT_REGEX.split(content)
+        parsed_turns: List[str] = [p.strip() for p in raw_splits if p and len(p.strip()) > 10]
 
-        current_msg = content[:split_pos].strip()
-        history_raw = content[split_pos:].strip()
-        is_thread = len(history_raw) > 50
+        if not parsed_turns:
+            parsed_turns = [content]
 
-        is_latest_internal = cls.is_internal_email(sender_clean)
-        if is_latest_internal:
-            is_confirm = any(re.search(p, current_msg, re.IGNORECASE) for p in cls.FULFILLMENT_PATTERNS)
-            lifecycle_state = "RESOLVED_CONFIRMATION" if is_confirm else "WAITING_CUSTOMER_INFO"
+        is_thread = len(parsed_turns) > 1
+        latest_msg = cls.clean_trimmed_quotes(parsed_turns[0])
+
+        # Kiểm tra xem tin nhắn gần nhất có phải do kỹ sư DTT gửi hoàn tất không
+        is_latest_internal = cls.is_internal_email(sender_clean) or any(
+            adm in latest_msg.lower() for adm in ["hùng nguyễn mạnh", "hung.nguyenmanh@dtt.vn", "best regards,\nhùng"]
+        )
+
+        is_completed_by_staff = any(re.search(p, latest_msg, re.IGNORECASE) for p in cls.FULFILLMENT_PATTERNS)
+
+        # 🎯 BỐC TÁCH YÊU CẦU THỰC SỰ CỦA KHÁCH HÀNG:
+        # Nếu lượt trên cùng là của anh Hùng ("I have completed..."), thì yêu cầu thực sự của khách nằm ở tin nhắn thứ 2!
+        if is_latest_internal and len(parsed_turns) > 1:
+            latest_customer_request = cls.clean_trimmed_quotes(parsed_turns[1])
         else:
-            lifecycle_state = "ACTIONABLE" if is_thread else "SINGLE_MESSAGE"
+            latest_customer_request = latest_msg
 
-        compact_context = f"""[YÊU CẦU MỚI NHẤT HIỆN TẠI]:
-{current_msg}
+        lifecycle_state = "RESOLVED_CONFIRMATION" if (is_latest_internal and is_completed_by_staff) else ("ACTIONABLE" if is_thread else "SINGLE_MESSAGE")
 
-[LỊCH SỬ CŨ THAM KHẢO]:
-{history_raw[:800] if is_thread else '(Không có lịch sử cũ)'}
+        compact_context = f"""[YÊU CẦU VẬN HÀNH CỦA KHÁCH HÀNG (CẦN XỬ LÝ)]:
+{latest_customer_request}
+
+[PHẢN HỒI GẦN NHẤT CỦA KỸ SƯ HỆ THỐNG]:
+{latest_msg if is_latest_internal else '(Chưa có phản hồi từ kỹ sư)'}
 """
+
         return ParsedThreadResult(
             is_thread=is_thread,
-            total_turns=2 if is_thread else 1,
-            current_message=current_msg,
-            original_message=history_raw[-1000:] if is_thread else current_msg,
+            total_turns=len(parsed_turns),
+            current_message=latest_msg,
+            original_message=parsed_turns[-1] if parsed_turns else latest_msg,
+            latest_user_message=latest_customer_request,
             history_turns=[],
             participants=[sender_clean] if sender_clean else [],
             is_latest_from_internal=is_latest_internal,
             lifecycle_state=lifecycle_state,
             compact_prompt_context=compact_context,
-            accounts_already_created=False,
+            accounts_already_created=is_completed_by_staff,
             requested_school_correction=None
         )
 

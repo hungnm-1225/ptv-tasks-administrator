@@ -1,13 +1,19 @@
 # backend/app/services/site_monitor_service.py
+"""
+Pythaverse Central Admin - Site Uptime & Infrastructure Monitor Service
+Chuẩn hóa: Sử dụng get_supabase_client() chuẩn mực, Hydrate dữ liệu mới nhất từ CSDL khi khởi động.
+Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI
+"""
 import os
 import time
 import logging
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 import pytz
 import httpx
 from cryptography.fernet import Fernet
+from app.core.supabase import get_supabase_client
 
 logger = logging.getLogger(__name__)
 VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
@@ -20,24 +26,6 @@ def format_vn(dt: datetime) -> str:
 
 def now_vn_str() -> str:
     return format_vn(now_vn())
-
-# ---------------------------------------------------------------------------
-# SUPABASE & FERNET INITIALIZER
-# ---------------------------------------------------------------------------
-_supabase_client = None
-
-def get_supabase():
-    global _supabase_client
-    if _supabase_client is None:
-        try:
-            from supabase import create_client
-            url = os.getenv("SUPABASE_URL", "")
-            key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY", "")
-            if url and key:
-                _supabase_client = create_client(url, key)
-        except Exception as e:
-            logger.warning(f"Không thể khởi tạo Supabase client: {e}")
-    return _supabase_client
 
 def get_fernet_cipher() -> Optional[Fernet]:
     vault_key = os.getenv("VAULT_SECRET_KEY", "")
@@ -63,16 +51,16 @@ def decrypt_secret(encrypted_text: str) -> str:
 # CẤU HÌNH CÁC WEBSITE THEO DÕI (10 SITES CHUẨN)
 # ---------------------------------------------------------------------------
 DEFAULT_MONITORED_SITES = [
-    {"id": "pythaverse_main",  "name": "Pythaverse Main Portal",    "url": "https://pythaverse.space",              "category": "core",      "enabled": True},
-    {"id": "ide",              "name": "Pythaverse IDE",            "url": "https://ide.pythaverse.space/#/",       "category": "satellite", "enabled": True},
-    {"id": "avatar",           "name": "Avatar 3D Generator",       "url": "https://avatar.pythaverse.space/",       "category": "satellite", "enabled": True},
-    {"id": "note",             "name": "Jupyter Hub Note",          "url": "https://note.pythaverse.space/",        "category": "satellite", "enabled": True},
-    {"id": "git",              "name": "Pythaverse Git Repos",      "url": "https://git.pythaverse.space/",         "category": "satellite", "enabled": True},
-    {"id": "contest",          "name": "Contest & Competitions",    "url": "https://contest.pythaverse.space/events","category": "satellite", "enabled": True},
-    {"id": "digitaltwin",      "name": "Digital Twin Simulation",   "url": "https://digitaltwin.pythaverse.space/", "category": "satellite", "enabled": True},
-    {"id": "learn",            "name": "LMS Learn Portal",          "url": "https://learn.pythaverse.space/my/",    "category": "satellite", "enabled": True},
-    {"id": "learn_s",          "name": "LMS Learn Staging",         "url": "https://learn-s.pythaverse.space/my/",  "category": "satellite", "enabled": True},
-    {"id": "iot",              "name": "IoT Pythaverse Hub",        "url": "https://iot.pythaverse.space/",         "category": "satellite", "enabled": True},
+    {"id": "pythaverse_main",  "name": "Pythaverse Main Portal",    "url": "https://pythaverse.space",               "category": "core",      "enabled": True},
+    {"id": "ide",              "name": "Pythaverse IDE",            "url": "https://ide.pythaverse.space/#/",        "category": "satellite", "enabled": True},
+    {"id": "avatar",           "name": "Avatar 3D Generator",       "url": "https://avatar.pythaverse.space/",        "category": "satellite", "enabled": True},
+    {"id": "note",             "name": "Jupyter Hub Note",          "url": "https://note.pythaverse.space/",         "category": "satellite", "enabled": True},
+    {"id": "git",              "name": "Pythaverse Git Repos",      "url": "https://git.pythaverse.space/",          "category": "satellite", "enabled": True},
+    {"id": "contest",          "name": "Contest & Competitions",    "url": "https://contest.pythaverse.space/events", "category": "satellite", "enabled": True},
+    {"id": "digitaltwin",      "name": "Digital Twin Simulation",   "url": "https://digitaltwin.pythaverse.space/",  "category": "satellite", "enabled": True},
+    {"id": "learn",            "name": "LMS Learn Portal",          "url": "https://learn.pythaverse.space/my/",     "category": "satellite", "enabled": True},
+    {"id": "learn_s",          "name": "LMS Learn Staging",         "url": "https://learn-s.pythaverse.space/my/",   "category": "satellite", "enabled": True},
+    {"id": "iot",              "name": "IoT Pythaverse Hub",        "url": "https://iot.pythaverse.space/",          "category": "satellite", "enabled": True},
 ]
 
 def _make_initial_state(site: dict) -> dict:
@@ -82,7 +70,7 @@ def _make_initial_state(site: dict) -> dict:
         "http_code":         200,
         "response_time_ms":  0,
         "last_checked_at":   None,
-        "details":          "Đang chờ kiểm tra định kỳ",
+        "details":          "Phản hồi ổn định",
         "uptime_pct_24h":   100.0,
         "uptime_pct_30d":   100.0,
         "total_incidents":   0,
@@ -90,14 +78,39 @@ def _make_initial_state(site: dict) -> dict:
     }
 
 _sites_cache: list[dict] = [_make_initial_state(s) for s in DEFAULT_MONITORED_SITES]
-
-# ===========================================================================
-# [CẬP NHẬT THÊM / PATCH 1] LƯU TRỮ METRIC PING THỰC TẾ (ZERO MOCKUP)
-# ===========================================================================
 _site_latency_buffer: Dict[str, List[Dict[str, Any]]] = {}
 
+def hydrate_cache_from_db():
+    """Tự động khôi phục dữ liệu Ping mới nhất từ Supabase khi máy chủ Render vừa khởi động."""
+    try:
+        db = get_supabase_client()
+        for site in _sites_cache:
+            s_id = site["id"]
+            res = db.table("site_ping_metrics")\
+                .select("latency_ms, http_code, status, checked_at")\
+                .eq("site_id", s_id)\
+                .order("checked_at", desc=True)\
+                .limit(1)\
+                .execute()
+
+            if res.data:
+                latest = res.data[0]
+                dt = datetime.fromisoformat(latest["checked_at"].replace("Z", "+00:00")).astimezone(VN_TZ)
+                site["response_time_ms"] = latest.get("latency_ms") or 0
+                site["http_code"] = latest.get("http_code") or 200
+                site["last_status"] = latest.get("status") or "UP"
+                site["last_checked_at"] = format_vn(dt)
+                site["details"] = "Phản hồi ổn định" if site["last_status"] == "UP" else "Sự cố kết nối"
+        logger.info("✨ [SiteMonitor] Đã nạp thành công dữ liệu Ping mới nhất từ Supabase vào RAM!")
+    except Exception as e:
+        logger.warning(f"⚠️ [SiteMonitor] Không thể hydrate cache từ DB: {e}")
+
+# Kích hoạt hydrate ngay khi nạp module
+hydrate_cache_from_db()
+
 def record_ping_metric(site_id: str, latency_ms: int, http_code: int, status: str):
-    """Chỉ lưu latency_ms dương đối với các lần ping thành công, ghi đệm RAM và Supabase."""
+    """Ghi nhận metric vào RAM Buffer và Supabase bằng service role."""
+    now_utc = datetime.now(timezone.utc)
     now_dt = now_vn()
     clean_latency = latency_ms if status == "UP" and 0 < latency_ms < 15000 else 0
 
@@ -106,11 +119,11 @@ def record_ping_metric(site_id: str, latency_ms: int, http_code: int, status: st
         "latency_ms": clean_latency,
         "http_code": http_code,
         "status": status,
-        "checked_at": now_dt.isoformat(),
+        "checked_at": now_utc.isoformat(),
         "hour_key": now_dt.strftime("%Y-%m-%d %H"),
     }
-    
-    # 1. Lưu vào Ring Buffer RAM (tối đa 500 bản ghi/site phục vụ đọc tức thì 1ms)
+
+    # 1. Lưu vào RAM Buffer
     if site_id not in _site_latency_buffer:
         _site_latency_buffer[site_id] = []
     _site_latency_buffer[site_id].append(metric_entry)
@@ -118,34 +131,28 @@ def record_ping_metric(site_id: str, latency_ms: int, http_code: int, status: st
         _site_latency_buffer[site_id].pop(0)
 
     # 2. Ghi trực tiếp vào Supabase table site_ping_metrics
-    db = get_supabase()
-    if db:
-        try:
-            db.table("site_ping_metrics").insert({
-                "site_id": site_id,
-                "latency_ms": clean_latency,
-                "http_code": http_code,
-                "status": status,
-                "checked_at": now_dt.isoformat()
-            }).execute()
-        except Exception as e:
-            # Ghi nhận log cảnh báo nếu có lỗi RLS hoặc lỗi schema
-            logger.warning(f"⚠️ [PingMetric] Không thể ghi nhận vào Supabase: {e}")
-
+    try:
+        db = get_supabase_client()
+        db.table("site_ping_metrics").insert({
+            "site_id": site_id,
+            "latency_ms": clean_latency,
+            "http_code": http_code,
+            "status": status,
+            "checked_at": now_utc.isoformat()
+        }).execute()
+    except Exception as e:
+        logger.warning(f"⚠️ [PingMetric] Không thể ghi nhận vào Supabase: {e}")
 
 def record_downtime_event(site_id: str, site_name: str, http_code: int, error_msg: str):
-    """Mở sự cố gián đoạn trên Supabase khi phát hiện site sập."""
-    db = get_supabase()
-    if not db:
-        return
+    """Mở sự cố gián đoạn trên Supabase."""
     try:
-        # Kiểm tra xem có sự cố đang diễn ra hay không
+        db = get_supabase_client()
         resp = db.table("site_downtime_events").select("id").eq("site_id", site_id).eq("is_ongoing", True).limit(1).execute()
         if not resp.data:
             db.table("site_downtime_events").insert({
                 "site_id": site_id,
                 "site_name": site_name,
-                "started_at": now_vn().isoformat(),
+                "started_at": datetime.now(timezone.utc).isoformat(),
                 "http_code": http_code,
                 "error_msg": error_msg,
                 "is_ongoing": True,
@@ -155,17 +162,15 @@ def record_downtime_event(site_id: str, site_name: str, http_code: int, error_ms
         logger.error(f"Lỗi ghi nhận sự cố vào DB: {e}")
 
 def resolve_downtime_event(site_id: str):
-    """Đóng sự cố gián đoạn trên Supabase khi site đã hoạt động trở lại."""
-    db = get_supabase()
-    if not db:
-        return
+    """Đóng sự cố gián đoạn trên Supabase khi site UP trở lại."""
     try:
+        db = get_supabase_client()
         resp = db.table("site_downtime_events").select("id, started_at").eq("site_id", site_id).eq("is_ongoing", True).execute()
         for event in resp.data or []:
-            started = datetime.fromisoformat(event["started_at"]).astimezone(VN_TZ)
-            duration_s = int((now_vn() - started).total_seconds())
+            started = datetime.fromisoformat(event["started_at"].replace("Z", "+00:00"))
+            duration_s = int((datetime.now(timezone.utc) - started).total_seconds())
             db.table("site_downtime_events").update({
-                "ended_at": now_vn().isoformat(),
+                "ended_at": datetime.now(timezone.utc).isoformat(),
                 "duration_s": duration_s,
                 "is_ongoing": False
             }).eq("id", event["id"]).execute()
@@ -174,20 +179,15 @@ def resolve_downtime_event(site_id: str):
         logger.error(f"Lỗi đóng sự cố trên DB: {e}")
 
 # ---------------------------------------------------------------------------
-# LỊCH SỬ UPTIME & INCIDENT LOGS
+# LỊCH SỬ UPTIME 24H CHUẨN XÁC
 # ---------------------------------------------------------------------------
 def get_hourly_uptime_history(site_id: str, hours: int = 24) -> list[dict]:
-    """
-    Trả về 24 blocks (mỗi block là 1 giờ) mang số Ping thật và đối soát Downtime thật.
-    Đã sửa triệt để lỗi hiển thị 'Chưa có mẫu đo' và đường biểu đồ phẳng lì giả tạo!
-    """
+    """Trả về 24 blocks giờ có dữ liệu thật từ Supabase và RAM Buffer."""
     result = []
     now = now_vn()
-    db = get_supabase()
-    since_dt = now - timedelta(hours=hours)
-    since_iso = since_dt.isoformat()
+    since_utc = datetime.now(timezone.utc) - timedelta(hours=hours)
+    since_utc_iso = since_utc.isoformat()
 
-    # 1. Khởi tạo danh sách 24 khung giờ
     hour_map: Dict[str, dict] = {}
     for i in range(hours - 1, -1, -1):
         target_time = now - timedelta(hours=i)
@@ -206,26 +206,30 @@ def get_hourly_uptime_history(site_id: str, hours: int = 24) -> list[dict]:
 
     metrics_by_hour: Dict[str, List[int]] = {}
 
-    # 2. Đọc từ RAM buffer trước (cực nhanh và luôn có dữ liệu mới nhất)
+    # 1. Đọc từ RAM buffer
     for m in _site_latency_buffer.get(site_id, []):
         hk = m.get("hour_key")
         if hk in hour_map and m.get("latency_ms", 0) > 0:
             metrics_by_hour.setdefault(hk, []).append(m["latency_ms"])
 
-    # 3. Đọc dữ liệu lịch sử từ Supabase
-    if db:
-        try:
-            resp = db.table("site_ping_metrics").select("latency_ms, checked_at, http_code")\
-                .eq("site_id", site_id).gte("checked_at", since_iso).execute()
-            for row in resp.data or []:
-                row_dt = datetime.fromisoformat(row["checked_at"]).astimezone(VN_TZ)
-                hk = row_dt.strftime("%Y-%m-%d %H")
-                if hk in hour_map and row.get("latency_ms", 0) > 0:
-                    metrics_by_hour.setdefault(hk, []).append(row["latency_ms"])
-        except Exception as e:
-            logger.warning(f"Lỗi đọc Supabase site_ping_metrics cho {site_id}: {e}")
+    # 2. Đọc từ Supabase (Chuẩn hóa múi giờ VN)
+    try:
+        db = get_supabase_client()
+        resp = db.table("site_ping_metrics")\
+            .select("latency_ms, checked_at, http_code")\
+            .eq("site_id", site_id)\
+            .gte("checked_at", since_utc_iso)\
+            .execute()
 
-    # 4. Tính toán độ trễ trung bình cho các giờ CÓ MẪU ĐO THẬT
+        for row in resp.data or []:
+            row_dt = datetime.fromisoformat(row["checked_at"].replace("Z", "+00:00")).astimezone(VN_TZ)
+            hk = row_dt.strftime("%Y-%m-%d %H")
+            if hk in hour_map and row.get("latency_ms", 0) > 0:
+                metrics_by_hour.setdefault(hk, []).append(row["latency_ms"])
+    except Exception as e:
+        logger.warning(f"Lỗi đọc Supabase site_ping_metrics cho {site_id}: {e}")
+
+    # 3. Tính độ trễ trung bình cho từng giờ
     for hk, lat_list in metrics_by_hour.items():
         valid_pings = [l for l in lat_list if 0 < l < 15000]
         if valid_pings and hk in hour_map:
@@ -233,35 +237,36 @@ def get_hourly_uptime_history(site_id: str, hours: int = 24) -> list[dict]:
             hour_map[hk]["latency_ms"] = avg_lat
             hour_map[hk]["has_data"] = True
 
-    # 5. Đối soát bảng sự cố Downtime Events (Đoạn nào sập đánh dấu DOWN chuẩn xác)
-    if db:
-        try:
-            resp = db.table("site_downtime_events").select("started_at, ended_at, duration_s, is_ongoing, http_code, error_msg")\
-                .eq("site_id", site_id).gte("started_at", since_iso).execute()
-            for event in resp.data or []:
-                event_start = datetime.fromisoformat(event["started_at"]).astimezone(VN_TZ)
-                event_end = datetime.fromisoformat(event["ended_at"]).astimezone(VN_TZ) if event.get("ended_at") else now
-                
-                start_str = event_start.strftime("%Hh%M")
-                end_str = event_end.strftime("%Hh%M") if event.get("ended_at") else "nay"
-                dur_str = f"{start_str} - {end_str}"
+    # 4. Đối soát sự cố Downtime
+    try:
+        db = get_supabase_client()
+        resp = db.table("site_downtime_events")\
+            .select("started_at, ended_at, duration_s, is_ongoing, http_code, error_msg")\
+            .eq("site_id", site_id)\
+            .gte("started_at", since_utc_iso)\
+            .execute()
 
-                for entry in result:
-                    entry_dt = datetime.strptime(entry["full_time"], "%Y-%m-%d %H").replace(tzinfo=VN_TZ)
-                    if entry_dt <= event_end and (entry_dt + timedelta(hours=1)) >= event_start:
-                        entry["status"] = "DOWN"
-                        entry["latency_ms"] = 0
-                        entry["http_code"] = event.get("http_code") or 500
-                        entry["incident_duration"] = dur_str
-                        entry["has_data"] = True
-        except Exception as e:
-            logger.error(f"Lỗi đối soát downtime events: {e}")
+        for event in resp.data or []:
+            event_start = datetime.fromisoformat(event["started_at"].replace("Z", "+00:00")).astimezone(VN_TZ)
+            event_end = datetime.fromisoformat(event["ended_at"].replace("Z", "+00:00")).astimezone(VN_TZ) if event.get("ended_at") else now
+            
+            dur_str = f"{event_start.strftime('%Hh%M')} - {event_end.strftime('%Hh%M') if event.get('ended_at') else 'nay'}"
 
-    # 6. ĐẢM BẢO KHUNG GIỜ HIỆN TẠI LUÔN CÓ MẪU ĐO TỪ CACHE
+            for entry in result:
+                entry_dt = datetime.strptime(entry["full_time"], "%Y-%m-%d %H").replace(tzinfo=VN_TZ)
+                if entry_dt <= event_end and (entry_dt + timedelta(hours=1)) >= event_start:
+                    entry["status"] = "DOWN"
+                    entry["latency_ms"] = 0
+                    entry["http_code"] = event.get("http_code") or 500
+                    entry["incident_duration"] = dur_str
+                    entry["has_data"] = True
+    except Exception as e:
+        logger.error(f"Lỗi đối soát downtime events: {e}")
+
+    # 5. Gán giá trị điểm hiện tại nếu có
     current_hk = now.strftime("%Y-%m-%d %H")
     site_obj = next((s for s in _sites_cache if s["id"] == site_id), None)
     if site_obj and current_hk in hour_map:
-        # Nhưng nếu cron vừa ping nhát đầu tiên mà chưa kịp vào DB, lấy ngay giá trị mới nhất làm gốc:
         if not hour_map[current_hk]["has_data"] and site_obj.get("response_time_ms", 0) > 0:
             hour_map[current_hk]["latency_ms"] = site_obj["response_time_ms"]
             hour_map[current_hk]["status"] = site_obj.get("last_status", "UP")
@@ -269,12 +274,9 @@ def get_hourly_uptime_history(site_id: str, hours: int = 24) -> list[dict]:
 
     return result
 
-
 def get_incident_log(limit: int = 20) -> list[dict]:
-    db = get_supabase()
-    if not db:
-        return []
     try:
+        db = get_supabase_client()
         resp = db.table("site_downtime_events").select("*").order("started_at", desc=True).limit(limit).execute()
         return resp.data or []
     except Exception as e:
@@ -282,7 +284,7 @@ def get_incident_log(limit: int = 20) -> list[dict]:
         return []
 
 # ---------------------------------------------------------------------------
-# CORE MONITOR SERVICE (HTTP PING CHÍNH XÁC - ZERO MOCKUP)
+# CORE MONITOR SERVICE (PING HTTP NHẸ NHÀNG - KHÔNG MỞ PLAYWRIGHT)
 # ---------------------------------------------------------------------------
 class SiteMonitorService:
 
@@ -307,11 +309,10 @@ class SiteMonitorService:
         }
 
         try:
-            # Dùng HEAD request để đo đúng network ping, không tốn băng thông tải HTML
             async with httpx.AsyncClient(verify=False, timeout=8.0, follow_redirects=True, headers=headers) as client:
                 try:
                     response = await client.head(url)
-                    if response.status_code in (405, 501): # Nếu site chặn HEAD thì fallback sang GET
+                    if response.status_code in (405, 501):
                         response = await client.get(url)
                 except Exception:
                     response = await client.get(url)
@@ -337,7 +338,6 @@ class SiteMonitorService:
                     site["last_status"] = "WARNING"
                     site["details"] = f"Mã HTTP bất thường: {response.status_code}"
 
-                # Ghi nhận metric: nếu status UP thì ghi latency thật, DOWN thì ghi 0
                 record_ping_metric(site_id, latency if site["last_status"] == "UP" else 0, response.status_code, site["last_status"])
 
         except httpx.ConnectError:
@@ -388,14 +388,13 @@ class SiteMonitorService:
             if api_key and srv_id:
                 return api_key, srv_id
 
-        db = get_supabase()
-        if db:
-            try:
-                resp = db.table("site_deploy_configs").select("target_id, encrypted_api_token").eq("provider", provider).eq("is_active", True).execute()
-                if resp.data:
-                    return decrypt_secret(resp.data[0].get("encrypted_api_token", "")), resp.data[0].get("target_id", "")
-            except Exception:
-                pass
+        try:
+            db = get_supabase_client()
+            resp = db.table("site_deploy_configs").select("target_id, encrypted_api_token").eq("provider", provider).eq("is_active", True).execute()
+            if resp.data:
+                return decrypt_secret(resp.data[0].get("encrypted_api_token", "")), resp.data[0].get("target_id", "")
+        except Exception:
+            pass
         return "", ""
 
     @classmethod
@@ -506,9 +505,6 @@ class SiteMonitorService:
             "last_checked_at": now_vn_str(),
         }
 
-# ---------------------------------------------------------------------------
-# CRON JOB LẬP LỊCH TỰ ĐỘNG (ĐÃ BỎ TAB 2 RA KHỎI CRON)
-# ---------------------------------------------------------------------------
 async def poll_site_uptime_cron():
-    """Chỉ ping HTTP nhanh 10 trang web, không chạy RPA phân quyền để bảo toàn RAM."""
+    """Chỉ ping HTTP nhanh 10 trang web định kỳ mỗi 5 phút."""
     await SiteMonitorService.check_all_sites()

@@ -367,6 +367,7 @@ export interface WorkflowAIAnalysis {
   workflow_outcome?: 'NO_ACTION' | 'NEEDS_INFORMATION' | 'ACTIONABLE' | string;
   confidence_breakdown?: Record<string, number>;
   detected_school?: WorkflowEntityCandidate | null;
+  school_required?: boolean;
   school_candidates?: WorkflowEntityCandidate[];
   detected_courses?: Array<{ course_id?: number; course_name: string; category?: string }>;
   detected_actions?: string[];
