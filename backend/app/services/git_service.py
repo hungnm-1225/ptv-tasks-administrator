@@ -282,17 +282,34 @@ class GitPlaywrightService:
                 repo_res["status"] = "failed"
                 return repo_res
 
-            collab_match = re.search(r'name=["\']collaborators["\']\s+value=["\']([^"\']*)["\']', get_res.text)
-            current_collab_str = collab_match.group(1) if collab_match else ""
-
             current_collaborators: Dict[str, str] = {}
-            if current_collab_str:
-                for item in current_collab_str.split(","):
-                    item = item.strip()
-                    if ":" in item:
-                        u, r = item.split(":", 1)
-                        current_collaborators[u.strip()] = r.strip()
+            ul_match = re.search(r'<ul[^>]+id=["\']collaborator-list["\'][^>]*>(.*?)</ul>', get_res.text, re.DOTALL)
+            if ul_match:
+                ul_content = ul_match.group(1)
+                # Tách từng thẻ <li>
+                li_items = re.findall(r'<li[^>]*>(.*?)</li>', ul_content, re.DOTALL)
+                for li in li_items:
+                    # Lấy username từ <a href="/{username}">{username}</a>
+                    u_match = re.search(r'<a[^>]+href=["\']/([a-zA-Z0-9_\.\-]+)["\'][^>]*>\s*\1\s*</a>', li)
+                    if not u_match:
+                        # Fallback lấy từ name của input radio
+                        u_match = re.search(r'<input[^>]+type=["\']radio["\'][^>]+name=["\']([a-zA-Z0-9_\.\-]+)["\']', li)
 
+                    # Lấy role từ label có class "active"
+                    r_match = re.search(r'<label[^>]+class=["\'][^"\']*\bactive\b[^"\']*["\'][^>]*>.*?value=["\']([A-Z]+)["\']', li, re.DOTALL)
+
+                    if u_match:
+                        uname = u_match.group(1).strip()
+                        urole = r_match.group(1).strip() if r_match else "GUEST"
+                        current_collaborators[uname] = urole
+
+            logger.info(f"🔍 [DOM Parser] Đã quét thấy {len(current_collaborators)} thành viên hiện tại trong Repo.")
+            if ul_match and li_items and len(current_collaborators) == 0:
+                err_msg = f"CẢNH BÁO AN TOÀN: Phát hiện {len(li_items)} thẻ thành viên nhưng Parser không đọc được. Hủy POST để chống ghi đè!"
+                logger.error(f"🛑 {err_msg} tại {settings_url}")
+                repo_res["errors"].append({"user": "*", "error": err_msg})
+                repo_res["status"] = "failed"
+                return repo_res
             new_changes = False
 
             if is_remove_action:
