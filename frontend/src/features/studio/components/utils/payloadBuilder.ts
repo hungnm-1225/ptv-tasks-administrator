@@ -58,6 +58,7 @@ export interface BuildPayloadParams {
     editSchoolName: string;
     editPartnerCode: string;
     editPartnerName: string;
+    gitActionType?: 'add' | 'remove'; // 🎯 HỖ TRỢ CẢ THÊM LẪN GỠ
     gitSelectedRepos: string[];
     gitUsersList: string;
     gitTargetRole: 'GUEST' | 'DEVELOPER' | 'ADMIN';
@@ -479,25 +480,45 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
             .filter((u) => u.length > 0);
 
         if (usersArr.length === 0) {
-            toast.error('Vui lòng nhập ít nhất 1 username hoặc email cần thêm vào Repo!');
+            toast.error('Vui lòng nhập ít nhất 1 username hoặc email!');
             return null;
         }
 
-        payload = {
-            action: 'add_repo_collaborators',
-            repo_urls: validRepos,
-            role: params.gitTargetRole,
-            users: usersArr,
-        };
+        // 🎯 PHÂN LUỒNG: GỠ BỎ (REMOVE) vs THÊM MỚI (ADD)
+        if (params.gitActionType === 'remove') {
+            payload = {
+                action: 'remove_repo_collaborators',
+                git_action: 'remove',
+                repo_urls: validRepos,
+                users: usersArr,
+            };
 
-        summary.engineName = '🐙 Pythaverse Git (Single-Session Multi-Repo RPA)';
-        summary.actionTitle = `Thêm ${usersArr.length} Thành Viên Vào ${validRepos.length} Repositories`;
-        summary.targetEntity = `${validRepos.length} Repos (${validRepos.map((r) => r.split('/').pop()).join(', ')})`;
-        summary.detailsList = [
-            `Danh sách kho: ${validRepos.map((r) => r.split('/').pop()).join(', ')}`,
-            `Vai trò gán: ${params.gitTargetRole} (Single login session)`,
-            `Số lượng tài khoản: ${usersArr.length} người dùng`,
-        ];
+            summary.engineName = '🐙 Pythaverse Git (Single-Session Multi-Repo RPA)';
+            summary.actionTitle = `Gỡ Bỏ ${usersArr.length} Thành Viên Khỏi ${validRepos.length} Repositories`;
+            summary.targetEntity = `${validRepos.length} Repos (${validRepos.map((r) => r.split('/').pop()).join(', ')})`;
+            summary.detailsList = [
+                `Danh sách kho: ${validRepos.map((r) => r.split('/').pop()).join(', ')}`,
+                `Hành động: GỠ BỎ QUYỀN (Remove Collaborators 🗑️)`,
+                `Số lượng tài khoản cần gỡ: ${usersArr.length} người dùng`,
+            ];
+        } else {
+            payload = {
+                action: 'add_repo_collaborators',
+                git_action: 'add',
+                repo_urls: validRepos,
+                role: params.gitTargetRole,
+                users: usersArr,
+            };
+
+            summary.engineName = '🐙 Pythaverse Git (Single-Session Multi-Repo RPA)';
+            summary.actionTitle = `Thêm ${usersArr.length} Thành Viên Vào ${validRepos.length} Repositories`;
+            summary.targetEntity = `${validRepos.length} Repos (${validRepos.map((r) => r.split('/').pop()).join(', ')})`;
+            summary.detailsList = [
+                `Danh sách kho: ${validRepos.map((r) => r.split('/').pop()).join(', ')}`,
+                `Vai trò gán: ${params.gitTargetRole} (Single login session)`,
+                `Số lượng tài khoản: ${usersArr.length} người dùng`,
+            ];
+        }
     } else if (params.selectedBotType === 'keycloak_api') {
         const rawEmails = params.kcTargetEmail
             .split(/[\n,;]+/)

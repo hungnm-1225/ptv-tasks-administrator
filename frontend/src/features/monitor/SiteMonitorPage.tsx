@@ -1,25 +1,6 @@
 // frontend/src/features/monitor/SiteMonitorPage.tsx
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import {
-  RefreshCw,
-  Globe,
-  CheckCircle2,
-  AlertTriangle,
-  PauseCircle,
-  Zap,
-  ExternalLink,
-  Loader2,
-  Wifi,
-  WifiOff,
-  Server,
-  GitBranch,
-  Terminal,
-  Copy,
-  Check,
-  Filter,
-  XCircle,
-  TrendingUp,
-} from 'lucide-react';
+import { RefreshCw, Globe, CheckCircle2, AlertTriangle, PauseCircle, Zap, ExternalLink, Loader2, Wifi, WifiOff, Server, GitBranch, Terminal, Copy, Check, Filter, XCircle, TrendingUp, } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { toast } from 'sonner';
 

@@ -1,63 +1,16 @@
 // frontend/src/features/studio/AutomationStudioPage.tsx
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
-  Zap,
-  Building2,
-  Key,
-  FileText,
-  BookOpen,
-  Search,
-  Check,
-  Plus,
-  Trash2,
-  CheckCircle2,
-  Loader2,
-  ShieldCheck,
-  ArrowRight,
-  Users,
-  GraduationCap,
-  Calendar,
-  X,
-  Code2,
-  Send,
-  Sparkles,
-  Upload,
-  Info,
-  ClipboardCheck,
-  GitBranch,
-  AlertTriangle,
-  AlertCircle,
-  FileCheck2,
-  Download,
-  Clock,
-  XCircle,
-  AtSign,
-  UserCheck,
+  Zap, Building2, Key, FileText, Check, CheckCircle2, ArrowRight, Users, GraduationCap, ClipboardCheck, GitBranch, UserCheck,
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { BotType } from '../../types';
 import { toast } from 'sonner';
 import { supabase } from '../../lib/supabase';
 import {
-  HierarchySchoolItem,
-  CourseItem,
-  OrderCourseSelection,
-  LmsCourseSelectionItem,
-  ScrapedPendingItem,
-  PreparedTaskSummary,
-  ClassGroupItem,
-  TeacherAllocationItem,
-  LicenseTrayItem,
-  ParsedUserRow,
-  AccountValidationStats,
-  LiveExecutedTask,
-  LoadedUserProfile,
-  CofExtractionResult,
-  PreparedPayload,
-  AvailableGitRepo,
+  HierarchySchoolItem, CourseItem, OrderCourseSelection, LmsCourseSelectionItem, ScrapedPendingItem, PreparedTaskSummary, ClassGroupItem, TeacherAllocationItem,
 } from './types';
 import { TaskConfirmationModal } from './components/modals/TaskConfirmationModal';
 import { FeedbackTriageTab } from './components/tabs/FeedbackTriageTab';
@@ -68,14 +21,7 @@ import { UpdateUserSection } from './components/tabs/workspace/UpdateUserSection
 import { BulkAccountsSection } from './components/tabs/workspace/BulkAccountsSection';
 import { LmsEnrollSection } from './components/tabs/workspace/LmsEnrollSection';
 import { CreateAndApproveSection } from './components/tabs/workspace/CreateAndApproveSection';
-import {
-  formatExcelDateClient,
-  cleanSchoolText,
-  cleanLmsText,
-  extractGradeNumberClient,
-  matchSchoolWithHierarchy,
-  getFormattedDate,
-} from './components/utils/studioFormatters';
+import { getFormattedDate } from './components/utils/studioFormatters';
 import { buildPreparedTaskPayload } from './components/utils/payloadBuilder';
 import { parseAccountsExcelFile, parseCofExcelFile } from './components/utils/excelParsers';
 export const AutomationStudioPage: React.FC = () => {
@@ -155,9 +101,8 @@ export const AutomationStudioPage: React.FC = () => {
   } | null>(null);
   const cofFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // 🔍 State tìm kiếm môn học linh hoạt xuyên Category
-  const [courseSearchTerms, setCourseSearchTerms] = useState<Record<number, string>>({});
-  const [activeCourseDropdownRow, setActiveCourseDropdownRow] = useState<number | null>(null);
+  // 🎯 HỖ TRỢ CẢ THÊM LẪN GỠ
+  const [gitActionType, setGitActionType] = useState<'add' | 'remove'>('add');
 
   // --- STATE DÀNH RIÊNG CHO BÓC TÁCH & VALIDATE EXCEL TẠO TÀI KHOẢN ---
   interface ParsedUserRow {
@@ -902,6 +847,7 @@ export const AutomationStudioPage: React.FC = () => {
       editSchoolName,
       editPartnerCode,
       editPartnerName,
+      gitActionType,
       gitSelectedRepos,
       gitUsersList,
       gitTargetRole,
@@ -1523,6 +1469,8 @@ export const AutomationStudioPage: React.FC = () => {
       {/* 🌟 6. Pythaverse Git Collaborator Engine Workplace (HỖ TRỢ MULTI-REPOS) */}
       {selectedBotType === 'git_collaborator' && (
         <GitCollaboratorTab
+          gitActionType={gitActionType}
+          setGitActionType={setGitActionType}
           gitSelectedRepos={gitSelectedRepos}
           setGitSelectedRepos={setGitSelectedRepos}
           customRepoInput={customRepoInput}
