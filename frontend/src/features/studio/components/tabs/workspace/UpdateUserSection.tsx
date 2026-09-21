@@ -38,10 +38,8 @@ interface UpdateUserSectionProps {
     uniquePartnersList: { code: string; name: string }[];
 }
 
-// ─── BENTO SKELETON LOADER (HIỆN RA KHI ĐANG TÌM KIẾM HỒ SƠ MỚI) ─────────────
 const UpdateUserSkeleton: React.FC = () => (
     <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-5 shadow-xs animate-pulse">
-        {/* Header Skeleton */}
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
             <div className="flex items-center gap-2">
                 <div className="w-4 h-4 rounded-md bg-indigo-200 dark:bg-indigo-900/50" />
@@ -51,7 +49,6 @@ const UpdateUserSkeleton: React.FC = () => (
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {/* Cột Trái Skeleton */}
             <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
@@ -79,7 +76,6 @@ const UpdateUserSkeleton: React.FC = () => (
                 </div>
             </div>
 
-            {/* Cột Phải Skeleton */}
             <div className="space-y-4">
                 <div className="space-y-1.5">
                     <div className="flex justify-between">
@@ -97,18 +93,11 @@ const UpdateUserSkeleton: React.FC = () => (
                     <div className="h-9 w-full rounded-xl bg-slate-100 dark:bg-slate-800/60" />
                 </div>
 
-                {/* Hộp Metadata Skeleton */}
                 <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 space-y-2">
                     <div className="h-3 w-48 rounded bg-slate-200 dark:bg-slate-800" />
                     <div className="h-3 w-36 rounded bg-slate-200 dark:bg-slate-800" />
                 </div>
             </div>
-        </div>
-
-        {/* Thông báo quét ngầm thân thiện */}
-        <div className="flex items-center justify-center gap-2 pt-2 text-[11px] text-indigo-600 dark:text-indigo-400 font-mono">
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            <span>Đang kéo toàn bộ dữ liệu người dùng từ pythaverse.space...</span>
         </div>
     </div>
 );
@@ -182,10 +171,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                         </p>
                     </div>
 
-                    {/* Badge trạng thái thông minh: Khi đang search thì ẩn ID cũ đi, hiện Spinner! */}
-                    {isSearchingUser ? (
-                        <></>
-                    ) : loadedUserProfile ? (
+                    {isSearchingUser ? null : loadedUserProfile ? (
                         <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-[11px] font-mono font-bold flex items-center gap-1 self-start sm:self-auto shadow-xs">
                             <CheckCircle2 className="w-3.5 h-3.5" />
                             <span>ID: #{loadedUserProfile.userId} ({loadedUserProfile.userRole})</span>
@@ -229,12 +215,10 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                 </div>
             </div>
 
-            {/* 2. KHU VỰC BẢNG CHỈNH SỬA: PHÂN LUỒNG RÕ RÀNG 3 TRẠNG THÁI */}
+            {/* 2. KHU VỰC BẢNG CHỈNH SỬA */}
             {isSearchingUser ? (
-                /* Trạng thái 1: Đang tìm kiếm ➔ Hiển thị Bento Skeleton mượt mà */
                 <UpdateUserSkeleton />
             ) : loadedUserProfile ? (
-                /* Trạng thái 2: Đã có hồ sơ ➔ Hiển thị Bento Form chỉnh sửa */
                 <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-5 shadow-xs animate-in fade-in duration-150">
                     <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
                         <div className="flex items-center gap-2">
@@ -283,7 +267,6 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                 />
                             </div>
 
-                            {/* 3 Dropdown Ngày Sinh */}
                             <div>
                                 <label className="text-[10px] font-bold uppercase text-slate-500 mb-1 block">Ngày Sinh (<span className="text-rose-500 font-bold">*</span>):</label>
                                 <div className="grid grid-cols-3 gap-2">
@@ -320,7 +303,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                             </div>
                         </div>
 
-                        {/* CỘT PHẢI: BỘ ĐÔI COMBOBOX TÌM KIẾM & CHỌN TRƯỜNG - PARTNER */}
+                        {/* CỘT PHẢI: BỘ ĐÔI COMBOBOX ĐỐI TÁC & TRƯỜNG HỌC (ĐÃ SỬA CHUẨN ĐỂ HIỆN VNV SCHOOL) */}
                         <div className="space-y-3.5">
                             {/* 1. COMBOBOX CHỌN ĐỐI TÁC (PARTNER) */}
                             <div className="relative" ref={partnerComboboxRef}>
@@ -352,7 +335,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                             .filter((p) => {
                                                 const q = partnerSearchQuery.trim().toLowerCase();
                                                 if (!q) return true;
-                                                return p.name.toLowerCase().includes(q) || p.code.includes(q);
+                                                return p.name.toLowerCase().includes(q) || String(p.code).toLowerCase().includes(q);
                                             })
                                             .map((p) => (
                                                 <button
@@ -368,32 +351,20 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                                         setIsPartnerComboboxOpen(false);
 
                                                         const partnerSchools = schoolsList.filter(
-                                                            (s) => String(s.partner_code) === String(newPartnerCode)
+                                                            (s) => String(s.partner_code) === String(newPartnerCode) ||
+                                                                String(s.partner_name).toLowerCase().includes(newPartnerName.toLowerCase())
                                                         );
 
                                                         const isCurrentSchoolValid = partnerSchools.some(
                                                             (s) => String(s.school_code) === String(editSchoolCode)
                                                         );
 
-                                                        if (!isCurrentSchoolValid) {
-                                                            if (partnerSchools.length > 0) {
-                                                                const firstSchool = partnerSchools[0];
-                                                                setEditSchoolCode(firstSchool.school_code);
-                                                                setEditSchoolName(firstSchool.school_name);
-                                                                setSchoolSearchQuery(firstSchool.school_name);
-                                                                toast.info(
-                                                                    `💡 Đổi Partner: ${newPartnerName} ➔ Tự động chọn trường: ${firstSchool.school_name} (Mã: ${firstSchool.school_code})`
-                                                                );
-                                                            } else {
-                                                                setEditSchoolCode('');
-                                                                setEditSchoolName('');
-                                                                setSchoolSearchQuery('');
-                                                                toast.warning(
-                                                                    `⚠️ Đối tác ${newPartnerName} hiện chưa có trường học trực thuộc trong danh bạ.`
-                                                                );
-                                                            }
-                                                        } else {
-                                                            toast.success(`Đã chọn: ${newPartnerName} (Mã: ${newPartnerCode})`);
+                                                        if (!isCurrentSchoolValid && partnerSchools.length > 0) {
+                                                            const firstSchool = partnerSchools[0];
+                                                            setEditSchoolCode(firstSchool.school_code);
+                                                            setEditSchoolName(firstSchool.school_name);
+                                                            setSchoolSearchQuery(firstSchool.school_name);
+                                                            toast.info(`💡 Chọn Partner: ${newPartnerName} ➔ Gợi ý trường: ${firstSchool.school_name}`);
                                                         }
                                                     }}
                                                     className={`w-full text-left p-2.5 rounded-xl text-xs flex items-center justify-between cursor-pointer transition ${editPartnerCode === p.code
@@ -412,7 +383,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                 )}
                             </div>
 
-                            {/* 2. COMBOBOX CHỌN TRƯỜNG HỌC (SCHOOL) */}
+                            {/* 2. COMBOBOX CHỌN TRƯỜNG HỌC (SCHOOL) - TÌM KIẾM THÔNG MINH KHÔNG BỊ GIỚI HẠN */}
                             <div className="relative" ref={schoolComboboxRef}>
                                 <label className="text-[10px] font-bold uppercase text-slate-500 flex items-center justify-between">
                                     <span>Trường Học Thụ Hưởng (School):</span>
@@ -430,21 +401,22 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                             setSchoolSearchQuery(e.target.value);
                                             setIsSchoolComboboxOpen(true);
                                         }}
-                                        placeholder="Gõ tên trường hoặc mã số trường để chọn..."
+                                        placeholder="Gõ tìm tên trường (VD: VNV School, St Lorenzo...)"
                                         className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 px-3.5 py-2 text-xs font-semibold text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden pr-8"
                                     />
                                     <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-3" />
                                 </div>
 
                                 {isSchoolComboboxOpen && (
-                                    <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-60 overflow-y-auto p-1.5 space-y-1 animate-in fade-in duration-100">
+                                    <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-64 overflow-y-auto p-1.5 space-y-1 animate-in fade-in duration-100">
                                         {schoolsList
                                             .filter((s) => {
                                                 const q = schoolSearchQuery.trim().toLowerCase();
                                                 if (!q) return true;
                                                 return (
                                                     s.school_name.toLowerCase().includes(q) ||
-                                                    s.school_code.toLowerCase().includes(q) ||
+                                                    String(s.school_code).toLowerCase().includes(q) ||
+                                                    String(s.school_id).toLowerCase().includes(q) ||
                                                     s.partner_name.toLowerCase().includes(q)
                                                 );
                                             })
@@ -453,14 +425,14 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                                 const bMatch = String(b.partner_code) === String(editPartnerCode);
                                                 if (aMatch && !bMatch) return -1;
                                                 if (!aMatch && bMatch) return 1;
-                                                return 0;
+                                                return a.school_name.localeCompare(b.school_name);
                                             })
-                                            .slice(0, 30)
+                                            .slice(0, 60)
                                             .map((s) => {
                                                 const isCurrentPartner = String(s.partner_code) === String(editPartnerCode);
                                                 return (
                                                     <button
-                                                        key={s.school_code}
+                                                        key={`${s.school_id}-${s.school_code}`}
                                                         type="button"
                                                         onClick={() => {
                                                             setEditSchoolCode(s.school_code);
@@ -468,14 +440,14 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                                             setSchoolSearchQuery(s.school_name);
                                                             setIsSchoolComboboxOpen(false);
 
-                                                            if (s.partner_code) {
+                                                            if (s.partner_code && s.partner_code !== "N/A") {
                                                                 setEditPartnerCode(s.partner_code);
                                                                 setEditPartnerName(s.partner_name);
                                                                 setPartnerSearchQuery(s.partner_name);
-                                                                toast.info(`💡 Đã tự động chọn: ${s.partner_name} (Mã: ${s.partner_code})`);
+                                                                toast.info(`💡 Đã tự động chọn đối tác: ${s.partner_name} (Mã: ${s.partner_code})`);
                                                             }
                                                         }}
-                                                        className={`w-full text-left p-2.5 rounded-xl text-xs flex items-center justify-between cursor-pointer transition ${editSchoolCode === s.school_code
+                                                        className={`w-full text-left p-2.5 rounded-xl text-xs flex items-center justify-between cursor-pointer transition ${String(editSchoolCode) === String(s.school_code)
                                                             ? 'bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-300 dark:border-indigo-700'
                                                             : 'hover:bg-slate-50 dark:hover:bg-slate-800'
                                                             }`}
@@ -483,17 +455,17 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                                         <div className="truncate pr-2">
                                                             <div className="font-bold text-slate-900 dark:text-white truncate flex items-center gap-1.5">
                                                                 {isCurrentPartner && (
-                                                                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 font-bold">
-                                                                        Partner hiện tại
+                                                                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 font-bold shrink-0">
+                                                                        Partner khớp
                                                                     </span>
                                                                 )}
                                                                 <span>{s.school_name}</span>
                                                             </div>
                                                             <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-                                                                Mã: <b className="text-indigo-600 dark:text-indigo-400">{s.school_code}</b> | Thuộc: {s.partner_name}
+                                                                Mã: <b className="text-indigo-600 dark:text-indigo-400">{s.school_code}</b> | Trực thuộc: {s.partner_name}
                                                             </div>
                                                         </div>
-                                                        {editSchoolCode === s.school_code && (
+                                                        {String(editSchoolCode) === String(s.school_code) && (
                                                             <Check className="w-4 h-4 text-indigo-600 shrink-0" />
                                                         )}
                                                     </button>
@@ -512,7 +484,6 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                     </div>
                 </div>
             ) : (
-                /* Trạng thái 3: Trống ➔ Hướng dẫn người dùng tìm kiếm */
                 <div className="flex h-48 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 p-6 text-center text-xs text-slate-400 animate-in fade-in duration-150">
                     <UserCheck className="h-8 w-8 text-slate-300 dark:text-slate-700 mb-2" />
                     <span>Vui lòng nhập Email hoặc Username và bấm "Dò Tìm Hồ Sơ" để mở bảng chỉnh sửa.</span>
