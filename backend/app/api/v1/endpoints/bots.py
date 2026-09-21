@@ -7,6 +7,8 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timezone, timedelta
 from app.core.supabase import get_supabase_client
+from app.core.config import to_vn_time_str
+from app.core.cron_telemetry import get_all_cron_telemetry, mark_cron_finished, get_vn_now_str
 
 # Import Single Coordinator từ tasks endpoint
 from app.api.v1.endpoints.tasks import run_approved_task_worker
@@ -28,7 +30,6 @@ from app.core.cache_policy import BoundedMemoryCache, CacheTier
 
 bots_cache = BoundedMemoryCache(tier=CacheTier.TIER_B_STATUS, max_entries=10, default_ttl=15)
 
-from app.core.config import to_vn_time_str
 
 def format_vn_time(val: Any) -> str:
     """Chuyển đổi mọi định dạng thời gian sang chuỗi giờ Việt Nam chuẩn (GMT+7)."""
@@ -139,16 +140,41 @@ async def get_bot_workers_status() -> Dict[str, Any]:
 
     supabase = get_supabase_client()
 
-    worker_stats = {
-        "gmail_sync_worker": {"status": "active", "failed_count": 0, "last_status": "idle"},
-        "osticket_sync_worker": {"status": "active", "failed_count": 0, "last_status": "idle"},
-        "feedback_sheet_worker": {"status": "active", "failed_count": 0, "last_status": "idle"},
-        "distributor_cache_worker": {"status": "active", "failed_count": 0, "last_status": "idle"},
-        "workspace_license_worker": {"status": "active", "failed_count": 0, "last_status": "idle"},
-        "keycloak_api_worker": {"status": "active", "failed_count": 0, "last_status": "idle"},
-        "lms_git_worker": {"status": "active", "failed_count": 0, "last_status": "idle"},
-        "github_dispatcher": {"status": "active", "failed_count": 0, "last_status": "idle"},
+    cron_mapping = {
+        "gmail_sync_worker": "gmail_cron",
+        "osticket_sync_worker": "osticket_cron",
+        "feedback_sheet_worker": "sheet_cron",
+        "distributor_cache_worker": "distributor_cache_scanner_cron",
     }
+
+    worker_stats = {}
+    for w_key, c_id in cron_mapping.items():
+        t = cron_telemetry.get(c_id, {})
+        worker_stats[w_key] = {
+            "status": "degraded" if t.get("status") == "error" else "active",
+            "failed_count": t.get("failed_count", 0),
+            "last_status": t.get("status", "idle"),
+            "last_run_at": t.get("last_run_at"),
+            "next_run_at": t.get("next_run_at"),
+            "duration_seconds": t.get("duration_seconds"),
+            "last_message": t.get("last_message")
+        }
+    execution_keys = [
+        "workspace_license_worker", 
+        "keycloak_api_worker", 
+        "lms_git_worker", 
+        "github_dispatcher"
+    ]
+    for e_key in execution_keys:
+        worker_stats[e_key] = {
+            "status": "active", 
+            "failed_count": 0, 
+            "last_status": "idle",
+            "last_run_at": None,
+            "next_run_at": None,
+            "duration_seconds": None,
+            "last_message": None
+        }
 
     try:
         failed_res = supabase.table("bot_automation_tasks")\
@@ -290,23 +316,33 @@ async def force_sync_pipeline(sync_type: str, background_tasks: BackgroundTasks)
     now_str = format_vn_time(None)
     bots_cache.invalidate()
 
-    if sync_type == "gmail":
-        background_tasks.add_task(poll_unread_gmails)
-        msg = "Đã kích hoạt quét Gmail @dtt.vn tức thì thành công!"
-    elif sync_type == "osticket":
-        background_tasks.add_task(poll_open_ostickets)
-        msg = "Đã kích hoạt cào vé OS Ticket Support tức thì thành công!"
-    elif sync_type == "sheet":
-        background_tasks.add_task(poll_form_feedbacks)
-        msg = "Đã kích hoạt quét Google Sheet Feedback tức thì thành công!"
-    elif sync_type == "distributor_cache":
-        background_tasks.add_task(workspace_scanner_service.scan_and_cache_all_distributors)
-        msg = "Đã kích hoạt quét và cập nhật Cache 5 Nhà phân phối thành công!"
-    elif sync_type == "site_uptime":
-        background_tasks.add_task(poll_site_uptime_cron)
-        msg = "Đã kích hoạt kiểm tra Uptime 10 Site thành công!"
-    else:
+    sync_map = {
+        "gmail": (poll_unread_gmails, "gmail_cron", "Gmail @dtt.vn"),
+        "osticket": (poll_open_ostickets, "osticket_cron", "OS Ticket Support"),
+        "sheet": (poll_form_feedbacks, "sheet_cron", "Google Sheet Feedback"),
+        "distributor_cache": (workspace_scanner_service.scan_and_cache_all_distributors, "distributor_cache_scanner_cron", "5 Nhà Phân Phối"),
+        "site_uptime": (poll_site_uptime_cron, "site_uptime_cron", "10 Trang Web")
+    }
+
+    if sync_type not in sync_map:
         raise HTTPException(status_code=400, detail=f"Không hỗ trợ luồng đồng bộ: {sync_type}")
+
+    func, cron_id, label = sync_map[sync_type]
+
+    async def manual_run_wrapper():
+        start_ts = time.perf_counter()
+        try:
+            await func()
+            dur = time.perf_counter() - start_ts
+            mark_cron_finished(cron_id, status="success", duration=dur, message="Ép quét thủ công hoàn tất")
+        except Exception as err:
+            dur = time.perf_counter() - start_ts
+            mark_cron_finished(cron_id, status="error", duration=dur, message=f"Lỗi ép quét: {str(err)[:80]}")
+        finally:
+            gc.collect()
+
+    background_tasks.add_task(manual_run_wrapper)
+    msg = f"Đã kích hoạt quét {label} tức thì thành công!"
 
     return {
         "status": "success",

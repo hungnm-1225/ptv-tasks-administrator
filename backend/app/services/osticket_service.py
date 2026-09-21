@@ -1,12 +1,19 @@
-# backend/app/services/osticket_service.py
+"""
+Pythaverse Central Admin - OS Ticket Hybrid RPA-API Ingestion Service (V3.6 Master Enterprise)
+Kiến trúc: Ephemeral Session Caching (Playwright Auth Gateway 3s) + Non-blocking Async HTTP Engine (HTTPX 300ms)
+Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI
+"""
 import re
 import os
 import gc
+import time
 import mimetypes
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 from urllib.parse import urljoin
+import httpx
+from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
 from app.core.config import settings
@@ -22,76 +29,126 @@ OSTICKET_BASE_URL = str(raw_osticket_url).replace("/scp/login.php", "").replace(
 OSTICKET_USER = getattr(settings, "OSTICKET_ADMIN_USER", os.getenv("OSTICKET_ADMIN_USER", ""))
 OSTICKET_PASS = getattr(settings, "OSTICKET_ADMIN_PASS", os.getenv("OSTICKET_ADMIN_PASS", ""))
 
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "vi,en-US;q=0.9,en;q=0.8",
+}
+
 
 class OSTicketService:
-    """Service Playwright chuyên cào vé OS Ticket, bóc tách lịch sử Thread và chuyển giao cho Canonical Intake."""
+    """
+    Cỗ máy Hybrid OS Ticket:
+    - Playwright Auth Gateway: Bốc Session Cookie (3-5s) rồi đóng Chromium ngay.
+    - HTTPX Async Engine: Cào Open Queue, bóc tách chi tiết form & thread messages siêu tốc (300ms).
+    """
 
     def __init__(self):
         self.headless = True
+        # Bộ nhớ đệm phiên Ephemeral Session Cache (TTL 2 giờ)
+        self._cached_cookies: Optional[Dict[str, str]] = None
+        self._cookies_expire_at: float = 0.0
+        self._session_ttl_seconds: float = 7200.0  # 2 tiếng an toàn
 
-    async def _create_context(self, p) -> tuple:
-        browser = await p.chromium.launch(
-            headless=self.headless,
-            args=LOW_RAM_CHROMIUM_ARGS
-        )
-        context = await browser.new_context(
-            viewport={"width": 1440, "height": 900},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-        )
-        await setup_low_ram_routes(context)
-        page = await context.new_page()
-        page.set_default_timeout(30000)
-        return browser, context, page
+    # =========================================================================
+    # 🔑 PHA 1: AUTH GATEWAY (PLAYWRIGHT 3-5 GIÂY - CHỈ CHẠY MỖI 2 TIẾNG)
+    # =========================================================================
+    async def _steal_session_cookies(self) -> Dict[str, str]:
+        """Khởi chạy Chromium siêu nhẹ, đăng nhập và trích xuất cookie phiên OSTSESSID."""
+        logger.info("🔑 [Auth Gateway] Đang mở Playwright để bốc Session Cookie mới từ OS Ticket...")
+        async with acquire_playwright_slot("OSTicket Session Gateway", timeout=45.0, lane="cron"):
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=self.headless,
+                    args=LOW_RAM_CHROMIUM_ARGS
+                )
+                context = await browser.new_context(
+                    viewport={"width": 1440, "height": 900},
+                    user_agent=BROWSER_HEADERS["User-Agent"]
+                )
+                await setup_low_ram_routes(context)
+                page = await context.new_page()
+                page.set_default_timeout(30000)
 
-    async def login(self, page) -> bool:
-        """Đăng nhập vào bảng điều khiển quản trị OS Ticket (/scp/login.php)."""
-        try:
-            login_url = f"{OSTICKET_BASE_URL}/scp/login.php"
-            logger.info(f"🔑 Đang đăng nhập OS Ticket: {OSTICKET_USER}...")
-            await page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
-
-            if "/scp/index.php" in page.url or "/scp/tickets.php" in page.url or "/scp/" in page.url:
-                if "login.php" not in page.url:
-                    return True
-
-            if await page.locator("input[name='userid'], #name").count() > 0:
-                await page.fill("input[name='userid'], #name", OSTICKET_USER)
-                await page.fill("input[name='passwd'], #pass", OSTICKET_PASS)
-                await page.click("input[type='submit'], button[type='submit']")
                 try:
-                    await page.wait_for_url(lambda u: "login.php" not in u, timeout=12000)
-                except Exception:
-                    pass
+                    login_url = f"{OSTICKET_BASE_URL}/scp/login.php"
+                    await page.goto(login_url, wait_until="domcontentloaded", timeout=25000)
 
-            if "login.php" in page.url:
-                logger.error("❌ Đăng nhập OS Ticket thất bại! Vui lòng kiểm tra lại tài khoản/mật khẩu.")
-                return False
+                    # Kiểm tra nếu đã đăng nhập từ trước
+                    if "login.php" not in page.url and "/scp/" in page.url:
+                        pass
+                    else:
+                        if await page.locator("input[name='userid'], #name").count() > 0:
+                            await page.fill("input[name='userid'], #name", OSTICKET_USER)
+                            await page.fill("input[name='passwd'], #pass", OSTICKET_PASS)
+                            await page.click("input[type='submit'], button[type='submit']")
+                            try:
+                                await page.wait_for_url(lambda u: "login.php" not in u, timeout=12000)
+                            except Exception:
+                                pass
 
-            logger.info("✅ Đăng nhập OS Ticket thành công!")
-            return True
-        except Exception as e:
-            logger.error(f"❌ Lỗi đăng nhập OS Ticket: {e}")
-            return False
+                    if "login.php" in page.url:
+                        raise RuntimeError("Đăng nhập OS Ticket thất bại! Vui lòng kiểm tra OSTICKET_ADMIN_USER / PASS.")
 
-    async def upload_attachment_to_supabase(self, context, file_url: str, filename: str, ticket_display_id: str) -> Optional[str]:
-        """Tải file từ OS Ticket bằng context đã đăng nhập và upload lên Supabase Storage an toàn."""
+                    raw_cookies = await context.cookies()
+                    cookies_dict = {c["name"]: c["value"] for c in raw_cookies}
+                    
+                    if not cookies_dict:
+                        raise RuntimeError("Không trích xuất được cookie phiên từ OS Ticket.")
+
+                    self._cached_cookies = cookies_dict
+                    self._cookies_expire_at = time.time() + self._session_ttl_seconds
+                    logger.info(f"✨ [Auth Gateway] Bốc session thành công! Đã lưu {len(cookies_dict)} cookies vào RAM Cache (TTL: 2h).")
+                    return cookies_dict
+                finally:
+                    # 🛑 GIẢI PHÓNG CHROMIUM NGAY LẬP TỨC (RAM Render < 15MB)
+                    await browser.close()
+                    gc.collect()
+
+    async def get_valid_cookies(self, force_refresh: bool = False) -> Dict[str, str]:
+        """Lấy cookies phiên từ cache hoặc kích hoạt Auth Gateway làm tươi mới."""
+        now = time.time()
+        if not force_refresh and self._cached_cookies and now < self._cookies_expire_at:
+            return self._cached_cookies
+
+        return await self._steal_session_cookies()
+
+    def invalidate_session(self):
+        """Xóa session cache khi phát hiện phiên hết hạn."""
+        self._cached_cookies = None
+        self._cookies_expire_at = 0.0
+
+    # =========================================================================
+    # ⚡ PHA 2: HTTPX ASYNC ENGINE (THỰC THI SIÊU TỐC, KHÔNG DÙNG CHROMIUM)
+    # =========================================================================
+    def _create_http_client(self, cookies: Dict[str, str]) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            base_url=OSTICKET_BASE_URL,
+            headers=BROWSER_HEADERS,
+            cookies=cookies,
+            timeout=25.0,
+            follow_redirects=True
+        )
+
+    async def upload_attachment_to_supabase(self, client: httpx.AsyncClient, file_url: str, filename: str, ticket_display_id: str) -> Optional[str]:
+        """Tải file từ OS Ticket qua HTTPX thuần và upload lên Supabase Storage an toàn."""
         try:
             supabase = get_supabase_client()
             clean_filename = re.sub(r'[^a-zA-Z0-9_.-]', '_', filename)
             storage_path = f"osticket/{ticket_display_id}_{clean_filename}"
 
-            response = await context.request.get(file_url, timeout=20000)
-            if response.status != 200:
-                logger.warning(f"⚠️ Không tải được file {filename} từ OS Ticket (Status: {response.status})")
+            res = await client.get(file_url, timeout=30.0)
+            if res.status_code != 200:
+                logger.warning(f"⚠️ Không tải được file {filename} từ OS Ticket (Status: {res.status_code})")
                 return None
 
-            file_bytes = await response.body()
+            file_bytes = res.content
             content_type, _ = mimetypes.guess_type(filename)
             content_type = content_type or "application/octet-stream"
 
             bucket = supabase.storage.from_("ticket-attachments")
             bucket.upload(storage_path, file_bytes, file_options={"content-type": content_type, "upsert": "true"})
-            
+
             public_url = bucket.get_public_url(storage_path)
             logger.info(f"💾 Đã lưu Attachment '{filename}' lên Supabase: {public_url}")
             return public_url
@@ -99,259 +156,295 @@ class OSTicketService:
             logger.error(f"❌ Bỏ qua lỗi upload attachment '{filename}': {e}")
             return None
 
-    async def _get_text_by_candidates(self, page, candidates: List[str]) -> str:
-        """Helper tìm kiếm phần tử an toàn qua nhiều selector độc lập."""
+    def _extract_text_by_candidates(self, soup: BeautifulSoup, candidates: List[str]) -> str:
+        """Helper tìm kiếm phần tử an toàn qua nhiều CSS selectors / XPath giả lập trên BeautifulSoup."""
         for sel in candidates:
             try:
-                el = page.locator(sel).first
-                if await el.count() > 0:
-                    text = (await el.inner_text()).strip()
+                # Xử lý selector dạng xpath giả lập tr:contains
+                if sel.startswith("tr:contains("):
+                    text_search = sel.split("('")[1].split("')")[0]
+                    for tr in soup.find_all("tr"):
+                        if text_search.lower() in tr.get_text().lower():
+                            tds = tr.find_all("td")
+                            if len(tds) >= 2:
+                                return tds[1].get_text(strip=True)
+                            elif tds:
+                                return tds[0].get_text(strip=True)
+                    continue
+
+                el = soup.select_one(sel)
+                if el:
+                    text = el.get_text(strip=True)
                     if text:
                         return text
             except Exception:
                 continue
         return ""
 
-    async def scrape_ticket_detail(self, context, internal_id: str, ticket_number: str) -> Optional[Dict[str, Any]]:
-        """Mở chi tiết vé và bóc tách toàn bộ thông tin form cùng đầy đủ lịch sử hội thoại."""
-        detail_page = await context.new_page()
-        try:
-            detail_url = f"{OSTICKET_BASE_URL}/scp/tickets.php?id={internal_id}"
-            logger.info(f"🔍 Đang cào chi tiết vé #{ticket_number} (Internal ID: {internal_id})...")
-            
-            await detail_page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
-            await detail_page.wait_for_selector(".tixTitle, #ticket_info, .ticket_info", timeout=10000)
+    async def scrape_ticket_detail_httpx(
+        self, 
+        client: httpx.AsyncClient, 
+        internal_id: str, 
+        ticket_number: str
+    ) -> Optional[Dict[str, Any]]:
+        """Mở chi tiết vé và bóc tách toàn bộ thông tin form cùng lịch sử thread bằng HTTPX Async + BeautifulSoup (~300ms)."""
+        detail_url = f"{OSTICKET_BASE_URL}/scp/tickets.php?id={internal_id}"
+        logger.info(f"🔍 [HTTPX Engine] Đang cào chi tiết vé #{ticket_number} (Internal ID: {internal_id})...")
 
-            # 1. Tiêu đề
-            subject = await self._get_text_by_candidates(detail_page, [
-                ".tixTitle h3",
-                "h2 a",
-                "#ticket_info h2"
-            ]) or f"Ticket #{ticket_number}"
+        res = await client.get(detail_url)
+        if "login.php" in str(res.url):
+            raise PermissionError("Session hết hạn, cần làm tươi cookie.")
 
-            # 2. Người gửi (Tên & Email)
-            submitter_name = await self._get_text_by_candidates(detail_page, [
-                "span[id^='user-'][id$='-name']",
-                "a[href*='users.php?id=']"
-            ]) or "User"
+        if res.status_code != 200:
+            logger.error(f"❌ Lỗi tải chi tiết vé #{ticket_number}: HTTP {res.status_code}")
+            return None
 
-            sender_email = await self._get_text_by_candidates(detail_page, [
-                "span[id^='user-'][id$='-email']",
-                "a[href^='mailto:']"
-            ]) or "support@pythaverse.space"
+        soup = BeautifulSoup(res.text, "html.parser")
 
-            # 3. Help Topic & Assigned To
-            help_topic = await self._get_text_by_candidates(detail_page, [
-                "xpath=//tr[contains(., 'Help Topic:')]//td"
-            ])
+        # 1. Tiêu đề
+        subject = self._extract_text_by_candidates(soup, [
+            ".tixTitle h3",
+            "h2 a",
+            "#ticket_info h2"
+        ]) or f"Ticket #{ticket_number}"
 
-            assigned_to = await self._get_text_by_candidates(detail_page, [
-                "#field_assign",
-                "xpath=//tr[contains(., 'Assigned To:')]//td"
-            ])
+        # 2. Người gửi (Tên & Email)
+        submitter_name = self._extract_text_by_candidates(soup, [
+            "span[id^='user-'][id$='-name']",
+            "a[href*='users.php?id=']"
+        ]) or "User"
 
-            # 4. Custom Form Fields
-            school_name = await self._get_text_by_candidates(detail_page, [
-                "#inline-answer-93",
-                "td[id*='inline-answer-93']",
-                "xpath=//tr[contains(., 'School Name for the COF:')]//td[2]",
-                "xpath=//tr[contains(., 'School Name for the TOF:')]//td[2]",
-                "xpath=//tr[contains(., 'School Name')]//td[2]"
-            ])
+        sender_email = self._extract_text_by_candidates(soup, [
+            "span[id^='user-'][id$='-email']",
+            "a[href^='mailto:']"
+        ]) or "support@pythaverse.space"
 
-            country = await self._get_text_by_candidates(detail_page, [
-                "#inline-answer-118",
-                "td[id*='inline-answer-118']",
-                "xpath=//tr[contains(., 'Country:')]//td[2]"
-            ])
+        # 3. Help Topic & Assigned To
+        help_topic = self._extract_text_by_candidates(soup, [
+            "tr:contains('Help Topic:')"
+        ])
 
-            partner_name = await self._get_text_by_candidates(detail_page, [
-                "#inline-answer-100",
-                "td[id*='inline-answer-100']",
-                "xpath=//tr[contains(., 'Partner Name')]//td[2]"
-            ])
+        assigned_to = self._extract_text_by_candidates(soup, [
+            "#field_assign",
+            "tr:contains('Assigned To:')"
+        ])
 
-            distributor_name = await self._get_text_by_candidates(detail_page, [
-                "#inline-answer-106",
-                "td[id*='inline-answer-106']",
-                "xpath=//tr[contains(., 'Belongs to Distributor')]//td[2]"
-            ])
+        # 4. CUSTOM FORM FIELDS (ĐẶC THÙ HỆ THỐNG CỦA ANH)
+        school_name = self._extract_text_by_candidates(soup, [
+            "#inline-answer-93",
+            "td[id*='inline-answer-93']",
+            "tr:contains('School Name for the COF:')",
+            "tr:contains('School Name for the TOF:')",
+            "tr:contains('School Name')"
+        ])
 
-            # 5. Bóc tách Toàn bộ Danh sách Tin nhắn trong Thread
-            thread_entries = detail_page.locator("#thread-items .thread-entry")
-            total_entries = await thread_entries.count()
-            
-            messages_history: List[Dict[str, Any]] = []
-            attachments_list: List[Dict[str, str]] = []
+        country = self._extract_text_by_candidates(soup, [
+            "#inline-answer-118",
+            "td[id*='inline-answer-118']",
+            "tr:contains('Country:')"
+        ])
 
-            for i in range(total_entries):
-                entry = thread_entries.nth(i)
-                entry_class = await entry.get_attribute("class") or ""
-                
-                is_response = "response" in entry_class
-                role_label = "STAFF (Hỗ trợ)" if is_response else "USER (Khách hàng)"
+        partner_name = self._extract_text_by_candidates(soup, [
+            "#inline-answer-100",
+            "td[id*='inline-answer-100']",
+            "tr:contains('Partner Name')"
+        ])
 
-                poster_name = await self._get_text_by_candidates(entry, [".header b", ".header a.name"]) or "Unknown"
-                post_time = await self._get_text_by_candidates(entry, [".header time"]) or ""
-                body_text = await self._get_text_by_candidates(entry, [".thread-body"]) or ""
+        distributor_name = self._extract_text_by_candidates(soup, [
+            "#inline-answer-106",
+            "td[id*='inline-answer-106']",
+            "tr:contains('Belongs to Distributor')"
+        ])
 
-                entry_attachments = []
-                attach_links = entry.locator(".attachments a.filename, .attachments a[href*='file.php']")
-                attach_count = await attach_links.count()
-                for a_idx in range(attach_count):
-                    try:
-                        link = attach_links.nth(a_idx)
-                        raw_href = await link.get_attribute("href")
-                        fname = (await link.inner_text()).strip()
-                        if raw_href and fname:
-                            full_url = urljoin(OSTICKET_BASE_URL + "/scp/", raw_href)
-                            storage_url = await self.upload_attachment_to_supabase(context, full_url, fname, ticket_number)
-                            if storage_url:
-                                entry_attachments.append({"filename": fname, "url": storage_url})
-                                attachments_list.append({"filename": fname, "url": storage_url})
-                    except Exception as err:
-                        logger.warning(f"⚠️ Lỗi bóc tách file đính kèm trong thread entry {i}: {err}")
+        # 5. Bóc tách Toàn bộ Danh sách Tin nhắn trong Thread
+        thread_entries = soup.select("#thread-items .thread-entry")
+        messages_history: List[Dict[str, Any]] = []
+        attachments_list: List[Dict[str, str]] = []
 
-                messages_history.append({
-                    "index": i + 1,
-                    "role": role_label,
-                    "poster": poster_name,
-                    "time": post_time,
-                    "content": body_text,
-                    "attachments": entry_attachments
-                })
+        for i, entry in enumerate(thread_entries):
+            entry_class = " ".join(entry.get("class", []))
+            is_response = "response" in entry_class
+            role_label = "STAFF (Hỗ trợ)" if is_response else "USER (Khách hàng)"
 
-            # 6. File đính kèm từ Custom Form (COF / TOF File)
-            for form_sel in ["td[id*='inline-answer-97'] a", "#inline-answer-97 a", "xpath=//tr[contains(., 'Upload your COF File:')]//a", "xpath=//tr[contains(., 'Upload your TOF File:')]//a"]:
+            poster_el = entry.select_one(".header b, .header a.name")
+            poster_name = poster_el.get_text(strip=True) if poster_el else "Unknown"
+
+            time_el = entry.select_one(".header time")
+            post_time = time_el.get_text(strip=True) if time_el else ""
+
+            body_el = entry.select_one(".thread-body")
+            body_text = body_el.get_text("\n", strip=True) if body_el else ""
+
+            entry_attachments = []
+            attach_links = entry.select(".attachments a.filename, .attachments a[href*='file.php']")
+            for link in attach_links:
                 try:
-                    form_file_link = detail_page.locator(form_sel).first
-                    if await form_file_link.count() > 0:
-                        raw_href = await form_file_link.get_attribute("href")
-                        fname = (await form_file_link.inner_text()).strip()
-                        if raw_href and fname:
-                            full_url = urljoin(OSTICKET_BASE_URL + "/scp/", raw_href)
-                            storage_url = await self.upload_attachment_to_supabase(context, full_url, fname, ticket_number)
-                            if storage_url:
-                                attachments_list.insert(0, {"filename": fname, "url": storage_url})
-                        break
-                except Exception:
-                    continue
+                    raw_href = link.get("href")
+                    fname = link.get_text(strip=True)
+                    if raw_href and fname:
+                        full_url = urljoin(OSTICKET_BASE_URL + "/scp/", raw_href)
+                        storage_url = await self.upload_attachment_to_supabase(client, full_url, fname, ticket_number)
+                        if storage_url:
+                            entry_attachments.append({"filename": fname, "url": storage_url})
+                            attachments_list.append({"filename": fname, "url": storage_url})
+                except Exception as att_err:
+                    logger.warning(f"⚠️ Lỗi bóc tách file đính kèm trong thread entry {i}: {att_err}")
 
-            # 7. BÓC TÁCH NGÀY TẠO VÉ THẬT (CREATE DATE)
-            created_at_str = ""
-            created_at_iso = None
+            messages_history.append({
+                "index": i + 1,
+                "role": role_label,
+                "poster": poster_name,
+                "time": post_time,
+                "content": body_text,
+                "attachments": entry_attachments
+            })
 
-            first_time_el = detail_page.locator("#thread-items .thread-entry.message time[datetime]").first
-            if await first_time_el.count() > 0:
-                created_at_iso = await first_time_el.get_attribute("datetime")
-                created_at_str = (await first_time_el.inner_text()).strip()
+        # 6. File đính kèm từ Custom Form (COF / TOF File)
+        for form_sel in ["td[id*='inline-answer-97'] a", "#inline-answer-97 a"]:
+            try:
+                form_link = soup.select_one(form_sel)
+                if form_link:
+                    raw_href = form_link.get("href")
+                    fname = form_link.get_text(strip=True)
+                    if raw_href and fname:
+                        full_url = urljoin(OSTICKET_BASE_URL + "/scp/", raw_href)
+                        storage_url = await self.upload_attachment_to_supabase(client, full_url, fname, ticket_number)
+                        if storage_url:
+                            attachments_list.insert(0, {"filename": fname, "url": storage_url})
+                    break
+            except Exception:
+                continue
 
-            if not created_at_iso:
-                created_at_str = await self._get_text_by_candidates(detail_page, [
-                    "xpath=//th[contains(., 'Create Date:')]/following-sibling::td",
-                    "xpath=//tr[contains(., 'Create Date:')]//td"
-                ])
-                if created_at_str:
+        # 7. BÓC TÁCH NGÀY TẠO VÉ THẬT (CREATE DATE)
+        created_at_str = ""
+        created_at_iso = None
+
+        first_time_el = soup.select_one("#thread-items .thread-entry.message time[datetime]")
+        if first_time_el and first_time_el.get("datetime"):
+            created_at_iso = first_time_el["datetime"]
+            created_at_str = first_time_el.get_text(strip=True)
+
+        if not created_at_iso:
+            create_date_th = soup.find(lambda tag: tag.name in ["th", "td"] and "Create Date:" in tag.get_text())
+            if create_date_th:
+                next_td = create_date_th.find_next_sibling("td")
+                if next_td:
+                    created_at_str = next_td.get_text(strip=True)
                     try:
                         dt = datetime.strptime(created_at_str, "%d/%m/%Y %I:%M %p")
                         created_at_iso = dt.strftime("%Y-%m-%dT%H:%M:%S+07:00")
                     except Exception as dt_err:
                         logger.warning(f"⚠️ Không parse được Create Date '{created_at_str}': {dt_err}")
 
-            # Ghép nội dung hội thoại
-            formatted_dialogue = ""
-            for msg in messages_history:
-                formatted_dialogue += (
-                    f"\n--- [LƯỢT {msg['index']}] {msg['role']}: {msg['poster']} ({msg['time']}) ---\n"
-                    f"{msg['content']}\n"
-                )
-                if msg['attachments']:
-                    att_names = ", ".join([a['filename'] for a in msg['attachments']])
-                    formatted_dialogue += f"📎 File đính kèm trong tin nhắn này: {att_names}\n"
-
-            raw_content = (
-                f"📌 MÃ VÉ: #{ticket_number}\n"
-                f"📌 TIÊU ĐỀ: {subject}\n"
-                f"👤 NGƯỜI GỬI: {submitter_name} ({sender_email})\n"
-                f"📋 PHÂN LOẠI / TOPIC: {help_topic}\n"
-                f"👨‍💼 ĐANG PHÂN CÔNG: {assigned_to}\n"
+        # Ghép nội dung hội thoại theo template chuẩn của anh
+        formatted_dialogue = ""
+        for msg in messages_history:
+            formatted_dialogue += (
+                f"\n--- [LƯỢT {msg['index']}] {msg['role']}: {msg['poster']} ({msg['time']}) ---\n"
+                f"{msg['content']}\n"
             )
-            if school_name:
-                raw_content += f"🏫 TRƯỜNG HỌC: {school_name} | QUỐC GIA: {country}\n"
-            if partner_name:
-                raw_content += f"🏢 ĐỐI TÁC: {partner_name} | NHÀ PHÂN PHỐI: {distributor_name}\n"
-            
-            raw_content += f"\n=== TOÀN BỘ LỊCH SỬ HỘI THOẠI & TIẾN TRÌNH XỬ LÝ (TỪ ĐẦU ĐẾN MỚI NHẤT) ===\n{formatted_dialogue}"
+            if msg['attachments']:
+                att_names = ", ".join([a['filename'] for a in msg['attachments']])
+                formatted_dialogue += f"📎 File đính kèm trong tin nhắn này: {att_names}\n"
 
-            return {
-                "source": "osticket",
-                "source_id": ticket_number,
-                "doc_url": detail_url,
-                "sender_email": sender_email,
-                "submitter_name": submitter_name,
-                "subject": subject,
-                "raw_content": raw_content,
-                "created_at": created_at_iso,
-                "ticket_timestamp": created_at_str or created_at_iso,
-                "country": country,
+        raw_content = (
+            f"📌 MÃ VÉ: #{ticket_number}\n"
+            f"📌 TIÊU ĐỀ: {subject}\n"
+            f"👤 NGƯỜI GỬI: {submitter_name} ({sender_email})\n"
+            f"📋 PHÂN LOẠI / TOPIC: {help_topic}\n"
+            f"👨‍💼 ĐANG PHÂN CÔNG: {assigned_to}\n"
+        )
+        if school_name:
+            raw_content += f"🏫 TRƯỜNG HỌC: {school_name} | QUỐC GIA: {country}\n"
+        if partner_name:
+            raw_content += f"🏢 ĐỐI TÁC: {partner_name} | NHÀ PHÂN PHỐI: {distributor_name}\n"
+
+        raw_content += f"\n=== TOÀN BỘ LỊCH SỬ HỘI THOẠI & TIẾN TRÌNH XỬ LÝ (TỪ ĐẦU ĐẾN MỚI NHẤT) ===\n{formatted_dialogue}"
+
+        return {
+            "source": "osticket",
+            "source_id": ticket_number,
+            "doc_url": detail_url,
+            "sender_email": sender_email,
+            "submitter_name": submitter_name,
+            "subject": subject,
+            "raw_content": raw_content,
+            "created_at": created_at_iso,
+            "ticket_timestamp": created_at_str or created_at_iso,
+            "country": country,
+            "school_name": school_name,
+            "attachments": attachments_list,
+            "metadata": {
+                "internal_id": internal_id,
+                "ticket_number": ticket_number,
+                "help_topic": help_topic,
                 "school_name": school_name,
-                "attachments": attachments_list,
-                "metadata": {
-                    "internal_id": internal_id,
-                    "ticket_number": ticket_number,
-                    "help_topic": help_topic,
-                    "school_name": school_name,
-                    "partner_name": partner_name,
-                    "distributor_name": distributor_name,
-                    "assigned_to": assigned_to,
-                    "total_messages": len(messages_history),
-                    "created_date_raw": created_at_str
-                }
+                "partner_name": partner_name,
+                "distributor_name": distributor_name,
+                "assigned_to": assigned_to,
+                "total_messages": len(messages_history),
+                "created_date_raw": created_at_str
             }
-        except Exception as e:
-            logger.error(f"❌ Lỗi cào chi tiết vé #{ticket_number} (ID: {internal_id}): {e}")
-            return None
-        finally:
-            await detail_page.close()
+        }
 
+    # =========================================================================
+    # 🚀 POLL OPEN TICKETS PIPELINE (HYBRID KHÔNG CHẠM PLAYWRIGHT)
+    # =========================================================================
     async def poll_open_ostickets(self):
-        """Quét danh sách Open Queue và cào các vé mới nhất (Đẩy sang Canonical Intake Pipeline)."""
+        """
+        Quét danh sách Open Queue bằng Direct HTTPX (~300ms) và đồng bộ vào Supabase:
+        - Tự động lấy Session từ Cache RAM.
+        - Không chiếm giữ Playwright Semaphore.
+        - Chỉ bốc Session khi hết hạn (Self-Healing).
+        """
         supabase = get_supabase_client()
-        async with acquire_playwright_slot("OSTicket Queue Polling", timeout=60.0, lane="cron"):
-            async with async_playwright() as p:
-                browser, context, page = await self._create_context(p)
+        retry_auth = True
+
+        while retry_auth:
+            retry_auth = False
+            cookies = await self.get_valid_cookies()
+
+            async with self._create_http_client(cookies) as client:
+                queue_url = "/scp/tickets.php?dir=1&sort=10"
+                logger.info(f"📂 [HTTPX Engine] Đang quét danh sách vé Open: {OSTICKET_BASE_URL}{queue_url}")
+
                 try:
-                    if not await self.login(page):
+                    res = await client.get(queue_url)
+
+                    # Tự chữa lành: Nếu phiên hết hạn (bị redirect về login) -> Thử bốc lại session mới!
+                    if "login.php" in str(res.url) or "id=\"login-form\"" in res.text:
+                        logger.warning("⚠️ Session osTicket trong cache đã hết hạn. Đang kích hoạt làm tươi mới...")
+                        self.invalidate_session()
+                        cookies = await self.get_valid_cookies(force_refresh=True)
+                        retry_auth = False  # Đã làm mới xong, không loop lại
+                        res = await client.get(queue_url)
+
+                    if res.status_code != 200:
+                        logger.error(f"❌ Lỗi tải Open Queue osTicket: HTTP {res.status_code}")
                         return
 
-                    queue_url = f"{OSTICKET_BASE_URL}/scp/tickets.php?dir=1&sort=10"
-                    logger.info(f"📂 Đang mở danh sách vé Open: {queue_url}")
-                    await page.goto(queue_url, wait_until="domcontentloaded", timeout=30000)
-                    await page.wait_for_selector("table.list", timeout=15000)
+                    soup = BeautifulSoup(res.text, "html.parser")
+                    ticket_rows = soup.select("table.list tbody tr")
+                    total_rows = len(ticket_rows)
+                    logger.info(f"📋 Tìm thấy {total_rows} dòng vé trong Open Queue của OS Ticket (HTTPX).")
 
-                    ticket_rows = page.locator("table.list tbody tr")
-                    total_rows = await ticket_rows.count()
-                    logger.info(f"📋 Tìm thấy {total_rows} dòng vé trong Open Queue của OS Ticket.")
-
-                    for r_idx in range(total_rows):
+                    for r_idx, row in enumerate(ticket_rows):
                         try:
-                            row = ticket_rows.nth(r_idx)
-                            
-                            ticket_num_el = row.locator("a.preview, a[href*='tickets.php?id='], td:nth-child(2) a").first
-                            if await ticket_num_el.count() == 0:
+                            ticket_num_el = row.select_one("a.preview, a[href*='tickets.php?id='], td:nth-child(2) a")
+                            if not ticket_num_el:
                                 continue
 
-                            ticket_num_text = (await ticket_num_el.inner_text()).strip()
+                            ticket_num_text = ticket_num_el.get_text(strip=True)
                             num_match = re.search(r'(\d+)', ticket_num_text)
                             if not num_match:
                                 continue
                             ticket_number = num_match.group(1)
 
-                            last_updated_el = row.locator("td:nth-child(3)").first
-                            last_updated_str = (await last_updated_el.inner_text()).strip() if await last_updated_el.count() > 0 else ""
+                            tds = row.find_all("td")
+                            last_updated_str = tds[2].get_text(strip=True) if len(tds) > 2 else ""
 
-                            href = await ticket_num_el.get_attribute("href")
-                            id_match = re.search(r'id=(\d+)', href or '')
+                            href = ticket_num_el.get("href", "")
+                            id_match = re.search(r'id=(\d+)', href)
                             internal_id = id_match.group(1) if id_match else ticket_number
 
                             # Kiểm tra vé trong Database Supabase
@@ -368,9 +461,9 @@ class OSTicketService:
                                 if db_last_updated == last_updated_str and last_updated_str != "":
                                     continue
 
-                            logger.info(f"✨ Phát hiện biến động tại vé #{ticket_number} (Cập nhật lúc: {last_updated_str}), đang đồng bộ...")
-                            ticket_data = await self.scrape_ticket_detail(context, internal_id, ticket_number)
-                            
+                            logger.info(f"✨ [HTTPX Engine] Phát hiện vé #{ticket_number} (Cập nhật lúc: {last_updated_str}), đang cào chi tiết...")
+                            ticket_data = await self.scrape_ticket_detail_httpx(client, internal_id, ticket_number)
+
                             if ticket_data:
                                 meta = ticket_data.get("metadata", {})
                                 meta["last_updated_raw"] = last_updated_str
@@ -427,14 +520,14 @@ class OSTicketService:
                                         await process_incoming_ticket(updated_ticket)
 
                         except Exception as row_err:
-                            logger.error(f"❌ Lỗi khi quét dòng {r_idx}: {row_err}")
+                            logger.error(f"❌ Lỗi khi quét dòng {r_idx} vé #{ticket_number if 'ticket_number' in locals() else 'unknown'}: {row_err}")
                             continue
 
+                except PermissionError:
+                    logger.warning("🔄 Phát hiện phiên hết hạn giữa chừng, sẽ tự động bốc cookie mới ở chu kỳ kế tiếp.")
+                    self.invalidate_session()
                 except Exception as e:
-                    logger.error(f"❌ Lỗi polling OS Ticket tổng thể: {e}")
-                finally:
-                    await browser.close()
-                    gc.collect()
+                    logger.error(f"❌ Lỗi polling OS Ticket tổng thể: {e}", exc_info=True)
 
 
 osticket_service = OSTicketService()

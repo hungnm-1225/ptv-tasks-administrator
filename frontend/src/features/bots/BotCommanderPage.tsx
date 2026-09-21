@@ -27,10 +27,22 @@ import {
   Check,
   Tag,
   Filter,
+  CheckCircle,
+  HelpCircle
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { BotTerminalLog } from '../../types';
 import { toast } from 'sonner';
+
+interface WorkerTelemetry {
+  status: string;
+  failed_count: number;
+  last_status?: 'idle' | 'running' | 'success' | 'yielded' | 'error';
+  last_run_at?: string | null;
+  next_run_at?: string | null;
+  duration_seconds?: number | null;
+  last_message?: string | null;
+}
 
 interface IngestionWorkerConfig {
   key: string;
@@ -68,7 +80,7 @@ const INGESTION_PIPELINES: IngestionWorkerConfig[] = [
     key: 'osticket_sync_worker',
     name: 'OS Ticket Support Scraper',
     description: 'Cào vé mở từ helpdesk support.pythaverse.space qua Playwright',
-    cronInterval: 'Chu kỳ 5 phút (So Le)',
+    cronInterval: 'Chu kỳ 10 phút (Playwright Shield)',
     syncType: 'osticket',
     icon: LifeBuoy,
     badgeClass: 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200/60 dark:border-amber-800/50',
@@ -136,7 +148,7 @@ const EXECUTION_ENGINES: ExecutionWorkerConfig[] = [
 ];
 
 export const BotCommanderPage: React.FC = () => {
-  const [botStatus, setBotStatus] = useState<Record<string, { status: string; failed_count: number }> | null>(null);
+  const [botStatus, setBotStatus] = useState<Record<string, WorkerTelemetry> | null>(null);
   const [logs, setLogs] = useState<BotTerminalLog[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -160,7 +172,7 @@ export const BotCommanderPage: React.FC = () => {
 
     try {
       const [statusData, logsData] = await Promise.all([
-        fetchApi<Record<string, { status: string; failed_count: number }>>('/bots/status'),
+        fetchApi<Record<string, WorkerTelemetry>>('/bots/status'),
         fetchApi<BotTerminalLog[]>('/bots/logs')
       ]);
       setBotStatus(statusData);
@@ -278,6 +290,27 @@ export const BotCommanderPage: React.FC = () => {
     );
   }, [logs, searchQuery]);
 
+  // Helper tính khoảng thời gian tương đối
+  const formatTimeRelative = (timeStr?: string | null) => {
+    if (!timeStr) return null;
+    try {
+      const target = new Date(timeStr.replace(' ', 'T')).getTime();
+      const now = new Date().getTime();
+      const diffMs = target - now;
+      const diffMinutes = Math.round(diffMs / 60000);
+
+      if (diffMinutes > 0) {
+        return `sau ${diffMinutes}p`;
+      } else if (diffMinutes === 0) {
+        return 'ngay bây giờ';
+      } else {
+        return `${Math.abs(diffMinutes)}p trước`;
+      }
+    } catch {
+      return null;
+    }
+  };
+
   return (
     <div className="space-y-6 w-full pb-10">
       {/* Header */}
@@ -320,7 +353,7 @@ export const BotCommanderPage: React.FC = () => {
         </div>
       </div>
 
-      {/* SECTION 1: INGESTION PIPELINES */}
+      {/* SECTION 1: INGESTION PIPELINES (ĐÃ BỔ SUNG TELEMETRY REAL-TIME) */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -336,6 +369,40 @@ export const BotCommanderPage: React.FC = () => {
           {INGESTION_PIPELINES.map((p) => {
             const IconComp = p.icon;
             const isSyncing = syncingType === p.syncType;
+            const telemetry = botStatus?.[p.key];
+
+            // Xác định badge trạng thái động dựa trên Telemetry thực tế
+            let statusBadge = (
+              <span className="flex items-center gap-1 text-[10px] text-emerald-700 dark:text-emerald-300 font-semibold bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/60 dark:border-emerald-800/50 px-2 py-0.5 rounded-full shadow-xs">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>ONLINE</span>
+              </span>
+            );
+
+            if (telemetry?.last_status === 'running' || isSyncing) {
+              statusBadge = (
+                <span className="flex items-center gap-1 text-[10px] text-sky-700 dark:text-sky-300 font-semibold bg-sky-50 dark:bg-sky-950/40 border border-sky-200/60 dark:border-sky-800/50 px-2 py-0.5 rounded-full shadow-xs">
+                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                  <span>ĐANG CHẠY</span>
+                </span>
+              );
+            } else if (telemetry?.last_status === 'yielded') {
+              statusBadge = (
+                <span className="flex items-center gap-1 text-[10px] text-amber-700 dark:text-amber-300 font-semibold bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 px-2 py-0.5 rounded-full shadow-xs" title={telemetry.last_message || 'Đã nhường slot Playwright cho tác vụ VIP'}>
+                  <AlertTriangle className="w-2.5 h-2.5" />
+                  <span>NHƯỜNG SLOT</span>
+                </span>
+              );
+            } else if (telemetry?.last_status === 'error') {
+              statusBadge = (
+                <span className="flex items-center gap-1 text-[10px] text-rose-700 dark:text-rose-300 font-semibold bg-rose-50 dark:bg-rose-950/40 border border-rose-200/80 dark:border-rose-800/60 px-2 py-0.5 rounded-full shadow-xs" title={telemetry.last_message || 'Có lỗi xảy ra'}>
+                  <AlertTriangle className="w-2.5 h-2.5" />
+                  <span>LỖI CHU KỲ</span>
+                </span>
+              );
+            }
+
+            const relativeNext = formatTimeRelative(telemetry?.next_run_at);
 
             return (
               <div
@@ -350,18 +417,48 @@ export const BotCommanderPage: React.FC = () => {
                       </div>
                       <span className="text-xs font-bold text-slate-900 dark:text-white">{p.name}</span>
                     </div>
-                    <span className="flex items-center gap-1 text-[10px] text-emerald-700 dark:text-emerald-300 font-semibold bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/60 dark:border-emerald-800/50 px-2 py-0.5 rounded-full shadow-xs">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                      <span>ONLINE</span>
-                    </span>
+                    {statusBadge}
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-2.5 line-clamp-2 leading-relaxed">{p.description}</p>
+
+                  {/* BENTO TELEMETRY STRIP (LẦN CHẠY GẦN NHẤT & KẾ TIẾP) */}
+                  <div className="mt-3 p-2.5 rounded-xl bg-slate-50/80 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-800/80 space-y-1.5 font-mono text-[11px]">
+                    <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500">Chạy gần nhất:</span>
+                      <span className="font-semibold text-slate-700 dark:text-slate-300 truncate max-w-[130px]" title={telemetry?.last_run_at || 'Chưa chạy'}>
+                        {telemetry?.last_run_at ? (
+                          <>
+                            {telemetry.last_run_at.slice(11, 19)}
+                            {telemetry.duration_seconds !== null && telemetry.duration_seconds !== undefined && (
+                              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 ml-1">({telemetry.duration_seconds}s)</span>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-slate-400 italic">Chưa chạy</span>
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500">Kế tiếp:</span>
+                      <span className="font-semibold text-indigo-600 dark:text-indigo-400">
+                        {telemetry?.next_run_at ? (
+                          <>
+                            {telemetry.next_run_at.slice(11, 19)}
+                            {relativeNext && <span className="text-[10px] text-slate-400 ml-1">({relativeNext})</span>}
+                          </>
+                        ) : (
+                          <span className="text-slate-400 italic">Theo lịch</span>
+                        )}
+                      </span>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
                   <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md flex items-center gap-1">
                     <Clock className="w-3 h-3 text-slate-400" />
-                    <span>{p.cronInterval}</span>
+                    <span className="truncate max-w-[110px]" title={p.cronInterval}>{p.cronInterval}</span>
                   </span>
 
                   <button
@@ -389,7 +486,7 @@ export const BotCommanderPage: React.FC = () => {
         </div>
       </div>
 
-      {/* SECTION 2: AUTOMATION EXECUTION ENGINES */}
+      {/* SECTION 2: AUTOMATION EXECUTION ENGINES (GIỮ NGUYÊN HOÀN TOÀN) */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -466,7 +563,7 @@ export const BotCommanderPage: React.FC = () => {
         </div>
       </div>
 
-      {/* SECTION 3: LIVE WORKER EXECUTION TERMINAL */}
+      {/* SECTION 3: LIVE WORKER EXECUTION TERMINAL (GIỮ NGUYÊN) */}
       <section id="section-live-terminal" className="space-y-2.5">
         <div className="bg-[#0B1120] rounded-2xl border border-slate-800 shadow-xl overflow-hidden transition-all">
           {/* Terminal Header Bar */}
@@ -586,7 +683,6 @@ export const BotCommanderPage: React.FC = () => {
               filteredLogs.map((log, index) => {
                 const { taskId, cleanMsg } = parseLogLineDetails(log);
 
-                // 🟢 Ép kiểu String để TypeScript không báo lỗi No Overlap ts(2367)
                 const lvl = String(log.level || '').toUpperCase();
                 const isError = lvl === 'ERROR' || lvl.includes('CRITICAL') || lvl.includes('ERR');
                 const isSuccess = lvl === 'SUCCESS' || cleanMsg.toLowerCase().includes('success') || cleanMsg.includes('hoàn thành');
