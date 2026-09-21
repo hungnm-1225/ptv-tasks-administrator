@@ -365,7 +365,7 @@ class GitPlaywrightService:
     ) -> Dict[str, Any]:
         """Bộ điều phối cốt lõi: Dedup JIT đầu vào ➔ Chạy 3 Repos song song ➔ Báo cáo tinh gọn."""
         repos_plan: List[Dict[str, Any]] = []
-        is_remove_flow = action in ["remove", "remove_collaborator", "delete"]
+        is_remove_flow = action in ["remove", "remove_collaborator", "remove_collaborators", "remove_repo_collaborators", "delete"]
 
         if payload.get("repos_plan") and isinstance(payload.get("repos_plan"), list):
             for item in payload["repos_plan"]:
@@ -495,7 +495,7 @@ class GitPlaywrightService:
             if is_remove_flow:
                 rem_cnt = len(r.get("removed", []))
                 alr_cnt = len(r.get("already_exists", []))
-                report_lines.append(f"📁 REPO: {short_name} [Đã gỡ ({rem_cnt}) | Vốn không có ({alr_cnt})]")
+                report_lines.append(f"📁 REPO: {short_name} [Đã gỡ ({rem_cnt}) | Không tìm thấy ({alr_cnt})]")
             else:
                 add_cnt = len(r.get("added", []))
                 alr_cnt = len(r.get("already_exists", []))

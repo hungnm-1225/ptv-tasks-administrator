@@ -130,8 +130,17 @@ async def execute_approved_bot_task(
         # 4. NHÓM TASK PYTHAVERSE GIT COLLABORATOR BOT (GITBUCKET HYBRID)
         # =====================================================================
         elif bot_type in ["git_collaborator", "git_playwright", "git_repo_collaborator"]:
-            logger.info(f"🐙 {task_tag} Kích hoạt Pythaverse Git Direct Engine...")
-            return await git_playwright_service.add_collaborators_pipeline(payload_data)
+            is_remove_action = (
+                action in ["remove", "remove_collaborator", "remove_collaborators", "remove_repo_collaborators", "delete"]
+                or payload_data.get("git_action") == "remove"
+            )
+
+            if is_remove_action:
+                logger.info(f"🐙 {task_tag} Kích hoạt Pythaverse Git Direct Engine (GỠ BỎ / REMOVE COLLABORATORS)...")
+                return await git_playwright_service.remove_collaborators_pipeline(payload_data)
+            else:
+                logger.info(f"🐙 {task_tag} Kích hoạt Pythaverse Git Direct Engine (THÊM / ADD COLLABORATORS)...")
+                return await git_playwright_service.add_collaborators_pipeline(payload_data)
 
         # =====================================================================
         # 5. NHÓM TASK GITHUB ISSUE DISPATCHER
