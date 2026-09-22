@@ -290,27 +290,33 @@ class GitPlaywrightService:
             # 🎯 BÓC TÁCH COLLABORATORS TỪ DANH SÁCH <ul id="collaborator-list">
             # =================================================================
             current_collaborators: Dict[str, str] = {}
-            ul_match = re.search(r'<ul[^>]+id=["\']collaborator-list["\'][^>]*>(.*?)</ul>', get_res.text, re.DOTALL)
-            
-            if ul_match:
-                ul_content = ul_match.group(1)
-                li_items = re.findall(r'<li[^>]*>(.*?)</li>', ul_content, re.DOTALL)
-                for li in li_items:
-                    # Cách 1: Bắt username trực tiếp từ name của nút Radio (Cực kỳ chuẩn xác vì radio luôn có name="tên_user")
-                    # Ví dụ: <input type="radio" value="GUEST" name="hsdttemd">
-                    u_match = re.search(r'<input[^>]+type=["\']radio["\'][^>]+name=["\']([a-zA-Z0-9_\.\-]+)["\']', li)
-                    
-                    # Cách 2 (Fallback): Bắt từ link profile không phải nút remove
-                    if not u_match:
-                        u_match = re.search(r'<a[^>]+href=["\']/([a-zA-Z0-9_\.\-]+)["\'][^>]*>(?!\s*\(remove\))', li)
 
-                    # Bắt Role từ label active: <label class="... active"><input ... value="ROLE">
-                    r_match = re.search(r'<label[^>]+class=["\'][^"\']*\bactive\b[^"\']*["\'][^>]*>.*?value=["\']([A-Z]+)["\']', li, re.DOTALL)
+            # VECTƠ 1: Bóc tách trực tiếp từ các nút Radio đang Active
+            # Ví dụ: <label class="btn btn-default btn-mini active"><input type="radio" value="GUEST" name="hsdttemd">
+            active_labels = re.findall(
+                r'<label[^>]*class=["\'][^"\']*\bactive\b[^"\']*["\'][^>]*>(.*?)</label>',
+                get_res.text,
+                re.DOTALL | re.IGNORECASE
+            )
+            for lbl in active_labels:
+                val_m = re.search(r'value=["\'](ADMIN|DEVELOPER|GUEST)["\']', lbl, re.IGNORECASE)
+                name_m = re.search(r'name=["\']([a-zA-Z0-9_\.\-]+)["\']', lbl, re.IGNORECASE)
+                if val_m and name_m:
+                    uname = name_m.group(1).strip()
+                    urole = val_m.group(1).upper().strip()
+                    current_collaborators[uname] = urole
 
-                    if u_match:
-                        uname = u_match.group(1).strip()
-                        urole = r_match.group(1).strip() if r_match else "GUEST"
-                        current_collaborators[uname] = urole
+            # VECTƠ 2 (Lưới hứng an toàn): Quét các user có nút (remove) bên cạnh
+            # Ví dụ: <a target="_blank" href="/hsdttemd">hsdttemd</a><a href="#" class="remove pull-right">(remove)</a>
+            remove_user_matches = re.findall(
+                r'<a[^>]+href=["\']/([a-zA-Z0-9_\.\-]+)["\'][^>]*>.*?</a>\s*<a[^>]+class=["\'][^"\']*remove[^"\']*["\']',
+                get_res.text,
+                re.DOTALL | re.IGNORECASE
+            )
+            for u in remove_user_matches:
+                u_clean = u.strip()
+                if u_clean not in current_collaborators:
+                    current_collaborators[u_clean] = "GUEST"
 
             logger.info(f"🔍 [DOM Parser] Đã quét thấy {len(current_collaborators)} thành viên: {list(current_collaborators.keys())}")
 

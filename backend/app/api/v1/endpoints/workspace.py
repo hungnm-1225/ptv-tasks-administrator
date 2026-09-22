@@ -23,6 +23,7 @@ from app.services.workspace.orchestrator_service import workspace_orchestrator_s
 from app.services.workspace.workspace_scanner_service import workspace_scanner_service
 from app.services.keycloak_service import keycloak_service
 from app.services.excel.cof_service import COFService
+from app.services.session_keepalive_service import session_keepalive_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -615,3 +616,12 @@ async def update_organization_and_vault(org_id: str, payload: OrgUpdateRequest):
     except Exception as e:
         logger.error(f"❌ Lỗi cập nhật organization {org_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Lỗi máy chủ: {str(e)}")
+
+@router.post("/prewarm-all-sessions")
+async def trigger_prewarm_all_sessions(background_tasks: BackgroundTasks):
+    """⚡ ÉP GIEO MẦM & LÀM TƯƠI TOÀN BỘ 7 PHÂN HỆ VÀO BẢNG SUPABASE NGAY LẬP TỨC."""
+    background_tasks.add_task(session_keepalive_service.keep_alive_all_sessions)
+    return {
+        "status": "queued",
+        "message": "Đang kích hoạt gieo mầm và nạp toàn bộ Session vào Supabase trong nền!"
+    }
