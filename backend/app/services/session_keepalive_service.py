@@ -1,12 +1,18 @@
 # backend/app/services/session_keepalive_service.py
 """
-Pythaverse Central Admin - Unified Session Keep-Alive & Auto-Seeding Engine (Master Enterprise v2.0)
-Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI
+Pythaverse Central Admin - Unified Session Keep-Alive & Full 7-Subsystem Auto-Seeder
+Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI (Master Enterprise Edition)
 Chuyên trách:
-- Tự động phát hiện bảng rỗng và kích hoạt Playwright gieo mầm tuần tự (Sequential Seeding) cho TOÀN BỘ phân hệ.
-- Bảo vệ trần 512MB RAM Render: Chỉ chạy duy nhất 1 Chromium tại 1 thời điểm, đóng ngay sau 3s và thu hồi RAM.
-- Ghi đè (UPSERT) trọn bộ Cookies vào bảng workspace_active_sessions trên Supabase.
-- Giữ ấm song song 7 phân hệ mỗi 15 phút bằng HTTPX Async thuần (< 1s, Zero Playwright).
+- Gieo mầm tuần tự (1 Chromium slot duy nhất - bảo vệ 512MB RAM):
+  1. Sales Admin Workspace
+  2. Workspace Admin Portal
+  3. osTicket Support
+  4. Pythaverse GitBucket
+  5. PLearn Moodle LMS
+  6. Keycloak Admin Console
+  7. Distributor Workspace (Vì Người Việt #2 / Malaysia)
+- Ghi đè (UPSERT) trọn bộ 7 records vào bảng workspace_active_sessions trên Supabase.
+- Giữ ấm định kỳ 15 phút bằng HTTPX Async thuần (< 1s, Zero Playwright).
 """
 import os
 import gc
@@ -15,7 +21,7 @@ import time
 import logging
 import asyncio
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List
 import httpx
 from playwright.async_api import async_playwright
 
@@ -99,22 +105,39 @@ class UnifiedSessionKeepAliveService:
             logger.error(f"❌ Lỗi ghi đè session '{session_key}' lên Supabase: {e}")
 
     # =========================================================================
-    # 🔑 2. CỖ MÁY GIEO MẦM TUẦN TỰ (PLAYWRIGHT SEEDERS - CHỈ CHẠY 1 CHROMIUM/LẦN)
+    # 🔑 2. CỖ MÁY GIEO MẦM TUẦN TỰ TRỌN BỘ 7 PHÂN HỆ (1 CHROMIUM/LẦN)
     # =========================================================================
 
-    async def _seed_sales_admin(self) -> bool:
-        """Gieo mầm session Sales Admin / Admin Workspace."""
+    async def _seed_workspace_admins(self) -> bool:
+        """Gieo mầm đồng thời cho cả Sales Admin và Workspace Admin."""
         raw_user = os.getenv("TEST_ADMIN_USER", "")
         raw_pass = os.getenv("TEST_ADMIN_PASS", "")
         user = sanitize_val(raw_user)
         pwd = sanitize_val(raw_pass)
 
         if not user or not pwd:
-            logger.warning("⚠️ Chưa cấu hình TEST_ADMIN_USER / PASS để gieo mầm Sales Admin.")
+            try:
+                from app.api.v1.endpoints.workspace import get_clean_fernet_cipher
+                vault_res = self.supabase.table("workspace_credentials_vault")\
+                    .select("username, encrypted_password")\
+                    .or_("username.eq.adminworkspace,account_role.eq.admin,account_role.eq.sales_admin")\
+                    .limit(1)\
+                    .execute()
+
+                if vault_res.data:
+                    v_row = vault_res.data[0]
+                    user = v_row.get("username") or "adminworkspace"
+                    enc_pass = v_row.get("encrypted_password") or ""
+                    cipher = get_clean_fernet_cipher()
+                    pwd = cipher.decrypt(enc_pass.encode()).decode() if (cipher and enc_pass.startswith("gAAAAA")) else enc_pass
+            except Exception as v_err:
+                logger.warning(f"⚠️ Không thể giải mã Vault cho Workspace Admin: {v_err}")
+
+        if not user or not pwd:
             return False
 
-        logger.info("🌱 [Seeder 1/4] Đang mở Playwright bốc Session Sales Admin...")
-        async with acquire_playwright_slot("Seed Sales Admin", timeout=45, lane="admin"):
+        logger.info(f"🌱 [Seeder 1/6] Đang mở Playwright bốc Session Admin Workspace ({user})...")
+        async with acquire_playwright_slot("Seed Workspace Admin", timeout=45, lane="admin"):
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True, args=LOW_RAM_CHROMIUM_ARGS)
                 context = await browser.new_context(viewport={"width": 1280, "height": 800}, user_agent=BROWSER_HEADERS["User-Agent"])
@@ -123,23 +146,24 @@ class UnifiedSessionKeepAliveService:
 
                 try:
                     await page.goto("https://pythaverse.space/login", wait_until="domcontentloaded", timeout=25000)
-                    if await page.locator("#username").count() > 0:
-                        await page.evaluate(f"""() => {{
-                            document.querySelector('#username').value = '{user}';
-                            document.querySelector('#username').dispatchEvent(new Event('input', {{ bubbles: true }}));
-                            document.querySelector('#password').value = '{pwd}';
-                            document.querySelector('#password').dispatchEvent(new Event('input', {{ bubbles: true }}));
-                        }}""")
-                        await page.click("button[type='submit']")
+                    user_sel = "#username, #user_login, input[name='log']"
+                    pass_sel = "#password, #user_pass, input[name='pwd']"
+                    btn_sel = "button[type='submit'], input[type='submit'], #wp-submit"
+
+                    if await page.locator(user_sel).count() > 0:
+                        await page.fill(user_sel, user)
+                        await page.fill(pass_sel, pwd)
+                        await page.click(btn_sel)
                         await page.wait_for_url(lambda u: "login" not in u, timeout=15000)
 
                     cookies = {c["name"]: c["value"] for c in await context.cookies()}
                     if cookies:
+                        # Ghi đồng thời cả 2 bản ghi Sales Admin & Workspace Admin
                         await self.save_session_cookies("sales_admin", "Sales Admin Workspace", cookies, {"user": user})
-                        await self.save_session_cookies("admin_workspace", "Admin Workspace", cookies, {"user": user})
+                        await self.save_session_cookies("admin_workspace", "Admin Workspace Portal", cookies, {"user": user})
                         return True
                 except Exception as e:
-                    logger.error(f"❌ Lỗi gieo mầm Sales Admin: {e}")
+                    logger.error(f"❌ Lỗi gieo mầm Workspace Admin: {e}")
                 finally:
                     await browser.close()
                     gc.collect()
@@ -147,16 +171,12 @@ class UnifiedSessionKeepAliveService:
 
     async def _seed_osticket(self) -> bool:
         """Gieo mầm session osTicket Support."""
-        raw_user = os.getenv("OSTICKET_ADMIN_USER", "")
-        raw_pass = os.getenv("OSTICKET_ADMIN_PASS", "")
-        user = sanitize_val(raw_user)
-        pwd = sanitize_val(raw_pass)
-
+        user = sanitize_val(os.getenv("OSTICKET_ADMIN_USER", ""))
+        pwd = sanitize_val(os.getenv("OSTICKET_ADMIN_PASS", ""))
         if not user or not pwd:
-            logger.warning("⚠️ Chưa cấu hình OSTICKET_ADMIN_USER / PASS.")
             return False
 
-        logger.info("🌱 [Seeder 2/4] Đang mở Playwright bốc Session osTicket...")
+        logger.info("🌱 [Seeder 2/6] Đang mở Playwright bốc Session osTicket...")
         async with acquire_playwright_slot("Seed osTicket", timeout=45, lane="admin"):
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True, args=LOW_RAM_CHROMIUM_ARGS)
@@ -184,17 +204,13 @@ class UnifiedSessionKeepAliveService:
         return False
 
     async def _seed_git(self) -> bool:
-        """Gieo mầm session Pythaverse Git (qua Keycloak SSO)."""
-        raw_user = os.getenv("GIT_ADMIN_USER", "") or os.getenv("KEYCLOAK_ADMIN_USER", "")
-        raw_pass = os.getenv("GIT_ADMIN_PASS", "") or os.getenv("KEYCLOAK_ADMIN_PASS", "")
-        user = sanitize_val(raw_user)
-        pwd = sanitize_val(raw_pass)
-
+        """Gieo mầm session Pythaverse Git."""
+        user = sanitize_val(os.getenv("GIT_ADMIN_USER", "") or os.getenv("KEYCLOAK_ADMIN_USER", "") or "ptvadmin")
+        pwd = sanitize_val(os.getenv("GIT_ADMIN_PASS", "") or os.getenv("KEYCLOAK_ADMIN_PASS", ""))
         if not user or not pwd:
-            logger.warning("⚠️ Chưa cấu hình GIT_ADMIN_USER / PASS.")
             return False
 
-        logger.info("🌱 [Seeder 3/4] Đang mở Playwright bốc Session Pythaverse Git...")
+        logger.info(f"🌱 [Seeder 3/6] Đang mở Playwright bốc Session Pythaverse Git ({user})...")
         async with acquire_playwright_slot("Seed Git", timeout=45, lane="admin"):
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True, args=LOW_RAM_CHROMIUM_ARGS)
@@ -223,16 +239,12 @@ class UnifiedSessionKeepAliveService:
 
     async def _seed_lms(self) -> bool:
         """Gieo mầm session PLearn LMS Moodle."""
-        raw_user = os.getenv("KEYCLOAK_ADMIN_USER", "")
-        raw_pass = os.getenv("KEYCLOAK_ADMIN_PASS", "")
-        user = sanitize_val(raw_user)
-        pwd = sanitize_val(raw_pass)
-
+        user = sanitize_val(os.getenv("GIT_ADMIN_USER", "") or os.getenv("KEYCLOAK_ADMIN_USER", "") or "ptvadmin")
+        pwd = sanitize_val(os.getenv("GIT_ADMIN_PASS", "") or os.getenv("KEYCLOAK_ADMIN_PASS", ""))
         if not user or not pwd:
-            logger.warning("⚠️ Chưa cấu hình tài khoản LMS Moodle.")
             return False
 
-        logger.info("🌱 [Seeder 4/4] Đang mở Playwright bốc Session PLearn LMS...")
+        logger.info(f"🌱 [Seeder 4/6] Đang mở Playwright bốc Session PLearn LMS ({user})...")
         async with acquire_playwright_slot("Seed LMS", timeout=45, lane="admin"):
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True, args=LOW_RAM_CHROMIUM_ARGS)
@@ -241,15 +253,12 @@ class UnifiedSessionKeepAliveService:
                 page = await context.new_page()
 
                 try:
-                    await page.goto("https://learn.pythaverse.space/login/index.php", wait_until="domcontentloaded", timeout=25000)
-                    if await page.locator("a[href*='auth/oidc'], a.btn-login").count() > 0:
-                        await page.click("a[href*='auth/oidc'], a.btn-login")
-                    
+                    await page.goto("https://learn.pythaverse.space/auth/oidc/", wait_until="domcontentloaded", timeout=25000)
                     if "eid.pythaverse.space" in page.url or await page.locator("#username").count() > 0:
                         await page.fill("#username", user)
                         await page.fill("#password", pwd)
                         await page.click("#kc-login, input[type='submit']")
-                        await page.wait_for_url(lambda u: "learn.pythaverse.space" in u and "login" not in u, timeout=15000)
+                        await page.wait_for_url(lambda u: "learn.pythaverse.space" in u and "login" not in u and "eid.pythaverse" not in u, timeout=18000)
 
                     cookies = {c["name"]: c["value"] for c in await context.cookies()}
                     if cookies:
@@ -262,39 +271,133 @@ class UnifiedSessionKeepAliveService:
                     gc.collect()
         return False
 
-    async def seed_all_empty_sessions(self):
-        """Kiểm tra toàn bộ hệ thống: Phân hệ nào rỗng hoặc chết thì tự động mở Playwright gieo mầm tuần tự."""
-        logger.info("🔍 [Auto-Seeder] Đang kiểm tra trạng thái Session của toàn bộ hệ sinh thái...")
-        
-        # 1. Sales Admin
-        if not await self.get_session_cookies("sales_admin"):
-            await self._seed_sales_admin()
+    async def _seed_keycloak(self) -> bool:
+        """Gieo mầm session Keycloak Admin Console Web UI (KEYCLOAK_SESSION 10 tiếng)."""
+        user = sanitize_val(os.getenv("KEYCLOAK_ADMIN_USER", "") or os.getenv("GIT_ADMIN_USER", "") or "ptvadmin")
+        pwd = sanitize_val(os.getenv("KEYCLOAK_ADMIN_PASS", "") or os.getenv("GIT_ADMIN_PASS", ""))
+        if not user or not pwd:
+            return False
 
-        # 2. osTicket
+        logger.info(f"🌱 [Seeder 5/6] Đang mở Playwright bốc Session Keycloak Admin Console ({user})...")
+        async with acquire_playwright_slot("Seed Keycloak Admin", timeout=45, lane="admin"):
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True, args=LOW_RAM_CHROMIUM_ARGS)
+                context = await browser.new_context(viewport={"width": 1280, "height": 800}, user_agent=BROWSER_HEADERS["User-Agent"])
+                await setup_low_ram_routes(context)
+                page = await context.new_page()
+
+                try:
+                    await page.goto("https://eid.pythaverse.space/auth/admin/master/console/", wait_until="domcontentloaded", timeout=25000)
+                    if await page.locator("#username").count() > 0:
+                        await page.fill("#username", user)
+                        await page.fill("#password", pwd)
+                        await page.click("#kc-login, input[type='submit']")
+                        await page.wait_for_url(lambda u: "console" in u and "login" not in u, timeout=18000)
+
+                    cookies = {c["name"]: c["value"] for c in await context.cookies()}
+                    if cookies:
+                        await self.save_session_cookies("keycloak_admin", "Keycloak Admin Console", cookies, {"user": user})
+                        return True
+                except Exception as e:
+                    logger.error(f"❌ Lỗi gieo mầm Keycloak: {e}")
+                finally:
+                    await browser.close()
+                    gc.collect()
+        return False
+
+    async def _seed_distributor(self, dist_id: str = "2") -> bool:
+        """Gieo mầm session Nhà phân phối (Distributor Vì Người Việt #2 hoặc Malaysia)."""
+        user, pwd = "", ""
+        try:
+            from app.api.v1.endpoints.workspace import get_clean_fernet_cipher
+            vault_res = self.supabase.table("workspace_credentials_vault")\
+                .select("username, encrypted_password")\
+                .or_(f"username.ilike.%distributor%,account_role.eq.distributor")\
+                .limit(1)\
+                .execute()
+
+            if vault_res.data:
+                v_row = vault_res.data[0]
+                user = v_row.get("username") or ""
+                enc_pass = v_row.get("encrypted_password") or ""
+                cipher = get_clean_fernet_cipher()
+                pwd = cipher.decrypt(enc_pass.encode()).decode() if (cipher and enc_pass.startswith("gAAAAA")) else enc_pass
+        except Exception as v_err:
+            logger.warning(f"⚠️ Lỗi đọc Vault Distributor: {v_err}")
+
+        if not user or not pwd:
+            return False
+
+        logger.info(f"🌱 [Seeder 6/6] Đang mở Playwright bốc Session Distributor ({user})...")
+        async with acquire_playwright_slot("Seed Distributor", timeout=45, lane="admin"):
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True, args=LOW_RAM_CHROMIUM_ARGS)
+                context = await browser.new_context(viewport={"width": 1280, "height": 800}, user_agent=BROWSER_HEADERS["User-Agent"])
+                await setup_low_ram_routes(context)
+                page = await context.new_page()
+
+                try:
+                    await page.goto("https://pythaverse.space/login", wait_until="domcontentloaded", timeout=25000)
+                    user_sel = "#username, #user_login, input[name='log']"
+                    pass_sel = "#password, #user_pass, input[name='pwd']"
+                    btn_sel = "button[type='submit'], input[type='submit'], #wp-submit"
+
+                    if await page.locator(user_sel).count() > 0:
+                        await page.fill(user_sel, user)
+                        await page.fill(pass_sel, pwd)
+                        await page.click(btn_sel)
+                        await page.wait_for_url(lambda u: "login" not in u, timeout=15000)
+
+                    cookies = {c["name"]: c["value"] for c in await context.cookies()}
+                    if cookies:
+                        await self.save_session_cookies("distributor_2", f"Distributor Vì Người Việt (#{dist_id})", cookies, {"user": user})
+                        return True
+                except Exception as e:
+                    logger.error(f"❌ Lỗi gieo mầm Distributor: {e}")
+                finally:
+                    await browser.close()
+                    gc.collect()
+        return False
+
+    async def seed_all_empty_sessions(self):
+        """Tự động kiểm tra và gieo mầm tuần tự cho TẤT CẢ các phân hệ còn thiếu."""
+        logger.info("🔍 [Auto-Seeder] Đang rà soát và gieo mầm cho toàn bộ 7 phân hệ...")
+
+        # 1 & 2. Sales Admin & Workspace Admin
+        if not await self.get_session_cookies("admin_workspace") or not await self.get_session_cookies("sales_admin"):
+            await self._seed_workspace_admins()
+
+        # 3. osTicket
         if not await self.get_session_cookies("osticket"):
             await self._seed_osticket()
 
-        # 3. Git
+        # 4. Git
         if not await self.get_session_cookies("pythaverse_git"):
             await self._seed_git()
 
-        # 4. LMS Moodle
+        # 5. LMS Moodle
         if not await self.get_session_cookies("plearn_lms"):
             await self._seed_lms()
 
+        # 6. Keycloak Admin
+        if not await self.get_session_cookies("keycloak_admin"):
+            await self._seed_keycloak()
+
+        # 7. Distributor
+        if not await self.get_session_cookies("distributor_2"):
+            await self._seed_distributor()
+
     # =========================================================================
-    # ⚡ 3. BỘ 7 HÀM PING GIỮ ẤM SIÊU NHẸ (HTTPX ASYNC)
+    # ⚡ 3. BỘ HÀM PING GIỮ ẤM SONG SONG (HTTPX ASYNC)
     # =========================================================================
 
     async def _ping_admin_workspace(self, client: httpx.AsyncClient) -> Dict[str, Any]:
-        cookies = await self.get_session_cookies("admin_workspace")
+        cookies = await self.get_session_cookies("admin_workspace") or await self.get_session_cookies("sales_admin")
         if not cookies:
             return {"system": "Admin Workspace", "status": "NO_SESSION"}
-
         start = time.perf_counter()
-        url = "https://pythaverse.space/wp-content/plugins/admin-workspace-v5/pages/phub_admin/action/getAdmin.php"
         try:
-            res = await client.get(url, cookies=cookies)
+            res = await client.get("https://pythaverse.space/wp-content/plugins/admin-workspace-v5/pages/phub_admin/action/getAdmin.php", cookies=cookies)
             dur = int((time.perf_counter() - start) * 1000)
             is_valid = res.status_code == 200 and "login" not in str(res.url)
             return {"system": "Admin Workspace", "status": "UP" if is_valid else "EXPIRED", "latency_ms": dur}
@@ -305,11 +408,9 @@ class UnifiedSessionKeepAliveService:
         cookies = await self.get_session_cookies("plearn_lms")
         if not cookies:
             return {"system": "PLearn LMS", "status": "NO_SESSION"}
-
         start = time.perf_counter()
-        url = "https://learn.pythaverse.space/?redirect=0"
         try:
-            res = await client.head(url, cookies=cookies)
+            res = await client.head("https://learn.pythaverse.space/?redirect=0", cookies=cookies)
             dur = int((time.perf_counter() - start) * 1000)
             is_valid = res.status_code in [200, 303] and "login" not in str(res.headers.get("location", ""))
             return {"system": "PLearn LMS", "status": "UP" if is_valid else "EXPIRED", "latency_ms": dur}
@@ -320,11 +421,9 @@ class UnifiedSessionKeepAliveService:
         cookies = await self.get_session_cookies("pythaverse_git")
         if not cookies:
             return {"system": "Pythaverse Git", "status": "NO_SESSION"}
-
         start = time.perf_counter()
-        url = "https://git.pythaverse.space/repo?search=&page=1"
         try:
-            res = await client.get(url, cookies=cookies)
+            res = await client.get("https://git.pythaverse.space/repo?search=&page=1", cookies=cookies)
             dur = int((time.perf_counter() - start) * 1000)
             is_valid = res.status_code == 200 and "signin" not in str(res.url)
             return {"system": "Pythaverse Git", "status": "UP" if is_valid else "EXPIRED", "latency_ms": dur}
@@ -335,26 +434,33 @@ class UnifiedSessionKeepAliveService:
         cookies = await self.get_session_cookies("sales_admin")
         if not cookies:
             return {"system": "Sales Admin", "status": "NO_SESSION"}
-
         start = time.perf_counter()
-        url = "https://pythaverse.space/wp-json/sales-admin-workspace/v1/users/available-roles"
         try:
-            res = await client.get(url, cookies=cookies)
+            res = await client.get("https://pythaverse.space/wp-json/sales-admin-workspace/v1/users/available-roles", cookies=cookies)
             dur = int((time.perf_counter() - start) * 1000)
             is_valid = res.status_code == 200 and "code" not in res.text[:20]
             return {"system": "Sales Admin", "status": "UP" if is_valid else "EXPIRED", "latency_ms": dur}
         except Exception as e:
             return {"system": "Sales Admin", "status": "ERROR", "error": str(e)}
 
+    async def _ping_keycloak(self, client: httpx.AsyncClient) -> Dict[str, Any]:
+        cookies = await self.get_session_cookies("keycloak_admin")
+        start = time.perf_counter()
+        try:
+            res = await client.get("https://eid.pythaverse.space/auth/admin/realms/idp/users?briefRepresentation=true&first=0&max=1", cookies=cookies)
+            dur = int((time.perf_counter() - start) * 1000)
+            is_valid = res.status_code == 200
+            return {"system": "Keycloak Admin", "status": "UP" if is_valid else "EXPIRED", "latency_ms": dur}
+        except Exception as e:
+            return {"system": "Keycloak Admin", "status": "ERROR", "error": str(e)}
+
     async def _ping_distributor(self, client: httpx.AsyncClient, dist_id: str = "2") -> Dict[str, Any]:
-        cookies = await self.get_session_cookies("admin_workspace") or await self.get_session_cookies("sales_admin")
+        cookies = await self.get_session_cookies("distributor_2") or await self.get_session_cookies("admin_workspace")
         if not cookies:
             return {"system": f"Distributor #{dist_id}", "status": "NO_SESSION"}
-
         start = time.perf_counter()
-        url = f"https://pythaverse.space/wp-content/plugins/distributor_workspace_v3/api/user/getNotificationsData.php?topic=distributor_{dist_id}"
         try:
-            res = await client.get(url, cookies=cookies)
+            res = await client.get(f"https://pythaverse.space/wp-content/plugins/distributor_workspace_v3/api/user/getNotificationsData.php?topic=distributor_{dist_id}", cookies=cookies)
             dur = int((time.perf_counter() - start) * 1000)
             is_valid = res.status_code == 200 and "login" not in str(res.url)
             return {"system": f"Distributor #{dist_id}", "status": "UP" if is_valid else "EXPIRED", "latency_ms": dur}
@@ -365,11 +471,9 @@ class UnifiedSessionKeepAliveService:
         cookies = await self.get_session_cookies("osticket")
         if not cookies:
             return {"system": "osTicket", "status": "NO_SESSION"}
-
         start = time.perf_counter()
-        url = "https://support.pythaverse.space/scp/"
         try:
-            res = await client.head(url, cookies=cookies)
+            res = await client.head("https://support.pythaverse.space/scp/", cookies=cookies)
             dur = int((time.perf_counter() - start) * 1000)
             is_valid = res.status_code == 200 and "login.php" not in str(res.headers.get("location", ""))
             return {"system": "osTicket", "status": "UP" if is_valid else "EXPIRED", "latency_ms": dur}
@@ -377,13 +481,13 @@ class UnifiedSessionKeepAliveService:
             return {"system": "osTicket", "status": "ERROR", "error": str(e)}
 
     # =========================================================================
-    # 🚀 4. PIPELINE ĐIỀU PHỐI ĐỒNG LOẠT (CHẠY MỖI 15 PHÚT)
+    # 🚀 4. ĐIỀU PHỐI ĐỒNG LOẠT (CHẠY ĐỊNH KỲ 15 PHÚT)
     # =========================================================================
     async def keep_alive_all_sessions(self) -> List[Dict[str, Any]]:
-        # 1. BƯỚC QUAN TRỌNG NHẤT: NẾU THẤY RỖNG THÌ TỰ ĐỘNG GIEO MẦM NGAY!
+        # 1. TỰ ĐỘNG BỐC MẦM CHO NHỮNG CON CÒN THIẾU
         await self.seed_all_empty_sessions()
 
-        # 2. BẮN SONG SONG GIỮ ẤM CÁC PHÂN HỆ ĐÃ CÓ COOKIE (< 1 GIÂY)
+        # 2. BẮN SONG SONG GIỮ ẤM CÁC CON ĐÃ CÓ COOKIE (< 1 GIÂY)
         start_all = time.perf_counter()
         async with httpx.AsyncClient(headers=BROWSER_HEADERS, timeout=12.0, follow_redirects=True, verify=False) as client:
             tasks = [
@@ -391,6 +495,7 @@ class UnifiedSessionKeepAliveService:
                 self._ping_lms_admin(client),
                 self._ping_git(client),
                 self._ping_sales_admin(client),
+                self._ping_keycloak(client),
                 self._ping_distributor(client, dist_id="2"),
                 self._ping_osticket(client)
             ]
@@ -403,7 +508,7 @@ class UnifiedSessionKeepAliveService:
                 logger.info(f"   🟢 {r.get('system')}: {r.get('status')} ({r.get('latency_ms', 0)}ms)")
 
         total_dur = time.perf_counter() - start_all
-        logger.info(f"✨ [KeepAlive] Đã hoàn tất giữ ấm toàn bộ hệ sinh thái trong {total_dur:.2f}s!")
+        logger.info(f"✨ [KeepAlive] Đã hoàn tất giữ ấm toàn bộ 7 phân hệ trong {total_dur:.2f}s!")
         return summary
 
 
