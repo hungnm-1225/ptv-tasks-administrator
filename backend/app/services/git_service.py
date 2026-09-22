@@ -291,32 +291,61 @@ class GitPlaywrightService:
             # =================================================================
             current_collaborators: Dict[str, str] = {}
 
-            # VECTƠ 1: Bóc tách trực tiếp từ các nút Radio đang Active
-            # Ví dụ: <label class="btn btn-default btn-mini active"><input type="radio" value="GUEST" name="hsdttemd">
-            active_labels = re.findall(
-                r'<label[^>]*class=["\'][^"\']*\bactive\b[^"\']*["\'][^>]*>(.*?)</label>',
+            # 1. KHOANH VÙNG CHUẨN XÁC: Chỉ quét trong <ul id="collaborator-list">
+            # (Tránh 100% việc bắt nhầm các thẻ <a> ở navbar hay breadcrumb /ptvadmin)
+            collab_list_match = re.search(
+                r'<ul[^>]*id=["\']collaborator-list["\'][^>]*>(.*?)</ul>',
                 get_res.text,
                 re.DOTALL | re.IGNORECASE
             )
-            for lbl in active_labels:
-                val_m = re.search(r'value=["\'](ADMIN|DEVELOPER|GUEST)["\']', lbl, re.IGNORECASE)
-                name_m = re.search(r'name=["\']([a-zA-Z0-9_\.\-]+)["\']', lbl, re.IGNORECASE)
-                if val_m and name_m:
-                    uname = name_m.group(1).strip()
-                    urole = val_m.group(1).upper().strip()
-                    current_collaborators[uname] = urole
+            collab_html = collab_list_match.group(1) if collab_list_match else get_res.text
 
-            # VECTƠ 2 (Lưới hứng an toàn): Quét các user có nút (remove) bên cạnh
-            # Ví dụ: <a target="_blank" href="/hsdttemd">hsdttemd</a><a href="#" class="remove pull-right">(remove)</a>
-            remove_user_matches = re.findall(
-                r'<a[^>]+href=["\']/([a-zA-Z0-9_\.\-]+)["\'][^>]*>.*?</a>\s*<a[^>]+class=["\'][^"\']*remove[^"\']*["\']',
-                get_res.text,
-                re.DOTALL | re.IGNORECASE
-            )
-            for u in remove_user_matches:
-                u_clean = u.strip()
-                if u_clean not in current_collaborators:
-                    current_collaborators[u_clean] = "GUEST"
+            # 2. BÓC TÁCH TỪNG THẺ <li> (Mỗi <li> là 1 thành viên)
+            li_blocks = re.findall(r'<li[^>]*>(.*?)</li>', collab_html, re.DOTALL | re.IGNORECASE)
+            
+            for li in li_blocks:
+                # a. Nhận diện Username từ input radio name="..." hoặc thẻ <a>
+                name_m = re.search(r'<input[^>]*name=["\']([a-zA-Z0-9_\.\-]+)["\']', li, re.IGNORECASE)
+                if not name_m:
+                    name_m = re.search(r'<a[^>]+href=["\']/[^"\']*?([a-zA-Z0-9_\.\-]+)["\'][^>]*>', li, re.IGNORECASE)
+                
+                if not name_m:
+                    continue
+                uname = name_m.group(1).strip()
+
+                # b. Nhận diện Role đang kích hoạt (Kiểm tra thẻ <label class="active"> hoặc <input checked>)
+                val_m = None
+                # Cách 1: Label mang class "active"
+                active_lbl = re.search(
+                    r'<label[^>]*class=["\'][^"\']*\bactive\b[^"\']*["\'][^>]*>.*?value=["\'](ADMIN|DEVELOPER|GUEST)["\']',
+                    li,
+                    re.DOTALL | re.IGNORECASE
+                )
+                if active_lbl:
+                    val_m = active_lbl.group(1).upper().strip()
+                else:
+                    # Cách 2: Input mang thuộc tính checked
+                    checked_inp = re.search(
+                        r'<input[^>]*value=["\'](ADMIN|DEVELOPER|GUEST)["\'][^>]*\bchecked\b',
+                        li,
+                        re.IGNORECASE
+                    ) or re.search(
+                        r'<input[^>]*\bchecked\b[^>]*value=["\'](ADMIN|DEVELOPER|GUEST)["\']',
+                        li,
+                        re.IGNORECASE
+                    )
+                    if checked_inp:
+                        val_m = checked_inp.group(1).upper().strip()
+
+                current_collaborators[uname] = val_m if val_m in ["ADMIN", "DEVELOPER", "GUEST"] else "GUEST"
+
+            # 3. LƯỚI BẢO HIỂM DỰ PHÒNG (Nếu cấu trúc <li> bị thay đổi)
+            if not current_collaborators:
+                for lbl in re.findall(r'<label[^>]*class=["\'][^"\']*\bactive\b[^"\']*["\'][^>]*>(.*?)</label>', collab_html, re.DOTALL | re.IGNORECASE):
+                    val_sub = re.search(r'value=["\'](ADMIN|DEVELOPER|GUEST)["\']', lbl, re.IGNORECASE)
+                    name_sub = re.search(r'name=["\']([a-zA-Z0-9_\.\-]+)["\']', lbl, re.IGNORECASE)
+                    if val_sub and name_sub:
+                        current_collaborators[name_sub.group(1).strip()] = val_sub.group(1).upper().strip()
 
             logger.info(f"🔍 [DOM Parser] Đã quét thấy {len(current_collaborators)} thành viên: {list(current_collaborators.keys())}")
 
@@ -327,15 +356,20 @@ class GitPlaywrightService:
             new_changes = False
             active_params_to_send: Dict[str, str] = {}
 
+            # Tạo bảng ánh xạ chữ thường -> Key thực tế (Xóa tan hoàn toàn lỗi hoa/thường)
+            collab_lower_map = {k.lower(): k for k in current_collaborators.keys()}
+
             if is_remove_action:
-                # 🗑️ KỊCH BẢN GỠ BỎ: Xóa khỏi danh sách, không gửi param riêng
+                # 🗑️ KỊCH BẢN GỠ BỎ: So khớp không phân biệt hoa thường, xóa khỏi danh sách
                 for u in valid_users:
                     u_clean = u.strip()
                     if u_clean.lower() == self.admin_user.lower():
                         continue  # Cấm gỡ chính mình
-                    if u_clean in current_collaborators:
-                        del current_collaborators[u_clean]
-                        repo_res["removed"].append(u_clean)
+
+                    actual_key = collab_lower_map.get(u_clean.lower())
+                    if actual_key and actual_key in current_collaborators:
+                        del current_collaborators[actual_key]
+                        repo_res["removed"].append(actual_key)
                         new_changes = True
                     else:
                         repo_res["already_exists"].append(u_clean)
@@ -343,15 +377,16 @@ class GitPlaywrightService:
                 # ➕ KỊCH BẢN THÊM MỚI HOẶC CẬP NHẬT ROLE
                 for u in valid_users:
                     u_clean = u.strip()
-                    if u_clean in current_collaborators:
-                        if current_collaborators[u_clean] != role:
+                    actual_key = collab_lower_map.get(u_clean.lower())
+                    if actual_key and actual_key in current_collaborators:
+                        if current_collaborators[actual_key] != role:
                             # 🔄 ĐỔI ROLE
-                            current_collaborators[u_clean] = role
-                            repo_res["added"].append(u_clean)
-                            active_params_to_send[u_clean] = role
+                            current_collaborators[actual_key] = role
+                            repo_res["added"].append(actual_key)
+                            active_params_to_send[actual_key] = role
                             new_changes = True
                         else:
-                            repo_res["already_exists"].append(u_clean)
+                            repo_res["already_exists"].append(actual_key)
                     else:
                         # ✨ THÊM MỚI
                         current_collaborators[u_clean] = role
