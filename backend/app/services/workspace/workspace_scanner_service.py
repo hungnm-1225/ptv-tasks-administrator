@@ -292,7 +292,16 @@ class WorkspaceScannerService(WorkspaceBaseService):
                         logger.info(f"💾 Đã lưu session Distributor [{dist_code}] vào RAM Cache (TTL: 3h).")
                     except Exception:
                         pass
-
+                    try:
+                        from app.services.session_keepalive_service import session_keepalive_service
+                        await session_keepalive_service.save_session_cookies(
+                            session_key=f"distributor_{dist_code}",
+                            system_name=f"Distributor {dist.get('distributor_name', '')} ({dist_code})",
+                            cookies=cookies_dict,
+                            metadata={"dist_id": str(real_dist_id), "user": dist["username"]}
+                        )
+                    except Exception as up_err:
+                        logger.warning(f"⚠️ Không thể lưu session Distributor lên Supabase: {up_err}")
                     return cookies_dict, str(real_dist_id)
 
                 finally:

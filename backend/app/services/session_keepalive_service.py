@@ -205,8 +205,8 @@ class UnifiedSessionKeepAliveService:
 
     async def _seed_git(self) -> bool:
         """Gieo mầm session Pythaverse Git."""
-        user = sanitize_val(os.getenv("GIT_ADMIN_USER", "") or os.getenv("KEYCLOAK_ADMIN_USER", "") or "ptvadmin")
-        pwd = sanitize_val(os.getenv("GIT_ADMIN_PASS", "") or os.getenv("KEYCLOAK_ADMIN_PASS", ""))
+        user = sanitize_val(os.getenv("GIT_ADMIN_USER", ""))
+        pwd = sanitize_val(os.getenv("GIT_ADMIN_PASS", ""))
         if not user or not pwd:
             return False
 
@@ -239,8 +239,8 @@ class UnifiedSessionKeepAliveService:
 
     async def _seed_lms(self) -> bool:
         """Gieo mầm session PLearn LMS Moodle."""
-        user = sanitize_val(os.getenv("GIT_ADMIN_USER", "") or os.getenv("KEYCLOAK_ADMIN_USER", "") or "ptvadmin")
-        pwd = sanitize_val(os.getenv("GIT_ADMIN_PASS", "") or os.getenv("KEYCLOAK_ADMIN_PASS", ""))
+        user = sanitize_val(os.getenv("TEST_ADMIN_USER", ""))
+        pwd = sanitize_val(os.getenv("TEST_ADMIN_PASS", ""))
         if not user or not pwd:
             return False
 
@@ -273,8 +273,8 @@ class UnifiedSessionKeepAliveService:
 
     async def _seed_keycloak(self) -> bool:
         """Gieo mầm session Keycloak Admin Console Web UI (KEYCLOAK_SESSION 10 tiếng)."""
-        user = sanitize_val(os.getenv("KEYCLOAK_ADMIN_USER", "") or os.getenv("GIT_ADMIN_USER", "") or "ptvadmin")
-        pwd = sanitize_val(os.getenv("KEYCLOAK_ADMIN_PASS", "") or os.getenv("GIT_ADMIN_PASS", ""))
+        user = sanitize_val(os.getenv("KEYCLOAK_ADMIN_USER", ""))
+        pwd = sanitize_val(os.getenv("KEYCLOAK_ADMIN_PASS", ""))
         if not user or not pwd:
             return False
 
@@ -305,59 +305,77 @@ class UnifiedSessionKeepAliveService:
                     gc.collect()
         return False
 
-    async def _seed_distributor(self, dist_id: str = "2") -> bool:
-        """Gieo mầm session Nhà phân phối (Distributor Vì Người Việt #2 hoặc Malaysia)."""
-        user, pwd = "", ""
+    async def _seed_all_distributors(self) -> int:
+        """Tự động duyệt và gieo mầm tuần tự cho TẤT CẢ các Master Distributor có trong CSDL."""
         try:
-            from app.api.v1.endpoints.workspace import get_clean_fernet_cipher
-            vault_res = self.supabase.table("workspace_credentials_vault")\
-                .select("username, encrypted_password")\
-                .or_(f"username.ilike.%distributor%,account_role.eq.distributor")\
-                .limit(1)\
-                .execute()
+            from app.services.workspace.workspace_scanner_service import workspace_scanner_service
+            from app.services.workspace.base import WorkspaceBaseService, BASE_WORKSPACE_URL
 
-            if vault_res.data:
-                v_row = vault_res.data[0]
-                user = v_row.get("username") or ""
-                enc_pass = v_row.get("encrypted_password") or ""
-                cipher = get_clean_fernet_cipher()
-                pwd = cipher.decrypt(enc_pass.encode()).decode() if (cipher and enc_pass.startswith("gAAAAA")) else enc_pass
-        except Exception as v_err:
-            logger.warning(f"⚠️ Lỗi đọc Vault Distributor: {v_err}")
+            # 🎯 LẤY DANH SÁCH ĐỘNG TOÀN BỘ DISTRIBUTORS TỪ CSDL (5 MASTER DISTRIBUTORS)
+            distributors = await workspace_scanner_service.get_all_distributor_credentials()
+            if not distributors:
+                logger.warning("⚠️ Không tìm thấy tài khoản Distributor nào trong CSDL.")
+                return 0
 
-        if not user or not pwd:
-            return False
+            seeded_count = 0
+            for dist in distributors:
+                d_code = str(dist.get("distributor_code") or dist.get("org_id") or "N/A")
+                d_name = dist.get("distributor_name", "Distributor")
+                session_key = f"distributor_{d_code}"
 
-        logger.info(f"🌱 [Seeder 6/6] Đang mở Playwright bốc Session Distributor ({user})...")
-        async with acquire_playwright_slot("Seed Distributor", timeout=45, lane="admin"):
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True, args=LOW_RAM_CHROMIUM_ARGS)
-                context = await browser.new_context(viewport={"width": 1280, "height": 800}, user_agent=BROWSER_HEADERS["User-Agent"])
-                await setup_low_ram_routes(context)
-                page = await context.new_page()
+                # Nếu Distributor này đã có Session trong DB -> Bỏ qua, nhường slot cho con khác!
+                if await self.get_session_cookies(session_key):
+                    continue
 
-                try:
-                    await page.goto("https://pythaverse.space/login", wait_until="domcontentloaded", timeout=25000)
-                    user_sel = "#username, #user_login, input[name='log']"
-                    pass_sel = "#password, #user_pass, input[name='pwd']"
-                    btn_sel = "button[type='submit'], input[type='submit'], #wp-submit"
+                user = dist.get("username", "")
+                pwd = dist.get("password", "")
 
-                    if await page.locator(user_sel).count() > 0:
-                        await page.fill(user_sel, user)
-                        await page.fill(pass_sel, pwd)
-                        await page.click(btn_sel)
-                        await page.wait_for_url(lambda u: "login" not in u, timeout=15000)
+                if not user or not pwd:
+                    continue
 
-                    cookies = {c["name"]: c["value"] for c in await context.cookies()}
-                    if cookies:
-                        await self.save_session_cookies("distributor_2", f"Distributor Vì Người Việt (#{dist_id})", cookies, {"user": user})
-                        return True
-                except Exception as e:
-                    logger.error(f"❌ Lỗi gieo mầm Distributor: {e}")
-                finally:
-                    await browser.close()
-                    gc.collect()
-        return False
+                logger.info(f"🌱 [Seeder Distributor] Đang bốc Session cho [{d_name}] ({d_code})...")
+                async with acquire_playwright_slot(f"Seed Distributor ({d_code})", timeout=45, lane="admin"):
+                    async with async_playwright() as p:
+                        browser = await p.chromium.launch(headless=True, args=LOW_RAM_CHROMIUM_ARGS)
+                        context = await browser.new_context(viewport={"width": 1280, "height": 800}, user_agent=BROWSER_HEADERS["User-Agent"])
+                        await setup_low_ram_routes(context)
+                        page = await context.new_page()
+
+                        try:
+                            base_svc = WorkspaceBaseService()
+                            is_ok, login_err = await base_svc.login_role(page, user, pwd, "Distributor")
+                            if not is_ok:
+                                logger.error(f"❌ Login thất bại cho {d_name}: {login_err}")
+                                continue
+
+                            await page.goto(f"{BASE_WORKSPACE_URL}/distributor-workspace/dashboard", wait_until="domcontentloaded", timeout=25000)
+                            try:
+                                await page.wait_for_function("() => !!window.user?.distributor_id", timeout=4000)
+                            except Exception:
+                                pass
+
+                            real_dist_id = await page.evaluate("() => window.user?.distributor_id || null") or d_code
+                            cookies = {c["name"]: c["value"] for c in await context.cookies()}
+
+                            if cookies:
+                                await self.save_session_cookies(
+                                    session_key=session_key,
+                                    system_name=f"Distributor {d_name} ({d_code})",
+                                    cookies=cookies,
+                                    metadata={"dist_id": str(real_dist_id), "distributor_code": d_code, "user": user}
+                                )
+                                logger.info(f"✨ [Seeder] Đã lưu session Distributor [{d_name}] ({d_code}) lên Supabase!")
+                                seeded_count += 1
+                        except Exception as e:
+                            logger.error(f"❌ Lỗi gieo mầm Distributor {d_name}: {e}")
+                        finally:
+                            await browser.close()
+                            gc.collect()
+
+            return seeded_count
+        except Exception as ex:
+            logger.error(f"❌ Lỗi quy trình gieo mầm Distributors: {ex}")
+            return 0
 
     async def seed_all_empty_sessions(self):
         """Tự động kiểm tra và gieo mầm tuần tự cho TẤT CẢ các phân hệ còn thiếu."""
@@ -384,8 +402,7 @@ class UnifiedSessionKeepAliveService:
             await self._seed_keycloak()
 
         # 7. Distributor
-        if not await self.get_session_cookies("distributor_2"):
-            await self._seed_distributor()
+        await self._seed_all_distributors()
 
     # =========================================================================
     # ⚡ 3. BỘ HÀM PING GIỮ ẤM SONG SONG (HTTPX ASYNC)
@@ -454,18 +471,26 @@ class UnifiedSessionKeepAliveService:
         except Exception as e:
             return {"system": "Keycloak Admin", "status": "ERROR", "error": str(e)}
 
-    async def _ping_distributor(self, client: httpx.AsyncClient, dist_id: str = "2") -> Dict[str, Any]:
-        cookies = await self.get_session_cookies("distributor_2") or await self.get_session_cookies("admin_workspace")
+    async def _ping_single_distributor(self, client: httpx.AsyncClient, dist: Dict[str, Any]) -> Dict[str, Any]:
+        """Ping giữ ấm cho từng Master Distributor cụ thể."""
+        d_code = str(dist.get("distributor_code") or dist.get("org_id") or "N/A")
+        d_name = dist.get("distributor_name", "Distributor")
+        session_key = f"distributor_{d_code}"
+
+        cookies = await self.get_session_cookies(session_key)
         if not cookies:
-            return {"system": f"Distributor #{dist_id}", "status": "NO_SESSION"}
+            return {"system": f"Distributor {d_name}", "status": "NO_SESSION"}
+
         start = time.perf_counter()
+        # Đọc dist_id thực tế từ metadata hoặc dùng dist_code
+        url = f"https://pythaverse.space/wp-content/plugins/distributor_workspace_v3/api/user/getNotificationsData.php?topic=distributor_{d_code}"
         try:
-            res = await client.get(f"https://pythaverse.space/wp-content/plugins/distributor_workspace_v3/api/user/getNotificationsData.php?topic=distributor_{dist_id}", cookies=cookies)
+            res = await client.get(url, cookies=cookies)
             dur = int((time.perf_counter() - start) * 1000)
             is_valid = res.status_code == 200 and "login" not in str(res.url)
-            return {"system": f"Distributor #{dist_id}", "status": "UP" if is_valid else "EXPIRED", "latency_ms": dur}
+            return {"system": f"Distributor {d_name}", "status": "UP" if is_valid else "EXPIRED", "latency_ms": dur}
         except Exception as e:
-            return {"system": f"Distributor #{dist_id}", "status": "ERROR", "error": str(e)}
+            return {"system": f"Distributor {d_name}", "status": "ERROR", "error": str(e)}
 
     async def _ping_osticket(self, client: httpx.AsyncClient) -> Dict[str, Any]:
         cookies = await self.get_session_cookies("osticket")
@@ -496,9 +521,18 @@ class UnifiedSessionKeepAliveService:
                 self._ping_git(client),
                 self._ping_sales_admin(client),
                 self._ping_keycloak(client),
-                self._ping_distributor(client, dist_id="2"),
                 self._ping_osticket(client)
             ]
+            
+            # 2.1. Bắt riêng danh sách Master Distributors
+            try:
+                from app.services.workspace.workspace_scanner_service import workspace_scanner_service
+                all_dists = await workspace_scanner_service.get_all_distributor_credentials()
+                for d in all_dists:
+                    tasks.append(self._ping_single_distributor(client, d))
+            except Exception as d_err:
+                logger.warning(f"Không thể nạp danh sách distributor để ping: {d_err}")
+
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
         summary = []
