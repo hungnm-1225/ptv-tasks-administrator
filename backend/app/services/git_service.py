@@ -138,10 +138,10 @@ class GitPlaywrightService:
     # ⚡ 2. QUẢN TRỊ BỘ NHỚ ĐỆM SESSION CACHE & AUTH GATEWAY
     # =========================================================================
     async def _is_session_valid(self, cookies: Dict[str, str]) -> bool:
-        """Kiểm tra siêu tốc (20ms) xem Session Cookie còn quyền Admin hay không."""
+        """Kiểm tra siêu tốc (20ms) xem Session Cookie còn sống hay không qua trang Dashboard."""
         try:
             async with httpx.AsyncClient(timeout=4.0, follow_redirects=False) as client:
-                res = await client.get(f"{self.base_url}/settings/account", cookies=cookies)
+                res = await client.get(f"{self.base_url}/dashboard/repos", cookies=cookies)
                 return res.status_code == 200
         except Exception:
             return False
@@ -296,10 +296,15 @@ class GitPlaywrightService:
                 ul_content = ul_match.group(1)
                 li_items = re.findall(r'<li[^>]*>(.*?)</li>', ul_content, re.DOTALL)
                 for li in li_items:
-                    u_match = re.search(r'<a[^>]+href=["\']/([a-zA-Z0-9_\.\-]+)["\'][^>]*>\s*\1\s*</a>', li)
+                    # Cách 1: Bắt username trực tiếp từ name của nút Radio (Cực kỳ chuẩn xác vì radio luôn có name="tên_user")
+                    # Ví dụ: <input type="radio" value="GUEST" name="hsdttemd">
+                    u_match = re.search(r'<input[^>]+type=["\']radio["\'][^>]+name=["\']([a-zA-Z0-9_\.\-]+)["\']', li)
+                    
+                    # Cách 2 (Fallback): Bắt từ link profile không phải nút remove
                     if not u_match:
-                        u_match = re.search(r'<input[^>]+type=["\']radio["\'][^>]+name=["\']([a-zA-Z0-9_\.\-]+)["\']', li)
+                        u_match = re.search(r'<a[^>]+href=["\']/([a-zA-Z0-9_\.\-]+)["\'][^>]*>(?!\s*\(remove\))', li)
 
+                    # Bắt Role từ label active: <label class="... active"><input ... value="ROLE">
                     r_match = re.search(r'<label[^>]+class=["\'][^"\']*\bactive\b[^"\']*["\'][^>]*>.*?value=["\']([A-Z]+)["\']', li, re.DOTALL)
 
                     if u_match:
@@ -307,7 +312,7 @@ class GitPlaywrightService:
                         urole = r_match.group(1).strip() if r_match else "GUEST"
                         current_collaborators[uname] = urole
 
-            logger.info(f"🔍 [DOM Parser] Đã quét thấy {len(current_collaborators)} thành viên hiện tại.")
+            logger.info(f"🔍 [DOM Parser] Đã quét thấy {len(current_collaborators)} thành viên: {list(current_collaborators.keys())}")
 
             # 🛡️ BẢO VỆ TÀI KHOẢN ADMIN BOT VĨNH VIỄN
             if self.admin_user and self.admin_user not in current_collaborators:
