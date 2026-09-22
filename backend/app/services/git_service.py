@@ -267,6 +267,7 @@ class GitPlaywrightService:
             "target_role": role,
             "action": "remove" if is_remove_action else "add",
             "added": [],
+            "updated": [],
             "already_exists": [],
             "removed": [],
             "not_logged_in_git": [],
@@ -287,61 +288,30 @@ class GitPlaywrightService:
                 return repo_res
 
             # =================================================================
-            # 🎯 BÓC TÁCH COLLABORATORS TỪ DANH SÁCH <ul id="collaborator-list">
+            # 🎯 BÓC TÁCH COLLABORATORS TỪ LỆNH JAVASCRIPT: addListHTML(...)
             # =================================================================
             current_collaborators: Dict[str, str] = {}
 
-            # 1. KHOANH VÙNG CHUẨN XÁC: Chỉ quét trong <ul id="collaborator-list">
-            # (Tránh 100% việc bắt nhầm các thẻ <a> ở navbar hay breadcrumb /ptvadmin)
-            collab_list_match = re.search(
-                r'<ul[^>]*id=["\']collaborator-list["\'][^>]*>(.*?)</ul>',
+            # 1. BẮT TRỰC TIẾP LỆNH KHỞI TẠO JAVASCRIPT CỦA GITBUCKET
+            # Cú pháp thực tế trong HTML thô:
+            # addListHTML('hsdttemd', 'DEVELOPER', '#collaborator-list');
+            js_collab_matches = re.findall(
+                r"addListHTML\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]#collaborator-list['\"]\s*\)",
                 get_res.text,
-                re.DOTALL | re.IGNORECASE
+                re.IGNORECASE
             )
-            collab_html = collab_list_match.group(1) if collab_list_match else get_res.text
 
-            # 2. BÓC TÁCH TỪNG THẺ <li> (Mỗi <li> là 1 thành viên)
-            li_blocks = re.findall(r'<li[^>]*>(.*?)</li>', collab_html, re.DOTALL | re.IGNORECASE)
-            
-            for li in li_blocks:
-                # a. Nhận diện Username từ input radio name="..." hoặc thẻ <a>
-                name_m = re.search(r'<input[^>]*name=["\']([a-zA-Z0-9_\.\-]+)["\']', li, re.IGNORECASE)
-                if not name_m:
-                    name_m = re.search(r'<a[^>]+href=["\']/[^"\']*?([a-zA-Z0-9_\.\-]+)["\'][^>]*>', li, re.IGNORECASE)
-                
-                if not name_m:
-                    continue
-                uname = name_m.group(1).strip()
-
-                # b. Nhận diện Role đang kích hoạt (Kiểm tra thẻ <label class="active"> hoặc <input checked>)
-                val_m = None
-                # Cách 1: Label mang class "active"
-                active_lbl = re.search(
-                    r'<label[^>]*class=["\'][^"\']*\bactive\b[^"\']*["\'][^>]*>.*?value=["\'](ADMIN|DEVELOPER|GUEST)["\']',
-                    li,
-                    re.DOTALL | re.IGNORECASE
-                )
-                if active_lbl:
-                    val_m = active_lbl.group(1).upper().strip()
+            for uname, urole in js_collab_matches:
+                u_clean = uname.strip()
+                r_clean = urole.upper().strip()
+                if r_clean in ["ADMIN", "DEVELOPER", "GUEST"]:
+                    current_collaborators[u_clean] = r_clean
                 else:
-                    # Cách 2: Input mang thuộc tính checked
-                    checked_inp = re.search(
-                        r'<input[^>]*value=["\'](ADMIN|DEVELOPER|GUEST)["\'][^>]*\bchecked\b',
-                        li,
-                        re.IGNORECASE
-                    ) or re.search(
-                        r'<input[^>]*\bchecked\b[^>]*value=["\'](ADMIN|DEVELOPER|GUEST)["\']',
-                        li,
-                        re.IGNORECASE
-                    )
-                    if checked_inp:
-                        val_m = checked_inp.group(1).upper().strip()
+                    current_collaborators[u_clean] = "GUEST"
 
-                current_collaborators[uname] = val_m if val_m in ["ADMIN", "DEVELOPER", "GUEST"] else "GUEST"
-
-            # 3. LƯỚI BẢO HIỂM DỰ PHÒNG (Nếu cấu trúc <li> bị thay đổi)
+            # 2. LƯỚI BẢO HIỂM (Nếu sau này GitBucket đổi thành render sẵn thẻ <li>)
             if not current_collaborators:
-                for lbl in re.findall(r'<label[^>]*class=["\'][^"\']*\bactive\b[^"\']*["\'][^>]*>(.*?)</label>', collab_html, re.DOTALL | re.IGNORECASE):
+                for lbl in re.findall(r'<label[^>]*class=["\'][^"\']*\bactive\b[^"\']*["\'][^>]*>(.*?)</label>', get_res.text, re.DOTALL | re.IGNORECASE):
                     val_sub = re.search(r'value=["\'](ADMIN|DEVELOPER|GUEST)["\']', lbl, re.IGNORECASE)
                     name_sub = re.search(r'name=["\']([a-zA-Z0-9_\.\-]+)["\']', lbl, re.IGNORECASE)
                     if val_sub and name_sub:
@@ -356,11 +326,11 @@ class GitPlaywrightService:
             new_changes = False
             active_params_to_send: Dict[str, str] = {}
 
-            # Tạo bảng ánh xạ chữ thường -> Key thực tế (Xóa tan hoàn toàn lỗi hoa/thường)
+            # Tạo bảng ánh xạ chữ thường -> Key thực tế (Case-Insensitive tuyệt đối)
             collab_lower_map = {k.lower(): k for k in current_collaborators.keys()}
 
             if is_remove_action:
-                # 🗑️ KỊCH BẢN GỠ BỎ: So khớp không phân biệt hoa thường, xóa khỏi danh sách
+                # 🗑️ KỊCH BẢN GỠ BỎ: So khớp chữ thường, xóa khỏi danh sách
                 for u in valid_users:
                     u_clean = u.strip()
                     if u_clean.lower() == self.admin_user.lower():
@@ -379,20 +349,24 @@ class GitPlaywrightService:
                     u_clean = u.strip()
                     actual_key = collab_lower_map.get(u_clean.lower())
                     if actual_key and actual_key in current_collaborators:
-                        if current_collaborators[actual_key] != role:
-                            # 🔄 ĐỔI ROLE
+                        old_role = current_collaborators[actual_key]
+                        if old_role != role:
+                            # 🔄 1. CẬP NHẬT: Đổi role cho người đã có sẵn
                             current_collaborators[actual_key] = role
-                            repo_res["added"].append(actual_key)
+                            repo_res["updated"].append(actual_key)
                             active_params_to_send[actual_key] = role
                             new_changes = True
+                            logger.info(f"🔄 [Role Update] {actual_key}: {old_role} ➔ {role}")
                         else:
+                            # ⏸️ 2. CÓ SẴN: Đã có sẵn và đúng role, bỏ qua
                             repo_res["already_exists"].append(actual_key)
                     else:
-                        # ✨ THÊM MỚI
+                        # ✨ 3. THÊM MỚI: Người dùng hoàn toàn mới
                         current_collaborators[u_clean] = role
                         repo_res["added"].append(u_clean)
                         active_params_to_send[u_clean] = role
                         new_changes = True
+                        logger.info(f"✨ [New Collab] Thêm mới {u_clean} với role [{role}]")
 
             if new_changes:
                 # 🎯 CHUẨN HÓA PAYLOAD ĐÚNG THEO BẢN NETWORK DEVTOOLS
@@ -432,7 +406,7 @@ class GitPlaywrightService:
                 logger.info(f"ℹ️ Không có thay đổi nào cần lưu ({elapsed}ms).")
 
             total_users = len(valid_users)
-            success_cnt = len(repo_res["added"]) + len(repo_res["already_exists"]) + len(repo_res["removed"])
+            success_cnt = len(repo_res["added"]) + len(repo_res["updated"]) + len(repo_res["already_exists"]) + len(repo_res["removed"])
             repo_res["status"] = "success" if success_cnt == total_users else ("partial_success" if success_cnt > 0 else "failed")
             return repo_res
 
