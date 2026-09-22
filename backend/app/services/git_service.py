@@ -249,7 +249,7 @@ class GitPlaywrightService:
         target_role: str = "GUEST",
         action: str = "add"
     ) -> Dict[str, Any]:
-        """Thực thi thêm hoặc gỡ Collaborator trên 1 Repo thuần Direct HTTPX (~150ms)."""
+        """Thực thi thêm, đổi role hoặc gỡ Collaborator trên 1 Repo (Khớp 100% chuẩn Network DevTools)."""
         settings_url = clean_repo_settings_url(raw_repo_url)
         role = target_role.upper()
         if role not in ["ADMIN", "DEVELOPER", "GUEST"]:
@@ -258,7 +258,7 @@ class GitPlaywrightService:
         is_remove_action = action in ["remove", "remove_collaborator", "remove_collaborators", "remove_repo_collaborators", "delete"]
         action_title = "GỠ BỎ" if is_remove_action else f"GÁN ROLE [{role}]"
 
-        logger.info(f"📂 Đang xử lý: {settings_url} | Hành động: {action_title} | Users: {len(valid_users)}")
+        logger.info(f"📂 Đang xử lý: {settings_url} | Hành động: {action_title} | Users: {valid_users}")
         t0 = time.time()
 
         repo_res: Dict[str, Any] = {
@@ -279,16 +279,15 @@ class GitPlaywrightService:
             # 🚨 CHỐT CHẶN 1: PHÁT HIỆN BỊ REDIRECT DO MẤT QUYỀN HOẶC HẾT HẠN PHIÊN
             final_url = str(get_res.url)
             if get_res.status_code != 200 or not final_url.endswith("/settings/collaborators"):
-                err_msg = f"MẤT QUYỀN QUẢN TRỊ: Bị chuyển hướng sang '{final_url}'. Tài khoản bot không có quyền Admin trên Repo này hoặc Session hết hạn!"
+                err_msg = f"MẤT QUYỀN TRUY CẬP: Bị chuyển hướng sang '{final_url}'. Session hết hạn hoặc bot thiếu quyền Admin!"
                 logger.error(f"🛑 {err_msg} tại {settings_url}")
-                # Hủy ngay cache session cũ để ép Playwright đăng nhập lại phiên mới ở lần sau
-                self._cached_cookies = None
+                self._cached_cookies = None  # Xóa cache cookie ngay lập tức
                 repo_res["errors"].append({"user": "*", "error": err_msg})
                 repo_res["status"] = "failed"
                 return repo_res
 
             # =================================================================
-            # 🎯 BÓC TÁCH COLLABORATORS TỪ DOM THỰC TẾ
+            # 🎯 BÓC TÁCH COLLABORATORS TỪ DANH SÁCH <ul id="collaborator-list">
             # =================================================================
             current_collaborators: Dict[str, str] = {}
             ul_match = re.search(r'<ul[^>]+id=["\']collaborator-list["\'][^>]*>(.*?)</ul>', get_res.text, re.DOTALL)
@@ -308,22 +307,21 @@ class GitPlaywrightService:
                         urole = r_match.group(1).strip() if r_match else "GUEST"
                         current_collaborators[uname] = urole
 
-            logger.info(f"🔍 [DOM Parser] Đã quét thấy {len(current_collaborators)} thành viên hiện tại trong Repo.")
+            logger.info(f"🔍 [DOM Parser] Đã quét thấy {len(current_collaborators)} thành viên hiện tại.")
 
-            # 🚨 CHỐT CHẶN 2: BẢO VỆ TÀI KHOẢN ADMIN BOT
-            # Đảm bảo tài khoản bot (admin_user) LUÔN LUÔN được giữ lại trong danh sách với quyền ADMIN
+            # 🛡️ BẢO VỆ TÀI KHOẢN ADMIN BOT VĨNH VIỄN
             if self.admin_user and self.admin_user not in current_collaborators:
-                logger.info(f"🛡️ Tự động bảo toàn tài khoản Bot [{self.admin_user}: ADMIN] trong danh sách.")
                 current_collaborators[self.admin_user] = "ADMIN"
 
             new_changes = False
+            active_params_to_send: Dict[str, str] = {}
 
             if is_remove_action:
+                # 🗑️ KỊCH BẢN GỠ BỎ: Xóa khỏi danh sách, không gửi param riêng
                 for u in valid_users:
                     u_clean = u.strip()
-                    # Không bao giờ cho phép gỡ bỏ chính tài khoản Bot
                     if u_clean.lower() == self.admin_user.lower():
-                        continue
+                        continue  # Cấm gỡ chính mình
                     if u_clean in current_collaborators:
                         del current_collaborators[u_clean]
                         repo_res["removed"].append(u_clean)
@@ -331,47 +329,58 @@ class GitPlaywrightService:
                     else:
                         repo_res["already_exists"].append(u_clean)
             else:
+                # ➕ KỊCH BẢN THÊM MỚI HOẶC CẬP NHẬT ROLE
                 for u in valid_users:
                     u_clean = u.strip()
                     if u_clean in current_collaborators:
                         if current_collaborators[u_clean] != role:
+                            # 🔄 ĐỔI ROLE
                             current_collaborators[u_clean] = role
+                            repo_res["added"].append(u_clean)
+                            active_params_to_send[u_clean] = role
                             new_changes = True
-                        repo_res["already_exists"].append(u_clean)
+                        else:
+                            repo_res["already_exists"].append(u_clean)
                     else:
+                        # ✨ THÊM MỚI
                         current_collaborators[u_clean] = role
                         repo_res["added"].append(u_clean)
+                        active_params_to_send[u_clean] = role
                         new_changes = True
 
             if new_changes:
+                # 🎯 CHUẨN HÓA PAYLOAD ĐÚNG THEO BẢN NETWORK DEVTOOLS
+                # Chuỗi collaborators bắt buộc có dấu phẩy ở cuối: user1:ROLE,user2:ROLE,
                 new_collab_str = ",".join([f"{u}:{r}" for u, r in current_collaborators.items()]) + ("," if current_collaborators else "")
-                form_payload = {
+                
+                form_payload: Dict[str, str] = {
                     "userName-collaborator": "",
                     "userName-group": "",
                     "collaborators": new_collab_str
                 }
-                for u, r in current_collaborators.items():
-                    form_payload[u] = r
+                # Gắn kèm tham số role riêng cho user được cập nhật (ví dụ: hsdttemd=DEVELOPER)
+                form_payload.update(active_params_to_send)
 
                 post_res = await client.post(
                     settings_url,
                     data=form_payload,
                     headers={"Content-Type": "application/x-www-form-urlencoded"}
                 )
-                
+
                 elapsed = round((time.time() - t0) * 1000, 1)
                 final_post_url = str(post_res.url)
 
-                # 🚨 CHỐT CHẶN 3: KIỂM TRA POST THỰC SỰ THÀNH CÔNG HAY BỊ REDIRECT VỀ DASHBOARD
+                # 🚨 KIỂM TRA PHẢN HỒI:
+                # Chuẩn GitBucket: Thành công sẽ trả về 302 chuyển hướng lại chính '/settings/collaborators'
                 if "dashboard/repos" in final_post_url or post_res.status_code >= 400:
-                    err_msg = f"LƯU THẤT BẠI: Máy chủ từ chối cập nhật và chuyển hướng về '{final_post_url}'!"
+                    err_msg = f"LƯU THẤT BẠI: Bị máy chủ từ chối và văng về '{final_post_url}'!"
                     logger.error(f"❌ {err_msg}")
                     self._cached_cookies = None
                     repo_res["errors"].append({"user": "*", "error": err_msg})
                     repo_res["status"] = "failed"
                     return repo_res
 
-                logger.info(f"🎉 Lưu thay đổi Repo thành công trong {elapsed}ms (Giữ nguyên {len(current_collaborators)} thành viên)!")
+                logger.info(f"🎉 Lưu thành công ({elapsed}ms)! Danh sách hiện tại: {len(current_collaborators)} người.")
             else:
                 elapsed = round((time.time() - t0) * 1000, 1)
                 logger.info(f"ℹ️ Không có thay đổi nào cần lưu ({elapsed}ms).")
@@ -387,6 +396,7 @@ class GitPlaywrightService:
             repo_res["status"] = "failed"
             repo_res["errors"].append({"user": "*", "error": str(e)})
             return repo_res
+
 
     # =========================================================================
     # 🚀 5. ĐIỀU PHỐI MULTI-REPO PIPELINE CHÍNH THỨC VỚI JIT DEDUP & SEMAPHORE
