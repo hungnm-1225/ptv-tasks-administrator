@@ -238,37 +238,48 @@ class UnifiedSessionKeepAliveService:
         return False
 
     async def _seed_lms(self) -> bool:
-        """Gieo mầm session PLearn LMS Moodle."""
-        user = sanitize_val(os.getenv("TEST_ADMIN_USER", ""))
-        pwd = sanitize_val(os.getenv("TEST_ADMIN_PASS", ""))
-        if not user or not pwd:
-            return False
+        """Gieo mầm session PLearn LMS bằng chính cỗ máy chuẩn của playwright_service.py."""
+        try:
+            from app.services.playwright_service import playwright_lms_service
 
-        logger.info(f"🌱 [Seeder 4/6] Đang mở Playwright bốc Session PLearn LMS ({user})...")
-        async with acquire_playwright_slot("Seed LMS", timeout=45, lane="admin"):
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True, args=LOW_RAM_CHROMIUM_ARGS)
-                context = await browser.new_context(viewport={"width": 1280, "height": 800}, user_agent=BROWSER_HEADERS["User-Agent"])
-                await setup_low_ram_routes(context)
-                page = await context.new_page()
-
+            if not os.getenv("TEST_ADMIN_PASS"):
                 try:
-                    await page.goto("https://learn.pythaverse.space/auth/oidc/", wait_until="domcontentloaded", timeout=25000)
-                    if "eid.pythaverse.space" in page.url or await page.locator("#username").count() > 0:
-                        await page.fill("#username", user)
-                        await page.fill("#password", pwd)
-                        await page.click("#kc-login, input[type='submit']")
-                        await page.wait_for_url(lambda u: "learn.pythaverse.space" in u and "login" not in u and "eid.pythaverse" not in u, timeout=18000)
+                    from app.api.v1.endpoints.workspace import get_clean_fernet_cipher
+                    vault_res = self.supabase.table("workspace_credentials_vault")\
+                        .select("username, encrypted_password")\
+                        .or_("username.eq.adminworkspace,account_role.eq.admin,account_role.eq.sales_admin")\
+                        .limit(1)\
+                        .execute()
 
-                    cookies = {c["name"]: c["value"] for c in await context.cookies()}
-                    if cookies:
-                        await self.save_session_cookies("plearn_lms", "PLearn Moodle LMS", cookies, {"user": user})
-                        return True
-                except Exception as e:
-                    logger.error(f"❌ Lỗi gieo mầm LMS: {e}")
-                finally:
-                    await browser.close()
-                    gc.collect()
+                    if vault_res.data:
+                        v_row = vault_res.data[0]
+                        user_name = v_row.get("username") or "adminworkspace"
+                        enc_pass = v_row.get("encrypted_password") or ""
+                        cipher = get_clean_fernet_cipher()
+                        pwd = cipher.decrypt(enc_pass.encode()).decode() if (cipher and enc_pass.startswith("gAAAAA")) else enc_pass
+
+                        os.environ["TEST_ADMIN_USER"] = user_name
+                        os.environ["TEST_ADMIN_PASS"] = pwd
+                        logger.info(f"🔓 [Vault] Đã nạp tài khoản '{user_name}' cho cỗ máy Moodle LMS!")
+                except Exception as v_err:
+                    logger.warning(f"⚠️ Lỗi đọc Vault cho LMS: {v_err}")
+
+            logger.info("🌱 [Seeder LMS] Kích hoạt cỗ máy chuẩn _steal_moodle_session của anh...")
+            cookies_dict, sesskey = await playwright_lms_service._steal_moodle_session()
+
+            if cookies_dict and "MoodleSession" in cookies_dict:
+                await self.save_session_cookies(
+                    session_key="plearn_lms",
+                    system_name="PLearn Moodle LMS",
+                    cookies=cookies_dict,
+                    metadata={"sesskey": sesskey, "user": os.getenv("TEST_ADMIN_USER", "adminworkspace")}
+                )
+                logger.info("✨ [Seeder LMS] Đã bốc thành công MoodleSession và lưu lên Supabase!")
+                return True
+            else:
+                logger.warning("⚠️ Cỗ máy LMS không lấy được MoodleSession hoặc sesskey.")
+        except Exception as e:
+            logger.error(f"❌ Lỗi gieo mầm LMS qua playwright_service: {e}", exc_info=True)
         return False
 
     async def _seed_keycloak(self) -> bool:
