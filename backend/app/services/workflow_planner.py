@@ -223,9 +223,33 @@ class WorkflowPlannerService:
         warnings: List[str] = list(assessment.warnings)
         step_counter = 1
 
+        # 🛑 FAIL-CLOSED INVARIANT 1: Từng intent bắt buộc phải có trích dẫn bằng chứng
+        for intent in assessment.intents:
+            if not intent.evidence:
+                missing_requirements.append({
+                    "field": "evidence",
+                    "message": f"Ý định '{intent.type}' không có trích dẫn bằng chứng xác thực từ nội dung yêu cầu."
+                })
+                intent.is_valid = False
+
+        # 🛑 FAIL-CLOSED INVARIANT 2: Không được nâng cấp thực thể thô (legacy entities) thành input thực thi
+        if assessment.entities and not assessment.typed_entities:
+            missing_requirements.append({
+                "field": "verified_entities",
+                "message": "Các thực thể chưa được xác thực thông qua TypedEntities."
+            })
+
         entities_dict = assessment.entities if isinstance(assessment.entities, dict) else {}
         typed_entities = assessment.typed_entities
         entities: Dict[str, Any] = typed_entities.model_dump() if isinstance(typed_entities, TypedEntities) else {}
+
+        # 🛑 FAIL-CLOSED INVARIANT 3: Không tự ý đoán URL repository khi chỉ có tên repo
+        if any(i.type == "repository_access" for i in assessment.intents if i.is_valid):
+            if entities.get("repositories") and not entities.get("repository_url"):
+                missing_requirements.append({
+                    "field": "repository_url",
+                    "message": "Yêu cầu cấp quyền Git cần URL repository hợp lệ (không tự ý đoán URL)."
+                })
 
         raw_users = anchored_users or entities_dict.get("users", []) or entities.get("users", [])
         user_emails = [u.get("email") for u in raw_users if isinstance(u, dict) and u.get("email")]
@@ -247,8 +271,10 @@ class WorkflowPlannerService:
             if any(k in full_blob for k in ["repository", "kho lưu trữ", "git"]):
                 planned_intent_types.append("repository_access")
 
-        # 🛑 NẾU VẪN KHÔNG CÓ Ý ĐỊNH NÀO THẬT -> NO ACTION
+        # 🛑 NẾU VẪN KHÔNG CÓ Ý ĐỊNH NÀO THẬT -> NO ACTION HOẶC NEEDS_INFORMATION NẾU THIẾU BẰNG CHỨNG
         if not planned_intent_types:
+            if missing_requirements:
+                return "needs_information", [], missing_requirements, warnings
             return "no_action", [], [], ["Không phát hiện ý định tự động hóa cụ thể nào cần xử lý."]
 
         # 🎯 2. PHÂN GIẢI DANH MỤC KHÓA HỌC & GIT REPOS LIÊN KẾT
@@ -286,36 +312,48 @@ class WorkflowPlannerService:
                 "collaborators": user_emails,
                 "courses": [c["course_name"] for c in canonical_courses],
                 "repo_url": repo_target,
-                "target_role": entities.get("git_role") or "GUEST",  # Dùng GUEST cho draft để hiển thị, gắn warning
+                "target_role": entities.get("git_role"),
                 "target_email": user_emails[0] if user_emails else entities.get("target_email")
             }
         }
 
-        # 🎯 3. SINH BƯỚC THỰC THI (LUÔN BẢO TOÀN DRAFT, KHÔNG BAO GIỜ SET STEPS = [])
+        # 🎯 3. SINH BƯỚC THỰC THI THEO PIPELINE CỦA INTENT
         for intent_type in planned_intent_types:
             policy = self.policy_registry.get(intent_type)
             if not policy:
                 continue
 
-            is_school_required = "school_name" in policy.get("required_inputs", [])
-            
-            if is_school_required and not active_school_name:
-                missing_requirements.append({
-                    "field": "school_name",
-                    "message": f"Ý định '{policy.get('name')}' cần Quản trị viên chọn Trường học mục tiêu."
-                })
-
-            if "courses" in policy.get("required_inputs", []) and not canonical_courses:
-                missing_requirements.append({
-                    "field": "courses",
-                    "message": "Yêu cầu cần xác định khóa học cụ thể hoặc Course ID."
-                })
-
-            if "git_role" in policy.get("required_inputs", []) and not entities.get("git_role"):
-                missing_requirements.append({
-                    "field": "git_role",
-                    "message": "Cần xác định vai trò Git (GUEST, DEVELOPER, ADMIN) trước khi duyệt."
-                })
+            for r_in in policy.get("required_inputs", []):
+                if r_in == "school_name" and not active_school_name:
+                    missing_requirements.append({
+                        "field": "school_name",
+                        "message": f"Ý định '{policy.get('name')}' cần Quản trị viên chọn Trường học mục tiêu."
+                    })
+                elif r_in == "courses" and not canonical_courses:
+                    missing_requirements.append({
+                        "field": "courses",
+                        "message": "Yêu cầu cần xác định khóa học cụ thể hoặc Course ID."
+                    })
+                elif r_in in ["user_identifiers", "user_emails"] and not user_emails:
+                    missing_requirements.append({
+                        "field": "user_emails",
+                        "message": "Yêu cầu cần danh sách email tài khoản."
+                    })
+                elif r_in == "repositories" and not entities.get("repositories") and not entities.get("repository_url"):
+                    missing_requirements.append({
+                        "field": "repositories",
+                        "message": "Yêu cầu cấp quyền Git thiếu link hoặc tên repository."
+                    })
+                elif r_in == "git_role" and not entities.get("git_role"):
+                    missing_requirements.append({
+                        "field": "git_role",
+                        "message": "Cần xác định vai trò Git (GUEST, DEVELOPER, ADMIN) trước khi duyệt."
+                    })
+                elif r_in == "target_email" and not operation_context["context"].get("target_email"):
+                    missing_requirements.append({
+                        "field": "target_email",
+                        "message": "Yêu cầu thiếu email tài khoản đích."
+                    })
 
             pipeline = policy.get("capability_pipeline", [])
             for step_cfg in pipeline:
@@ -340,7 +378,7 @@ class WorkflowPlannerService:
                     elif in_key == "repo_url":
                         step_inputs[in_key] = repo_target
                     elif in_key == "target_role":
-                        step_inputs[in_key] = entities.get("git_role") or "GUEST"
+                        step_inputs[in_key] = entities.get("git_role")
                     else:
                         step_inputs[in_key] = operation_context["context"].get(in_key)
 
@@ -355,14 +393,16 @@ class WorkflowPlannerService:
                     step_id=curr_step_id,
                     capability_id=cap_id,
                     name=step_name,
-                    status="ready" if not missing_requirements else "pending",
+                    status="ready",
                     inputs=step_inputs,
                     depends_on=[]
                 ))
 
-        # 🌟 ĐỘT PHÁ CỐT TỬ: KỂ CẢ KHI CÓ MISSING REQUIREMENTS, STEPS VẪN ĐƯỢC GIỮ NGUYÊN ĐỂ HIỂN THỊ TRÊN UI!
-        if missing_requirements:
+        # 🛑 FAIL-CLOSED & ZERO-MOCKUP INVARIANT:
+        # Nếu thiếu dữ kiện bắt buộc, hạ trạng thái về needs_information và xóa sạch steps (steps = [])
+        if missing_requirements or assessment.outcome == "needs_information":
             status = "needs_information"
+            steps = []
         elif warnings:
             status = "needs_review"
         elif steps:
@@ -562,6 +602,93 @@ class WorkflowPlannerService:
         }
         res = supabase.table("automation_workflows").insert(insert_payload).execute()
         return res.data[0]
+
+    def validate_workflow_graph(self, steps: List[Any]) -> WorkflowValidationResult:
+        """
+        Kiểm định tính toàn vẹn của Đồ thị phụ thuộc (DAG):
+        - Phát hiện chu trình khép kín (Circular Dependencies) qua DFS.
+        - Kiểm tra các bước phụ thuộc có tồn tại trong danh sách không.
+        - Kiểm tra các trường inputs bắt buộc theo capabilities.json.
+        """
+        errors: List[str] = []
+        warnings: List[str] = []
+        
+        step_objs = []
+        for s in steps:
+            if isinstance(s, dict):
+                step_objs.append(WorkflowStepDraft(**s))
+            else:
+                step_objs.append(s)
+
+        step_ids = {s.step_id for s in step_objs}
+
+        # 1. Kiểm tra tồn tại của step_id phụ thuộc
+        adj: Dict[str, List[str]] = {s.step_id: [] for s in step_objs}
+        for s in step_objs:
+            for dep in s.depends_on:
+                if dep not in step_ids:
+                    errors.append(f"Bước '{s.name}' ({s.step_id}) phụ thuộc vào bước '{dep}' không tồn tại trong luồng.")
+                else:
+                    adj[dep].append(s.step_id)
+
+        # 2. Phát hiện chu trình (Cycle Detection - DFS 3 Colors: 0=unvisited, 1=visiting, 2=visited)
+        visited: Dict[str, int] = {s.step_id: 0 for s in step_objs}
+        has_cycle = False
+
+        def dfs(node: str, path: List[str]):
+            nonlocal has_cycle
+            visited[node] = 1
+            path.append(node)
+            for neighbor in adj.get(node, []):
+                if visited[neighbor] == 1:
+                    has_cycle = True
+                    cycle_path = " -> ".join(path + [neighbor])
+                    errors.append(f"Phát hiện chu trình phụ thuộc vòng kín (Circular Dependency): {cycle_path}")
+                    return
+                elif visited[neighbor] == 0:
+                    dfs(neighbor, path)
+            visited[node] = 2
+            path.pop()
+
+        for s in step_objs:
+            if visited[s.step_id] == 0:
+                dfs(s.step_id, [])
+
+        # 3. Kiểm tra Required Inputs từ capabilities.json
+        for s in step_objs:
+            cap_def = self.capabilities_map.get(s.capability_id)
+            if not cap_def:
+                warnings.append(f"Capability '{s.capability_id}' chưa được đăng ký trong Capability Registry.")
+                continue
+
+            if not cap_def.get("supported_by_handler", True) or not cap_def.get("available", True):
+                errors.append(f"Capability '{s.capability_id}' không khả dụng để thực thi (supported_by_handler=False hoặc available=False).")
+
+            req_inputs = cap_def.get("required_inputs", [])
+            for req in req_inputs:
+                val = s.inputs.get(req)
+                if val is None or str(val).strip() in ["", "None", "null", "undefined"]:
+                    has_upstream = any(req in str(v) for v in s.inputs.values() if isinstance(v, str) and "{{" in v)
+                    if not has_upstream:
+                        warnings.append(f"Bước '{s.name}': Cần bổ sung thông tin '{req}' trước khi thực thi.")
+
+            if cap_def.get("risk_level") == "high_mutation":
+                warnings.append(f"Bước '{s.name}' sẽ tác động trực tiếp thay đổi dữ liệu trên hệ thống thực tế.")
+
+        is_valid = len(errors) == 0
+        status = "ready" if is_valid and len(warnings) == 0 else "needs_review" if is_valid else "invalid"
+
+        return WorkflowValidationResult(
+            is_valid=is_valid,
+            status=status,
+            errors=errors,
+            warnings=warnings,
+            stats={
+                "total_steps": len(step_objs),
+                "ready_steps": sum(1 for s in step_objs if not s.depends_on),
+                "dependent_steps": sum(1 for s in step_objs if s.depends_on)
+            }
+        )
 
 
 workflow_planner_service = WorkflowPlannerService()
