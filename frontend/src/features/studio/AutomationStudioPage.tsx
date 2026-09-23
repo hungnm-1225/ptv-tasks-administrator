@@ -1346,6 +1346,10 @@ export const AutomationStudioPage: React.FC = () => {
               workspaceCategoriesList={workspaceCategoriesList}
               onAddCourseRow={handleAddCourseRow}
               onRemoveCourseRow={handleRemoveCourseRow}
+              contactInfo={contactInfo}
+              setContactInfo={setContactInfo}
+              additionalNotes={additionalNotes}
+              setAdditionalNotes={setAdditionalNotes}
             />
           )}
 
