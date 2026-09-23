@@ -230,7 +230,7 @@ const CourseCombobox: React.FC<CourseComboboxProps> = ({
                         {otherCategoryCourses.length > 0 && (
                             <div className="border-t border-slate-100 dark:border-slate-800/80 pt-2">
                                 <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center justify-between">
-                                    <span>Khóa học phân loại khác (Tự đổi Category)</span>
+                                    <span>Khóa học phân loại khác</span>
                                     <span>{otherCategoryCourses.length} môn</span>
                                 </div>
                                 <div className="mt-1 space-y-1">
@@ -566,7 +566,7 @@ export const LmsEnrollSection: React.FC<LmsEnrollSectionProps> = ({
                                                     disabled={isCatExhausted}
                                                     className={isCatExhausted ? 'text-slate-400 bg-slate-100 dark:bg-slate-800' : ''}
                                                 >
-                                                    {cat} {isCatExhausted ? '(Đã chọn hết)' : `(Còn ${remainingCount}/${coursesInCat.length} môn)`}
+                                                    {cat} {isCatExhausted ? '(Đã chọn hết)' : ''}
                                                 </option>
                                             );
                                         })}

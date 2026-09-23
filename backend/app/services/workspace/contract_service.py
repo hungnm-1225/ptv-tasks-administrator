@@ -161,7 +161,10 @@ class WorkspaceContractService(WorkspaceBaseService):
         credentials: Dict[str, str],
         contract_identifier: Optional[str] = None,
         auto_create_dst_if_short: bool = True,
-        courses_needed: Optional[List[Dict[str, Any]]] = None
+        courses_needed: Optional[List[Dict[str, Any]]] = None,
+        note: Optional[str] = None,
+        origin_order_code: Optional[str] = None,  # 🎯 Mã Order trường học gốc
+        school_name: Optional[str] = None         # 🎯 Tên trường học gốc
     ) -> Dict[str, Any]:
         """Distributor duyệt PRT Contract qua Direct API (Tạo DST bù cho tất cả các môn thiếu)."""
         try:
@@ -178,7 +181,7 @@ class WorkspaceContractService(WorkspaceBaseService):
                     "distributor_id": str(dist_id),
                     "username": credentials.get("username", "testdistributor"),
                     "license_type": "license",
-                    "note": "Approved by PTV Automation Hub Fast Engine"
+                    "note": note or "Approved by PTV Automation Hub Fast Engine"
                 }
                 url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/distributor_workspace_v3/api/orders_management/updateStatusPartnerOrder.php"
                 res = await client.post(url, files=self._to_multipart(payload))
@@ -200,10 +203,16 @@ class WorkspaceContractService(WorkspaceBaseService):
                     # THIẾU LICENSE ➔ TẠO DST CONTRACT BÙ TOÀN BỘ CÁC MÔN
                     if auto_create_dst_if_short:
                         courses_to_topup = courses_needed or [{"course_id": 1344, "course_name": "SWRP 1", "licenses": 100}]
+                        
+                        # 🎯 HỆ THỐNG TỰ ĐỘNG GẮN PHẢ HỆ 2 CẤP (PRT ➔ GỐC SCH)
+                        origin_part = f" ➔ GỐC ORDER: {origin_order_code}" if origin_order_code else ""
+                        school_part = f" | TRƯỜNG: {school_name}" if school_name else ""
+                        sys_dst_notes = f"[CẤP BÙ CHO PRT: {contract_identifier}{origin_part}{school_part}] Yêu cầu Sales Admin cấp bù hạn ngạch"
+
                         dst_payload = {
                             "distributor_id": str(dist_id),
                             "order_type": "License",
-                            "order_notes": f"Auto-topup for PRT {contract_identifier}",
+                            "order_notes": sys_dst_notes,  # 🎯 Hệ thống tự đặt
                             "total_amount": "100"
                         }
 
@@ -234,6 +243,8 @@ class WorkspaceContractService(WorkspaceBaseService):
                                 "status": "insufficient_pool_created_dst",
                                 "contract_identifier": contract_identifier,
                                 "dst_contract_code": dst_code,
+                                "origin_order_code": origin_order_code,
+                                "school_name": school_name,
                                 "message": clean_msg
                             }
 

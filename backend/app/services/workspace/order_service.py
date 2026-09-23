@@ -505,10 +505,14 @@ class WorkspaceOrderService(WorkspaceBaseService):
                 logger.warning(f"⚠️ Kho Partner thiếu License cho Order [{order_identifier}]: {short_desc}")
 
                 if auto_create_prt_if_short:
+                    # 🎯 HỆ THỐNG TỰ ĐỘNG TẠO GHI CHÚ PHẢ HỆ (LINEAGE PROVENANCE)
+                    resolved_school_name = credentials.get("school_name") or order_identifier
+                    sys_topup_notes = f"[CẤP BÙ CHO ORDER: {order_identifier} | TRƯỜNG: {resolved_school_name}] Thiếu: {short_desc}"
+
                     topup_payload = {
                         "partner_id": str(partner_id),
                         "order_type": "License",
-                        "order_notes": f"Auto-topup for Order {order_identifier}: {short_desc}",
+                        "order_notes": sys_topup_notes,  # 🎯 Hệ thống tự đặt
                         "status": "pending_distributor_review",
                         "total_amount": "100"
                     }
@@ -539,6 +543,8 @@ class WorkspaceOrderService(WorkspaceBaseService):
                             "status": "insufficient_pool_created_prt",
                             "order_identifier": order_identifier,
                             "prt_contract_code": prt_code,
+                            "school_name": resolved_school_name,
+                            "origin_notes": sys_topup_notes,
                             "message": clean_msg
                         }
 

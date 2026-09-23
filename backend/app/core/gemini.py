@@ -1,19 +1,21 @@
 # backend/app/core/gemini.py
 """
-Dual-Key Gemini Cognition Engine (Master Enterprise v3.1 - Zero-Mockup & Evidence Grounded)
+Dual-Key Gemini Cognition Engine (Master Enterprise v3.2 - Catalog Grounded & Full Extraction)
 Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI
 Chuyên trách:
 - Key 1: Tóm tắt mềm Inbox (summarize_ticket).
-- Key 2: Bóc tách sự thật vận hành có định vị offset (extract_operational_facts).
-- Tích hợp chặt chẽ với email_thread_service để phân tích tiến trình xử lý.
-- Loại bỏ hoàn toàn fake fallback data, tuân thủ nguyên tắc Zero-Mockup & Fail-Closed.
+- Key 2: Bóc tách sự thật vận hành (extract_operational_facts) nạp đầy đủ:
+  + Dữ liệu file đính kèm bóc tách (Universal Primitives).
+  + Dynamic LMS Course Catalog (tự động map mã tắt SWRP 11 -> Course ID + Git Repos).
+- Tích hợp email_thread_service nhận diện vòng đời trao đổi.
+- Tuân thủ nguyên tắc Zero-Mockup & Evidence Grounded.
 """
+
 import os
 import re
 import json
 import logging
-import tempfile
-import urllib.request
+import time
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timezone
 from dotenv import load_dotenv
@@ -21,15 +23,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import google.generativeai as genai
-from app.core.supabase import get_supabase_client
-from app.services.cof_excel_service import COFExcelService
-from app.services.request_fact_normalizer import augment_assessment_with_request_facts
 from app.models.intent import (
     IntentAssessment, 
     VerifiedIntentAssessment,
     TicketSummary, 
     ExtractedIntent, 
-    ExtractedEntity,
     EvidenceSpan
 )
 from app.services.evidence_verifier import evidence_verifier
@@ -42,7 +40,6 @@ except Exception:
 
 logger = logging.getLogger(__name__)
 
-# Danh mục danh bạ Category chuẩn của Pydantic TicketSummary
 VALID_CATEGORIES = {"license", "lms_enroll", "account_keycloak", "bug", "other"}
 VALID_PRIORITIES = {"urgent", "normal", "low", "high"}
 
@@ -57,6 +54,7 @@ GEMINI_MODELS = [
     "gemini-2.5-flash-lite",
     "gemini-2.5-flash",
 ]
+
 AUTOMATED_SENDER_PREFIXES = (
     "noreply@", "no-reply@", "notification@", "notifications@",
     "alert@", "alerts@", "info@", "newsletter@", "marketing@",
@@ -102,6 +100,7 @@ class AIEngine:
             if os.path.exists(intent_p):
                 with open(intent_p, "r", encoding="utf-8") as f:
                     self.intent_prompt_tpl = f.read()
+                    logger.info("📄 Đã nạp thành công intent_extraction_v1.txt")
         except Exception as e:
             logger.warning(f"⚠️ Lỗi nạp prompt templates: {e}")
 
@@ -110,8 +109,6 @@ class AIEngine:
         prompt: str,
         primary_key: Optional[str] = None
     ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-        import time
-
         key_1 = primary_key or self.api_key_summary
         key_2 = self.api_key_facts if key_1 == self.api_key_summary else self.api_key_summary
 
@@ -140,7 +137,7 @@ class AIEngine:
                     response = model.generate_content(
                         prompt,
                         generation_config={"response_mime_type": "application/json"},
-                        request_options={"timeout": 20.0}
+                        request_options={"timeout": 25.0}
                     )
                     if response and response.text:
                         raw_text = response.text.strip()
@@ -258,83 +255,104 @@ class AIEngine:
             return IntentAssessment(
                 outcome="no_action",
                 model_name="fast_path_system_filter",
-                prompt_version="v4.0_structured",
+                prompt_version="v4.5_catalog_grounded",
                 intents=[], entities={}, extracted_entities=[], missing_requirements=[],
                 warnings=["Email thông báo tự động từ hệ thống."],
                 raw_evidence_quotes=[]
             )
 
-        # 2. Phân tích thread
+        # 2. Phân tích tiến trình trao đổi (Thread)
         parsed_thread = thread_service.parse_thread(raw_content, sender_email)
         if parsed_thread.lifecycle_state == "WAITING_CUSTOMER_INFO":
             return IntentAssessment(
                 outcome="no_action",
                 model_name="thread_state_machine",
-                prompt_version="v4.0_structured",
+                prompt_version="v4.5_catalog_grounded",
                 intents=[], entities={}, extracted_entities=[], missing_requirements=[],
-                warnings=["Email mới nhất do kỹ sư nội bộ phản hồi. Tạm dừng chờ khách hàng."],
+                warnings=["Email mới nhất do kỹ sư nội bộ phản hồi. Tạm dừng chờ khách hàng bổ sung."],
                 raw_evidence_quotes=[]
             )
 
         full_content = parsed_thread.compact_prompt_context if parsed_thread.is_thread else (raw_content[:20000] if raw_content else "(Trống)")
 
-        # 🎯 PROMPT MỚI: BẮT GEMINI LÀM ĐÚNG VAI TRÒ SUY LUẬN NGỮ NGHĨA (KHÔNG DÙNG REGEX ĐOÁN MÒ NỮA)
-        prompt = f"""Bạn là Senior Automation Architect cho Pythaverse. Hãy đọc toàn bộ ngữ cảnh và lịch sử hội thoại dưới đây để trích xuất sự thật vận hành chính xác:
+        # =========================================================================
+        # 3. ĐỊNH DẠNG DỮ LIỆU ĐÍNH KÈM & CATALOG CONTEXT
+        # =========================================================================
+        excel_data = excel_summary or {}
+        catalog_list = excel_data.get("catalog_reference", [])
+        
+        # Định dạng danh mục khóa học thành bảng tra cứu gọn gàng cho AI
+        if catalog_list:
+            catalog_lines = []
+            for item in catalog_list[:50]:
+                cid = item.get("id")
+                code = item.get("code") or "N/A"
+                name = item.get("name") or "N/A"
+                repos = item.get("git_repos") or []
+                repo_str = json.dumps(repos, ensure_ascii=False) if repos else "Chưa có repo"
+                catalog_lines.append(f"- Course ID: {cid} | Mã tắt: {code} | Tên: {name} | Repos: {repo_str}")
+            catalog_context_str = "\n".join(catalog_lines)
+        else:
+            catalog_context_str = "(Không có danh mục khóa học LMS trong bộ nhớ)"
 
-TIÊU ĐỀ: {subject}
-NGƯỜI GỬI EMAIL: {sender_email}
-TIẾN TRÌNH & NỘI DUNG HỘI THOẠI:
-{full_content}
+        # Định dạng dữ liệu đã bóc tách từ file / text
+        summary_clean = {k: v for k, v in excel_data.items() if k != "catalog_reference"}
+        if summary_clean:
+            excel_info_str = json.dumps(summary_clean, ensure_ascii=False, indent=2)
+        else:
+            excel_info_str = "(Không có tệp đính kèm hoặc dữ liệu bóc tách thô)"
 
-HÃY SUY LUẬN VÀ TRẢ VỀ JSON CÓ CẤU TRÚC CHÍNH XÁC THEO SCHEMA SAU:
-{{
-  "outcome": "candidate_action", // "candidate_action" nếu có việc cần làm, "needs_information" nếu thiếu dữ liệu, "no_action" nếu chỉ là trao đổi
-  "target_school_name": "Tên trường học chính xác mà khách hàng yêu cầu áp dụng (nếu có đính chính, lấy tên trường mới nhất, gọt sạch chữ thừa như School Name:, chỉ để lại tên trường chuẩn)",
-  "beneficiary_users": [
-    // Danh sách những người THẬT SỰ được thụ hưởng (được tạo tk, sửa trường, hoặc vào lớp).
-    // NẾU NGƯỜI GỬI ({sender_email}) CHỈ LÀ NGƯỜI ĐẠI DIỆN GỬI THAY CHO DANH SÁCH GIÁO VIÊN/HỌC SINH THÌ TUYỆT ĐỐI KHÔNG ĐƯA NGƯỜI GỬI VÀO MẢNG NÀY!
-    {{ "name": "Họ và tên", "email": "email", "role": "teacher hoặc student" }}
-  ],
-  "already_completed_actions": [
-    // Những việc đã được nhân viên hoàn thành ở các lượt trước (ví dụ nếu nhân viên đã gửi login/credentials thì điền "create_accounts")
-  ],
-  "actionable_intents": [
-    // Những việc CÒN TỒN ĐỌNG CẦN LÀM BÂY GIỜ (chọn trong: "update_user_profile", "course_access", "create_accounts", "reset_password")
-    {{
-      "type": "tên intent",
-      "confidence": 0.95,
-      "evidence_quote": "Trích dẫn nguyên văn câu tiếng Anh/Việt trong hội thoại yêu cầu việc này"
-    }}
-  ],
-  "courses": ["Tên các khóa học được yêu cầu (ví dụ SWRP 11)"]
-}}
-"""
+        # =========================================================================
+        # 4. KHỞI TẠO PROMPT TỪ INTENT_EXTRACTION_V1.TXT
+        # =========================================================================
+        if self.intent_prompt_tpl:
+            prompt = self.intent_prompt_tpl.format(
+                subject=subject,
+                sender_email=sender_email or "Không rõ",
+                catalog_context_str=catalog_context_str,
+                excel_info_str=excel_info_str,
+                full_content=full_content
+            )
+        else:
+            # Fallback nếu file prompt bị lỗi đọc
+            prompt = f"""Bạn là Senior Automation Architect. Bóc tách sự thật vận hành:
+Tiêu đề: {subject}
+Người gửi: {sender_email}
+Catalog: {catalog_context_str}
+File đính kèm: {excel_info_str}
+Nội dung: {full_content}
+Trả về JSON chuẩn xác có actionability_analysis, outcome, intents, entities, missing_requirements."""
 
         parsed_data, used_model = self._call_gemini_with_fallback(prompt, primary_key=self.api_key_facts)
 
         if not parsed_data or not isinstance(parsed_data, dict):
-            logger.warning("⚠️ Không thể phân tích cấu trúc từ AI.")
+            logger.warning("⚠️ Không thể phân tích cấu trúc facts từ Gemini.")
             return IntentAssessment(
                 outcome="needs_information",
                 model_name=used_model or "ai_extraction_failed",
-                prompt_version="v4.0_structured",
+                prompt_version="v4.5_catalog_grounded",
                 intents=[], entities={}, extracted_entities=[],
-                missing_requirements=[{"field": "ai_analysis", "message": "Không thể phân tích yêu cầu từ AI."}],
+                missing_requirements=[{"field": "ai_analysis", "message": "Không thể phân tích yêu cầu từ AI (Quota 429 hoặc lỗi kết nối)."}],
                 warnings=["Hệ thống kích hoạt van an toàn."],
                 raw_evidence_quotes=[]
             )
 
-        # 3. Chuẩn hóa Outcome
+        # 5. Chuẩn hóa Outcome
         raw_outcome = str(parsed_data.get("outcome", "candidate_action")).lower().strip()
         final_outcome = "no_action" if "no_action" in raw_outcome else ("needs_information" if "needs_info" in raw_outcome else "candidate_action")
 
-        # 4. Trích xuất Actionable Intents (Đã được Gemini lọc bỏ việc cũ)
+        # 6. Trích xuất Structured Intents & Bằng chứng nguyên văn
         structured_intents: List[ExtractedIntent] = []
         raw_evidence_quotes: List[str] = []
 
-        for item in parsed_data.get("actionable_intents", []):
+        intents_input = parsed_data.get("intents") or []
+        for item in intents_input:
             if not isinstance(item, dict):
                 continue
+            itype = str(item.get("type") or "").strip()
+            if not itype:
+                continue
+
             quote_str = str(item.get("evidence_quote") or "").strip()
             ev_list = []
             if quote_str:
@@ -348,32 +366,43 @@ HÃY SUY LUẬN VÀ TRẢ VỀ JSON CÓ CẤU TRÚC CHÍNH XÁC THEO SCHEMA SAU:
                 raw_evidence_quotes.append(quote_str)
 
             structured_intents.append(ExtractedIntent(
-                type=item.get("type", "unknown"),
-                confidence=float(item.get("confidence", 0.9)),
+                type=itype,
+                confidence=float(item.get("confidence", 0.95)),
                 evidence=ev_list
             ))
 
-        # 🎯 ENTITIES ĐƯỢC GEMINI TỰ ĐỘNG LÀM SẠCH VÀ PHÂN LOẠI CHUẨN XÁC
-        clean_school = str(parsed_data.get("target_school_name") or "").strip(" '\",.:")
-        clean_users = parsed_data.get("beneficiary_users", [])
-        clean_courses = parsed_data.get("courses", [])
+        # 7. Chuẩn hóa Entities
+        entities_raw = parsed_data.get("entities") or {}
+        clean_school = entities_raw.get("school_name") or excel_data.get("school_detected")
+        clean_users = entities_raw.get("users") or excel_data.get("account_profiles") or []
+        clean_courses = entities_raw.get("courses") or excel_data.get("courses_detected") or []
+        clean_course_ids = entities_raw.get("matched_course_ids") or []
+        clean_repos = entities_raw.get("repositories") or excel_data.get("repo_urls") or []
+        clean_identifiers = entities_raw.get("identifiers") or excel_data.get("identifiers") or []
+        git_role = entities_raw.get("git_role")
+        target_email = entities_raw.get("target_email")
 
         entities_payload = {
-            "school_name": clean_school if clean_school and clean_school.lower() != "none" else None,
+            "school_name": clean_school if clean_school and str(clean_school).lower() != "none" else None,
             "users": clean_users if isinstance(clean_users, list) else [],
             "courses": clean_courses if isinstance(clean_courses, list) else [],
+            "matched_course_ids": clean_course_ids if isinstance(clean_course_ids, list) else [],
+            "repositories": clean_repos if isinstance(clean_repos, list) else [],
+            "git_role": git_role,
+            "target_email": target_email,
+            "identifiers": clean_identifiers if isinstance(clean_identifiers, list) else [],
             "already_completed_actions": parsed_data.get("already_completed_actions", [])
         }
 
         raw_assessment = IntentAssessment(
             outcome=final_outcome,
             model_name=used_model,
-            prompt_version="v4.0_ai_first",
+            prompt_version="v4.5_catalog_grounded",
             intents=structured_intents,
             entities=entities_payload,
             extracted_entities=[],
-            missing_requirements=[],
-            warnings=[],
+            missing_requirements=parsed_data.get("missing_requirements") or [],
+            warnings=parsed_data.get("warnings") or [],
             raw_evidence_quotes=raw_evidence_quotes
         )
 

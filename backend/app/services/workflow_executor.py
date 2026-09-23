@@ -618,7 +618,7 @@ class WorkflowExecutorService:
             "workspace.query_distributor_contracts": ("workspace_rpa", "query_distributor_contracts"),
             "workspace.query_partner_orders": ("workspace_rpa", "query_partner_orders"),
 
-            # 🎯 ĐÂY RỒI! BỔ SUNG ÁNH XẠ CHO CAPABILITY CẬP NHẬT HỒ SƠ / ĐỔI TRƯỜNG WORKSPACE:
+            # CẬP NHẬT THÔNG TIN NGƯỜI DÙNG TRÊN WORKSPACE:
             "workspace.update_user_profile": ("workspace_rpa", "update_user_profile"),
             "workspace.update_user": ("workspace_rpa", "update_user_profile"),
 

@@ -1,9 +1,22 @@
 # backend/app/workers/ticket_processor.py
+"""
+Ticket Processor Worker (Canonical Intake Orchestrator)
+Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI
+Chuyên trách:
+- Quản trị Revision nguyên tử qua PostgreSQL RPC 'create_or_get_inbox_ticket_revision' (FOR UPDATE).
+- Khai thác tệp đính kèm Excel đa năng trong RAM qua GenericExcelService (Universal Primitives).
+- Fallback bóc tách văn bản trần tự nhiên khi không có file đính kèm.
+- Bơm Dynamic Course Catalog (LMS ID, Code, Git Repos) vào tri thức AI.
+- Điều phối Dual-Path AI (Summary hiển thị + Fact Extraction mang source_revision_id).
+- Bảo vệ trần 512MB RAM Render: Async HTTPX, dọn dẹp file tạm triệt để trong finally.
+"""
+
 import os
 import json
 import hashlib
 import logging
 import tempfile
+import httpx
 import urllib.request
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timezone
@@ -12,6 +25,7 @@ from app.core.supabase import get_supabase_client
 from app.core.gemini import gemini_engine
 from app.services.workflow_planner import workflow_planner_service
 from app.services.cof_excel_service import COFExcelService
+from app.services.excel.generic_excel_service import GenericExcelService
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +69,7 @@ def create_or_get_ticket_revision(
 ) -> Tuple[Optional[str], int, bool]:
     """
     HÀM DUY NHẤT TẠO HOẶC LẤY REVISION (Single Source of Truth):
-    - PHA D: Gọi PostgreSQL RPC 'create_or_get_inbox_ticket_revision' (FOR UPDATE Atomic Lock).
+    - Gọi PostgreSQL RPC 'create_or_get_inbox_ticket_revision' (FOR UPDATE Atomic Lock).
     - Triệt tiêu 100% race condition uq_ticket_revision khi nhiều worker chạy đồng thời.
     Trả về: (revision_id, revision_no, is_new)
     """
@@ -64,8 +78,6 @@ def create_or_get_ticket_revision(
     now_iso = datetime.now(timezone.utc).isoformat()
     updated_at_val = source_updated_at or now_iso
 
-    # The RPC is the only allocator.  A Python MAX(revision_no)+1 fallback
-    # reintroduces the race that the database lock exists to prevent.
     try:
         rpc_res = supabase.rpc("create_or_get_inbox_ticket_revision", {
             "p_ticket_id": ticket_id,
@@ -88,14 +100,41 @@ def create_or_get_ticket_revision(
     raise RuntimeError("Atomic ticket revision allocation returned no revision")
 
 
+def get_catalog_context(supabase) -> List[Dict[str, Any]]:
+    """
+    Lấy danh mục các khóa học LMS kèm Git Repos liên kết để nạp vào trí tuệ AI.
+    Giúp Gemini giải mã 'SWRP 11' -> ID 48 + Link Git repo tương ứng.
+    """
+    try:
+        res = supabase.table("lms_courses")\
+            .select("id, name, course_code, git_repos")\
+            .limit(60)\
+            .execute()
+        if res.data:
+            catalog = []
+            for c in res.data:
+                catalog.append({
+                    "id": c.get("id"),
+                    "code": c.get("course_code") or "",
+                    "name": c.get("name") or "",
+                    "git_repos": c.get("git_repos") or []
+                })
+            return catalog
+    except Exception as err:
+        logger.warning(f"⚠️ Không thể nạp LMS catalog vào AI context: {err}")
+    return []
+
+
 async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
     """
     CANONICAL INTAKE ORCHESTRATOR (Một cửa tiếp nhận chuẩn hóa):
     1. Đọc nội dung snapshot bất biến từ inbox_ticket_revisions.
-    2. Bóc tách file COF/Excel (nếu có).
-    3. Chạy Dual-Path AI (Summary mềm + Fact Extraction TRUYỀN ĐỦ source_revision_id).
-    4. Lưu độc lập 2 assessments vào ticket_ai_assessments.
-    5. Khởi chạy Deterministic Planner kèm revision_id xác định.
+    2. Tải & bóc tách file COF/Excel bất kỳ qua GenericExcelService (Universal Primitives).
+    3. Fallback bóc tách text trần khi không có file đính kèm.
+    4. Bơm Dynamic LMS Course Catalog giúp Gemini thấu suốt hệ thống.
+    5. Chạy Dual-Path AI (Summary mềm + Fact Extraction TRUYỀN ĐỦ source_revision_id).
+    6. Lưu độc lập 2 assessments vào ticket_ai_assessments.
+    7. Khởi chạy Non-Destructive Workflow Planner.
     """
     supabase = get_supabase_client()
     try:
@@ -110,19 +149,46 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
         raw_content = revision.get("raw_content") or ""
         subject = ticket.get("subject") or ""
         source = ticket.get("source") or "gmail"
+        sender_email = ticket.get("sender_email") or ""
         attachments = revision.get("attachments") or ticket.get("attachments") or []
 
-        excel_summary = None
+        excel_summary: Optional[Dict[str, Any]] = None
+
+        # =========================================================================
+        # 1. BÓC TÁCH TỆP ĐÍNH KÈM EXCEL (PRE-PARSING ATTACHMENTS)
+        # =========================================================================
         for att in attachments:
             fname = att.get("filename", "").lower()
             furl = att.get("url", "")
             if (fname.endswith(".xlsx") or fname.endswith(".xls")) and furl:
+                temp_path = None
                 try:
-                    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp_file:
-                        urllib.request.urlretrieve(furl, tmp_file.name)
-                        temp_path = tmp_file.name
+                    file_bytes: Optional[bytes] = None
 
-                    # 1. Kiểm tra nếu là file COF 3 Tabs truyền thống
+                    # Tải file bất đồng bộ qua HTTPX (Non-blocking I/O)
+                    try:
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            resp = await client.get(furl)
+                            if resp.status_code == 200:
+                                file_bytes = resp.content
+                    except Exception as dl_err:
+                        logger.warning(f"⚠️ Tải qua HTTPX lỗi ({dl_err}), fallback urllib...")
+                        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp_file:
+                            urllib.request.urlretrieve(furl, tmp_file.name)
+                            temp_path = tmp_file.name
+                            with open(temp_path, "rb") as f:
+                                file_bytes = f.read()
+
+                    if not file_bytes:
+                        continue
+
+                    # Tạo file tạm thời nếu cần thiết cho COF parser
+                    if not temp_path:
+                        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp_file:
+                            tmp_file.write(file_bytes)
+                            temp_path = tmp_file.name
+
+                    # Nhánh A: Kiểm tra xem có phải file COF 3 Tabs truyền thống
                     if COFExcelService.is_cof_file(temp_path):
                         parsed_cof = COFExcelService.parse_cof_file(temp_path)
                         excel_summary = {
@@ -134,32 +200,72 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                             "students_to_create": len(parsed_cof.get("students_to_create", [])),
                             "total_teachers": len(parsed_cof.get("teachers_all", [])),
                             "teachers_to_create": len(parsed_cof.get("teachers_to_create", [])),
+                            "classes": list(set(s.get("class_name") for s in parsed_cof.get("students_all", []) if s.get("class_name")))
                         }
                     else:
-                        # 2. FILE EXCEL THƯỜNG (DANH SÁCH REPOSITORIES / THÀNH VIÊN) - DÙNG GENERIC PARSER!
-                        from app.services.excel.generic_excel_service import GenericExcelService
-                        parsed_generic = GenericExcelService.parse_any_excel(temp_path)
+                        # Nhánh B: FILE EXCEL BẤT KỲ - BÓC TÁCH ĐA NĂNG 2 TẦNG (UNIVERSAL EXTRACTOR)
+                        parsed_universal = GenericExcelService.extract_universal_data(file_bytes)
                         excel_summary = {
                             "is_cof": False,
                             "filename": fname,
-                            "repositories": parsed_generic.get("repositories", []),
-                            "users": parsed_generic.get("users", []),
-                            "total_users": parsed_generic.get("total_users", 0),
-                            "has_repos": parsed_generic.get("has_repos", False),
-                            "notice": f"File danh sách Excel đính kèm: {parsed_generic.get('total_users', 0)} người dùng, {len(parsed_generic.get('repositories', []))} repos."
+                            "identifiers": parsed_universal.get("identifiers", []),
+                            "emails": parsed_universal.get("emails", []),
+                            "usernames": parsed_universal.get("usernames", []),
+                            "repo_urls": parsed_universal.get("repo_urls", []),
+                            "courses_detected": parsed_universal.get("courses_detected", []),
+                            "classes_detected": parsed_universal.get("classes_detected", []),
+                            "suggested_roles": parsed_universal.get("suggested_roles", []),
+                            "school_detected": parsed_universal.get("school_detected"),
+                            "account_profiles": parsed_universal.get("account_profiles", [])[:50],  # Preview tối đa 50 user cho AI
+                            "total_identifiers": len(parsed_universal.get("identifiers", [])),
+                            "total_accounts": len(parsed_universal.get("account_profiles", [])),
+                            "notice": f"File danh sách Excel [{fname}]: {len(parsed_universal.get('identifiers', []))} định danh, {len(parsed_universal.get('repo_urls', []))} repos, {len(parsed_universal.get('courses_detected', []))} môn học."
                         }
-
-                    if os.path.exists(temp_path):
-                        os.remove(temp_path)
                     break
                 except Exception as ex_err:
-                    logger.warning(f"⚠️ Lỗi bóc tách file Excel [{fname}]: {ex_err}")
-        
-        
-        # lấy sender email từ ticket
-        sender_email = ticket.get("sender_email") or ""
+                    logger.warning(f"⚠️ Lỗi bóc tách file Excel [{fname}]: {ex_err}", exc_info=True)
+                finally:
+                    # Render 512MB RAM: Dọn sạch file tạm trên đĩa ngay lập tức!
+                    if temp_path and os.path.exists(temp_path):
+                        try:
+                            os.remove(temp_path)
+                        except Exception:
+                            pass
 
-        # Phân tách 2 đánh giá AI độc lập (BẮT BUỘC TRUYỀN source_revision_id)
+        # =========================================================================
+        # 2. BỔ TRỢ NGUYÊN LIỆU TỪ VĂN BẢN TRẦN NẾU KHÔNG CÓ FILE ĐÍNH KÈM
+        # =========================================================================
+        if not excel_summary and raw_content:
+            text_parsed = GenericExcelService.parse_universal_text(raw_content)
+            if text_parsed.get("identifiers") or text_parsed.get("repo_urls") or text_parsed.get("account_profiles"):
+                excel_summary = {
+                    "is_cof": False,
+                    "filename": "email_raw_text",
+                    "identifiers": text_parsed.get("identifiers", []),
+                    "emails": text_parsed.get("emails", []),
+                    "usernames": text_parsed.get("usernames", []),
+                    "repo_urls": text_parsed.get("repo_urls", []),
+                    "courses_detected": text_parsed.get("courses_detected", []),
+                    "classes_detected": text_parsed.get("classes_detected", []),
+                    "suggested_roles": text_parsed.get("suggested_roles", []),
+                    "account_profiles": text_parsed.get("account_profiles", []),
+                    "total_identifiers": len(text_parsed.get("identifiers", [])),
+                    "total_accounts": len(text_parsed.get("account_profiles", [])),
+                    "notice": f"Bóc tách từ nội dung văn bản email: {len(text_parsed.get('identifiers', []))} định danh, {len(text_parsed.get('repo_urls', []))} repos."
+                }
+
+        # =========================================================================
+        # 3. BƠM TRI THỨC ĐỘNG (DYNAMIC CATALOG CONTEXT INJECTION)
+        # =========================================================================
+        catalog_context = get_catalog_context(supabase)
+        if excel_summary is not None:
+            excel_summary["catalog_reference"] = catalog_context
+        else:
+            excel_summary = {"catalog_reference": catalog_context}
+
+        # =========================================================================
+        # 4. THỰC THI DUAL-PATH AI ENGINE (SUMMARY & FACT EXTRACTION)
+        # =========================================================================
         summary_res = gemini_engine.summarize_ticket(
             subject=subject, 
             raw_content=raw_content, 
@@ -180,8 +286,9 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
             sender_email=sender_email
         )
 
-
-        # Lưu độc lập 2 bản đánh giá AI vào ticket_ai_assessments
+        # =========================================================================
+        # 5. LƯU 2 BẢN ĐÁNH GIÁ ĐỘC LẬP VÀO TICKET_AI_ASSESSMENTS
+        # =========================================================================
         now_iso = datetime.now(timezone.utc).isoformat()
         try:
             supabase.table("ticket_ai_assessments").insert([
@@ -190,7 +297,7 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                     "assessment_kind": "summary",
                     "model_name": summary_res.model_name or "unknown",
                     "prompt_version": summary_res.prompt_version,
-                    "registry_version": "v1.1.0",
+                    "registry_version": "v1.2.0",
                     "structured_result": summary_res.model_dump(),
                     "status": "failed" if summary_res.model_name == "ai_analysis_failed" else "completed",
                     "created_at": now_iso
@@ -200,7 +307,7 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                     "assessment_kind": "fact_extraction",
                     "model_name": facts_res.model_name or "unknown",
                     "prompt_version": facts_res.prompt_version,
-                    "registry_version": "v1.1.0",
+                    "registry_version": "v1.2.0",
                     "structured_result": facts_res.model_dump(),
                     "status": "failed" if facts_res.model_name == "ai_analysis_failed" else "completed",
                     "created_at": now_iso
@@ -209,6 +316,9 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
         except Exception as assess_err:
             logger.warning(f"⚠️ Lỗi ghi ticket_ai_assessments: {assess_err}")
 
+        # =========================================================================
+        # 6. ĐỒNG BỘ METADATA VÀO INBOX_TICKETS
+        # =========================================================================
         combined_meta = ticket.get("metadata") or {}
         combined_meta["ai_analysis"] = {
             "workflow_outcome": "NO_ACTION" if facts_res.outcome == "no_action" else "NEEDS_INFORMATION" if facts_res.outcome == "needs_information" else "ACTIONABLE",
@@ -216,7 +326,7 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
             "priority": summary_res.priority,
             "goal": summary_res.goal,
             "summary_vi": summary_res.summary_vi,
-            "detected_school": facts_res.entities.get("school_name"),
+            "detected_school": facts_res.entities.get("school_name") or (excel_summary.get("school_detected") if excel_summary else None),
             "entities": facts_res.entities,
             "requested_operations": [{"intent": i.type, "confidence": i.confidence} for i in facts_res.intents if i.is_valid],
             "missing_requirements": facts_res.missing_requirements,
@@ -236,10 +346,12 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
             "metadata": combined_meta
         }).eq("id", ticket_id).execute()
 
-        # Bật await chuẩn xác cho Planner (TRUYỀN ĐỦ revision_id ĐỂ KHÔNG PHẢI GUESS)
+        # =========================================================================
+        # 7. KHỞI CHẠY LẬP KẾ HOẠCH WORKFLOW (NON-DESTRUCTIVE DAG)
+        # =========================================================================
         wf_draft = await workflow_planner_service.plan_workflow_for_ticket(
             ticket_id=ticket_id, 
-            revision_id=revision_id  # << SỬA LỖI: TRUYỀN REVISION_ID
+            revision_id=revision_id
         )
         logger.info(f"✨ Đã hoàn tất xử lý Revision #{revision_id[:8]} cho ticket #{ticket_id[:8]} (Status: {wf_draft.get('status') if wf_draft else 'N/A'})")
 

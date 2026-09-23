@@ -136,6 +136,7 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
 }) => {
     const [vungAViewMode, setVungAViewMode] = useState<'summary' | 'raw'>('summary');
     const [isEditingWorkflow, setIsEditingWorkflow] = useState<boolean>(false);
+    const [operatorReason, setOperatorReason] = useState<string>('');
     const [isSchoolPickerOpen, setIsSchoolPickerOpen] = useState<boolean>(false);
     const [schoolSearchQuery, setSchoolSearchQuery] = useState<string>('');
     const schoolPickerRef = useRef<HTMLDivElement | null>(null);
@@ -153,29 +154,33 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
             .slice(0, 30);
     }, [schoolsList, schoolSearchQuery]);
 
+    // 🎯 KIỂM ĐỊNH TÍNH KHẢ THI KHỞI CHẠY (BẬT CHẾ ĐỘ OVERRIDE KHI ADMIN SỬA LUỒNG)
     const isWorkflowRunnable = useMemo(() => {
         if (!activeWorkflow) return false;
-        const blockedStatuses = [
-            'no_action',
-            'needs_information',
-            'invalid',
-            'cancelled',
-            'running',
-            'waiting_poll',
-            'success',
-            'succeeded',
-        ];
-        if (blockedStatuses.includes(activeWorkflow.status)) {
+
+        // Các trạng thái đang chạy ngầm hoặc đã xong thì khóa nút
+        const permanentBlocked = ['cancelled', 'running', 'waiting_poll', 'success', 'succeeded'];
+        if (permanentBlocked.includes(activeWorkflow.status)) {
             return false;
         }
+
+        // Nếu không có bước nào
         if (!activeWorkflow.steps || activeWorkflow.steps.length === 0) {
             return false;
         }
+
+        // Nếu lỗi chu trình phụ thuộc (DAG cycle)
         if (validationResult && !validationResult.is_valid) {
             return false;
         }
+
+        // 🌟 NẾU LÀ NEEDS_INFORMATION NHƯNG ADMIN ĐANG MỞ CHẾ ĐỘ CHỈNH SỬA -> CHO PHÉP CHẠY OVERRIDE!
+        if (activeWorkflow.status === 'needs_information') {
+            return isEditingWorkflow;
+        }
+
         return true;
-    }, [activeWorkflow, validationResult]);
+    }, [activeWorkflow, validationResult, isEditingWorkflow]);
 
     if (!selectedTicket || typeof document === 'undefined') return null;
 
@@ -388,7 +393,7 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
 
                                             {activeWorkflow.status === 'needs_information' ? (
                                                 <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-300">
-                                                    ⚠️ Chưa Đủ Bằng Chứng
+                                                    ⚠️ Chưa Đủ Bằng Chứng (Có Thể Sửa Luồng)
                                                 </span>
                                             ) : (
                                                 <span className="text-xs font-mono font-extrabold px-2 py-0.5 rounded-md bg-white dark:bg-slate-900 text-indigo-600 border border-indigo-200 dark:border-indigo-800">
@@ -465,7 +470,7 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
                                         )}
                                     </div>
 
-                                    {/* Autocomplete Trường Học */}
+                                    {/* Autocomplete Chọn Trường Học */}
                                     {activeWorkflow.ai_analysis?.school_required === false ? (
                                         <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
                                             <div className="flex items-center gap-2">
@@ -488,7 +493,7 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
                                             <div className="flex items-center justify-between">
                                                 <span className="text-[10px] font-extrabold uppercase text-slate-400 flex items-center gap-1">
                                                     <Building2 className="w-3 h-3 text-indigo-500" />
-                                                    <span>Trường Học Mục Tiêu (Detected School):</span>
+                                                    <span>Trường Học Mục Tiêu (Target School):</span>
                                                 </span>
 
                                                 {activeWorkflow.ai_analysis?.detected_school && (
@@ -523,12 +528,12 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
                                                                 }`}
                                                         >
                                                             {activeWorkflow.ai_analysis?.detected_school?.name ||
-                                                                '⚠️ Chưa xác định chắc chắn trường học (Nhấp để chọn)'}
+                                                                '⚠️ Chưa xác định trường học (Bấm vào đây để chọn)'}
                                                         </span>
                                                     </div>
 
                                                     <div className="flex items-center gap-1.5 shrink-0 text-indigo-700 dark:text-indigo-400 font-bold">
-                                                        <span className="text-xs underline">Thay đổi</span>
+                                                        <span className="text-xs underline">Chọn trường</span>
                                                         <ChevronDown className="w-4 h-4" />
                                                     </div>
                                                 </div>
@@ -617,7 +622,7 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
                                 </div>
                             </div>
 
-                            {/* VÙNG C: 4 TRẠNG THÁI HIỂN THỊ */}
+                            {/* VÙNG C: QUẢN LÝ & CHỈNH SỬA ĐỒ THỊ DAG */}
                             {activeWorkflow.status === 'invalid' ? (
                                 <div className="p-6 rounded-3xl bg-rose-500/10 border-2 border-rose-500/40 space-y-4 shadow-sm">
                                     <div className="flex items-center gap-3 text-rose-700 dark:text-rose-400">
@@ -648,84 +653,37 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
                                         </div>
                                     )}
                                 </div>
-                            ) : activeWorkflow.status === 'needs_information' ? (
-                                <div className="space-y-4">
-                                    <div className="p-5 rounded-2xl bg-amber-500/10 border-2 border-amber-500/30 space-y-3 shadow-xs">
-                                        <div className="flex items-center gap-3 text-amber-800 dark:text-amber-300">
-                                            <div className="p-2 rounded-xl bg-amber-500 text-white shadow-xs">
-                                                <ListChecks className="w-5 h-5" />
+                            ) : (
+                                <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4">
+                                    {/* Cảnh báo nếu đang ở needs_information */}
+                                    {activeWorkflow.status === 'needs_information' && (
+                                        <div className="p-4 rounded-xl bg-amber-500/10 border-2 border-amber-500/40 space-y-2">
+                                            <div className="flex items-center justify-between flex-wrap gap-2">
+                                                <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300 font-extrabold text-xs">
+                                                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                                                    <span>Yêu Cầu Cần Bổ Sung Thông Tin: Bấm nút "Chỉnh Sửa Luồng" bên dưới để hoàn thiện và khởi chạy!</span>
+                                                </div>
                                             </div>
-                                            <div>
-                                                <h4 className="text-xs font-black uppercase tracking-wider">
-                                                    Yêu Cầu Cần Bổ Sung Thông Tin Trước Khi Khởi Chạy
-                                                </h4>
-                                                <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
-                                                    Hệ thống đã tự động dựng sẵn các bước dự thảo bên dưới. Quản trị viên vui lòng hoàn thiện các trường
-                                                    màu vàng hoặc bấm "Chỉnh sửa luồng".
-                                                </p>
-                                            </div>
-                                        </div>
 
-                                        <div className="space-y-2 pt-1">
-                                            {activeWorkflow.ai_analysis?.missing_requirements?.map((item: any, idx: number) => (
-                                                <div
-                                                    key={idx}
-                                                    className="flex items-start gap-2.5 p-3 rounded-xl bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-900/60 text-xs shadow-2xs"
-                                                >
-                                                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                                                    <div className="space-y-0.5">
-                                                        <span className="font-bold text-slate-900 dark:text-white font-mono mr-1">
-                                                            [{item.field || 'Thiếu thông tin'}]:
+                                            <div className="space-y-1.5 pt-1">
+                                                {activeWorkflow.ai_analysis?.missing_requirements?.map((item: any, idx: number) => (
+                                                    <div
+                                                        key={idx}
+                                                        className="flex items-center gap-2 p-2 rounded-lg bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-900/60 text-xs"
+                                                    >
+                                                        <span className="font-bold text-slate-900 dark:text-white font-mono">
+                                                            [{item.field || 'Thiếu'}]
                                                         </span>
                                                         <span className="text-slate-700 dark:text-slate-300">
                                                             {item.message || JSON.stringify(item)}
                                                         </span>
                                                     </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-
-                                    <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4">
-                                        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3 flex-wrap gap-2">
-                                            <div className="flex items-center gap-2">
-                                                <Layers className="w-4 h-4 text-indigo-600" />
-                                                <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
-                                                    Đồ Thị Các Bước Dự Thảo ({activeWorkflow.steps?.length || 0} bước)
-                                                </h4>
+                                                ))}
                                             </div>
-
-                                            <button
-                                                type="button"
-                                                onClick={() => setIsEditingWorkflow(!isEditingWorkflow)}
-                                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition cursor-pointer"
-                                            >
-                                                <Edit3 className="w-3.5 h-3.5" />
-                                                <span>{isEditingWorkflow ? 'Đóng Chỉnh Sửa' : 'Chỉnh Sửa Luồng Này'}</span>
-                                            </button>
                                         </div>
+                                    )}
 
-                                        <WorkflowBuilder
-                                            steps={activeWorkflow.steps || []}
-                                            capabilities={capabilities}
-                                            isEditable={isEditingWorkflow}
-                                            onStepsChange={onStepsChange}
-                                            onRetryStep={onRetryStep}
-                                        />
-                                    </div>
-                                </div>
-                            ) : activeWorkflow.status === 'no_action' ? (
-                                <div className="p-8 text-center rounded-3xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-3">
-                                    <Info className="w-10 h-10 text-slate-400 mx-auto" />
-                                    <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">
-                                        Không Có Hành Động Tự Động Hóa Nào Được Kích Hoạt
-                                    </h4>
-                                    <p className="text-xs text-slate-500 mx-auto">
-                                        Email này được phân loại là bản tin, thông báo tự động hoặc không chứa yêu cầu can thiệp hệ sinh thái.
-                                    </p>
-                                </div>
-                            ) : (
-                                <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4">
+                                    {/* Thanh Tiêu Đề Đồ Thị DAG & Nút Bật/Tắt Chỉnh Sửa */}
                                     <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3 flex-wrap gap-2">
                                         <div className="flex items-center gap-2">
                                             <div className="p-1.5 rounded-lg bg-indigo-600 text-white shadow-sm">
@@ -733,45 +691,47 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
                                             </div>
                                             <div>
                                                 <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
-                                                    VÙNG C • Prepared Workflow & Execution Console
+                                                    VÙNG C • Đồ Thị Thực Thi DAG ({activeWorkflow.steps?.length || 0} bước)
                                                 </h4>
                                                 <p className="text-[11px] text-slate-500">
                                                     {isEditingWorkflow
-                                                        ? 'Chế độ chỉnh sửa: Bắt buộc nhập lý do can thiệp thủ công bên dưới.'
-                                                        : 'Kiểm tra thứ tự và các liên kết phụ thuộc trước khi khởi chạy.'}
+                                                        ? 'Chế độ chỉnh sửa đang BẬT: Bạn có thể thêm/xóa bước, sửa từng input, thay đổi người dùng.'
+                                                        : 'Nhấp "Chỉnh Sửa Luồng Này" để can thiệp bất kỳ tham số nào.'}
                                                 </p>
                                             </div>
                                         </div>
 
-                                        <div className="flex items-center gap-2">
-                                            <button
-                                                type="button"
-                                                onClick={() => setIsEditingWorkflow(!isEditingWorkflow)}
-                                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${isEditingWorkflow
-                                                    ? 'bg-indigo-600 text-white shadow-sm'
-                                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200'
-                                                    }`}
-                                            >
-                                                <Edit3 className="w-3.5 h-3.5" />
-                                                <span>{isEditingWorkflow ? 'Đóng Chỉnh Sửa' : 'Chỉnh Sửa Luồng'}</span>
-                                            </button>
-                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsEditingWorkflow(!isEditingWorkflow)}
+                                            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${isEditingWorkflow
+                                                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
+                                                : 'bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
+                                                }`}
+                                        >
+                                            <Edit3 className="w-3.5 h-3.5" />
+                                            <span>{isEditingWorkflow ? 'Hoàn Tất Chỉnh Sửa' : 'Chỉnh Sửa Luồng Này'}</span>
+                                        </button>
                                     </div>
 
+                                    {/* Khung nhập lý do khi Admin chỉnh sửa thủ công */}
                                     {isEditingWorkflow && (
                                         <div className="p-3.5 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 space-y-2 animate-in fade-in duration-150">
                                             <div className="flex items-center gap-2 text-xs font-extrabold text-indigo-900 dark:text-indigo-200">
                                                 <FileEdit className="w-4 h-4 text-indigo-600" />
-                                                <span>Lý Do Can Thiệp Thủ Công (Bắt buộc lưu Audit Log):</span>
+                                                <span>Lý Do Can Thiệp Thủ Công (Lưu Audit Trail):</span>
                                             </div>
                                             <input
                                                 type="text"
-                                                placeholder="Ví dụ: Bổ sung quyền Git theo trao đổi trực tiếp, đổi thứ tự bước..."
+                                                value={operatorReason}
+                                                onChange={(e) => setOperatorReason(e.target.value)}
+                                                placeholder="Ví dụ: Bổ sung thêm học sinh từ trao đổi Zalo, chỉ định vai trò Git DEVELOPER..."
                                                 className="w-full px-3.5 py-2 text-xs font-bold text-slate-950 dark:text-white bg-white dark:bg-slate-900 border-2 border-indigo-400 dark:border-indigo-600 rounded-xl outline-none shadow-xs focus:ring-2 focus:ring-indigo-500/20 placeholder:text-slate-400"
                                             />
                                         </div>
                                     )}
 
+                                    {/* Bộ Dựng Đồ Thị DAG */}
                                     <WorkflowBuilder
                                         steps={activeWorkflow.steps || []}
                                         capabilities={capabilities}
@@ -827,11 +787,6 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
                                 <Info className="w-4 h-4 text-slate-400" />
                                 <span>Không yêu cầu thao tác tự động</span>
                             </div>
-                        ) : activeWorkflow?.status === 'needs_information' ? (
-                            <div className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 text-xs font-bold border border-amber-300 dark:border-amber-800">
-                                <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                                <span>Thiếu thông tin đầu vào (Đã khóa van an toàn)</span>
-                            </div>
                         ) : activeWorkflow?.status === 'invalid' ? (
                             <div className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 text-xs font-bold border border-rose-300 dark:border-rose-800">
                                 <ShieldAlert className="w-4 h-4 text-rose-600 dark:text-rose-400" />
@@ -842,12 +797,21 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
                                 type="button"
                                 disabled={isConfirmingRun || !isWorkflowRunnable}
                                 onClick={onConfirmAndRun}
-                                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 text-white hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-lg shadow-indigo-500/25 cursor-pointer"
+                                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black text-white transition shadow-lg cursor-pointer ${activeWorkflow?.status === 'needs_information' && isEditingWorkflow
+                                    ? 'bg-gradient-to-r from-amber-500 via-orange-600 to-amber-600 shadow-amber-500/25 hover:brightness-110'
+                                    : 'bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 shadow-indigo-500/25 hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed'
+                                    }`}
                             >
                                 {isConfirmingRun ? (
                                     <>
                                         <Loader2 className="w-4 h-4 animate-spin" />
                                         <span>Đang Khởi Chạy...</span>
+                                    </>
+                                ) : activeWorkflow?.status === 'needs_information' && isEditingWorkflow ? (
+                                    <>
+                                        <Zap className="w-4 h-4 text-amber-200 animate-bounce" />
+                                        <span>Xác Nhận Chạy (Admin Override)</span>
+                                        <ArrowRight className="w-3.5 h-3.5" />
                                     </>
                                 ) : (
                                     <>

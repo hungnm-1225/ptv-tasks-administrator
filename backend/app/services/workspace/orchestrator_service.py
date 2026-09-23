@@ -508,12 +508,15 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
             resources["prt_contract_code"] = prt_code
             log_step(f"Thiếu License Order [{order_identifier}] ➔ Cấp bù PRT: {prt_code}")
 
+            # 🎯 TRUYỀN NGUỒN GỐC ORDER VÀO CHUỖI LEVERAGE TIẾP THEO
             prt_resolve_res = await self.execute_approve_partner_contract_standalone(
                 contract_identifier=prt_code,
                 distributor_creds=distributor_creds,
                 sales_admin_creds=sales_admin_creds,
                 courses_needed=courses_needed,
-                checkpoint=cp
+                checkpoint=cp,
+                origin_order_code=order_identifier,
+                school_name=partner_res.get("school_name")
             )
             if prt_resolve_res.get("status") != "success":
                 err_prt = prt_resolve_res.get("error", "Lỗi duyệt PRT Contract cấp trên")
@@ -582,7 +585,9 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
         distributor_creds: Dict[str, str],
         sales_admin_creds: Dict[str, str],
         courses_needed: Optional[List[Dict[str, Any]]] = None,
-        checkpoint: Optional[Dict[str, Any]] = None
+        checkpoint: Optional[Dict[str, Any]] = None,
+        origin_order_code: Optional[str] = None, 
+        school_name: Optional[str] = None         
     ) -> Dict[str, Any]:
         """Duyệt Partner Contract gọn gàng qua Direct API kèm leo cấp Sales Admin nếu thiếu."""
         cp = normalize_checkpoint_v2(checkpoint)
@@ -598,7 +603,9 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
             credentials=distributor_creds,
             contract_identifier=contract_identifier,
             auto_create_dst_if_short=True,
-            courses_needed=courses_needed
+            courses_needed=courses_needed,
+            origin_order_code=origin_order_code,
+            school_name=school_name
         )
 
         if dist_res.get("status") == "success":

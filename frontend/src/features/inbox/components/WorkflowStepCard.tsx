@@ -26,7 +26,8 @@ import {
   Plus,
   BookOpen,
   Search,
-  Check
+  Check,
+  UserPlus
 } from 'lucide-react';
 import { WorkflowStep, CapabilityDefinition, CourseItem, GitRepoConfig } from '../../../types';
 import { fetchApi } from '../../../lib/api';
@@ -58,15 +59,22 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
   const [editingInputKey, setEditingInputKey] = useState<string | null>(null);
   const [tempInputValue, setTempInputValue] = useState<string>('');
 
+  // Quản lý Course Picker
   const [showCoursePicker, setShowCoursePicker] = useState<boolean>(false);
   const [dbCourses, setDbCourses] = useState<CourseItem[]>([]);
   const [courseSearch, setCourseSearch] = useState<string>('');
   const [loadingCourses, setLoadingCourses] = useState<boolean>(false);
 
-  const [showAddUserModal, setShowAddUserModal] = useState<boolean>(false);
-  const [newEmail, setNewEmail] = useState<string>('');
+  // Quản lý Thêm User Mới
+  const [showAddUserForm, setShowAddUserForm] = useState<boolean>(false);
   const [newName, setNewName] = useState<string>('');
-  const [newRole, setNewRole] = useState<string>('teacher');
+  const [newEmail, setNewEmail] = useState<string>('');
+  const [newRole, setNewRole] = useState<'teacher' | 'student'>('student');
+  const [newClass, setNewClass] = useState<string>('');
+
+  // Quản lý Thêm Repo URL Mới
+  const [showAddRepoInput, setShowAddRepoInput] = useState<boolean>(false);
+  const [newRepoUrl, setNewRepoUrl] = useState<string>('');
 
   const capDef = capabilitiesMap[step.capability_id];
 
@@ -162,7 +170,85 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
     setEditingInputKey(null);
   };
 
-  // 🎯 CHỌN KHÓA HỌC: LƯU VÀO MẢNG KHÓA HỌC & GIỮ NGUYÊN REPO TƯƠNG ỨNG
+  // 🎯 QUẢN LÝ DANH SÁCH USERS
+  const handleAddUser = () => {
+    if (!onUpdateStep || (!newName.trim() && !newEmail.trim())) return;
+    const currentUsers = Array.isArray(step.inputs?.users) ? [...step.inputs.users] : [];
+
+    // Tự động phân tách First/Last name nếu người dùng chỉ nhập họ tên
+    const cleanName = newName.trim();
+    const words = cleanName.split(' ');
+    const firstName = words.length > 1 ? words.slice(0, -1).join(' ') : (newRole === 'teacher' ? 'Teacher' : 'Student');
+    const lastName = words.length > 1 ? words[words.length - 1] : (words[0] || 'User');
+
+    currentUsers.push({
+      first_name: firstName,
+      last_name: lastName,
+      full_name: cleanName || `${firstName} ${lastName}`,
+      email: newEmail.trim() || null,
+      role: newRole,
+      class_name: newClass.trim() || null,
+      dob: newRole === 'teacher' ? '01/01/1990' : '01/01/2016'
+    });
+
+    onUpdateStep(step.step_id, {
+      inputs: {
+        ...step.inputs,
+        users: currentUsers,
+      }
+    });
+
+    // Reset form
+    setNewName('');
+    setNewEmail('');
+    setNewClass('');
+    setShowAddUserForm(false);
+  };
+
+  const handleRemoveUser = (userIdx: number) => {
+    if (!onUpdateStep) return;
+    const currentUsers = Array.isArray(step.inputs?.users) ? [...step.inputs.users] : [];
+    currentUsers.splice(userIdx, 1);
+    onUpdateStep(step.step_id, {
+      inputs: {
+        ...step.inputs,
+        users: currentUsers,
+      }
+    });
+  };
+
+  // 🎯 QUẢN LÝ REPOSITORIES
+  const handleAddRepo = () => {
+    if (!onUpdateStep || !newRepoUrl.trim()) return;
+    const currentRepos = Array.isArray(step.inputs?.repositories) ? [...step.inputs.repositories] : [];
+    if (!currentRepos.includes(newRepoUrl.trim())) {
+      currentRepos.push(newRepoUrl.trim());
+    }
+    onUpdateStep(step.step_id, {
+      inputs: {
+        ...step.inputs,
+        repositories: currentRepos,
+        repo_urls: currentRepos
+      }
+    });
+    setNewRepoUrl('');
+    setShowAddRepoInput(false);
+  };
+
+  const handleRemoveRepo = (repoIdx: number) => {
+    if (!onUpdateStep) return;
+    const currentRepos = Array.isArray(step.inputs?.repositories) ? [...step.inputs.repositories] : [];
+    currentRepos.splice(repoIdx, 1);
+    onUpdateStep(step.step_id, {
+      inputs: {
+        ...step.inputs,
+        repositories: currentRepos,
+        repo_urls: currentRepos
+      }
+    });
+  };
+
+  // 🎯 QUẢN LÝ KHÓA HỌC
   const handleSelectCourse = (course: CourseItem) => {
     if (!onUpdateStep) return;
     const currentCourses = Array.isArray(step.inputs?.courses) ? [...step.inputs.courses] : [];
@@ -218,14 +304,14 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
     });
   };
 
-  // 🛑 BỘ LỌC TỐI GIẢN: TRIỆT TIÊU TOÀN BỘ CÁC BIẾN RÁC THÔ THIỂN
   const shouldSkipKey = (key: string) => {
     if (key === 'school_identifier') return true;
     if (key === 'school_id') return true;
-    if (key === 'sync_git_repo') return true; // ĐÃ CHUYỂN THÀNH TOGGLE TRÊN UI
-    if (key === 'attached_git_repo') return true; // ĐÃ GOM VÀO BẢNG REPO
+    if (key === 'sync_git_repo') return true;
+    if (key === 'attached_git_repo') return true;
     if (key === 'attached_git_repos') return true;
     if (key === 'course_repo_pairings') return true;
+    if (key === 'repo_urls' && step.inputs?.repositories) return true;
     if (step.capability_id === 'workspace.bulk_account_creation' && (key === 'student_emails' || key === 'user_emails')) return true;
     if (step.capability_id === 'workspace.poll_account_batch' && (key === 'school_name' || key === 'school_id')) return true;
     return false;
@@ -239,17 +325,17 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
     if (key === 'school_name') {
       const schoolId = step.inputs?.school_id || '';
       return (
-        <div key={key} className="rounded-xl border border-slate-200 bg-white dark:bg-slate-900 p-3 shadow-2xs">
+        <div key={key} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 shadow-2xs">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+              <div className="w-7 h-7 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
                 <Building2 className="w-4 h-4" />
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold text-slate-500 uppercase">Trường Học:</span>
                   <span className="text-xs font-extrabold text-slate-950 dark:text-white truncate">
-                    {val || '(Chưa xác định)'}
+                    {val || '(Chưa xác định - Bấm sửa để gõ)'}
                   </span>
                 </div>
                 {schoolId && (
@@ -267,7 +353,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
                   setEditingInputKey(key);
                   setTempInputValue(val || '');
                 }}
-                className="p-1 text-indigo-600 hover:bg-indigo-50 rounded cursor-pointer"
+                className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 rounded-lg cursor-pointer transition"
               >
                 <Edit3 className="w-3.5 h-3.5" />
               </button>
@@ -277,53 +363,232 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
       );
     }
 
-    // 2. DANH SÁCH USERS
+    // 2. DANH SÁCH USERS (CHO PHÉP THÊM, SỬA, XÓA TRỰC QUAN)
     if (key === 'users' && Array.isArray(val)) {
       return (
-        <div key={key} className="rounded-xl border border-slate-200 bg-white dark:bg-slate-900 p-3 shadow-2xs space-y-2">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+        <div key={key} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 shadow-2xs space-y-3">
+          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
             <span className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200 uppercase">
               <Users className="w-3.5 h-3.5 text-indigo-500" />
-              <span>Danh Sách Tài Khoản Cần Tạo ({val.length} người):</span>
+              <span>Danh Sách Người Dùng Áp Dụng ({val.length} người):</span>
             </span>
+
+            {isEditable && (
+              <button
+                type="button"
+                onClick={() => setShowAddUserForm(!showAddUserForm)}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:text-indigo-300 transition cursor-pointer"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>{showAddUserForm ? 'Đóng' : 'Thêm Thành Viên'}</span>
+              </button>
+            )}
           </div>
 
+          {/* Form Thêm User Mới Nhanh */}
+          {showAddUserForm && (
+            <div className="p-3 bg-indigo-50/70 dark:bg-indigo-950/40 rounded-xl border border-indigo-200 dark:border-indigo-800/60 space-y-2.5 animate-in fade-in duration-150">
+              <span className="text-[11px] font-black uppercase text-indigo-900 dark:text-indigo-200 block">
+                Bổ Sung Tài Khoản Mới Vào Bước Này:
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <input
+                  type="text"
+                  placeholder="Họ và tên (VD: Nguyễn Văn A)"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  className="px-2.5 py-1.5 text-xs font-bold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg outline-none"
+                />
+                <input
+                  type="email"
+                  placeholder="Email (bắt buộc cho GV)"
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                  className="px-2.5 py-1.5 text-xs font-bold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg outline-none"
+                />
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <select
+                  value={newRole}
+                  onChange={(e) => setNewRole(e.target.value as 'teacher' | 'student')}
+                  className="px-2.5 py-1.5 text-xs font-bold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg outline-none"
+                >
+                  <option value="student">🎓 Học sinh</option>
+                  <option value="teacher">🧑‍🏫 Giáo viên</option>
+                </select>
+                <input
+                  type="text"
+                  placeholder="Lớp (VD: 6A1)"
+                  value={newClass}
+                  onChange={(e) => setNewClass(e.target.value)}
+                  className="w-24 px-2.5 py-1.5 text-xs font-bold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddUser}
+                  className="ml-auto px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold cursor-pointer transition shadow-xs"
+                >
+                  Thêm Ngay
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Danh Sách User Hiện Tại */}
           <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-            {val.map((u: any, idx: number) => (
-              <div
-                key={idx}
-                className="flex items-center justify-between gap-2 p-2 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 text-xs"
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center shrink-0">
-                    <User className="w-3.5 h-3.5 text-slate-600" />
+            {val.length === 0 ? (
+              <div className="text-xs text-amber-600 dark:text-amber-400 p-2 bg-amber-50 dark:bg-amber-950/30 rounded-lg italic">
+                ⚠️ Chưa có người dùng nào. Nhấn "Thêm Thành Viên" ở trên để bổ sung.
+              </div>
+            ) : (
+              val.map((u: any, idx: number) => (
+                <div
+                  key={idx}
+                  className="flex items-center justify-between gap-2 p-2 rounded-lg bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center shrink-0">
+                      <User className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-bold text-slate-950 dark:text-white truncate">
+                        {u.full_name || `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.email?.split('@')[0]}
+                      </div>
+                      <div className="text-[11px] font-mono text-slate-600 dark:text-slate-400 truncate font-semibold">
+                        {u.email || '(Không có email)'} {u.class_name ? `• Lớp ${u.class_name}` : ''}
+                      </div>
+                    </div>
                   </div>
-                  <div className="min-w-0">
-                    <div className="font-bold text-slate-950 dark:text-white truncate">
-                      {u.full_name || u.email?.split('@')[0]}
-                    </div>
-                    <div className="text-[11px] font-mono text-slate-600 dark:text-slate-400 truncate font-semibold">
-                      {u.email}
-                    </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${u.role === 'teacher'
+                        ? 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border border-purple-200 dark:border-purple-800'
+                        : 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 border border-sky-200 dark:border-sky-800'
+                        }`}
+                    >
+                      {u.role === 'teacher' ? 'Giáo viên' : 'Học sinh'}
+                    </span>
+
+                    {isEditable && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveUser(idx)}
+                        className="p-1 text-slate-400 hover:text-rose-600 rounded transition cursor-pointer"
+                        title="Xóa người này"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
-
-                <span
-                  className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${u.role === 'teacher'
-                    ? 'bg-purple-100 text-purple-800 border border-purple-200'
-                    : 'bg-sky-100 text-sky-800 border border-sky-200'
-                    }`}
-                >
-                  {u.role === 'teacher' ? 'Giáo viên' : 'Học sinh'}
-                </span>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       );
     }
 
-    // 3. KHÓA HỌC LMS & ĐỒNG BỘ GIT REPO THEO TỪNG MÔN
+    // 3. GIT ROLE (CHỌN DROPDOWN AN TOÀN TUYỆT ĐỐI)
+    if (key === 'git_role') {
+      const currentGitRole = val || 'GUEST';
+      return (
+        <div key={key} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 shadow-2xs flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <GitBranch className="w-4 h-4 text-purple-600" />
+            <span className="text-xs font-bold text-slate-500 uppercase">Vai Trò Git Collaborator:</span>
+            <span className="text-xs font-extrabold text-purple-900 dark:text-purple-200 bg-purple-100 dark:bg-purple-950 px-2.5 py-1 rounded-md border border-purple-300 dark:border-purple-800">
+              {currentGitRole}
+            </span>
+          </div>
+
+          {isEditable && (
+            <select
+              value={currentGitRole}
+              onChange={(e) => handleSaveInput(key, e.target.value)}
+              className="text-xs font-extrabold text-slate-950 dark:text-white bg-white dark:bg-slate-900 border-2 border-purple-400 dark:border-purple-600 rounded-lg px-2.5 py-1 outline-none cursor-pointer"
+            >
+              <option value="GUEST">GUEST (Chỉ Clone / Xem bài học)</option>
+              <option value="DEVELOPER">DEVELOPER (Đẩy Code / Làm Bài)</option>
+              <option value="ADMIN">ADMIN (Quản Trị Toàn Quyền)</option>
+            </select>
+          )}
+        </div>
+      );
+    }
+
+    // 4. DANH SÁCH REPOSITORIES
+    if ((key === 'repositories' || key === 'repo_urls') && Array.isArray(val)) {
+      return (
+        <div key={key} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 shadow-2xs space-y-3">
+          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
+            <span className="flex items-center gap-1.5 text-xs font-bold text-purple-900 dark:text-purple-200 uppercase">
+              <GitBranch className="w-4 h-4 text-purple-600" />
+              <span>Kho Mã Nguồn Áp Dụng ({val.length} repos):</span>
+            </span>
+
+            {isEditable && (
+              <button
+                type="button"
+                onClick={() => setShowAddRepoInput(!showAddRepoInput)}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-50 text-purple-700 hover:bg-purple-100 dark:bg-purple-950/60 dark:text-purple-300 transition cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>{showAddRepoInput ? 'Đóng' : 'Thêm Repo URL'}</span>
+              </button>
+            )}
+          </div>
+
+          {showAddRepoInput && (
+            <div className="flex items-center gap-2 p-2 bg-purple-50/70 dark:bg-purple-950/40 rounded-xl border border-purple-200 dark:border-purple-800">
+              <input
+                type="text"
+                placeholder="Dán link Git repo (VD: https://git.pythaverse.space/owner/repo)..."
+                value={newRepoUrl}
+                onChange={(e) => setNewRepoUrl(e.target.value)}
+                className="flex-1 px-3 py-1.5 text-xs font-mono font-bold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg outline-none"
+              />
+              <button
+                type="button"
+                onClick={handleAddRepo}
+                className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold cursor-pointer shadow-xs"
+              >
+                Lưu Repo
+              </button>
+            </div>
+          )}
+
+          <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+            {val.length === 0 ? (
+              <div className="text-xs text-slate-400 italic p-2 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+                (Chưa có link repo nào)
+              </div>
+            ) : (
+              val.map((r: string, rIdx: number) => (
+                <div
+                  key={rIdx}
+                  className="flex items-center justify-between gap-2 p-2 rounded-lg bg-purple-50/40 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/60 text-xs font-mono"
+                >
+                  <span className="truncate font-bold text-slate-800 dark:text-slate-200">{r}</span>
+                  {isEditable && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveRepo(rIdx)}
+                      className="p-1 text-slate-400 hover:text-rose-600 rounded transition cursor-pointer"
+                      title="Xóa repo này"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // 5. KHÓA HỌC LMS & ĐỒNG BỘ GIT REPO
     if (key === 'courses') {
       const coursesList = Array.isArray(val) ? val : [];
       const pairings: Record<string, string> = step.inputs?.course_repo_pairings || {};
@@ -336,7 +601,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
       );
 
       return (
-        <div key={key} className="rounded-xl border border-slate-200 bg-white dark:bg-slate-900 p-3.5 shadow-2xs space-y-3">
+        <div key={key} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5 shadow-2xs space-y-3">
           <div className="flex items-center justify-between">
             <span className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200 uppercase">
               <GraduationCap className="w-4 h-4 text-sky-600" />
@@ -353,10 +618,9 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
             )}
           </div>
 
-          {/* Danh sách các khóa học + Repo tương ứng của từng khóa */}
           <div className="space-y-2">
             {coursesList.length === 0 ? (
-              <div className="text-xs text-amber-600 font-semibold italic p-2 bg-amber-50 rounded-lg border border-amber-200">
+              <div className="text-xs text-amber-600 dark:text-amber-400 font-semibold italic p-2 bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-800">
                 ⚠️ Chưa có khóa học nào được chọn. Nhấp "Chọn Khóa Học Từ Danh Mục" để gán khóa học.
               </div>
             ) : (
@@ -365,12 +629,12 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
                 return (
                   <div
                     key={cIdx}
-                    className="p-2.5 rounded-xl border border-sky-200 bg-sky-50/60 flex flex-col gap-1.5"
+                    className="p-2.5 rounded-xl border border-sky-200 dark:border-sky-800/60 bg-sky-50/60 dark:bg-sky-950/30 flex flex-col gap-1.5"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 min-w-0">
                         <BookOpen className="w-4 h-4 text-sky-600 shrink-0" />
-                        <span className="text-xs font-extrabold text-slate-950 truncate">{c}</span>
+                        <span className="text-xs font-extrabold text-slate-950 dark:text-white truncate">{c}</span>
                       </div>
                       {isEditable && (
                         <button
@@ -384,12 +648,11 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
                       )}
                     </div>
 
-                    {/* Hiển thị Repo của riêng khóa học này */}
                     {repoForThisCourse ? (
-                      <div className="flex items-center gap-2 text-[11px] font-mono text-purple-900 bg-purple-100/70 p-1.5 rounded-lg border border-purple-200">
-                        <GitBranch className="w-3.5 h-3.5 text-purple-700 shrink-0" />
+                      <div className="flex items-center gap-2 text-[11px] font-mono text-purple-900 dark:text-purple-200 bg-purple-100/70 dark:bg-purple-950/60 p-1.5 rounded-lg border border-purple-200 dark:border-purple-800">
+                        <GitBranch className="w-3.5 h-3.5 text-purple-700 dark:text-purple-400 shrink-0" />
                         <span className="truncate font-bold">Repo: {repoForThisCourse}</span>
-                        <span className="ml-auto text-[9px] font-sans font-black uppercase text-purple-700 bg-purple-200 px-1.5 py-0.2 rounded shrink-0">
+                        <span className="ml-auto text-[9px] font-sans font-black uppercase text-purple-700 dark:text-purple-300 bg-purple-200 dark:bg-purple-900 px-1.5 py-0.2 rounded shrink-0">
                           Auto Git
                         </span>
                       </div>
@@ -404,11 +667,10 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
             )}
           </div>
 
-          {/* TOGGLE THÔNG MINH BẬT/TẮT TỰ ĐỘNG ĐỒNG BỘ GIT REPO */}
-          <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <GitBranch className="w-4 h-4 text-purple-600" />
-              <span className="text-xs font-bold text-slate-800">
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
                 Tự Động Đồng Bộ Quyền Git Repos Tương Ứng:
               </span>
             </div>
@@ -419,18 +681,17 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
               onClick={() => handleSaveInput('sync_git_repo', !isSyncGitEnabled)}
               className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold transition cursor-pointer ${isSyncGitEnabled
                 ? 'bg-purple-600 text-white shadow-xs'
-                : 'bg-slate-200 text-slate-600'
+                : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400'
                 }`}
             >
               <span>{isSyncGitEnabled ? 'ĐANG BẬT' : 'ĐANG TẮT'}</span>
             </button>
           </div>
 
-          {/* BẢNG CHỌN KHÓA HỌC TỪ DATABASE */}
           {showCoursePicker && (
-            <div className="p-3 bg-slate-50 border-2 border-sky-400 rounded-xl shadow-md space-y-2 mt-2">
+            <div className="p-3 bg-slate-50 dark:bg-slate-800 border-2 border-sky-400 rounded-xl shadow-md space-y-2 mt-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-black text-slate-900 uppercase">
+                <span className="text-xs font-black text-slate-900 dark:text-white uppercase">
                   Chọn Khóa Học Từ Course Management:
                 </span>
                 <button
@@ -450,11 +711,11 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
                   placeholder="Tìm theo tên môn, mã SKU, ID (VD: SWRP 11, SWRP 8...)"
                   value={courseSearch}
                   onChange={(e) => setCourseSearch(e.target.value)}
-                  className="w-full h-9 pl-8 pr-3 text-xs font-bold text-slate-950 bg-white border border-slate-300 rounded-lg outline-none"
+                  className="w-full h-9 pl-8 pr-3 text-xs font-bold text-slate-950 dark:text-white bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg outline-none"
                 />
               </div>
 
-              <div className="max-h-56 overflow-y-auto divide-y divide-slate-200 border border-slate-200 rounded-lg bg-white">
+              <div className="max-h-56 overflow-y-auto divide-y divide-slate-200 dark:divide-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900">
                 {loadingCourses ? (
                   <div className="p-4 text-center text-xs text-slate-500">Đang tải danh mục môn học...</div>
                 ) : filteredDbCourses.length === 0 ? (
@@ -464,10 +725,10 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
                     <div
                       key={c.id || c.course_id}
                       onClick={() => handleSelectCourse(c)}
-                      className="p-2.5 hover:bg-sky-50 transition cursor-pointer flex items-center justify-between gap-2"
+                      className="p-2.5 hover:bg-sky-50 dark:hover:bg-slate-800 transition cursor-pointer flex items-center justify-between gap-2"
                     >
                       <div className="min-w-0">
-                        <div className="text-xs font-extrabold text-slate-950 truncate">
+                        <div className="text-xs font-extrabold text-slate-950 dark:text-white truncate">
                           {c.course_name}
                         </div>
                         <div className="text-[10px] text-slate-500 font-mono">
@@ -476,7 +737,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
                       </div>
 
                       {c.git_repos && Array.isArray(c.git_repos) && c.git_repos.length > 0 && (
-                        <span className="shrink-0 text-[10px] font-black text-purple-700 bg-purple-100 px-2 py-0.5 rounded border border-purple-200 flex items-center gap-1">
+                        <span className="shrink-0 text-[10px] font-black text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-950 px-2 py-0.5 rounded border border-purple-200 dark:border-purple-800 flex items-center gap-1">
                           <GitBranch className="w-3 h-3" />
                           <span>{c.git_repos.length} Repos</span>
                         </span>
@@ -491,7 +752,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
       );
     }
 
-    // 4. VAI TRÒ LMS
+    // 6. VAI TRÒ LMS
     if (key === 'role') {
       const roleLabel =
         val === 'teacher'
@@ -501,10 +762,10 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
             : '🎓 Học viên (Student)';
 
       return (
-        <div key={key} className="rounded-xl border border-slate-200 bg-white dark:bg-slate-900 p-2.5 shadow-2xs flex items-center justify-between">
+        <div key={key} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2.5 shadow-2xs flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-slate-500 uppercase">Vai Trò Ghi Danh:</span>
-            <span className="text-xs font-extrabold text-purple-800 bg-purple-100 px-2.5 py-1 rounded-md border border-purple-300">
+            <span className="text-xs font-bold text-slate-500 uppercase">Vai Trò Ghi Danh LMS:</span>
+            <span className="text-xs font-extrabold text-purple-800 dark:text-purple-300 bg-purple-100 dark:bg-purple-950 px-2.5 py-1 rounded-md border border-purple-300 dark:border-purple-800">
               {roleLabel}
             </span>
           </div>
@@ -513,7 +774,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
             <select
               value={val || 'teacher'}
               onChange={(e) => handleSaveInput(key, e.target.value)}
-              className="text-xs font-bold text-slate-950 bg-white border-2 border-indigo-400 rounded-lg px-2.5 py-1 outline-none cursor-pointer"
+              className="text-xs font-bold text-slate-950 dark:text-white bg-white dark:bg-slate-900 border-2 border-indigo-400 rounded-lg px-2.5 py-1 outline-none cursor-pointer"
             >
               <option value="teacher">Giáo viên (Non-editing Teacher)</option>
               <option value="student">Học viên (Student)</option>
@@ -524,24 +785,12 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
       );
     }
 
-    // 5. ATTACHMENT_URL
-    if (key === 'attachment_url') {
-      return (
-        <div key={key} className="rounded-xl border border-slate-200 bg-white dark:bg-slate-900 p-2.5 text-xs flex items-center justify-between">
-          <span className="text-slate-500 font-bold">Tệp Đính Kèm COF:</span>
-          <span className="text-slate-400 italic">
-            {val ? String(val) : '(Không có tệp đính kèm - xử lý từ văn bản)'}
-          </span>
-        </div>
-      );
-    }
-
-    // 6. CÁC TRƯỜNG DỮ LIỆU ĐƠN GIẢN (ĐEN ĐẬM CHUẨN MỰC)
+    // 7. CÁC TRƯỜNG DỮ LIỆU ĐƠN GIẢN HOẶC MẢNG KHÁC
     return (
-      <div key={key} className="rounded-xl border border-slate-200 bg-white dark:bg-slate-900 p-2.5 shadow-2xs">
+      <div key={key} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2.5 shadow-2xs">
         {isEditing ? (
           <div className="flex items-center gap-2 w-full">
-            <span className="font-mono font-extrabold text-slate-950 text-xs shrink-0">
+            <span className="font-mono font-extrabold text-slate-950 dark:text-white text-xs shrink-0">
               {key}:
             </span>
             <input
@@ -553,7 +802,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
                 if (e.key === 'Enter') handleSaveInput(key);
                 if (e.key === 'Escape') setEditingInputKey(null);
               }}
-              className="flex-1 h-9 px-3 text-xs font-mono font-extrabold text-slate-950 bg-white border-2 border-indigo-500 rounded-lg outline-none shadow-sm"
+              className="flex-1 h-9 px-3 text-xs font-mono font-extrabold text-slate-950 dark:text-white bg-white dark:bg-slate-900 border-2 border-indigo-500 rounded-lg outline-none shadow-sm"
             />
             <button
               type="button"
@@ -565,7 +814,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
             <button
               type="button"
               onClick={() => setEditingInputKey(null)}
-              className="h-9 px-2 bg-slate-200 rounded-lg text-xs cursor-pointer"
+              className="h-9 px-2 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-xs cursor-pointer"
             >
               Hủy
             </button>
@@ -573,16 +822,20 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
         ) : (
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 min-w-0 flex-wrap">
-              <span className="font-mono font-bold text-slate-700 text-xs shrink-0">
+              <span className="font-mono font-bold text-slate-700 dark:text-slate-300 text-xs shrink-0">
                 {key === 'student_emails' ? 'Tài Khoản Ghi Danh:' : `${key}:`}
               </span>
               <span
                 className={`font-mono text-xs px-2.5 py-0.5 rounded-lg break-all font-extrabold ${isBound
-                  ? 'text-indigo-900 bg-indigo-50 border border-indigo-300'
-                  : 'text-slate-950 bg-slate-50 border border-slate-200'
+                  ? 'text-indigo-900 dark:text-indigo-200 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-300 dark:border-indigo-800'
+                  : 'text-slate-950 dark:text-white bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700'
                   }`}
               >
-                {val === null || val === undefined || String(val).trim() === '' ? '(Không có)' : String(val)}
+                {val === null || val === undefined || String(val).trim() === ''
+                  ? '(Không có)'
+                  : typeof val === 'object'
+                    ? JSON.stringify(val)
+                    : String(val)}
               </span>
             </div>
 
@@ -591,9 +844,9 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
                 type="button"
                 onClick={() => {
                   setEditingInputKey(key);
-                  setTempInputValue(String(val || ''));
+                  setTempInputValue(typeof val === 'object' ? JSON.stringify(val) : String(val || ''));
                 }}
-                className="p-1 text-indigo-600 hover:bg-indigo-50 rounded cursor-pointer"
+                className="p-1 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 rounded cursor-pointer"
               >
                 <Edit3 className="w-3.5 h-3.5" />
               </button>
@@ -607,18 +860,18 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
   return (
     <div
       className={`relative rounded-2xl border transition-all duration-200 ${step.status === 'running'
-        ? 'bg-sky-50/60 border-sky-400 shadow-md ring-2 ring-sky-300/40'
+        ? 'bg-sky-50/60 dark:bg-sky-950/30 border-sky-400 shadow-md ring-2 ring-sky-300/40'
         : step.status === 'failed'
-          ? 'bg-rose-50/60 border-rose-300 shadow-sm'
+          ? 'bg-rose-50/60 dark:bg-rose-950/30 border-rose-300 shadow-sm'
           : step.status === 'success'
-            ? 'bg-emerald-50/40 border-emerald-200'
-            : 'bg-white dark:bg-slate-900 border-slate-200 shadow-xs hover:border-slate-300'
+            ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/60'
+            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-xs hover:border-slate-300'
         }`}
     >
       {/* Header Thẻ Bước */}
-      <div className="p-3.5 sm:p-4 flex items-center justify-between gap-3 flex-wrap bg-slate-50/80 rounded-t-2xl border-b border-slate-100">
+      <div className="p-3.5 sm:p-4 flex items-center justify-between gap-3 flex-wrap bg-slate-50/80 dark:bg-slate-800/60 rounded-t-2xl border-b border-slate-100 dark:border-slate-800">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-8 h-8 rounded-xl bg-slate-200 border border-slate-300 flex items-center justify-center text-xs font-black text-slate-950 shrink-0 font-mono">
+          <div className="w-8 h-8 rounded-xl bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 flex items-center justify-center text-xs font-black text-slate-950 dark:text-white shrink-0 font-mono">
             {String(index + 1).padStart(2, '0')}
           </div>
 
@@ -630,7 +883,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
               </span>
 
               {capDef?.risk_level === 'high_mutation' && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-900 border border-amber-300">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300 border border-amber-300">
                   <ShieldAlert className="w-3 h-3 text-amber-700" /> MUTATION
                 </span>
               )}
@@ -638,12 +891,12 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
               {getStatusBadge(step.status)}
             </div>
 
-            <div className="flex items-center gap-2 text-xs text-slate-600 mt-1 flex-wrap font-mono">
-              <span className="bg-slate-100 px-2 py-0.5 rounded text-[11px] font-bold text-slate-700 border border-slate-200">
+            <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400 mt-1 flex-wrap font-mono">
+              <span className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded text-[11px] font-bold text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                 {step.capability_id}
               </span>
               {step.depends_on && step.depends_on.length > 0 && (
-                <span className="text-indigo-600 font-bold">
+                <span className="text-indigo-600 dark:text-indigo-400 font-bold">
                   ↳ Phụ thuộc: {step.depends_on.join(', ')}
                 </span>
               )}
@@ -654,12 +907,12 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
         {/* Nút Điều Khiển */}
         <div className="flex items-center gap-1.5 shrink-0">
           {isEditable && (
-            <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200 shadow-2xs">
+            <div className="flex items-center gap-1 bg-white dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700 shadow-2xs">
               <button
                 type="button"
                 disabled={index === 0}
                 onClick={() => onMoveStep && onMoveStep(step.step_id, 'up')}
-                className="p-1.5 text-slate-600 hover:text-slate-900 disabled:opacity-30 rounded-lg hover:bg-slate-100 cursor-pointer"
+                className="p-1.5 text-slate-600 dark:text-slate-300 hover:text-slate-900 disabled:opacity-30 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer"
                 title="Di chuyển lên"
               >
                 <ArrowUp className="w-4 h-4" />
@@ -668,7 +921,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
                 type="button"
                 disabled={index === totalSteps - 1}
                 onClick={() => onMoveStep && onMoveStep(step.step_id, 'down')}
-                className="p-1.5 text-slate-600 hover:text-slate-900 disabled:opacity-30 rounded-lg hover:bg-slate-100 cursor-pointer"
+                className="p-1.5 text-slate-600 dark:text-slate-300 hover:text-slate-900 disabled:opacity-30 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer"
                 title="Di chuyển xuống"
               >
                 <ArrowDown className="w-4 h-4" />
@@ -676,7 +929,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
               <button
                 type="button"
                 onClick={() => onDeleteStep && onDeleteStep(step.step_id)}
-                className="p-1.5 text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg cursor-pointer"
+                className="p-1.5 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg cursor-pointer"
                 title="Xóa bước này"
               >
                 <Trash2 className="w-4 h-4" />
@@ -697,7 +950,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
           <button
             type="button"
             onClick={() => setIsExpanded(!isExpanded)}
-            className="p-1.5 text-slate-500 hover:text-slate-900 rounded-xl hover:bg-slate-100 cursor-pointer"
+            className="p-1.5 text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
           >
             {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </button>
@@ -705,7 +958,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
       </div>
 
       {step.error_message && (
-        <div className="mx-4 mt-3 p-3 rounded-xl bg-rose-50 border border-rose-300 text-rose-900 text-xs flex items-start gap-2 font-medium">
+        <div className="mx-4 mt-3 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 text-rose-900 dark:text-rose-200 text-xs flex items-start gap-2 font-medium">
           <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
           <span>{step.error_message}</span>
         </div>
@@ -714,7 +967,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
       {/* Thân Thẻ Bước */}
       {isExpanded && (
         <div className="p-4 space-y-3">
-          <div className="space-y-2 bg-slate-100/70 p-3 rounded-2xl border border-slate-200">
+          <div className="space-y-2 bg-slate-100/70 dark:bg-slate-800/50 p-3 rounded-2xl border border-slate-200 dark:border-slate-700">
             {Object.keys(step.inputs || {}).length === 0 ? (
               <div className="text-slate-500 italic text-xs py-1">Không có tham số đầu vào.</div>
             ) : (
@@ -726,10 +979,10 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
 
           {step.outputs && Object.keys(step.outputs).length > 0 && (
             <div>
-              <div className="text-xs font-bold text-emerald-700 uppercase tracking-wider mb-1">
+              <div className="text-xs font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider mb-1">
                 Kết Quả Đầu Ra (Outputs):
               </div>
-              <pre className="p-3 bg-emerald-50 border border-emerald-300 text-xs font-mono font-bold text-emerald-950 max-h-40 overflow-y-auto leading-relaxed">
+              <pre className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 text-xs font-mono font-bold text-emerald-950 dark:text-emerald-200 max-h-40 overflow-y-auto leading-relaxed">
                 {JSON.stringify(step.outputs, null, 2)}
               </pre>
             </div>
