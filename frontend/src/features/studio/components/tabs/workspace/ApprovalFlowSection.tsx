@@ -47,7 +47,7 @@ export const ApprovalFlowSection: React.FC<ApprovalFlowSectionProps> = ({
 }) => {
     return (
         <div className="space-y-5 pt-2">
-            {/* 3 Nút Chọn Sub-flow */}
+            {/* 1. 3 Nút Chọn Sub-flow */}
             <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
                 {[
                     { id: 'approve_school_order', label: 'Đơn Hàng Trường', desc: 'Duyệt Order của Trường' },
@@ -77,7 +77,7 @@ export const ApprovalFlowSection: React.FC<ApprovalFlowSectionProps> = ({
                 ))}
             </div>
 
-            {/* Ô Tìm Kiếm Phổ Quát */}
+            {/* 2. Ô Tìm Kiếm Phổ Quát */}
             <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
                     <span className="flex items-center gap-1.5">
@@ -114,12 +114,13 @@ export const ApprovalFlowSection: React.FC<ApprovalFlowSectionProps> = ({
                 </div>
             </div>
 
-            {/* Lý Do Duyệt Sales Admin (Chỉ hiện khi chọn DST) */}
+            {/* 3. CONFIRMATION NOTE: CHỈ HIỆN DUY NHẤT KHI SALES ADMIN DUYỆT DST CONTRACT */}
             {approveSubFlow === 'admin_approve_contract' && (
                 <div className="rounded-2xl border border-amber-200/80 dark:border-amber-900/40 bg-amber-50/40 dark:bg-amber-950/20 p-4 space-y-2">
                     <div className="flex items-center justify-between">
-                        <label className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-                            Lý Do Phê Duyệt Sales Admin: <span className="text-rose-500">* (Tối thiểu 15 ký tự)</span>
+                        <label className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                            <span>👑</span>
+                            <span>Sales Admin Confirmation Note: <span className="text-rose-500">* (Tối thiểu 15 ký tự)</span></span>
                         </label>
                         <span className={`text-[11px] font-mono font-medium ${adminJustification.trim().length >= 15 ? 'text-emerald-600' : 'text-rose-500'}`}>
                             {adminJustification.trim().length}/15 ký tự
@@ -129,13 +130,13 @@ export const ApprovalFlowSection: React.FC<ApprovalFlowSectionProps> = ({
                         rows={2}
                         value={adminJustification}
                         onChange={(e) => setAdminJustification(e.target.value)}
-                        placeholder="Nhập lý do phê duyệt Sales Admin..."
-                        className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3.5 py-2 text-xs text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden"
+                        placeholder="Nhập lý do phê duyệt / Confirmation Note của Sales Admin..."
+                        className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3.5 py-2 text-xs text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden resize-none"
                     />
                 </div>
             )}
 
-            {/* Bộ Lọc Trạng Thái Status Filter */}
+            {/* 4. Bộ Lọc Trạng Thái Status Filter */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-1 border-t border-slate-100 dark:border-slate-800/80">
                 <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
                     Danh Sách Đơn Hàng ({filteredCacheList.length}/{scrapedPendingList.length}):
@@ -162,7 +163,7 @@ export const ApprovalFlowSection: React.FC<ApprovalFlowSectionProps> = ({
                 </div>
             </div>
 
-            {/* Bố Cục Danh Sách & Bảng Chi Tiết Khóa Học */}
+            {/* 5. Bố Cục Danh Sách & Bảng Chi Tiết Khóa Học */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
                 <div className="lg:col-span-7 space-y-2.5 max-h-[360px] overflow-y-auto pr-1">
                     {isScrapingLive && scrapedPendingList.length === 0 ? (

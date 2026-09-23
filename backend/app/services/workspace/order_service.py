@@ -34,6 +34,18 @@ async def _is_session_valid(cookies: Dict[str, str], role_title: str) -> bool:
     """Kiểm tra session sạch sẽ, không gọi admin-ajax để tránh log 400."""
     return bool(cookies and len(cookies) > 0)
 
+def clear_role_session_cache(role_title: str, username: str = ""):
+    """Xóa session tạm của School hoặc Partner trong RAM sau khi hoàn tất tác vụ."""
+    clean_role = role_title.strip().lower()
+    clean_user = username.strip().lower()
+    if clean_user:
+        _WORKSPACE_SESSION_CACHE.pop((clean_role, clean_user), None)
+        logger.info(f"🧹 [Session Cache] Đã dọn sạch RAM session tạm của [{role_title}: {username}]")
+    else:
+        keys_to_remove = [k for k in _WORKSPACE_SESSION_CACHE.keys() if k[0] == clean_role]
+        for k in keys_to_remove:
+            _WORKSPACE_SESSION_CACHE.pop(k, None)
+        logger.info(f"🧹 [Session Cache] Đã dọn sạch toàn bộ RAM session của Role [{role_title}]")
 
 async def get_or_steal_role_session(
     service_instance: WorkspaceBaseService,
@@ -41,28 +53,106 @@ async def get_or_steal_role_session(
     password: str,
     role_title: str
 ) -> Tuple[Dict[str, str], Dict[str, Any]]:
-    """Hàm bốc session dùng chung đa phân hệ có Cache RAM 2h."""
+    """
+    Hàm bốc session Workspace thông minh:
+    1. School & Partner: Lưu tạm trong RAM, không lưu DB, dọn dẹp khi xong.
+    2. Sales Admin & Distributor: Đọc trực tiếp từ kho Supabase qua KeepAlive (Zero Playwright!).
+    3. Fallback: Chỉ mở Playwright khi session trên Supabase hoặc RAM chưa có/hết hạn.
+    """
     now = time.time()
     clean_role = role_title.strip().lower()
     clean_user = username.strip().lower()
     cache_key = (clean_role, clean_user)
 
+    # -------------------------------------------------------------------------
+    # ⚡ 1. KIỂM TRA RAM CACHE LOCAL (0ms)
+    # -------------------------------------------------------------------------
     cached = _WORKSPACE_SESSION_CACHE.get(cache_key)
     if cached and (now - cached.get("cached_at", 0) < WORKSPACE_SESSION_TTL):
         cookies = cached.get("cookies", {})
         identity = cached.get("identity", {})
         if await _is_session_valid(cookies, role_title):
-            logger.info(f"⚡ [Workspace Cache] Tái sử dụng Session [{role_title}] cho '{username}' (0ms)!")
+            logger.info(f"⚡ [Workspace Cache] Tái sử dụng Session [{role_title}] cho '{username}' từ RAM (0ms)!")
             return cookies, identity
         else:
             _WORKSPACE_SESSION_CACHE.pop(cache_key, None)
 
+    # -------------------------------------------------------------------------
+    # 💾 2. ĐỐI VỚI SALES ADMIN & DISTRIBUTOR: ĐỌC TỪ KHO SUPABASE KEEPALIVE
+    # -------------------------------------------------------------------------
+    if clean_role in ("sales admin", "sales_admin", "distributor"):
+        try:
+            from app.services.session_keepalive_service import session_keepalive_service
+
+            # A. Luồng Sales Admin (Bốc session sales_admin hoặc admin_workspace)
+            if clean_role in ("sales admin", "sales_admin"):
+                db_cookies = await session_keepalive_service.get_session_cookies("sales_admin") or \
+                             await session_keepalive_service.get_session_cookies("admin_workspace")
+                if db_cookies and await _is_session_valid(db_cookies, role_title):
+                    identity = {"username": username, "user_id": "1"}
+                    _WORKSPACE_SESSION_CACHE[cache_key] = {
+                        "cookies": db_cookies,
+                        "identity": identity,
+                        "cached_at": time.time()
+                    }
+                    logger.info(f"✨ [KeepAlive DB] Tái sử dụng Session Sales Admin từ Supabase cho '{username}' (Zero Playwright - 1ms)!")
+                    return db_cookies, identity
+
+            # B. Luồng Master Distributor (Dò tìm distributor_2, distributor_36, distributor_42... từ Supabase)
+            elif clean_role == "distributor":
+                from app.core.supabase import get_supabase_client
+                supabase = get_supabase_client()
+                dist_res = supabase.table("workspace_active_sessions")\
+                    .select("session_key, cookies, metadata")\
+                    .ilike("session_key", "distributor_%")\
+                    .eq("is_active", True)\
+                    .execute()
+
+                if dist_res.data:
+                    matched_row = None
+                    # So khớp username hoặc distributor_code với metadata trong DB
+                    for row in dist_res.data:
+                        meta = row.get("metadata") or {}
+                        row_user = str(meta.get("user") or "").strip().lower()
+                        row_code = str(meta.get("distributor_code") or "").strip().lower()
+                        if clean_user in (row_user, row_code) or clean_user in row.get("session_key", "").lower():
+                            matched_row = row
+                            break
+
+                    # Fallback nếu truyền tên chung chung như "distributor" hoặc "testdistributor"
+                    if not matched_row:
+                        matched_row = dist_res.data[0]
+
+                    if matched_row and matched_row.get("cookies"):
+                        db_cookies = matched_row["cookies"]
+                        if await _is_session_valid(db_cookies, role_title):
+                            meta = matched_row.get("metadata") or {}
+                            real_dist_id = meta.get("dist_id") or meta.get("distributor_code") or "36"
+                            identity = {
+                                "distributor_id": str(real_dist_id),
+                                "username": username or meta.get("user", "distributor")
+                            }
+                            _WORKSPACE_SESSION_CACHE[cache_key] = {
+                                "cookies": db_cookies,
+                                "identity": identity,
+                                "cached_at": time.time()
+                            }
+                            logger.info(f"✨ [KeepAlive DB] Tái sử dụng Session Distributor [{matched_row.get('session_key')}] từ Supabase (Zero Playwright - 1ms)!")
+                            return db_cookies, identity
+
+        except Exception as db_err:
+            logger.warning(f"⚠️ Không thể đọc session [{role_title}] từ Supabase: {db_err}")
+
+    # -------------------------------------------------------------------------
+    # 🔑 3. FALLBACK: CHỈ MỞ PLAYWRIGHT KHI CHƯA CÓ HOẶC SESSION HẾT HẠN
+    # -------------------------------------------------------------------------
     async with _get_role_lock(role_title, username):
         now = time.time()
         cached = _WORKSPACE_SESSION_CACHE.get(cache_key)
         if cached and (now - cached.get("cached_at", 0) < WORKSPACE_SESSION_TTL):
             return cached.get("cookies", {}), cached.get("identity", {})
 
+        logger.info(f"🔑 [Playwright Auth] Đang mở Chromium đăng nhập cho [{role_title}: {username}]...")
         async with acquire_playwright_slot(f"Workspace Auth [{role_title} - {username}]", timeout=60.0, lane="admin"):
             async with async_playwright() as p:
                 browser, context, page = await service_instance._create_context(p)
@@ -93,12 +183,27 @@ async def get_or_steal_role_session(
                     cookies = await context.cookies()
                     cookies_dict = {c["name"]: c["value"] for c in cookies}
 
+                    # Lưu vào RAM Cache
                     _WORKSPACE_SESSION_CACHE[cache_key] = {
                         "cookies": cookies_dict,
                         "identity": wp_identity,
                         "cached_at": time.time()
                     }
                     logger.info(f"✨ [Workspace Cache] Đã lưu Session mới cho [{role_title}: {username}] vào RAM.")
+
+                    # NẾU LÀ SALES ADMIN: LƯU NGƯỢC LẠI SUPABASE ĐỂ GIỮ ẤM
+                    if clean_role in ("sales admin", "sales_admin"):
+                        try:
+                            from app.services.session_keepalive_service import session_keepalive_service
+                            await session_keepalive_service.save_session_cookies(
+                                session_key="sales_admin",
+                                system_name="Sales Admin Workspace",
+                                cookies=cookies_dict,
+                                metadata={"admin_user": username, "identity": wp_identity}
+                            )
+                        except Exception as e:
+                            logger.warning(f"⚠️ Không thể lưu Sales Admin session lên DB: {e}")
+
                     return cookies_dict, wp_identity
 
                 finally:
@@ -219,10 +324,14 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     "end_date": order_data.get("end_date", "2027-09-16")
                 }]
 
+            # 🎯 LẤY CHUẨN XÁC DỮ LIỆU ANH NHẬP TỪ GIAO DIỆN
+            contact_val = str(order_data.get("contact_info") or "Admin Automation Hub (hungnm@dtt.vn)").strip()
+            notes_val = str(order_data.get("additional_notes") or order_data.get("notes") or "Order auto-generated by PTV Automation Hub").strip()
+
             payload = {
                 "school_id": str(school_id),
-                "contactInfoId": order_data.get("contact_info", "Admin Automation Hub (hungnm@dtt.vn)"),
-                "notes": order_data.get("additional_notes", "Order auto-generated by PTV Automation Hub"),
+                "contactInfoId": contact_val,
+                "notes": notes_val,
                 "type": "course"
             }
 
@@ -278,7 +387,8 @@ class WorkspaceOrderService(WorkspaceBaseService):
         credentials: Dict[str, str], 
         order_identifier: Optional[str] = None,
         auto_create_prt_if_short: bool = True,
-        courses_needed: Optional[List[Dict[str, Any]]] = None
+        courses_needed: Optional[List[Dict[str, Any]]] = None,
+        note: Optional[str] = None
     ) -> Dict[str, Any]:
         """Partner duyệt School Order cấp đủ 100% tất cả các môn trong đơn hàng."""
         try:
@@ -366,7 +476,8 @@ class WorkspaceOrderService(WorkspaceBaseService):
                         "partner_id": str(partner_id),
                         "username": credentials.get("username", "partnerdtte"),
                         "order_code": order_identifier or f"SCH-{num_order_id}",
-                        "license_type": "course"
+                        "license_type": "course",
+                        "note": note or "Approved by PTV Automation Hub Fast Engine"
                     }
 
                     details_str_list = []

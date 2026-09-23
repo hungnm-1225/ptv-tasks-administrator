@@ -73,16 +73,20 @@ class PlaywrightLMSService:
     # =========================================================================
     # ⚡ 1. KIỂM TRA & BỐC SESSION PLAYWRIGHT (CÓ CACHE 2 GIỜ)
     # =========================================================================
-    async def _is_session_valid(self, cookies: Dict[str, str]) -> bool:
-        """Kiểm tra siêu tốc (20ms) xem Moodle Session còn sống hay không."""
+    async def _is_session_valid(self, cookies: Dict[str, str]) -> Tuple[bool, Optional[str]]:
+        """Kiểm tra siêu tốc (20ms) xem Moodle Session còn sống không, đồng thời trích xuất sesskey từ /my/."""
         try:
-            async with httpx.AsyncClient(base_url=MOODLE_BASE_URL, cookies=cookies, timeout=4.0, follow_redirects=False) as client:
+            async with httpx.AsyncClient(base_url=MOODLE_BASE_URL, cookies=cookies, timeout=5.0, follow_redirects=False) as client:
                 res = await client.get("/my/")
-                # Nếu còn sống, Moodle trả về 200 trang Dashboard
-                # Nếu hết hạn, Moodle redirect 302/303 về /login/index.php
-                return res.status_code == 200
+                if res.status_code == 200:
+                    # Bóc tách sesskey trực tiếp từ trang Dashboard nếu có
+                    sk_m = re.search(r'["\']sesskey["\']\s*:\s*["\']([a-zA-Z0-9]+)["\']', res.text) or \
+                           re.search(r'sesskey=([a-zA-Z0-9]+)', res.text)
+                    extracted_sk = sk_m.group(1) if sk_m else None
+                    return True, extracted_sk
+                return False, None
         except Exception:
-            return False
+            return False, None
 
     async def _steal_moodle_session(self) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
         """Đăng nhập Keycloak SSO, bốc Cookies & sesskey, đóng trình duyệt ngay lập tức."""
@@ -160,30 +164,93 @@ class PlaywrightLMSService:
                     await browser.close()
                     gc.collect()
 
+    
     async def _get_or_steal_session(self) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
-        """Lấy Moodle Session từ RAM; chỉ bật Playwright khi cache trống hoặc hết hạn."""
+        """
+        Lấy Moodle Session theo Kiến trúc 3 Tầng Siêu Tốc:
+        1. Tầng 1 (0ms): RAM Cache cục bộ của tiến trình.
+        2. Tầng 2 (20ms): Kho Session tập trung Supabase ('plearn_lms') - Zero Playwright!
+        3. Tầng 3 (Fallback ~15s): Mở Playwright bốc mới và LƯU NGƯỢC lại vào Supabase.
+        """
         now = time.time()
-        # 1. Kiểm tra nhanh cache RAM
+
+        # ---------------------------------------------------------------------
+        # ⚡ TẦNG 1: KIỂM TRA RAM CACHE LOCAL (0ms)
+        # ---------------------------------------------------------------------
         if self._cached_cookies and self._cached_sesskey and (now - self._cached_at < self._cache_ttl_seconds):
-            if await self._is_session_valid(self._cached_cookies):
-                logger.info("⚡ [Moodle Cache] Tái sử dụng Moodle Admin Session (0ms - Bỏ qua Playwright)!")
+            is_valid, _ = await self._is_session_valid(self._cached_cookies)
+            if is_valid:
+                logger.info("⚡ [Moodle Cache] Tái sử dụng Moodle Admin Session từ RAM (0ms - Bỏ qua Playwright)!")
                 return self._cached_cookies, self._cached_sesskey
             else:
-                logger.warning("⚠️ [Moodle Cache] Moodle Session cũ đã hết hạn, chuẩn bị gia hạn mới...")
+                logger.warning("⚠️ [Moodle Cache] Moodle Session trong RAM đã hết hạn...")
                 self.invalidate_session_cache()
 
-        # 2. Xếp hàng Double-Checked Lock
+        # ---------------------------------------------------------------------
+        # 💾 TẦNG 2: ĐỌC TỪ SUPABASE KEEPALIVE (20ms - Zero Playwright!)
+        # ---------------------------------------------------------------------
+        logger.info("🔍 [Moodle KeepAlive] Đang kiểm tra Session 'plearn_lms' từ Supabase Vault...")
+        try:
+            from app.core.supabase import get_supabase_client
+            supabase = get_supabase_client()
+            res = supabase.table("workspace_active_sessions")\
+                .select("cookies, metadata")\
+                .eq("session_key", "plearn_lms")\
+                .eq("is_active", True)\
+                .limit(1)\
+                .execute()
+
+            if res.data and res.data[0].get("cookies"):
+                db_cookies = res.data[0]["cookies"]
+                db_meta = res.data[0].get("metadata") or {}
+                db_sesskey = db_meta.get("sesskey")
+
+                # Kiểm tra tính sống của Cookie và bốc sesskey nếu metadata thiếu
+                is_valid, extracted_sk = await self._is_session_valid(db_cookies)
+                final_sk = db_sesskey or extracted_sk
+
+                if is_valid and final_sk:
+                    logger.info(f"✨ [Moodle KeepAlive] Session Moodle trên Supabase CỰC KỲ ẤM NÓNG (sesskey: {final_sk})! Tái sử dụng ngay (Zero Playwright)!")
+                    self._cached_cookies = db_cookies
+                    self._cached_sesskey = final_sk
+                    self._cached_at = time.time()
+                    return db_cookies, final_sk
+                else:
+                    logger.warning("⚠️ [Moodle KeepAlive] Session 'plearn_lms' trên Supabase đã hết hạn hoặc thiếu sesskey...")
+        except Exception as db_err:
+            logger.warning(f"⚠️ Lỗi đọc session Moodle từ Supabase: {db_err}")
+
+        # ---------------------------------------------------------------------
+        # 🔑 TẦNG 3: FALLBACK MỞ PLAYWRIGHT BỐC MỚI VÀ LƯU NGƯỢC LẠI SUPABASE (~15s)
+        # ---------------------------------------------------------------------
         async with self._get_lock():
+            # Double-checked lock
             now = time.time()
             if self._cached_cookies and self._cached_sesskey and (now - self._cached_at < self._cache_ttl_seconds):
                 return self._cached_cookies, self._cached_sesskey
 
+            logger.info("🔑 [Moodle Fallback] Khởi động Chromium bốc Session Moodle mới...")
             cookies_dict, sesskey = await self._steal_moodle_session()
             if cookies_dict and sesskey:
                 self._cached_cookies = cookies_dict
                 self._cached_sesskey = sesskey
                 self._cached_at = time.time()
                 logger.info(f"✨ [Moodle Cache] Đã đệm Session Moodle mới vào RAM (sesskey: {sesskey})")
+
+                # Ghi ngược lại Supabase để các worker khác và Cronjob 15 phút giữ ấm dùng chung
+                try:
+                    from app.services.session_keepalive_service import session_keepalive_service
+                    admin_user = str(os.getenv("TEST_ADMIN_USER", "adminworkspace"))
+                    await session_keepalive_service.save_session_cookies(
+                        session_key="plearn_lms",
+                        system_name="PLearn Moodle LMS",
+                        cookies=cookies_dict,
+                        metadata={"sesskey": sesskey, "user": admin_user}
+                    )
+                    logger.info("💾 [KeepAlive Sync] Đã lưu ngược Session Moodle lên Supabase thành công!")
+                except Exception as save_err:
+                    logger.warning(f"⚠️ Không thể lưu ngược Session Moodle lên Supabase: {save_err}")
+
             return cookies_dict, sesskey
 
     # =========================================================================

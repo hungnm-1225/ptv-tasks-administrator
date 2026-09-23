@@ -56,6 +56,10 @@ interface CreateAndApproveSectionProps {
     workspaceCategoriesList: string[];
     onAddCourseRow: () => void;
     onRemoveCourseRow: (idx: number) => void;
+    contactInfo: string;
+    setContactInfo: (val: string) => void;
+    additionalNotes: string;
+    setAdditionalNotes: (val: string) => void;
 }
 
 export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = ({
@@ -85,6 +89,10 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
     workspaceCategoriesList,
     onAddCourseRow,
     onRemoveCourseRow,
+    contactInfo,
+    setContactInfo,
+    additionalNotes,
+    setAdditionalNotes,
 }) => {
     // 1. Quản lý kéo thả cục bộ
     const [draggedClassInfo, setDraggedClassInfo] = useState<{
@@ -687,6 +695,48 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                         <p className="text-[11px] text-slate-500 mt-0.5">{sub.desc}</p>
                     </button>
                 ))}
+            </div>
+            {/* 4.5. THÔNG TIN LIÊN HỆ & GHI CHÚ BỔ SUNG KHI TẠO ORDER / CONTRACT */}
+            <div className="rounded-2xl border border-indigo-200/80 dark:border-indigo-900/50 bg-gradient-to-r from-slate-50 via-indigo-50/20 to-slate-50 dark:from-slate-900 dark:via-indigo-950/20 dark:to-slate-900 p-4 space-y-3 shadow-2xs">
+                <div className="flex items-center justify-between border-b border-indigo-100 dark:border-slate-800 pb-2">
+                    <div className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-white">
+                        <span className="flex h-5 w-5 items-center justify-center rounded-lg bg-indigo-600 text-white font-mono text-[10px]">
+                            ℹ️
+                        </span>
+                        <span>Thông Tin Liên Hệ & Ghi Chú Đơn Hàng (Contact Info & Additional Information)</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-mono">Bắt buộc khi tạo Order/Contract</span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {/* ĐẦU MỐI LIÊN HỆ */}
+                    <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                            Đầu Mối Liên Hệ (Contact Info):
+                        </label>
+                        <input
+                            type="text"
+                            value={contactInfo}
+                            onChange={(e) => setContactInfo(e.target.value)}
+                            placeholder="VD: Thầy Nguyễn Văn A - 0912345678 (admin@school.edu.vn)"
+                            className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:border-indigo-500 focus:outline-hidden transition"
+                        />
+                    </div>
+
+                    {/* GHI CHÚ BỔ SUNG */}
+                    <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                            Ghi Chú Bổ Sung (Additional Information):
+                        </label>
+                        <textarea
+                            rows={2}
+                            value={additionalNotes}
+                            onChange={(e) => setAdditionalNotes(e.target.value)}
+                            placeholder="Ghi chú đơn hàng hoặc nội dung hợp đồng bổ sung..."
+                            className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:border-indigo-500 focus:outline-hidden resize-none"
+                        />
+                    </div>
+                </div>
             </div>
 
             {/* 5. CẤU HÌNH DANH SÁCH KHÓA HỌC CẤP PHÉP (COURSE LICENSE BUILDER) */}

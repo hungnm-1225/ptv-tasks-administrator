@@ -96,12 +96,16 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
     if (params.selectedBotType === 'workspace_rpa') {
         summary.engineName = '🏢 Workspace RPA & LMS Pipeline';
 
+        // =====================================================================
+        // NHÁNH 1: APPROVE FLOW (DUYỆT ĐƠN / HỢP ĐỒNG CÓ SẴN)
+        // =====================================================================
         if (params.workspaceMainCategory === 'approve') {
             if (!params.selectedItemCode) {
                 toast.error('Vui lòng click chọn 1 Đơn Hàng / Hợp Đồng trong danh sách kết quả lọc phía dưới!');
                 return null;
             }
 
+            // 1. Partner duyệt School Order (KHÔNG CÓ NOTE / CONTACT)
             if (params.approveSubFlow === 'approve_school_order') {
                 const resolvedSchoolName = params.selectedCachedItem?.school_name || 'Tự động truy vết theo Order';
                 const resolvedPartnerName = params.selectedCachedItem?.partner_name || 'Tự động truy vết';
@@ -120,8 +124,10 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                 summary.detailsList = [
                     `Trường học: ${resolvedSchoolName}`,
                     `Đối tác quản lý: ${resolvedPartnerName}`,
-                    `Số lượng môn học bóc tách: ${params.parsedOrderCourses.length} môn`,
+                    `Số lượng môn học: ${params.parsedOrderCourses.length} môn`,
                 ];
+
+                // 2. Distributor duyệt PRT Contract (KHÔNG CÓ NOTE / CONTACT)
             } else if (params.approveSubFlow === 'approve_partner_contract') {
                 const resolvedPartnerName = params.selectedCachedItem?.partner_name || params.selectedCachedItem?.sender_name || undefined;
                 const resolvedDistName = params.selectedCachedItem?.distributor_name || params.selectedCachedItem?.receiver_name || undefined;
@@ -143,9 +149,11 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                     `Đối tác gửi: ${resolvedPartnerName || 'Tự động truy vết từ Két sắt'}`,
                     `Nhà phân phối nhận: ${resolvedDistName || 'Tự động truy vết từ Két sắt'}`,
                 ];
+
+                // 3. Sales Admin duyệt DST Contract (BẮT BUỘC CONFIRMATION NOTE / JUSTIFICATION)
             } else if (params.approveSubFlow === 'admin_approve_contract') {
                 if (!params.adminJustification || params.adminJustification.trim().length < 15) {
-                    toast.error('Lý do phê duyệt của Sales Admin bắt buộc phải có ít nhất 15 ký tự!');
+                    toast.error('Confirmation Note của Sales Admin bắt buộc phải có ít nhất 15 ký tự!');
                     return null;
                 }
 
@@ -158,7 +166,7 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                     contract_code: params.selectedItemCode,
                     distributor_name: resolvedDistName,
                     distributor_code: resolvedDistCode,
-                    justification: params.adminJustification.trim(),
+                    justification: params.adminJustification.trim(), // 🎯 Confirmation Note
                     courses: params.parsedOrderCourses.length > 0 ? params.parsedOrderCourses : params.selectedCachedItem?.courses_data,
                 };
 
@@ -166,9 +174,13 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                 summary.targetEntity = `Mã Hợp Đồng: ${params.selectedItemCode}`;
                 summary.detailsList = [
                     `Nhà phân phối: ${resolvedDistName}`,
-                    `Lý do phê duyệt: "${params.adminJustification.trim()}"`,
+                    `Confirmation Note: "${params.adminJustification.trim()}"`,
                 ];
             }
+
+            // =====================================================================
+            // NHÁNH 2: CREATE AND APPROVE FLOW (TẠO MỚI ORDER / CONTRACT)
+            // =====================================================================
         } else if (params.workspaceMainCategory === 'create_and_approve') {
             if (params.createApproveSubFlow === 'end_to_end') {
                 if (!params.selectedSchool) {
@@ -186,8 +198,8 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                         distributor_name: params.selectedSchool.distributor_name,
                     },
                     order_details: {
-                        contact_info: params.contactInfo,
-                        additional_notes: params.additionalNotes,
+                        contact_info: params.contactInfo,         // 🎯 Nhập trực tiếp
+                        additional_notes: params.additionalNotes, // 🎯 Nhập trực tiếp
                         courses: params.selectedCourses.map((c) => ({
                             category: c.category,
                             course_id: c.course_id,
@@ -206,6 +218,8 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                 summary.targetEntity = params.selectedSchool.school_name;
                 summary.detailsList = [
                     `Tuyến phả hệ: ${params.selectedSchool.full_lineage}`,
+                    `Đầu mối liên hệ: ${params.contactInfo || 'Mặc định'}`,
+                    `Ghi chú: ${params.additionalNotes || 'Không có'}`,
                     `Tổng số môn cấp phép: ${params.selectedCourses.length} môn`,
                 ];
             } else if (params.createApproveSubFlow === 'partner_create_chain') {
@@ -219,7 +233,8 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                     partner_name: params.selectedPartner.name,
                     partner_code: params.selectedPartner.code,
                     contract_data: {
-                        notes: params.additionalNotes,
+                        contact_info: params.contactInfo,         // 🎯 Nhập trực tiếp
+                        notes: params.additionalNotes,            // 🎯 Nhập trực tiếp
                         courses: params.selectedCourses.map((c) => ({
                             category: c.category,
                             course_name: c.course_name,
@@ -230,7 +245,10 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
 
                 summary.actionTitle = 'Tạo & Duyệt Chuỗi Đối Tác (Partner ➔ Distributor)';
                 summary.targetEntity = params.selectedPartner.name;
-                summary.detailsList = [`Đối tác: ${params.selectedPartner.name} (Mã: ${params.selectedPartner.code})`];
+                summary.detailsList = [
+                    `Đối tác: ${params.selectedPartner.name} (Mã: ${params.selectedPartner.code})`,
+                    `Ghi chú: ${params.additionalNotes || 'Không có'}`,
+                ];
             } else if (params.createApproveSubFlow === 'distributor_create_chain') {
                 if (!params.selectedDistributor) {
                     toast.error('Vui lòng chọn nhà phân phối!');
@@ -242,7 +260,8 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                     distributor_name: params.selectedDistributor.name,
                     distributor_code: params.selectedDistributor.code,
                     contract_data: {
-                        notes: params.additionalNotes,
+                        contact_info: params.contactInfo,         // 🎯 Nhập trực tiếp
+                        notes: params.additionalNotes,            // 🎯 Nhập trực tiếp
                         justification: params.adminJustification,
                         courses: params.selectedCourses.map((c) => ({
                             category: c.category,
@@ -254,7 +273,10 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
 
                 summary.actionTitle = 'Tạo & Duyệt Chuỗi Nhà Phân Phối (Distributor ➔ Sales Admin)';
                 summary.targetEntity = params.selectedDistributor.name;
-                summary.detailsList = [`Nhà phân phối: ${params.selectedDistributor.name} (Mã: ${params.selectedDistributor.code})`];
+                summary.detailsList = [
+                    `Nhà phân phối: ${params.selectedDistributor.name} (Mã: ${params.selectedDistributor.code})`,
+                    `Ghi chú: ${params.additionalNotes || 'Không có'}`,
+                ];
             }
         } else if (params.workspaceMainCategory === 'bulk_accounts') {
             if (!params.uploadedAccountsFile) {

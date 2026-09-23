@@ -206,20 +206,62 @@ class GitPlaywrightService:
                 gc.collect()
 
     async def _get_or_steal_session(self, is_headless: bool) -> Optional[Dict[str, str]]:
-        """Lấy session từ Cache; chỉ mở Chromium khi chưa có hoặc phiên bị hết hạn."""
+        """
+        Lấy session Git theo kiến trúc 3 Tầng Siêu Tốc:
+        1. Tầng 1 (0ms): RAM Cache cục bộ của tiến trình.
+        2. Tầng 2 (10ms): Kho Session tập trung Supabase (workspace_active_sessions: 'pythaverse_git') - Zero Playwright!
+        3. Tầng 3 (Fallback ~20s): Mở Playwright SSO bốc mới và LƯU NGƯỢC lại vào Supabase để Cronjob giữ ấm.
+        """
+        from app.services.session_keepalive_service import session_keepalive_service
+
+        # ---------------------------------------------------------------------
+        # ⚡ TẦNG 1: KIỂM TRA RAM CACHE LOCAL (0ms)
+        # ---------------------------------------------------------------------
         if self._cached_cookies and (time.time() - self._cached_at < self._cache_ttl_seconds):
             if await self._is_session_valid(self._cached_cookies):
-                logger.info("⚡ [Session Cache] Tái sử dụng Git Admin Session (0ms - Bỏ qua Playwright)!")
+                logger.info("⚡ [Session Cache] Tái sử dụng Git Session từ RAM cục bộ (0ms - Bỏ qua Playwright)!")
                 return self._cached_cookies
             else:
-                logger.warning("⚠️ [Session Cache] Session Git cũ đã hết hạn, chuẩn bị gia hạn mới...")
+                logger.warning("⚠️ [Session Cache] Session Git trong RAM cục bộ đã hết hạn...")
                 self._cached_cookies = None
 
+        # ---------------------------------------------------------------------
+        # 💾 TẦNG 2: ĐỌC TỪ KHO GIỮ ẤM TẬP TRUNG SUPABASE (10ms - Zero Playwright!)
+        # ---------------------------------------------------------------------
+        logger.info("🔍 [Session KeepAlive] Đang kiểm tra Session 'pythaverse_git' từ Supabase Vault...")
+        supabase_cookies = await session_keepalive_service.get_session_cookies("pythaverse_git")
+        if supabase_cookies:
+            # Kiểm tra nhanh 20ms xem cookie trên Supabase còn sống không
+            if await self._is_session_valid(supabase_cookies):
+                logger.info("✨ [Session KeepAlive] Session Git trên Supabase CỰC KỲ ẤM NÓNG! Tái sử dụng ngay (Zero Playwright)!")
+                self._cached_cookies = supabase_cookies
+                self._cached_at = time.time()
+                return supabase_cookies
+            else:
+                logger.warning("⚠️ [Session KeepAlive] Session 'pythaverse_git' trên Supabase đã hết hạn...")
+
+        # ---------------------------------------------------------------------
+        # 🔑 TẦNG 3: FALLBACK MỞ PLAYWRIGHT BỐC MỚI VÀ LƯU NGƯỢC LẠI SUPABASE (~20s)
+        # ---------------------------------------------------------------------
+        logger.info("🔑 [Playwright Fallback] Cả RAM và Supabase đều chưa có phiên hợp lệ. Mở Chromium bốc Session mới...")
         async with acquire_playwright_slot("Git Session Stealer", timeout=60.0, lane="admin"):
             cookies = await self._steal_git_session(is_headless=is_headless)
             if cookies:
                 self._cached_cookies = cookies
                 self._cached_at = time.time()
+
+                # 🎯 GHI NGƯỢC LẠI SUPABASE ĐỂ CÁC WORKER KHÁC VÀ CRONJOB 15 PHÚT DÙNG CHUNG
+                try:
+                    await session_keepalive_service.save_session_cookies(
+                        session_key="pythaverse_git",
+                        system_name="Pythaverse GitBucket Repos",
+                        cookies=cookies,
+                        metadata={"user": self.admin_user}
+                    )
+                    logger.info("💾 [KeepAlive Sync] Đã lưu ngược Session Git mới bốc lên Supabase thành công!")
+                except Exception as save_err:
+                    logger.warning(f"⚠️ Không thể lưu ngược Session Git lên Supabase: {save_err}")
+
             return cookies
 
     # =========================================================================
