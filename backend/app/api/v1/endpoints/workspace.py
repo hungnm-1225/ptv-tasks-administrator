@@ -74,6 +74,16 @@ class OrgUpdateRequest(BaseModel):
     country_code: Optional[str] = None
     drive_folder_url: Optional[str] = None
 
+class OrgCreateRequest(BaseModel):
+    name: str
+    code: Optional[str] = None
+    role_type: str = "school"  # 'distributor' | 'partner' | 'school'
+    parent_id: Optional[str] = None
+    country: Optional[str] = "Vietnam"
+    country_code: Optional[str] = None
+    drive_folder_url: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
 
 # =============================================================================
 # 1. PHẢ HỆ VÀ DANH MỤC KHÓA HỌC (ĐÃ NÂNG LÊN 2500 TRƯỜNG - CHỐNG CẮT MẤT VNV SCHOOL)
@@ -487,6 +497,7 @@ async def get_hierarchy_manage():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
 @router.get("/organizations/{org_id}/vault-password")
 async def get_org_vault_password(org_id: str):
     db = get_supabase_client()
@@ -533,6 +544,141 @@ async def get_workspace_countries():
             {"code": "PH", "name": "Philippines", "flag_emoji": "🇵🇭"},
         ]
 
+@router.post("/organizations")
+async def create_organization(payload: OrgCreateRequest):
+    """Khởi tạo Đơn vị mới (School/Partner/Distributor) và lưu mã hóa vào Fernet Vault."""
+    supabase = get_supabase_client()
+    try:
+        name_clean = payload.name.strip()
+        if not name_clean:
+            raise HTTPException(status_code=400, detail="Tên đơn vị/tổ chức không được để trống!")
+
+        role_type = (payload.role_type or "school").strip().lower()
+        if role_type not in ["distributor", "partner", "school"]:
+            raise HTTPException(status_code=400, detail="Cấp bậc role_type không hợp lệ (phải là distributor, partner, hoặc school).")
+
+        # 1. Kiểm tra trùng mã code nếu có nhập
+        clean_code = payload.code.strip() if payload.code and payload.code.strip() else None
+        if clean_code:
+            dup_code = supabase.table("workspace_organizations").select("id").eq("code", clean_code).execute()
+            if dup_code.data:
+                raise HTTPException(status_code=400, detail=f"Mã định danh (Code) '{clean_code}' đã tồn tại trong hệ thống!")
+
+        # 2. Kiểm tra parent_id nếu có
+        clean_parent_id = payload.parent_id.strip() if payload.parent_id and payload.parent_id.strip() else None
+        if clean_parent_id:
+            parent_check = supabase.table("workspace_organizations").select("id, role_type").eq("id", clean_parent_id).execute()
+            if not parent_check.data:
+                raise HTTPException(status_code=400, detail="Đơn vị quản lý cấp cha (parent_id) không tồn tại!")
+
+        # 3. Bóc tách Google Drive Folder ID
+        drive_id = None
+        if payload.drive_folder_url:
+            clean_url = payload.drive_folder_url.strip()
+            match = re.search(r'folders/([a-zA-Z0-9-_]+)', clean_url)
+            drive_id = match.group(1) if match else clean_url
+
+        # 4. Chuẩn hóa Quốc gia
+        country = payload.country.strip() if (payload.country and payload.country != "Unknown") else "Vietnam"
+        country_code = payload.country_code
+        if not country_code and country:
+            c_map = {"Vietnam": "VN", "Malaysia": "MY", "Indonesia": "ID", "Philippines": "PH"}
+            country_code = c_map.get(country, "VN")
+
+        now_iso = get_utc_iso()
+
+        # 5. Insert vào bảng workspace_organizations
+        new_org_data = {
+            "name": name_clean,
+            "code": clean_code,
+            "role_type": role_type,
+            "parent_id": clean_parent_id,
+            "country": country,
+            "country_code": country_code,
+            "drive_folder_url": payload.drive_folder_url.strip() if payload.drive_folder_url else None,
+            "drive_folder_id": drive_id,
+            "created_at": now_iso
+        }
+
+        insert_res = supabase.table("workspace_organizations").insert(new_org_data).execute()
+        if not insert_res.data:
+            raise HTTPException(status_code=500, detail="Không thể tạo bản ghi tổ chức trong CSDL.")
+
+        created_org = insert_res.data[0]
+        org_id = created_org["id"]
+
+        # 6. Mã hóa Fernet và lưu vào Vault nếu có tài khoản
+        vault_created = False
+        if (payload.username and payload.username.strip()) or (payload.password and payload.password.strip()):
+            encrypted_pass = ""
+            if payload.password and payload.password.strip():
+                cipher = get_clean_fernet_cipher()
+                if cipher:
+                    encrypted_pass = cipher.encrypt(payload.password.strip().encode()).decode()
+                else:
+                    encrypted_pass = payload.password.strip()
+
+            new_vault = {
+                "org_id": org_id,
+                "account_role": role_type,
+                "username": (payload.username or "").strip(),
+                "encrypted_password": encrypted_pass,
+                "is_active": True,
+                "updated_at": now_iso
+            }
+            supabase.table("workspace_credentials_vault").insert(new_vault).execute()
+            vault_created = True
+
+        # 7. Xóa sạch RAM Cache để phản ánh ngay lập tức
+        ws_cache.invalidate("all_hierarchy_schools")
+
+        logger.info(f"✨ [Hierarchy] Đã tạo mới {role_type.upper()}: {name_clean} (ID: {org_id})")
+        return {
+            "status": "success",
+            "message": f"Đã khởi tạo thành công {role_type} '{name_clean}'!",
+            "data": created_org,
+            "vault_created": vault_created
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Lỗi tạo mới organization: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Lỗi máy chủ: {str(e)}")
+
+
+@router.delete("/organizations/{org_id}")
+async def delete_organization(org_id: str):
+    """Xóa bỏ một đơn vị khỏi hệ thống (Bảo vệ: Chặn xóa nếu còn đơn vị cấp con)."""
+    supabase = get_supabase_client()
+    try:
+        check_res = supabase.table("workspace_organizations").select("id, name, role_type").eq("id", org_id).execute()
+        if not check_res.data:
+            raise HTTPException(status_code=404, detail="Không tìm thấy đơn vị yêu cầu.")
+        org = check_res.data[0]
+
+        # Chặn xoá nếu đang có trường/đối tác con trực thuộc
+        children = supabase.table("workspace_organizations").select("id").eq("parent_id", org_id).limit(1).execute()
+        if children.data:
+            raise HTTPException(status_code=400, detail="Không thể xóa đơn vị này vì đang có các đơn vị trực thuộc cấp dưới!")
+
+        # Xóa vault credentials liên kết trước
+        supabase.table("workspace_credentials_vault").delete().eq("org_id", org_id).execute()
+
+        # Xóa organization
+        supabase.table("workspace_organizations").delete().eq("id", org_id).execute()
+
+        # Invalidate cache
+        ws_cache.invalidate("all_hierarchy_schools")
+
+        return {
+            "status": "success",
+            "message": f"Đã xóa thành công đơn vị '{org['name']}'!"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Lỗi xóa organization {org_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Lỗi máy chủ: {str(e)}")
 
 @router.put("/organizations/{org_id}")
 async def update_organization_and_vault(org_id: str, payload: OrgUpdateRequest):

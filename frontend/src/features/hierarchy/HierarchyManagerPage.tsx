@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import {
     Network, Building2, ShieldCheck, ShieldAlert, Search, Filter,
     Edit3, KeyRound, Eye, EyeOff, RefreshCw, Layers, School, Check, X, ArrowRight,
-    ChevronLeft, ChevronRight
+    ChevronLeft, ChevronRight, Plus, Sparkles
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { toast } from 'sonner';
@@ -44,19 +44,13 @@ export const HierarchyManagerPage: React.FC = () => {
 
     const [countriesList, setCountriesList] = useState<Array<{ code: string; name: string; flag_emoji: string }>>([]);
 
-    useEffect(() => {
-        // Tải danh mục quốc gia từ backend
-        fetchApi<any[]>('/workspace/countries')
-            .then(res => { if (res) setCountriesList(res); })
-            .catch(() => { });
-        loadHierarchyData();
-    }, []);
-
     // 🎯 State phân trang Local (Client-side Pagination)
     const [currentPage, setCurrentPage] = useState<number>(1);
     const [pageSize, setPageSize] = useState<number>(20);
 
-    // State Modal chỉnh sửa
+    // =========================================================================
+    // STATE MODAL CHỈNH SỬA (EDIT)
+    // =========================================================================
     const [editingOrg, setEditingOrg] = useState<OrganizationItem | null>(null);
     const [editForm, setEditForm] = useState({
         name: '',
@@ -70,6 +64,31 @@ export const HierarchyManagerPage: React.FC = () => {
     const [showPassword, setShowPassword] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isLoadingPassword, setIsLoadingPassword] = useState(false);
+
+    // =========================================================================
+    // STATE MODAL THÊM MỚI (CREATE)
+    // =========================================================================
+    const [isCreateOpen, setIsCreateOpen] = useState(false);
+    const [createRoleType, setCreateRoleType] = useState<'school' | 'partner' | 'distributor'>('school');
+    const [createForm, setCreateForm] = useState({
+        name: '',
+        code: '',
+        parent_id: '',
+        username: '',
+        password: '',
+        country: 'Vietnam',
+        drive_folder_url: ''
+    });
+    const [showCreatePassword, setShowCreatePassword] = useState(false);
+    const [isCreating, setIsCreating] = useState(false);
+
+    // Tải danh mục quốc gia & phả hệ
+    useEffect(() => {
+        fetchApi<any[]>('/workspace/countries')
+            .then(res => { if (res) setCountriesList(res); })
+            .catch(() => { });
+        loadHierarchyData();
+    }, []);
 
     // Tải dữ liệu từ Backend
     const loadHierarchyData = async (showToast = false) => {
@@ -86,10 +105,6 @@ export const HierarchyManagerPage: React.FC = () => {
         }
     };
 
-    useEffect(() => {
-        loadHierarchyData();
-    }, []);
-
     // 🎯 Mở modal chỉnh sửa & tự động nạp mật khẩu đã giải mã từ Két Sắt
     const handleOpenEdit = async (org: OrganizationItem) => {
         setEditingOrg(org);
@@ -104,11 +119,10 @@ export const HierarchyManagerPage: React.FC = () => {
             parent_id: org.parent_id || '',
             username: org.username || '',
             password: '',
-            country: safeCountry, // 👈 Không bao giờ bị dính "Unknown" nữa!
+            country: safeCountry,
             drive_folder_url: org.drive_folder_url || ''
         });
         setShowPassword(false);
-
 
         // Nếu tổ chức này đã có mật khẩu trong Vault -> Tự động kéo mật khẩu đã giải mã về
         if (org.has_vault_pass) {
@@ -145,6 +159,63 @@ export const HierarchyManagerPage: React.FC = () => {
             toast.error(err.message || 'Lỗi khi cập nhật phả hệ');
         } finally {
             setIsSubmitting(false);
+        }
+    };
+
+    // 🎯 Mở modal Thêm Mới
+    const handleOpenCreate = (role: 'school' | 'partner' | 'distributor' = 'school') => {
+        setCreateRoleType(role);
+        setCreateForm({
+            name: '',
+            code: '',
+            parent_id: '',
+            username: '',
+            password: '',
+            country: countriesList[0]?.name || 'Vietnam',
+            drive_folder_url: ''
+        });
+        setShowCreatePassword(false);
+        setIsCreateOpen(true);
+    };
+
+    // Tự sinh mật khẩu an toàn ngẫu nhiên
+    const generateRandomPassword = () => {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+        let generated = 'Ptv@';
+        for (let i = 0; i < 8; i++) {
+            generated += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return generated;
+    };
+
+    // Lưu tạo mới đơn vị
+    const handleSaveCreate = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!createForm.name.trim()) {
+            toast.error('Vui lòng nhập tên đơn vị / tổ chức');
+            return;
+        }
+
+        try {
+            setIsCreating(true);
+            const payload = {
+                ...createForm,
+                role_type: createRoleType,
+                parent_id: createForm.parent_id || null
+            };
+
+            await fetchApi('/workspace/organizations', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+
+            toast.success(`Đã tạo mới ${createRoleType.toUpperCase()}: "${createForm.name}" thành công!`);
+            setIsCreateOpen(false);
+            await loadHierarchyData(false);
+        } catch (err: any) {
+            toast.error(err.message || 'Lỗi khi tạo mới đơn vị');
+        } finally {
+            setIsCreating(false);
         }
     };
 
@@ -204,13 +275,23 @@ export const HierarchyManagerPage: React.FC = () => {
                                 Quản lý thông tin tài khoản và đơn vị trực thuộc
                             </h1>
                             <p className="text-sm text-slate-500 dark:text-slate-400">
-                                Chỉnh sửa thông tin tài khảon phân cấp 3 tầng (Distributor ➔ Partner ➔ School)
+                                Quản trị và phân cấp 3 tầng (Distributor ➔ Partner ➔ School) kết hợp Két Sắt Fernet Vault
                             </p>
                         </div>
                     </div>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
+                    {/* Nút Thêm Mới */}
+                    <button
+                        onClick={() => handleOpenCreate('school')}
+                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold transition-all shadow-md shadow-indigo-500/20 active:scale-95 cursor-pointer"
+                    >
+                        <Plus className="w-4 h-4" />
+                        Thêm Đơn Vị Mới
+                    </button>
+
+                    {/* Nút Làm Mới */}
                     <button
                         onClick={() => loadHierarchyData(true)}
                         disabled={refreshing}
@@ -231,7 +312,9 @@ export const HierarchyManagerPage: React.FC = () => {
                             <School className="w-4 h-4" />
                         </div>
                     </div>
-                    <div className="mt-3 text-2xl font-bold text-slate-900 dark:text-white">{stats.schools}</div>
+                    <div className="mt-3 text-2xl font-bold text-slate-900 dark:text-white">
+                        {loading ? <div className="h-8 w-16 bg-slate-200 dark:bg-slate-800 rounded animate-pulse" /> : stats.schools}
+                    </div>
                 </div>
 
                 <div className="bg-white dark:bg-[#131B2B] p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm">
@@ -241,7 +324,9 @@ export const HierarchyManagerPage: React.FC = () => {
                             <Layers className="w-4 h-4" />
                         </div>
                     </div>
-                    <div className="mt-3 text-2xl font-bold text-slate-900 dark:text-white">{stats.partners}</div>
+                    <div className="mt-3 text-2xl font-bold text-slate-900 dark:text-white">
+                        {loading ? <div className="h-8 w-16 bg-slate-200 dark:bg-slate-800 rounded animate-pulse" /> : stats.partners}
+                    </div>
                 </div>
 
                 <div className="bg-white dark:bg-[#131B2B] p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm">
@@ -251,18 +336,26 @@ export const HierarchyManagerPage: React.FC = () => {
                             <Building2 className="w-4 h-4" />
                         </div>
                     </div>
-                    <div className="mt-3 text-2xl font-bold text-slate-900 dark:text-white">{stats.distributors}</div>
+                    <div className="mt-3 text-2xl font-bold text-slate-900 dark:text-white">
+                        {loading ? <div className="h-8 w-16 bg-slate-200 dark:bg-slate-800 rounded animate-pulse" /> : stats.distributors}
+                    </div>
                 </div>
 
                 <div className="bg-white dark:bg-[#131B2B] p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm">
                     <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tài khoản đã có thông tin</span>
+                        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tài khoản có Vault</span>
                         <div className="p-2 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 rounded-lg">
                             <ShieldCheck className="w-4 h-4" />
                         </div>
                     </div>
                     <div className="mt-3 text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-                        {stats.vaultReady} <span className="text-xs text-slate-400 font-normal">/ {data?.total || 0}</span>
+                        {loading ? (
+                            <div className="h-8 w-24 bg-slate-200 dark:bg-slate-800 rounded animate-pulse" />
+                        ) : (
+                            <>
+                                {stats.vaultReady} <span className="text-xs text-slate-400 font-normal">/ {data?.total || 0}</span>
+                            </>
+                        )}
                     </div>
                 </div>
             </div>
@@ -311,13 +404,28 @@ export const HierarchyManagerPage: React.FC = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 text-sm">
+                            {/* 🌟 SKELETON LOADING STATE CHO DANH SÁCH */}
                             {loading ? (
-                                <tr>
-                                    <td colSpan={5} className="py-12 text-center text-slate-400">
-                                        <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-500" />
-                                        Đang giải mã phả hệ 480 trường học...
-                                    </td>
-                                </tr>
+                                Array.from({ length: pageSize > 20 ? 10 : pageSize }).map((_, idx) => (
+                                    <tr key={`skeleton-${idx}`} className="animate-pulse">
+                                        <td className="py-4 px-4">
+                                            <div className="h-4 w-44 bg-slate-200 dark:bg-slate-800 rounded-md mb-2" />
+                                            <div className="h-3 w-28 bg-slate-100 dark:bg-slate-800/60 rounded" />
+                                        </td>
+                                        <td className="py-4 px-4">
+                                            <div className="h-5 w-16 bg-slate-200 dark:bg-slate-800 rounded-full" />
+                                        </td>
+                                        <td className="py-4 px-4">
+                                            <div className="h-4 w-36 bg-slate-200 dark:bg-slate-800 rounded-md" />
+                                        </td>
+                                        <td className="py-4 px-4">
+                                            <div className="h-4 w-28 bg-slate-200 dark:bg-slate-800 rounded-md" />
+                                        </td>
+                                        <td className="py-4 px-4 text-right">
+                                            <div className="h-7 w-20 bg-slate-200 dark:bg-slate-800 rounded-xl ml-auto" />
+                                        </td>
+                                    </tr>
+                                ))
                             ) : paginatedOrgs.length === 0 ? (
                                 <tr>
                                     <td colSpan={5} className="py-12 text-center text-slate-400">
@@ -479,191 +587,475 @@ export const HierarchyManagerPage: React.FC = () => {
                 )}
             </div>
 
-            {/* Modal Chỉnh Sửa Phả Hệ & Két Sắt (Khóa width 512px, có xem pass và dấu * đỏ) */}
-            {
-                editingOrg && typeof document !== 'undefined' && createPortal(
+            {/* ========================================================================= */}
+            {/* 🌟 MODAL THÊM MỚI ĐƠN VỊ (CREATE ORG PORTAL)                             */}
+            {/* ========================================================================= */}
+            {isCreateOpen && typeof document !== 'undefined' && createPortal(
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto animate-in fade-in duration-200"
+                    onClick={() => setIsCreateOpen(false)}
+                >
                     <div
-                        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto animate-in fade-in duration-200"
-                        onClick={() => setEditingOrg(null)}
+                        style={{ width: '100%', maxWidth: '34rem' }}
+                        className="bg-white dark:bg-[#131B2B] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 my-auto flex flex-col max-h-[90vh]"
+                        onClick={(e) => e.stopPropagation()}
                     >
-                        <div
-                            style={{ width: '100%', maxWidth: '32rem' }}
-                            className="bg-white dark:bg-[#131B2B] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 my-auto flex flex-col max-h-[90vh]"
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            {/* Modal Header */}
-                            <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 shrink-0">
-                                <div className="flex items-center gap-2.5">
-                                    <div className="p-2 bg-indigo-50 dark:bg-indigo-950 text-indigo-600 rounded-xl">
-                                        <Edit3 className="w-5 h-5" />
-                                    </div>
-                                    <div>
-                                        <h3 className="font-bold text-slate-900 dark:text-white">
-                                            Chỉnh sửa thông tin
-                                        </h3>
-                                    </div>
+                        {/* Header */}
+                        <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 shrink-0">
+                            <div className="flex items-center gap-2.5">
+                                <div className="p-2 bg-indigo-50 dark:bg-indigo-950 text-indigo-600 rounded-xl">
+                                    <Plus className="w-5 h-5" />
                                 </div>
-                                <button
-                                    onClick={() => setEditingOrg(null)}
-                                    className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg cursor-pointer"
-                                >
-                                    <X className="w-5 h-5" />
-                                </button>
+                                <div>
+                                    <h3 className="font-bold text-slate-900 dark:text-white">
+                                        Thêm mới đơn vị / tổ chức
+                                    </h3>
+                                    <p className="text-xs text-slate-500">Khởi tạo thực thể mới và lưu mã hóa vào Fernet Vault</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setIsCreateOpen(false)}
+                                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg cursor-pointer"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        {/* Form */}
+                        <form onSubmit={handleSaveCreate} className="p-5 space-y-4 overflow-y-auto flex-1 scrollbar-thin">
+                            {/* Chọn cấp bậc Role Type */}
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                                    Cấp Bậc Thực Thể <span className="text-rose-500 font-bold">*</span>
+                                </label>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setCreateRoleType('school');
+                                            setCreateForm(prev => ({ ...prev, parent_id: '' }));
+                                        }}
+                                        className={`flex flex-col items-center gap-1 p-2.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${createRoleType === 'school'
+                                                ? 'bg-sky-50 border-sky-400 text-sky-700 dark:bg-sky-950/60 dark:border-sky-700 dark:text-sky-300 shadow-sm'
+                                                : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400'
+                                            }`}
+                                    >
+                                        <School className="w-4 h-4 text-sky-500" />
+                                        Trường Học
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setCreateRoleType('partner');
+                                            setCreateForm(prev => ({ ...prev, parent_id: '' }));
+                                        }}
+                                        className={`flex flex-col items-center gap-1 p-2.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${createRoleType === 'partner'
+                                                ? 'bg-indigo-50 border-indigo-400 text-indigo-700 dark:bg-indigo-950/60 dark:border-indigo-700 dark:text-indigo-300 shadow-sm'
+                                                : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400'
+                                            }`}
+                                    >
+                                        <Layers className="w-4 h-4 text-indigo-500" />
+                                        Đối Tác
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setCreateRoleType('distributor');
+                                            setCreateForm(prev => ({ ...prev, parent_id: '' }));
+                                        }}
+                                        className={`flex flex-col items-center gap-1 p-2.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${createRoleType === 'distributor'
+                                                ? 'bg-amber-50 border-amber-400 text-amber-700 dark:bg-amber-950/60 dark:border-amber-700 dark:text-amber-300 shadow-sm'
+                                                : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400'
+                                            }`}
+                                    >
+                                        <Building2 className="w-4 h-4 text-amber-500" />
+                                        Nhà Phân Phối
+                                    </button>
+                                </div>
                             </div>
 
-                            {/* Modal Form */}
-                            <form onSubmit={handleSaveEdit} className="p-5 space-y-4 overflow-y-auto flex-1 scrollbar-thin">
-                                {/* Tên tổ chức */}
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                                        Tên hiển thị tổ chức <span className="text-rose-500 font-bold">*</span>
-                                    </label>
-                                    <input
-                                        type="text"
-                                        required
-                                        value={editForm.name}
-                                        onChange={(e) => setEditForm(prev => ({ ...prev, name: e.target.value }))}
-                                        className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                                    />
-                                </div>
+                            {/* Tên tổ chức */}
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                                    Tên đơn vị / trường học <span className="text-rose-500 font-bold">*</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    required
+                                    placeholder="VD: Trường Quốc Tế ABC, Đối tác XYZ..."
+                                    value={createForm.name}
+                                    onChange={(e) => setCreateForm(prev => ({ ...prev, name: e.target.value }))}
+                                    className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                                />
+                            </div>
 
-                                {/* Mã code */}
+                            {/* Mã code */}
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                                    Mã định danh (ID / Code)
+                                </label>
+                                <input
+                                    type="text"
+                                    value={createForm.code}
+                                    onChange={(e) => setCreateForm(prev => ({ ...prev, code: e.target.value }))}
+                                    className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                                    placeholder="VD: 10267, PRT_VN_05, DST_MY..."
+                                />
+                            </div>
+
+                            {/* Quốc gia */}
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                                    Quốc Gia Trực Thuộc <span className="text-rose-500 font-bold">*</span>
+                                </label>
+                                <select
+                                    value={createForm.country}
+                                    onChange={(e) => setCreateForm(prev => ({ ...prev, country: e.target.value }))}
+                                    className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer"
+                                >
+                                    {(countriesList.length > 0 ? countriesList : [
+                                        { code: 'VN', name: 'Vietnam', flag_emoji: '🇻🇳' },
+                                        { code: 'MY', name: 'Malaysia', flag_emoji: '🇲🇾' },
+                                        { code: 'ID', name: 'Indonesia', flag_emoji: '🇮🇩' },
+                                        { code: 'PH', name: 'Philippines', flag_emoji: '🇵🇭' },
+                                    ]).map(c => (
+                                        <option key={c.code} value={c.name}>
+                                            {c.flag_emoji} {c.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Gán đơn vị cha theo role */}
+                            {createRoleType === 'school' && (
                                 <div>
-                                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                                        ID
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={editForm.code}
-                                        onChange={(e) => setEditForm(prev => ({ ...prev, code: e.target.value }))}
-                                        className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                                        placeholder="VD: 10266, PRT_VN_01..."
-                                    />
-                                </div>
-                                {/* CHỌN QUỐC GIA (KHÔNG BAO GIỜ BỊ UNKNOWN) */}
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                                        Quốc Gia Trực Thuộc <span className="text-rose-500 font-bold">*</span>
+                                    <label className="block text-xs font-semibold text-indigo-600 dark:text-indigo-400 mb-1">
+                                        Đối Tác Quản Lý (Partner)
                                     </label>
                                     <select
-                                        value={editForm.country}
-                                        onChange={(e) => setEditForm(prev => ({ ...prev, country: e.target.value }))}
-                                        className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer"
+                                        value={createForm.parent_id}
+                                        onChange={(e) => setCreateForm(prev => ({ ...prev, parent_id: e.target.value }))}
+                                        className="w-full px-3.5 py-2 bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-800 rounded-xl text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer"
                                     >
-                                        {(countriesList.length > 0 ? countriesList : [
-                                            { code: 'VN', name: 'Vietnam', flag_emoji: '🇻🇳' },
-                                            { code: 'MY', name: 'Malaysia', flag_emoji: '🇲🇾' },
-                                            { code: 'ID', name: 'Indonesia', flag_emoji: '🇮🇩' },
-                                            { code: 'PH', name: 'Philippines', flag_emoji: '🇵🇭' },
-                                        ]).map(c => (
-                                            <option key={c.code} value={c.name}>
-                                                {c.flag_emoji} {c.name}
+                                        <option value="">-- Trực tiếp (Không qua Partner) --</option>
+                                        {data?.partners.map(p => (
+                                            <option key={p.id} value={p.id}>
+                                                {p.name} ({p.code || 'N/A'})
                                             </option>
                                         ))}
                                     </select>
                                 </div>
+                            )}
 
-                                {/* CẤU HÌNH GOOGLE DRIVE FOLDER (ĐẶC QUYỀN CHO DISTRIBUTOR) */}
-                                {editingOrg.role_type === 'distributor' && (
-                                    <div className="p-3.5 bg-indigo-50/50 dark:bg-indigo-950/30 rounded-xl border border-indigo-200/70 dark:border-indigo-900/50 space-y-1.5">
-                                        <label className="block text-xs font-bold text-indigo-900 dark:text-indigo-300 flex items-center gap-1.5">
-                                            <span>📁 Thư Mục Google Drive Của Distributor (Lưu COF/TOF):</span>
-                                        </label>
+                            {createRoleType === 'partner' && (
+                                <div>
+                                    <label className="block text-xs font-semibold text-amber-600 dark:text-amber-400 mb-1">
+                                        Nhà Phân Phối Trực Thuộc (Distributor)
+                                    </label>
+                                    <select
+                                        value={createForm.parent_id}
+                                        onChange={(e) => setCreateForm(prev => ({ ...prev, parent_id: e.target.value }))}
+                                        className="w-full px-3.5 py-2 bg-amber-50/40 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-xl text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/20 cursor-pointer"
+                                    >
+                                        <option value="">-- Trực tiếp Master --</option>
+                                        {data?.distributors.map(d => (
+                                            <option key={d.id} value={d.id}>
+                                                {d.name} ({d.code || 'N/A'})
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+
+                            {/* Drive Folder nếu là Distributor */}
+                            {createRoleType === 'distributor' && (
+                                <div className="p-3.5 bg-indigo-50/50 dark:bg-indigo-950/30 rounded-xl border border-indigo-200/70 dark:border-indigo-900/50 space-y-1.5">
+                                    <label className="block text-xs font-bold text-indigo-900 dark:text-indigo-300 flex items-center gap-1.5">
+                                        <span>📁 Thư Mục Google Drive Của Distributor:</span>
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={createForm.drive_folder_url}
+                                        onChange={(e) => setCreateForm(prev => ({ ...prev, drive_folder_url: e.target.value }))}
+                                        placeholder="https://drive.google.com/drive/folders/1BxiMVs..."
+                                        className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 rounded-xl text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                                    />
+                                </div>
+                            )}
+
+                            {/* Két Sắt Khởi Tạo Mật Khẩu */}
+                            <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200/80 dark:border-slate-800 space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-white">
+                                        <KeyRound className="w-4 h-4 text-emerald-500" />
+                                        <span>Khởi Tạo Tài Khoản & Két Sắt</span>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setCreateForm(prev => ({ ...prev, password: generateRandomPassword() }))}
+                                        className="flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 cursor-pointer"
+                                    >
+                                        <Sparkles className="w-3 h-3" />
+                                        Tạo Pass Ngẫu Nhiên
+                                    </button>
+                                </div>
+
+                                <div>
+                                    <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                                        Username / Email đăng nhập
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={createForm.username}
+                                        onChange={(e) => setCreateForm(prev => ({ ...prev, username: e.target.value }))}
+                                        className="w-full px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                                        placeholder="VD: school_user@dtt.vn..."
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                                        Mật khẩu khởi tạo
+                                    </label>
+                                    <div className="relative">
                                         <input
-                                            type="text"
-                                            value={editForm.drive_folder_url}
-                                            onChange={(e) => setEditForm(prev => ({ ...prev, drive_folder_url: e.target.value }))}
-                                            placeholder="https://drive.google.com/drive/folders/1BxiMVs..."
-                                            className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 rounded-xl text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                                            type={showCreatePassword ? 'text' : 'password'}
+                                            value={createForm.password}
+                                            onChange={(e) => setCreateForm(prev => ({ ...prev, password: e.target.value }))}
+                                            className="w-full pl-3 pr-10 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                                            placeholder="Nhập hoặc bấm Tạo Pass Ngẫu Nhiên"
                                         />
-                                        <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                                            Hệ thống sẽ tự động bóc tách Folder ID để cỗ máy upload file COF/TOF trực tiếp vào đây.
-                                        </p>
-                                    </div>
-                                )}
-
-                                {/* GÁN LẠI ĐƠN VỊ QUẢN LÝ CHA (RE-ASSIGN PARENT) */}
-                                {editingOrg.role_type === 'school' && (
-                                    <div>
-                                        <label className="block text-xs font-semibold text-indigo-600 dark:text-indigo-400 mb-1 flex items-center justify-between">
-                                            <span>Đối tác Quản Lý (Partner)</span>
-                                        </label>
-                                        <select
-                                            value={editForm.parent_id}
-                                            onChange={(e) => setEditForm(prev => ({ ...prev, parent_id: e.target.value }))}
-                                            className="w-full px-3.5 py-2 bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-800 rounded-xl text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer"
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowCreatePassword(!showCreatePassword)}
+                                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
                                         >
-                                            <option value="">-- Trực tiếp (Không qua Partner) --</option>
-                                            {data?.partners.map(p => (
-                                                <option key={p.id} value={p.id}>
-                                                    {p.name} ({p.code || 'N/A'})
-                                                </option>
-                                            ))}
-                                        </select>
+                                            {showCreatePassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                        </button>
                                     </div>
-                                )}
+                                </div>
+                            </div>
 
-                                {editingOrg.role_type === 'partner' && (
-                                    <div>
-                                        <label className="block text-xs font-semibold text-amber-600 dark:text-amber-400 mb-1">
-                                            Nhà Phân Phối Trực Thuộc (Distributor)
+                            {/* Actions */}
+                            <div className="flex items-center justify-end gap-3 pt-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsCreateOpen(false)}
+                                    className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                                >
+                                    Hủy
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={isCreating}
+                                    className="flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl transition-all shadow-md shadow-indigo-500/20 disabled:opacity-50 active:scale-95 cursor-pointer"
+                                >
+                                    <Check className="w-4 h-4" />
+                                    {isCreating ? 'Đang tạo...' : 'Tạo Đơn Vị Mới'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>,
+                document.body
+            )}
+
+            {/* ========================================================================= */}
+            {/* 🌟 MODAL CHỈNH SỬA PHẢ HỆ & KÉT SẮT VAULT (CÓ SKELETON KHI LOAD PASS)    */}
+            {/* ========================================================================= */}
+            {editingOrg && typeof document !== 'undefined' && createPortal(
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto animate-in fade-in duration-200"
+                    onClick={() => setEditingOrg(null)}
+                >
+                    <div
+                        style={{ width: '100%', maxWidth: '32rem' }}
+                        className="bg-white dark:bg-[#131B2B] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 my-auto flex flex-col max-h-[90vh]"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {/* Modal Header */}
+                        <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 shrink-0">
+                            <div className="flex items-center gap-2.5">
+                                <div className="p-2 bg-indigo-50 dark:bg-indigo-950 text-indigo-600 rounded-xl">
+                                    <Edit3 className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-slate-900 dark:text-white">
+                                        Chỉnh sửa thông tin
+                                    </h3>
+                                    <p className="text-xs text-slate-500">{editingOrg.name}</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setEditingOrg(null)}
+                                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg cursor-pointer"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        {/* Modal Form */}
+                        <form onSubmit={handleSaveEdit} className="p-5 space-y-4 overflow-y-auto flex-1 scrollbar-thin">
+                            {/* Tên tổ chức */}
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                                    Tên hiển thị tổ chức <span className="text-rose-500 font-bold">*</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    required
+                                    value={editForm.name}
+                                    onChange={(e) => setEditForm(prev => ({ ...prev, name: e.target.value }))}
+                                    className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                                />
+                            </div>
+
+                            {/* Mã code */}
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                                    ID
+                                </label>
+                                <input
+                                    type="text"
+                                    value={editForm.code}
+                                    onChange={(e) => setEditForm(prev => ({ ...prev, code: e.target.value }))}
+                                    className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                                    placeholder="VD: 10266, PRT_VN_01..."
+                                />
+                            </div>
+
+                            {/* Chọn Quốc gia */}
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                                    Quốc Gia Trực Thuộc <span className="text-rose-500 font-bold">*</span>
+                                </label>
+                                <select
+                                    value={editForm.country}
+                                    onChange={(e) => setEditForm(prev => ({ ...prev, country: e.target.value }))}
+                                    className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer"
+                                >
+                                    {(countriesList.length > 0 ? countriesList : [
+                                        { code: 'VN', name: 'Vietnam', flag_emoji: '🇻🇳' },
+                                        { code: 'MY', name: 'Malaysia', flag_emoji: '🇲🇾' },
+                                        { code: 'ID', name: 'Indonesia', flag_emoji: '🇮🇩' },
+                                        { code: 'PH', name: 'Philippines', flag_emoji: '🇵🇭' },
+                                    ]).map(c => (
+                                        <option key={c.code} value={c.name}>
+                                            {c.flag_emoji} {c.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Cấu hình Drive nếu là Distributor */}
+                            {editingOrg.role_type === 'distributor' && (
+                                <div className="p-3.5 bg-indigo-50/50 dark:bg-indigo-950/30 rounded-xl border border-indigo-200/70 dark:border-indigo-900/50 space-y-1.5">
+                                    <label className="block text-xs font-bold text-indigo-900 dark:text-indigo-300 flex items-center gap-1.5">
+                                        <span>📁 Thư Mục Google Drive Của Distributor (Lưu COF/TOF):</span>
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={editForm.drive_folder_url}
+                                        onChange={(e) => setEditForm(prev => ({ ...prev, drive_folder_url: e.target.value }))}
+                                        placeholder="https://drive.google.com/drive/folders/1BxiMVs..."
+                                        className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 rounded-xl text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                                    />
+                                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                                        Hệ thống sẽ tự động bóc tách Folder ID để cỗ máy upload file COF/TOF trực tiếp vào đây.
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* Gán lại đơn vị cha (School -> Partner) */}
+                            {editingOrg.role_type === 'school' && (
+                                <div>
+                                    <label className="block text-xs font-semibold text-indigo-600 dark:text-indigo-400 mb-1">
+                                        Đối tác Quản Lý (Partner)
+                                    </label>
+                                    <select
+                                        value={editForm.parent_id}
+                                        onChange={(e) => setEditForm(prev => ({ ...prev, parent_id: e.target.value }))}
+                                        className="w-full px-3.5 py-2 bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-800 rounded-xl text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer"
+                                    >
+                                        <option value="">-- Trực tiếp (Không qua Partner) --</option>
+                                        {data?.partners.map(p => (
+                                            <option key={p.id} value={p.id}>
+                                                {p.name} ({p.code || 'N/A'})
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+
+                            {/* Gán lại đơn vị cha (Partner -> Distributor) */}
+                            {editingOrg.role_type === 'partner' && (
+                                <div>
+                                    <label className="block text-xs font-semibold text-amber-600 dark:text-amber-400 mb-1">
+                                        Nhà Phân Phối Trực Thuộc (Distributor)
+                                    </label>
+                                    <select
+                                        value={editForm.parent_id}
+                                        onChange={(e) => setEditForm(prev => ({ ...prev, parent_id: e.target.value }))}
+                                        className="w-full px-3.5 py-2 bg-amber-50/40 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-xl text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/20 cursor-pointer"
+                                    >
+                                        <option value="">-- Trực tiếp Master --</option>
+                                        {data?.distributors.map(d => (
+                                            <option key={d.id} value={d.id}>
+                                                {d.name} ({d.code || 'N/A'})
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+
+                            {/* KHU VỰC KÉT SẮT FERNET VAULT CÓ SKELETON */}
+                            <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200/80 dark:border-slate-800 space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-white">
+                                        <KeyRound className="w-4 h-4 text-emerald-500" />
+                                        <span>Thông tin Đăng Nhập & Két Sắt</span>
+                                    </div>
+                                    {isLoadingPassword && (
+                                        <span className="text-[10px] text-indigo-500 animate-pulse font-mono flex items-center gap-1">
+                                            <RefreshCw className="w-3 h-3 animate-spin" />
+                                            Đang giải mã két sắt...
+                                        </span>
+                                    )}
+                                </div>
+
+                                <div>
+                                    <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                                        Tên đăng nhập / Email
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={editForm.username}
+                                        onChange={(e) => setEditForm(prev => ({ ...prev, username: e.target.value }))}
+                                        className="w-full px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                                        placeholder="VD: school_admin..."
+                                    />
+                                </div>
+
+                                <div>
+                                    <div className="flex items-center justify-between mb-1">
+                                        <label className="text-[11px] font-semibold text-slate-500">
+                                            Mật khẩu
                                         </label>
-                                        <select
-                                            value={editForm.parent_id}
-                                            onChange={(e) => setEditForm(prev => ({ ...prev, parent_id: e.target.value }))}
-                                            className="w-full px-3.5 py-2 bg-amber-50/40 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-xl text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/20 cursor-pointer"
-                                        >
-                                            <option value="">-- Trực tiếp Master --</option>
-                                            {data?.distributors.map(d => (
-                                                <option key={d.id} value={d.id}>
-                                                    {d.name} ({d.code || 'N/A'})
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                )}
-
-                                {/* KHU VỰC KÉT SẮT FERNET VAULT (XEM ĐƯỢC MẬT KHẨU GỐC) */}
-                                <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200/80 dark:border-slate-800 space-y-3">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-white">
-                                            <KeyRound className="w-4 h-4 text-emerald-500" />
-                                            <span>Thông tin Đăng Nhập</span>
-                                        </div>
-                                        {isLoadingPassword && (
-                                            <span className="text-[10px] text-indigo-500 animate-pulse font-mono">
-                                                Đang giải mã mật khẩu...
-                                            </span>
-                                        )}
                                     </div>
 
-                                    <div>
-                                        <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                                            Tên đăng nhập/Email
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={editForm.username}
-                                            onChange={(e) => setEditForm(prev => ({ ...prev, username: e.target.value }))}
-                                            className="w-full px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-                                            placeholder="VD: school_admin..."
-                                        />
-                                    </div>
-
-                                    <div>
-                                        <div className="flex items-center justify-between mb-1">
-                                            <label className="text-[11px] font-semibold text-slate-500">
-                                                Mật khẩu
-                                            </label>
-                                        </div>
-
+                                    {/* 🌟 SKELETON SHIMMER KHI ĐANG GIẢI MÃ MẬT KHẨU */}
+                                    {isLoadingPassword ? (
+                                        <div className="h-9 w-full bg-slate-200 dark:bg-slate-800/80 rounded-lg animate-pulse border border-slate-200 dark:border-slate-700" />
+                                    ) : (
                                         <div className="relative">
                                             <input
                                                 type={showPassword ? 'text' : 'password'}
                                                 value={editForm.password}
                                                 onChange={(e) => setEditForm(prev => ({ ...prev, password: e.target.value }))}
                                                 className="w-full pl-3 pr-10 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-                                                placeholder={isLoadingPassword ? 'Đang nạp mật khẩu...' : '••••••••••••'}
+                                                placeholder="••••••••••••"
                                             />
                                             <button
                                                 type="button"
@@ -673,33 +1065,33 @@ export const HierarchyManagerPage: React.FC = () => {
                                                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                                             </button>
                                         </div>
-                                    </div>
+                                    )}
                                 </div>
+                            </div>
 
-                                {/* Modal Actions */}
-                                <div className="flex items-center justify-end gap-3 pt-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => setEditingOrg(null)}
-                                        className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-                                    >
-                                        Hủy
-                                    </button>
-                                    <button
-                                        type="submit"
-                                        disabled={isSubmitting}
-                                        className="flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl transition-all shadow-md shadow-indigo-500/20 disabled:opacity-50 active:scale-95 cursor-pointer"
-                                    >
-                                        <Check className="w-4 h-4" />
-                                        {isSubmitting ? 'Đang lưu...' : 'Lưu Thay Đổi'}
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>,
-                    document.body
-                )
-            }
+                            {/* Modal Actions */}
+                            <div className="flex items-center justify-end gap-3 pt-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setEditingOrg(null)}
+                                    className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                                >
+                                    Hủy
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={isSubmitting || isLoadingPassword}
+                                    className="flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl transition-all shadow-md shadow-indigo-500/20 disabled:opacity-50 active:scale-95 cursor-pointer"
+                                >
+                                    <Check className="w-4 h-4" />
+                                    {isSubmitting ? 'Đang lưu...' : 'Lưu Thay Đổi'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>,
+                document.body
+            )}
         </div>
     );
 };
