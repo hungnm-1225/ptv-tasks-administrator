@@ -17,6 +17,80 @@ from app.core.playwright_manager import acquire_playwright_slot
 
 logger = logging.getLogger(__name__)
 
+async def _get_or_steal_school_session(self, username: str, password: str, school_id: Optional[str] = None) -> Tuple[Dict[str, str], Dict[str, Any]]:
+        """Ưu tiên đọc session School tạm thời từ Supabase; chỉ mở Playwright khi chưa có hoặc hết hạn."""
+        from app.core.supabase import get_supabase_client
+        supabase = get_supabase_client()
+        clean_user = username.strip().lower()
+        
+        # 1. Thử tìm Session School đang lưu tạm trên Supabase (Zero Playwright - 10ms)
+        try:
+            query = supabase.table("workspace_active_sessions")\
+                .select("session_key, cookies, metadata")\
+                .eq("is_active", True)
+            
+            if school_id:
+                query = query.eq("session_key", f"school_{school_id}")
+            else:
+                query = query.ilike("session_key", "school_%")
+
+            res = query.execute()
+            if res.data:
+                for row in res.data:
+                    meta = row.get("metadata") or {}
+                    if not clean_user or meta.get("user", "").lower() == clean_user:
+                        cookies = row.get("cookies", {})
+                        identity = {
+                            "school_id": meta.get("school_id") or school_id or "10266",
+                            "partner_id": meta.get("partner_id") or "60",
+                            "username": username
+                        }
+                        logger.info(f"⚡ [Account Auth] Tái sử dụng Session School [{row.get('session_key')}] từ Supabase (Zero Playwright)!")
+                        return cookies, identity
+        except Exception as e:
+            logger.warning(f"⚠️ Không thể đọc session School từ Supabase: {e}")
+
+        # 2. Nếu chưa có: Mở Playwright bốc Session mới và LƯU TẠM vào Supabase
+        logger.info(f"🔑 [Account Auth] Mở Chromium đăng nhập School cho '{username}'...")
+        async with acquire_playwright_slot("School Auth Session", lane="admin"):
+            async with async_playwright() as p:
+                browser, context, page = await self._create_context(p)
+                try:
+                    is_ok, login_err = await self.login_role(page, username, password, "School")
+                    if not is_ok:
+                        raise RuntimeError(f"Đăng nhập School thất bại: {login_err}")
+
+                    wp_identity = await page.evaluate("""() => {
+                        const u = window.user || {};
+                        let localUser = {};
+                        try { localUser = JSON.parse(localStorage.getItem('user') || '{}'); } catch(e) {}
+                        return {
+                            school_id: u.school_id || localUser.school_id || '10266',
+                            partner_id: u.partner_id || localUser.partner_id || '60',
+                            username: u.username || localUser.username || ''
+                        };
+                    }""")
+
+                    cookies = await context.cookies()
+                    cookies_dict = {c["name"]: c["value"] for c in cookies}
+                    s_id = wp_identity.get("school_id", "10266")
+
+                    # LƯU TẠM VÀO SUPABASE ĐỂ CRONJOB 5 PHÚT DÙNG TRONG SUỐT 1 NGÀY CHỜ ĐỢI
+                    try:
+                        from app.services.session_keepalive_service import session_keepalive_service
+                        await session_keepalive_service.save_session_cookies(
+                            session_key=f"school_{s_id}",
+                            system_name=f"School Temp Session ({username})",
+                            cookies=cookies_dict,
+                            metadata={"school_id": s_id, "partner_id": wp_identity.get("partner_id"), "user": username}
+                        )
+                        logger.info(f"💾 [Account Auth] Đã lưu tạm session 'school_{s_id}' lên Supabase cho Cronjob dùng ngầm!")
+                    except Exception as s_err:
+                        logger.warning(f"⚠️ Lỗi lưu session school: {s_err}")
+
+                    return cookies_dict, wp_identity
+                finally:
+                    await browser.close()
 
 def is_status_done(status_val: Any) -> bool:
     """Nhận diện mã 1, '1' hoặc chữ Done/Completed/Success là hoàn thành."""
@@ -371,7 +445,7 @@ class WorkspaceAccountService(WorkspaceBaseService):
                 credentials.get("username", ""), 
                 credentials.get("password", "")
             )
-            school_id = identity.get("school_id") or credentials.get("school_id") or "10266"
+            school_id = identity.get("school_id") or credentials.get("school_id")
 
             async with httpx.AsyncClient(base_url=BASE_WORKSPACE_URL, cookies=cookies, timeout=25.0) as client:
                 # 2. Kiểm tra trạng thái Request
@@ -395,12 +469,24 @@ class WorkspaceAccountService(WorkspaceBaseService):
 
                 # 3. Khi đã Done: Xuất file kết quả & khôi phục Keycloak
                 result_path = await self._download_export_file_httpx(client, request_id, download_dir)
+
+                # 🧹 TỰ HỦY: XÓA SẠCH SESSION TẠM KHỎI SUPABASE SAU KHI BATCH HOÀN TẤT
+                try:
+                    from app.core.supabase import get_supabase_client
+                    supabase = get_supabase_client()
+                    supabase.table("workspace_active_sessions")\
+                        .delete()\
+                        .eq("session_key", f"school_{school_id}")\
+                        .execute()
+                    logger.info(f"🧹 [Auto-Cleanup] Đã dọn sạch session tạm 'school_{school_id}' trên Supabase!")
+                except Exception as del_err:
+                    logger.warning(f"⚠️ Không thể xóa session tạm school: {del_err}")
+
                 return {
                     "status": "completed",
                     "request_id": request_id,
                     "result_file_path": result_path
                 }
-
         except Exception as e:
             logger.error(f"❌ Lỗi check_and_export_batch_result: {e}")
             return {"status": "failed", "error": str(e)}

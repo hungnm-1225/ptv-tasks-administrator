@@ -556,6 +556,99 @@ class UnifiedSessionKeepAliveService:
         logger.info(f"✨ [KeepAlive] Đã hoàn tất giữ ấm toàn bộ 7 phân hệ trong {total_dur:.2f}s!")
         return summary
 
+    # =========================================================================
+    # 🔥 5. NGHI THỨC TÁI SINH TOÀN BỘ SESSION (ĐỘC QUYỀN - ZERO INTERRUPTION)
+    # =========================================================================
+    async def force_reseed_all_sessions(self) -> Dict[str, Any]:
+        """
+        Nghi thức Tái sinh Toàn bộ Session (Full System Session Rebirth):
+        - Khóa độc quyền qua heavy_operation_guard (chặn 100% cronjobs và Playwright khác).
+        - Xóa sạch RAM Cache _MEMORY_SESSIONS.
+        - Quét Supabase, xóa trắng cookies của tất cả session_key hiện tại để thanh tẩy.
+        - Gieo mầm tuần tự từ đầu cho toàn bộ 7 phân hệ (1 Chromium/lần, bảo vệ 512MB RAM).
+        - Ping kiểm tra giữ ấm đồng loạt và trả về báo cáo.
+        """
+        from app.core.playwright_manager import heavy_operation_guard
+
+        logger.info("🔥 [REBIRTH] BẮT ĐẦU NGHI THỨC TÁI SINH TOÀN BỘ SESSION HỆ THỐNG!")
+        t0 = time.perf_counter()
+
+        async with heavy_operation_guard("Tái sinh Session Toàn Hệ Thống"):
+            # 1. Xóa sạch RAM Cache
+            global _MEMORY_SESSIONS
+            _MEMORY_SESSIONS.clear()
+            logger.info("🧹 [REBIRTH 1/4] Đã xóa sạch _MEMORY_SESSIONS trong RAM.")
+
+            # 2. Quét danh sách session_key hiện có trên Supabase & Xóa trắng cookie
+            existing_keys = []
+            try:
+                res = self.supabase.table("workspace_active_sessions")\
+                    .select("session_key")\
+                    .execute()
+                if res.data:
+                    existing_keys = [r["session_key"] for r in res.data]
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    # Đánh dấu trạng thái đang tái sinh và xóa trắng cookies cũ
+                    self.supabase.table("workspace_active_sessions")\
+                        .update({
+                            "cookies": {},
+                            "is_active": False,
+                            "last_ping_status": "REBIRTHING",
+                            "updated_at": now_iso
+                        })\
+                        .in_("session_key", existing_keys)\
+                        .execute()
+                    logger.info(f"🧹 [REBIRTH 2/4] Đã xóa trắng cookies của {len(existing_keys)} keys trên Supabase.")
+            except Exception as wipe_err:
+                logger.warning(f"⚠️ Lỗi xóa cookies trên Supabase: {wipe_err}")
+
+            # 3. Gieo mầm tuần tự từng phân hệ (Chỉ 1 Chromium/lần -> đóng ngay)
+            logger.info("🌱 [REBIRTH 3/4] Bắt đầu gieo mầm tuần tự từng phân hệ...")
+            
+            # 3.1. Sales Admin & Workspace Admin
+            logger.info("👉 [1/6] Tái sinh Workspace Admins...")
+            await self._seed_workspace_admins()
+            gc.collect()
+
+            # 3.2. osTicket
+            logger.info("👉 [2/6] Tái sinh osTicket...")
+            await self._seed_osticket()
+            gc.collect()
+
+            # 3.3. GitBucket
+            logger.info("👉 [3/6] Tái sinh Pythaverse Git...")
+            await self._seed_git()
+            gc.collect()
+
+            # 3.4. LMS Moodle
+            logger.info("👉 [4/6] Tái sinh PLearn LMS...")
+            await self._seed_lms()
+            gc.collect()
+
+            # 3.5. Keycloak Admin Console
+            logger.info("👉 [5/6] Tái sinh Keycloak Console...")
+            await self._seed_keycloak()
+            gc.collect()
+
+            # 3.6. Tất cả Master Distributors
+            logger.info("👉 [6/6] Tái sinh Master Distributors...")
+            await self._seed_all_distributors()
+            gc.collect()
+
+            # 4. Kích hoạt ping giữ ấm và kiểm tra lại toàn bộ (< 1s)
+            logger.info("⚡ [REBIRTH 4/4] Bắn ping HTTPX kiểm định toàn bộ...")
+            ping_summary = await self.keep_alive_all_sessions()
+            
+            elapsed = round(time.perf_counter() - t0, 2)
+            logger.info(f"🎉 [REBIRTH HOÀN TẤT] Tái sinh toàn bộ session thành công trong {elapsed}s!")
+
+            return {
+                "status": "success",
+                "elapsed_seconds": elapsed,
+                "reseeded_keys": existing_keys,
+                "ping_summary": ping_summary,
+                "message": f"Đã tái sinh thành công {len(existing_keys)} Sessions trong {elapsed}s!"
+            }
 
 session_keepalive_service = UnifiedSessionKeepAliveService()
 

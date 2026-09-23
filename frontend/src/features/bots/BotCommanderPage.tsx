@@ -267,6 +267,32 @@ export const BotCommanderPage: React.FC = () => {
     toast.info('Đã xóa sạch nhật ký terminal');
   };
 
+  const [isRebirthing, setIsRebirthing] = useState<boolean>(false);
+
+  const handleRegenerateAllSessions = async () => {
+    const confirmed = window.confirm(
+      "⚠️ CẢNH BÁO TÁI SINH TOÀN HỆ THỐNG:\n\n" +
+      "• Tác vụ này sẽ XÓA TRẮNG toàn bộ Cookies cũ trên Supabase.\n" +
+      "• Tuần tự đăng nhập lại 7 phân hệ (Sales Admin, osTicket, Git, LMS, Keycloak, Distributors).\n" +
+      "• Tất cả cronjobs & tác vụ ngầm sẽ bị chặn để nhường 100% RAM 512MB cho tiến trình này.\n\n" +
+      "Thời gian dự kiến: ~60 - 90 giây.\n" +
+      "Bạn có chắc chắn muốn thực hiện ngay bây giờ?"
+    );
+    if (!confirmed) return;
+
+    setIsRebirthing(true);
+    try {
+      const res = await fetchApi<{ message?: string }>('/bots/regenerate-all-sessions', { method: 'POST' });
+      toast.success(res?.message || 'Đã kích hoạt Tái Sinh Toàn Bộ Session ngầm thành công!');
+      toast.info('Hãy theo dõi Live Execution Terminal bên dưới để xem tiến trình từng phân hệ!');
+      setTimeout(() => loadBotData(false, false), 2000);
+    } catch (err) {
+      toast.error('Lỗi tái sinh session: ' + (err as Error).message);
+    } finally {
+      setIsRebirthing(false);
+    }
+  };
+
   // 🔍 BÓC TÁCH TASK ID TỪ LOG LINE
   const parseLogLineDetails = (log: BotTerminalLog) => {
     const text = `${log.raw_line || ''} ${log.message || ''}`;
@@ -344,6 +370,17 @@ export const BotCommanderPage: React.FC = () => {
           >
             <Sparkles className={`w-3.5 h-3.5 ${purgingRam ? 'animate-spin' : ''}`} />
             <span>{purgingRam ? 'Đang dọn RAM...' : 'Dọn RAM (512MB)'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleRegenerateAllSessions}
+            disabled={isRebirthing}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/40 border border-rose-200/80 dark:border-rose-800/60 rounded-xl text-xs font-semibold text-rose-700 dark:text-rose-300 transition-all shadow-xs cursor-pointer"
+            title="Xóa trắng cookies cũ và đăng nhập lại toàn bộ 7 phân hệ, khóa độc quyền tài nguyên Render"
+          >
+            <RotateCw className={`w-3.5 h-3.5 ${isRebirthing ? 'animate-spin' : ''}`} />
+            <span>{isRebirthing ? 'Đang Tái Sinh...' : 'Tái Sinh Sessions'}</span>
           </button>
 
           <button

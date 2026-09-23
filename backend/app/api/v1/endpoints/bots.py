@@ -321,6 +321,46 @@ async def purge_system_memory():
         "timestamp": now_str
     }
 
+# =============================================================================
+# 🔥 API 4: TÁI SINH TOÀN BỘ SESSIONS (KHÓA ĐỘC QUYỀN - CIRCUIT BREAKER)
+# =============================================================================
+@router.post("/regenerate-all-sessions")
+async def trigger_regenerate_all_sessions(background_tasks: BackgroundTasks):
+    """
+    Kích hoạt Tái Sinh Toàn Bộ Session (Full Session Rebirth):
+    - Chặn tất cả cronjobs và tác vụ khác qua heavy_operation_guard.
+    - Xóa trắng cookies cũ trên Supabase để thanh tẩy dữ liệu rác.
+    - Đăng nhập tuần tự Playwright bốc lại phiên mới tinh cho 7 phân hệ.
+    """
+    from app.services.session_keepalive_service import session_keepalive_service
+    from app.core.playwright_manager import is_heavy_operation_running
+
+    is_running, op_name = is_heavy_operation_running()
+    if is_running:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Hệ thống đang bận thực thi tác vụ VIP: '{op_name}'. Vui lòng đợi trong giây lát!"
+        )
+
+    now_str = format_vn_time(None)
+    bots_cache.invalidate()
+
+    async def run_rebirth_task():
+        try:
+            await session_keepalive_service.force_reseed_all_sessions()
+            bots_cache.invalidate()
+        except Exception as e:
+            logger.error(f"❌ [SessionRebirthError] Lỗi khi tái sinh session: {e}", exc_info=True)
+        finally:
+            gc.collect()
+
+    background_tasks.add_task(run_rebirth_task)
+
+    return {
+        "status": "queued",
+        "message": f"[{now_str}] Đã kích hoạt luồng Tái Sinh Toàn Bộ Session ngầm! Hệ thống đã bật Circuit Breaker cách ly an toàn.",
+        "timestamp": now_str
+    }
 
 @router.post("/{task_id}/retry")
 async def retry_bot_task(task_id: str, background_tasks: BackgroundTasks):
