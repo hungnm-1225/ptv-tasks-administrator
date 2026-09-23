@@ -137,7 +137,7 @@ class AIEngine:
                     response = model.generate_content(
                         prompt,
                         generation_config={"response_mime_type": "application/json"},
-                        request_options={"timeout": 25.0}
+                        request_options={"timeout": 60.0}  # << TĂNG LÊN 60.0s CHỐNG LỖI 504 DEADLINE
                     )
                     if response and response.text:
                         raw_text = response.text.strip()
@@ -151,6 +151,7 @@ class AIEngine:
                 except Exception as e:
                     err_str = str(e).lower()
                     is_rate_limit = any(term in err_str for term in ["429", "quota", "resource_exhausted", "limit"])
+                    is_timeout = any(term in err_str for term in ["504", "deadline", "timeout", "timed out"])
                     
                     if is_rate_limit:
                         logger.warning(f"⚠️ Model [{model_name}] với Key #{key_idx + 1} dính Quota 429. Đang chuyển sang dự phòng...")
@@ -159,6 +160,9 @@ class AIEngine:
                             continue
                         else:
                             break
+                    elif is_timeout:
+                        logger.warning(f"⏳ Model [{model_name}] bị Timeout 504 (>60s). Đang chuyển ngay sang model kế tiếp...")
+                        break  # Chuyển sang model tiếp theo trong danh sách GEMINI_MODELS
                     else:
                         logger.warning(f"⚠️ Model [{model_name}] gặp lỗi khác: {str(e)[:80]}")
                         break
@@ -296,11 +300,25 @@ class AIEngine:
             catalog_context_str = "(Không có danh mục khóa học LMS trong bộ nhớ)"
 
         # Định dạng dữ liệu đã bóc tách từ file / text
-        summary_clean = {k: v for k, v in excel_data.items() if k != "catalog_reference"}
-        if summary_clean:
-            excel_info_str = json.dumps(summary_clean, ensure_ascii=False, indent=2)
+        if excel_data and any(k != "catalog_reference" for k in excel_data.keys()):
+            slim_excel = {
+                "is_cof": excel_data.get("is_cof", False),
+                "filename": excel_data.get("filename"),
+                "school_detected": excel_data.get("school_detected"),
+                "courses_detected": excel_data.get("courses_detected", []),
+                "classes_detected": excel_data.get("classes_detected", []),
+                "suggested_roles": excel_data.get("suggested_roles", []),
+                "repo_urls": excel_data.get("repo_urls", []),
+                "total_identifiers": excel_data.get("total_identifiers", 0),
+                "identifiers_sample": excel_data.get("identifiers", [])[:15],  # Chỉ lấy 15 đại diện
+                "total_accounts": excel_data.get("total_accounts", 0),
+                "sample_accounts": excel_data.get("account_profiles", [])[:5], # Chỉ lấy 5 mẫu đại diện
+                "notice": excel_data.get("notice")
+            }
+            excel_info_str = json.dumps(slim_excel, ensure_ascii=False, indent=2)
         else:
             excel_info_str = "(Không có tệp đính kèm hoặc dữ liệu bóc tách thô)"
+
 
         # =========================================================================
         # 4. KHỞI TẠO PROMPT TỪ INTENT_EXTRACTION_V1.TXT
