@@ -572,6 +572,7 @@ class GitPlaywrightService:
 
         # 4. Gom danh sách thống kê
         all_added = list(dict.fromkeys([u for r in all_results for u in r.get("added", [])]))
+        all_updated = list(dict.fromkeys([u for r in all_results for u in r.get("updated", [])]))  # ✨ Gom nhóm cập nhật
         all_already = list(dict.fromkeys([u for r in all_results for u in r.get("already_exists", [])]))
         all_removed = list(dict.fromkeys([u for r in all_results for u in r.get("removed", [])]))
         all_errors = [e for r in all_results for e in r.get("errors", [])]
@@ -597,7 +598,7 @@ class GitPlaywrightService:
                 if matched_users:
                     report_lines.append(f"{role_title}: {', '.join(matched_users)}")
 
-        # Tóm tắt từng Repo 1 dòng
+        # Tóm tắt từng Repo 1 dòng chuẩn xác 3 trạng thái
         for r in all_results:
             short_name = extract_short_repo_name(r.get("repo_url", ""))
             if is_remove_flow:
@@ -606,8 +607,9 @@ class GitPlaywrightService:
                 report_lines.append(f"📁 REPO: {short_name} [Đã gỡ ({rem_cnt}) | Không tìm thấy ({alr_cnt})]")
             else:
                 add_cnt = len(r.get("added", []))
+                upd_cnt = len(r.get("updated", []))
                 alr_cnt = len(r.get("already_exists", []))
-                report_lines.append(f"📁 REPO: {short_name} [Thêm mới ({add_cnt}) | Có sẵn ({alr_cnt})]")
+                report_lines.append(f"📁 REPO: {short_name} [Thêm mới ({add_cnt}) | Cập nhật ({upd_cnt}) | Có sẵn ({alr_cnt})]")
 
         # Báo lỗi có chọn lọc (Chỉ hiện khi có lỗi)
         if all_not_logged_in:
@@ -620,8 +622,21 @@ class GitPlaywrightService:
             for err_item in all_errors:
                 report_lines.append(f"Lỗi repo ⛔: {err_item.get('error')}")
 
-        overall_status = "success" if (all_added or all_already or all_removed) else "failed"
-        short_summary_msg = f"Hoàn tất {len(repos_plan)} Repos: {len(all_added)} Thêm, {len(all_removed)} Gỡ, {len(all_already)} Có sẵn."
+        overall_status = "success" if (all_added or all_updated or all_already or all_removed) else "failed"
+
+        # Sinh tóm tắt linh hoạt chỉ hiện các nhóm có số lượng > 0
+        summary_parts = []
+        if all_added:
+            summary_parts.append(f"{len(all_added)} Thêm mới")
+        if all_updated:
+            summary_parts.append(f"{len(all_updated)} Cập nhật")
+        if all_removed:
+            summary_parts.append(f"{len(all_removed)} Gỡ")
+        if all_already:
+            summary_parts.append(f"{len(all_already)} Có sẵn")
+
+        counts_str = ", ".join(summary_parts) if summary_parts else "0 Thay đổi"
+        short_summary_msg = f"Hoàn tất {len(repos_plan)} Repos: {counts_str}."
 
         return {
             "status": overall_status,
@@ -629,6 +644,7 @@ class GitPlaywrightService:
             "execution_logs": "\n".join(report_lines),
             "breakdown": {
                 "added": all_added,
+                "updated": all_updated,  # ✨ Cung cấp dữ liệu sạch cho Frontend/Audit
                 "already_exists": all_already,
                 "removed": all_removed,
                 "not_logged_in_git": all_not_logged_in,

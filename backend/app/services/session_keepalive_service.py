@@ -535,7 +535,7 @@ class UnifiedSessionKeepAliveService:
                 self._ping_osticket(client)
             ]
             
-            # 2.1. Bắt riêng danh sách Master Distributors
+            # Bắt riêng danh sách Master Distributors
             try:
                 from app.services.workspace.workspace_scanner_service import workspace_scanner_service
                 all_dists = await workspace_scanner_service.get_all_distributor_credentials()
@@ -547,13 +547,32 @@ class UnifiedSessionKeepAliveService:
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
         summary = []
+        expired_systems = []
         for r in results:
             if isinstance(r, dict):
                 summary.append(r)
-                logger.info(f"   🟢 {r.get('system')}: {r.get('status')} ({r.get('latency_ms', 0)}ms)")
+                sys_name = r.get("system", "")
+                st = r.get("status")
+                logger.info(f"   🟢 {sys_name}: {st} ({r.get('latency_ms', 0)}ms)")
+                if st in ["EXPIRED", "NO_SESSION"]:
+                    expired_systems.append(sys_name)
+
+        # 🎯 3. AUTO-HEALING: NẾU PHÁT HIỆN CON NÀO HẾT HẠN THÌ TỰ ĐỘNG BỐC MỚI NGAY DƯỚI NỀN!
+        if expired_systems:
+            logger.warning(f"⚠️ Phát hiện {len(expired_systems)} phân hệ hết hạn: {expired_systems}. Đang tự động gieo mầm lại dưới nền...")
+            if any("Git" in s for s in expired_systems):
+                await self._seed_git()
+            if any("LMS" in s for s in expired_systems):
+                await self._seed_lms()
+            if any("Workspace" in s or "Sales Admin" in s for s in expired_systems):
+                await self._seed_workspace_admins()
+            if any("osTicket" in s for s in expired_systems):
+                await self._seed_osticket()
+            if any("Distributor" in s for s in expired_systems):
+                await self._seed_all_distributors()
 
         total_dur = time.perf_counter() - start_all
-        logger.info(f"✨ [KeepAlive] Đã hoàn tất giữ ấm toàn bộ 7 phân hệ trong {total_dur:.2f}s!")
+        logger.info(f"✨ [KeepAlive] Đã hoàn tất giữ ấm & bảo trì toàn bộ 7 phân hệ trong {total_dur:.2f}s!")
         return summary
 
     # =========================================================================

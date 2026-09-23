@@ -235,38 +235,36 @@ class WorkspaceScannerService(WorkspaceBaseService):
         }
 
     # =========================================================================
-    # ⚡ VŨ KHÍ 1: QUẢN LÝ PHIÊN IN-MEMORY RAM CACHE (BỎ QUA 90% PLAYWRIGHT)
+    # ⚡ VŨ KHÍ 1: TẬN DỤNG SESSION SUPABASE (ZERO PLAYWRIGHT CHO SCANNER)
     # =========================================================================
     async def _get_distributor_session(self, dist: Dict[str, Any]) -> Tuple[Dict[str, str], str]:
         """
-        Lấy session của Distributor:
-        - Ưu tiên đọc RAM Cache `ws_cache`. Bắn ping test thử 1 request xem cookie còn sống không.
-        - Nếu còn sống ➔ Dùng luôn, 0 giây Chromium!
-        - Nếu hết hạn hoặc chưa có ➔ Mở Playwright 5s đăng nhập, lưu cache 3h rồi đóng Chromium ngay.
+        Lấy session Distributor:
+        1. Đọc từ Supabase workspace_active_sessions (0ms - Bỏ qua 100% Chromium).
+        2. Bắn test request kiểm tra. Nếu sống -> Dùng luôn!
+        3. Chỉ mở Playwright khi trên Supabase chưa có hoặc session chết thật.
         """
         dist_code = str(dist.get("distributor_code", ""))
-        cache_key = f"dist_session_{dist_code}"
+        dist_name = dist.get("distributor_name", "")
+        session_key = f"distributor_{dist_code}"
 
+        # 🎯 1. ƯU TIÊN ĐỌC TỪ SUPABASE KEEPALIVE TRƯỚC (BỎ QUA PLAYWRIGHT HOÀN TOÀN)
         try:
-            from app.api.v1.endpoints.workspace import ws_cache
-            cached_session = ws_cache.get(cache_key)
-            if cached_session and isinstance(cached_session, dict):
-                cookies = cached_session.get("cookies", {})
-                dist_id = cached_session.get("dist_id", dist_code)
-
-                # Bắn kiểm thử 1 ping xem session còn hiệu lực không
-                test_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/distributor_workspace_v3/api/order_sale/getListOrder.php?distributor_id={dist_id}"
-                async with httpx.AsyncClient(base_url=BASE_WORKSPACE_URL, cookies=cookies, timeout=8.0) as test_client:
+            from app.services.session_keepalive_service import session_keepalive_service
+            db_cookies = await session_keepalive_service.get_session_cookies(session_key)
+            if db_cookies:
+                # Test nhanh 1 request xem cookie còn sống không
+                test_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/distributor_workspace_v3/api/order_sale/getListOrder.php?distributor_id={dist_code}"
+                async with httpx.AsyncClient(base_url=BASE_WORKSPACE_URL, cookies=db_cookies, timeout=6.0) as test_client:
                     res = await test_client.get(test_url)
                     if res.status_code == 200 and isinstance(res.json(), dict) and "data" in res.json():
-                        logger.info(f"⚡ [CACHE HIT] Session Distributor [{dist.get('distributor_name')}] còn sống! Bỏ qua Chromium (0s)!")
-                        return cookies, dist_id
+                        logger.info(f"⚡ [SUPABASE HIT] Session Distributor [{dist_name}] ({dist_code}) cực ấm! Bỏ qua Chromium (0s)!")
+                        return db_cookies, dist_code
+        except Exception as db_e:
+            logger.debug(f"Không thể kiểm tra Supabase session cho {dist_code}: {db_e}")
 
-        except Exception as cache_e:
-            logger.debug(f"Không thể kiểm tra cache session: {cache_e}")
-
-        # Nếu chưa có cache hoặc session chết ➔ Mở Chromium đăng nhập
-        logger.info(f"🔑 [CACHE MISS / EXPIRED] Khởi động Playwright 5s lấy session mới cho: [{dist.get('distributor_name')}]...")
+        # 🎯 2. NẾU SUPABASE CHƯA CÓ / HẾT HẠN THẬT THÌ MỚI BỐC MỚI
+        logger.info(f"🔑 [CACHE MISS / EXPIRED] Khởi động Playwright lấy session mới cho: [{dist_name}]...")
         async with acquire_playwright_slot(f"Distributor Auth ({dist_code})", timeout=60.0, lane="cron"):
             async with async_playwright() as p:
                 browser, context, page = await self._create_context(p)
@@ -285,23 +283,19 @@ class WorkspaceScannerService(WorkspaceBaseService):
                     cookies_list = await context.cookies()
                     cookies_dict = {c["name"]: c["value"] for c in cookies_list}
 
-                    # Lưu vào RAM Cache 3 tiếng
-                    try:
-                        from app.api.v1.endpoints.workspace import ws_cache
-                        ws_cache.set(cache_key, {"cookies": cookies_dict, "dist_id": str(real_dist_id)}, ttl_seconds=DISTRIBUTOR_SESSION_TTL_SECONDS)
-                        logger.info(f"💾 Đã lưu session Distributor [{dist_code}] vào RAM Cache (TTL: 3h).")
-                    except Exception:
-                        pass
+                    # Lưu ngược lại Supabase để lần sau không bao giờ phải login lại nữa
                     try:
                         from app.services.session_keepalive_service import session_keepalive_service
                         await session_keepalive_service.save_session_cookies(
-                            session_key=f"distributor_{dist_code}",
-                            system_name=f"Distributor {dist.get('distributor_name', '')} ({dist_code})",
+                            session_key=session_key,
+                            system_name=f"Distributor {dist_name} ({dist_code})",
                             cookies=cookies_dict,
-                            metadata={"dist_id": str(real_dist_id), "user": dist["username"]}
+                            metadata={"dist_id": str(real_dist_id), "distributor_code": dist_code, "user": dist["username"]}
                         )
+                        logger.info(f"💾 Đã lưu session Distributor [{dist_code}] vào Supabase.")
                     except Exception as up_err:
                         logger.warning(f"⚠️ Không thể lưu session Distributor lên Supabase: {up_err}")
+
                     return cookies_dict, str(real_dist_id)
 
                 finally:
