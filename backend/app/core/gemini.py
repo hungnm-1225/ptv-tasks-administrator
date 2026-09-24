@@ -135,7 +135,7 @@ class AIEngine:
                     response = model.generate_content(
                         contents,
                         generation_config={"response_mime_type": "application/json"},
-                        request_options={"timeout": 60.0}
+                        request_options={"timeout": 90.0}
                     )
                     if response and response.text:
                         raw_text = response.text.strip()
