@@ -208,7 +208,13 @@ class AIEngine:
         prompt_content = parsed_thread.compact_prompt_context if parsed_thread.is_thread else (raw_content[:20000] if raw_content else "(Trống)")
 
         if self.summary_prompt_tpl:
-            prompt = self.summary_prompt_tpl.format(source=source, subject=subject, full_content=prompt_content)
+            prompt = self.summary_prompt_tpl
+            for ph, val in {
+                "{source}": str(source or ""),
+                "{subject}": str(subject or ""),
+                "{full_content}": str(prompt_content or "")
+            }.items():
+                prompt = prompt.replace(ph, val)
         else:
             prompt = f"Tóm tắt: {subject}\n{prompt_content}"
 
@@ -326,13 +332,16 @@ class AIEngine:
         ai_summary_context = f"[BẢN TÓM TẮT Ý ĐỊNH ĐÃ TINH CHẾ TỪ HỆ THỐNG]:\n{ai_summary}\n" if ai_summary else ""
 
         if self.intent_prompt_tpl:
-            prompt = self.intent_prompt_tpl.format(
-                subject=subject,
-                sender_email=sender_email or "Không rõ",
-                catalog_context_str=catalog_context_str,
-                excel_info_str=excel_info_str,
-                full_content=f"{ai_summary_context}\n[NỘI DUNG CHI TIẾT]:\n{full_content}"
-            )
+            prompt = self.intent_prompt_tpl
+            replacements = {
+                "{subject}": str(subject or ""),
+                "{sender_email}": str(sender_email or "Không rõ"),
+                "{catalog_context_str}": str(catalog_context_str or ""),
+                "{excel_info_str}": str(excel_info_str or ""),
+                "{full_content}": str(full_content or "")
+            }
+            for ph, val in replacements.items():
+                prompt = prompt.replace(ph, val)
         else:
             # Fallback nếu file prompt bị lỗi đọc
             prompt = f"""Bạn là Senior Automation Architect. Bóc tách sự thật vận hành:
