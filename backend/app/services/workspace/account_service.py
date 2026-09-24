@@ -41,8 +41,8 @@ async def _get_or_steal_school_session(self, username: str, password: str, schoo
                     if not clean_user or meta.get("user", "").lower() == clean_user:
                         cookies = row.get("cookies", {})
                         identity = {
-                            "school_id": meta.get("school_id") or school_id or "10266",
-                            "partner_id": meta.get("partner_id") or "60",
+                            "school_id": meta.get("school_id") or school_id,
+                            "partner_id": meta.get("partner_id"),
                             "username": username
                         }
                         logger.info(f"⚡ [Account Auth] Tái sử dụng Session School [{row.get('session_key')}] từ Supabase (Zero Playwright)!")
@@ -65,15 +65,15 @@ async def _get_or_steal_school_session(self, username: str, password: str, schoo
                         let localUser = {};
                         try { localUser = JSON.parse(localStorage.getItem('user') || '{}'); } catch(e) {}
                         return {
-                            school_id: u.school_id || localUser.school_id || '10266',
-                            partner_id: u.partner_id || localUser.partner_id || '60',
+                            school_id: u.school_id || localUser.school_id,
+                            partner_id: u.partner_id || localUser.partner_id,
                             username: u.username || localUser.username || ''
                         };
                     }""")
 
                     cookies = await context.cookies()
                     cookies_dict = {c["name"]: c["value"] for c in cookies}
-                    s_id = wp_identity.get("school_id", "10266")
+                    s_id = wp_identity.get("school_id")
 
                     # LƯU TẠM VÀO SUPABASE ĐỂ CRONJOB 5 PHÚT DÙNG TRONG SUỐT 1 NGÀY CHỜ ĐỢI
                     try:
@@ -189,8 +189,8 @@ class WorkspaceAccountService(WorkspaceBaseService):
                         let localUser = {};
                         try { localUser = JSON.parse(localStorage.getItem('user') || '{}'); } catch(e) {}
                         return {
-                            school_id: u.school_id || localUser.school_id || '10266',
-                            partner_id: u.partner_id || localUser.partner_id || '60',
+                            school_id: u.school_id || localUser.school_id || '',
+                            partner_id: u.partner_id || localUser.partner_id || '',
                             username: u.username || localUser.username || ''
                         };
                     }""")
@@ -341,8 +341,8 @@ class WorkspaceAccountService(WorkspaceBaseService):
                 credentials.get("username", ""), 
                 credentials.get("password", "")
             )
-            school_id = identity.get("school_id") or "10266"
-            partner_id = identity.get("partner_id") or "60"
+            school_id = identity.get("school_id")
+            partner_id = identity.get("partner_id")
 
             # 2. Parse file Excel trực tiếp bằng Python
             accounts = self._parse_excel_accounts(upload_file_path)

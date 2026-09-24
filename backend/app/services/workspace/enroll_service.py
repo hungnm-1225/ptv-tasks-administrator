@@ -89,10 +89,10 @@ class WorkspaceEnrollService(WorkspaceBaseService):
                     let localUser = {};
                     try { localUser = JSON.parse(localStorage.getItem('user') || '{}'); } catch(e) {}
                     return {
-                        school_id: u.school_id || localUser.school_id || '10266'
+                        school_id: u.school_id || localUser.school_id || ''
                     };
                 }""")
-                school_id = str(wp_identity.get("school_id") or "10266")
+                school_id = str(wp_identity.get("school_id") or "")
 
                 cookies = await context.cookies()
                 cookies_dict = {c["name"]: c["value"] for c in cookies}

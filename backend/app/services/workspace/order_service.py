@@ -312,7 +312,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                 credentials.get("password", ""), 
                 "School"
             )
-            school_id = identity.get("school_id") or "10266"
+            school_id = identity.get("school_id")
 
             courses = order_data.get("courses", [])
             if not courses:
@@ -397,7 +397,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                 credentials.get("password", ""), 
                 "Partner"
             )
-            partner_id = identity.get("partner_id") or "60"
+            partner_id = identity.get("partner_id")
 
             clean_num_match = re.search(r"\d+$", str(order_identifier))
             num_order_id = clean_num_match.group(0) if clean_num_match else str(order_identifier)
@@ -593,7 +593,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
     async def fetch_partner_pending_school_orders(self, credentials: Dict[str, str]) -> Dict[str, Any]:
         try:
             cookies, identity = await self._steal_role_session(credentials.get("username", ""), credentials.get("password", ""), "Partner")
-            p_id = identity.get("partner_id") or "60"
+            p_id = identity.get("partner_id")
             url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/partner_workspace_v3/api/orders_management/getListOrder.php?partner_id={p_id}"
             async with httpx.AsyncClient(base_url=BASE_WORKSPACE_URL, cookies=cookies, timeout=20.0) as client:
                 res = await client.get(url)

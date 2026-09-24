@@ -101,7 +101,7 @@ class WorkspaceContractService(WorkspaceBaseService):
         """Partner tạo PRT Contract hỗ trợ đa khóa học."""
         try:
             cookies, identity = await self._steal_role_session(credentials.get("username", ""), credentials.get("password", ""), "Partner")
-            partner_id = identity.get("partner_id") or "60"
+            partner_id = identity.get("partner_id")
 
             courses = contract_data.get("courses", [])
             if not courses:
@@ -163,8 +163,8 @@ class WorkspaceContractService(WorkspaceBaseService):
         auto_create_dst_if_short: bool = True,
         courses_needed: Optional[List[Dict[str, Any]]] = None,
         note: Optional[str] = None,
-        origin_order_code: Optional[str] = None,  # 🎯 Mã Order trường học gốc
-        school_name: Optional[str] = None         # 🎯 Tên trường học gốc
+        origin_order_code: Optional[str] = None, 
+        school_name: Optional[str] = None
     ) -> Dict[str, Any]:
         """Distributor duyệt PRT Contract qua Direct API (Tạo DST bù cho tất cả các môn thiếu)."""
         try:
