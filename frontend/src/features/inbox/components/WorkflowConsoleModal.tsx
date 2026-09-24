@@ -743,7 +743,7 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
                                     <WorkflowValidationPanel
                                         validation={validationResult}
                                         isValidating={workflowValidating}
-                                        isSchoolResolved={!!activeWorkflow.ai_analysis?.detected_school}
+                                        isSchoolResolved={activeWorkflow.ai_analysis?.school_required === false || !!activeWorkflow.ai_analysis?.detected_school}
                                         totalSteps={(activeWorkflow.steps || []).length}
                                     />
                                 </div>

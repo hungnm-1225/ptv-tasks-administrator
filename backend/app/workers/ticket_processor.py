@@ -103,22 +103,23 @@ def create_or_get_ticket_revision(
 def get_catalog_context(supabase) -> List[Dict[str, Any]]:
     """
     Lấy danh mục các khóa học LMS kèm Git Repos liên kết để nạp vào trí tuệ AI.
-    Giúp Gemini giải mã 'SWRP 11' -> ID 48 + Link Git repo tương ứng.
+    Sử dụng chính xác tên cột: course_name, sku, git_repos, course_id.
     """
     try:
         res = supabase.table("lms_courses")\
-            .select("id, name, course_code, git_repos")\
-            .limit(60)\
+            .select("id, course_id, course_name, sku, git_repos, git_repo_url")\
+            .limit(80)\
             .execute()
         if res.data:
             catalog = []
             for c in res.data:
                 catalog.append({
-                    "id": c.get("id"),
-                    "code": c.get("course_code") or "",
-                    "name": c.get("name") or "",
+                    "id": c.get("course_id") or c.get("id"),
+                    "code": c.get("sku") or "",
+                    "name": c.get("course_name") or "",
                     "git_repos": c.get("git_repos") or []
                 })
+            logger.info(f"📚 [LMS Catalog] Đã nạp thành công {len(catalog)} khóa học kèm Git Repos vào AI context!")
             return catalog
     except Exception as err:
         logger.warning(f"⚠️ Không thể nạp LMS catalog vào AI context: {err}")

@@ -27,10 +27,21 @@ BRAIN_DIR = os.path.join(os.path.dirname(__file__), "../brain")
 
 
 def expand_course_range_text(raw_text: str) -> List[str]:
-    """Mở rộng dải môn học tự nhiên từ văn bản (VD: SWRP 5 to 10 hoặc SWRP 5, 6, 7, 8, 9, 10)."""
+    """
+    Mở rộng dải môn học tự nhiên tổng quát:
+    - Bắt: 'SWRP từ 5 đến 10', 'SWRP 5 to 10', 'SWRP from 5 to 10', 'SWRP 5-10'
+    - Bắt: 'SWRP 5, 6, 7, 8, 9, 10'
+    """
+    if not raw_text:
+        return []
+
     courses = []
-    # 1. Bắt dải dạng 'SWRP 5 to 10' hoặc 'SWRP 5 - 10'
-    range_match = re.search(r"\b([A-Za-z]+)[\s_\-]*(\d+)\s*(?:to|đến|\-|->)\s*(\d+)\b", raw_text, re.IGNORECASE)
+    # 1. Bắt dải có chữ "từ / from" hoặc nối "đến / to / -"
+    range_match = re.search(
+        r"\b([A-Za-z]+)\s*(?:từ|from)?\s*(\d+)\s*(?:to|đến|\-|->)\s*(\d+)\b", 
+        raw_text, 
+        re.IGNORECASE
+    )
     if range_match:
         prefix = range_match.group(1).upper()
         start_idx = int(range_match.group(2))
@@ -39,14 +50,15 @@ def expand_course_range_text(raw_text: str) -> List[str]:
             for num in range(start_idx, end_idx + 1):
                 courses.append(f"{prefix} {num}")
 
-    # 2. Bắt danh sách liệt kê dạng 'SWRP 5, 6, 7, 8, 9, and 10'
-    list_match = re.search(r"\b([A-Za-z]+)\s*(\d+)(?:\s*,\s*(\d+))*(?:\s*(?:,|and|và)\s*(\d+))\b", raw_text, re.IGNORECASE)
-    if list_match and not courses:
-        prefix = list_match.group(1).upper()
-        nums = re.findall(r"\b\d+\b", list_match.group(0))
-        for n in nums:
-            if len(n) <= 2:
-                courses.append(f"{prefix} {n}")
+    # 2. Bắt danh sách liệt kê phẩy: SWRP 5, 6, 7, 8, 9, 10
+    if not courses:
+        list_match = re.search(r"\b([A-Za-z]+)\s*(\d+)(?:\s*,\s*(\d+))*(?:\s*(?:,|and|và)\s*(\d+))\b", raw_text, re.IGNORECASE)
+        if list_match:
+            prefix = list_match.group(1).upper()
+            nums = re.findall(r"\b\d+\b", list_match.group(0))
+            for n in nums:
+                if len(n) <= 2:
+                    courses.append(f"{prefix} {n}")
 
     return list(dict.fromkeys(courses))
 
