@@ -660,16 +660,20 @@
       "bot_type": "workspace_rpa",
       "action": "update_user_profile",
       "required_inputs": [
-        "school_name",
         "user_identifiers"
       ],
       "optional_inputs": [
+        "school_name",
         "school_id",
-        "partner_id"
+        "partner_id",
+        "first_name",
+        "last_name",
+        "dob",
+        "email"
       ],
       "input_schema": {
-        "school_name": "string",
-        "user_identifiers": "array|string"
+        "user_identifiers": "array|string",
+        "school_name": "string?"
       },
       "output_schema": {
         "updated_users_count": "integer"
