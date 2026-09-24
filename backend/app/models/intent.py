@@ -9,7 +9,7 @@ Cải tiến:
 """
 
 from typing import List, Dict, Any, Optional, Literal, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class EvidenceSpan(BaseModel):
@@ -76,6 +76,27 @@ class IntentAssessment(BaseModel):
     missing_requirements: List[Dict[str, str]] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     raw_evidence_quotes: List[str] = Field(default_factory=list)
+
+    # 🎯 BỘ LỌC TỰ ĐỘNG CHUYỂN CHUỖI SANG DICT NẾU AI TRẢ VỀ CHUỖI
+    @field_validator("missing_requirements", mode="before")
+    @classmethod
+    def normalize_missing_requirements(cls, v):
+        if not v:
+            return []
+        if isinstance(v, str):
+            return [{"field": "general", "message": v.strip()}]
+        if isinstance(v, list):
+            normalized = []
+            for item in v:
+                if isinstance(item, dict):
+                    normalized.append({
+                        "field": str(item.get("field") or "general"),
+                        "message": str(item.get("message") or item.get("detail") or str(item))
+                    })
+                elif isinstance(item, str) and item.strip():
+                    normalized.append({"field": "general", "message": item.strip()})
+            return normalized
+        return []
 
 
 class VerifiedIntentAssessment(IntentAssessment):

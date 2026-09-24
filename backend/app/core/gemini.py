@@ -423,6 +423,20 @@ Trả về JSON chuẩn xác có actionability_analysis, outcome, intents, entit
             "already_completed_actions": parsed_data.get("already_completed_actions", [])
         }
 
+        raw_missing = parsed_data.get("missing_requirements") or []
+        clean_missing: List[Dict[str, str]] = []
+        if isinstance(raw_missing, list):
+            for item in raw_missing:
+                if isinstance(item, dict):
+                    clean_missing.append({
+                        "field": str(item.get("field") or "general"),
+                        "message": str(item.get("message") or item.get("detail") or str(item))
+                    })
+                elif isinstance(item, str) and item.strip():
+                    clean_missing.append({"field": "general", "message": item.strip()})
+        elif isinstance(raw_missing, str) and raw_missing.strip():
+            clean_missing.append({"field": "general", "message": raw_missing.strip()})
+
         raw_assessment = IntentAssessment(
             outcome=final_outcome,
             model_name=used_model,
@@ -430,7 +444,7 @@ Trả về JSON chuẩn xác có actionability_analysis, outcome, intents, entit
             intents=structured_intents,
             entities=entities_payload,
             extracted_entities=[],
-            missing_requirements=parsed_data.get("missing_requirements") or [],
+            missing_requirements=clean_missing,
             warnings=parsed_data.get("warnings") or [],
             raw_evidence_quotes=raw_evidence_quotes
         )
