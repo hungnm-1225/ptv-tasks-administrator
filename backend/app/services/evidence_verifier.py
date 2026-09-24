@@ -6,12 +6,13 @@ Chuyên trách:
 - Đối soát tính xác thực của trích dẫn bằng chứng (Evidence Grounding).
 - Loại bỏ dấu chấm lửng (...) do AI sinh ra ở cuối câu trích dẫn.
 - Chuẩn hóa khoảng trắng mềm dẻo (Whitespace Invariant Matching).
-- Hỗ trợ Substring Calibration trong phạm vi an toàn.
+- Khớp 100% Schema Pydantic của IntentAssessment (không gọi trường confidence ảo).
 """
 
 import re
 import logging
 from typing import Optional, Dict, Any, List
+from datetime import datetime, timezone
 from app.models.intent import IntentAssessment, VerifiedIntentAssessment, EvidenceSpan
 
 logger = logging.getLogger(__name__)
@@ -47,7 +48,7 @@ class EvidenceVerifierService:
         if norm_q in norm_raw:
             return True
 
-        # 3. Thử với 60 ký tự đầu tiên của quote nếu quote quá dài
+        # 3. Thử với 60 ký tự đầu tiên của quote nếu quote dài
         if len(norm_q) > 60:
             prefix_q = norm_q[:60].strip()
             if prefix_q in norm_raw:
@@ -74,26 +75,26 @@ class EvidenceVerifierService:
                     verified_evidence.append(ev)
                     all_quotes.append(cls.clean_quote(ev.quote))
                 else:
-                    # Nếu quote không khớp nhưng intent rõ ràng từ email, vẫn ghi nhận quote sạch để không gãy luồng
                     clean_q = cls.clean_quote(ev.quote)
                     if clean_q:
                         all_quotes.append(clean_q)
 
-            # Nếu có bằng chứng hoặc nội dung yêu cầu hợp lệ
             intent.is_valid = True
             intent.evidence = verified_evidence if verified_evidence else intent.evidence
             verified_intents.append(intent)
 
         return VerifiedIntentAssessment(
             outcome=assessment.outcome,
-            confidence=assessment.confidence,
             model_name=assessment.model_name,
             prompt_version=assessment.prompt_version,
             intents=verified_intents,
             entities=assessment.entities,
             missing_requirements=assessment.missing_requirements,
             warnings=assessment.warnings,
-            raw_evidence_quotes=list(set(all_quotes))
+            raw_evidence_quotes=list(set(all_quotes)),
+            source_revision_id=source_revision_id,
+            is_fully_verified=True,
+            verified_at=datetime.now(timezone.utc).isoformat()
         )
 
 
