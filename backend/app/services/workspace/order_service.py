@@ -1,4 +1,9 @@
-# backend/app/services/workspace/order_service.py
+# =============================================================================
+# [VIẾT LẠI TOÀN BỘ] backend/app/services/workspace/order_service.py
+# Sửa lỗi: Triệt tiêu nhân đôi license, truyền đúng số lượng thực tế, total_amount an toàn
+# Tác giả: Nguyễn Mạnh Hùng & Co-pilot
+# =============================================================================
+
 import re
 import gc
 import json
@@ -15,9 +20,6 @@ from app.core.playwright_manager import acquire_playwright_slot, LOW_RAM_CHROMIU
 
 logger = logging.getLogger(__name__)
 
-# =============================================================================
-# ⚡ BỘ NHỚ ĐỆM SESSION MULTI-ROLE DÙNG CHUNG CHO TOÀN BỘ WORKSPACE (RAM < 20KB)
-# =============================================================================
 _WORKSPACE_SESSION_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
 _WORKSPACE_LOCKS: Dict[Tuple[str, str], asyncio.Lock] = {}
 WORKSPACE_SESSION_TTL = 7200  # 2 giờ
@@ -31,11 +33,10 @@ def _get_role_lock(role_title: str, username: str) -> asyncio.Lock:
 
 
 async def _is_session_valid(cookies: Dict[str, str], role_title: str) -> bool:
-    """Kiểm tra session sạch sẽ, không gọi admin-ajax để tránh log 400."""
     return bool(cookies and len(cookies) > 0)
 
+
 def clear_role_session_cache(role_title: str, username: str = ""):
-    """Xóa session tạm của School hoặc Partner trong RAM sau khi hoàn tất tác vụ."""
     clean_role = role_title.strip().lower()
     clean_user = username.strip().lower()
     if clean_user:
@@ -47,26 +48,19 @@ def clear_role_session_cache(role_title: str, username: str = ""):
             _WORKSPACE_SESSION_CACHE.pop(k, None)
         logger.info(f"🧹 [Session Cache] Đã dọn sạch toàn bộ RAM session của Role [{role_title}]")
 
+
 async def get_or_steal_role_session(
     service_instance: WorkspaceBaseService,
     username: str,
     password: str,
     role_title: str
 ) -> Tuple[Dict[str, str], Dict[str, Any]]:
-    """
-    Hàm bốc session Workspace thông minh:
-    1. School & Partner: Lưu tạm trong RAM, không lưu DB, dọn dẹp khi xong.
-    2. Sales Admin & Distributor: Đọc trực tiếp từ kho Supabase qua KeepAlive (Zero Playwright!).
-    3. Fallback: Chỉ mở Playwright khi session trên Supabase hoặc RAM chưa có/hết hạn.
-    """
     now = time.time()
     clean_role = role_title.strip().lower()
     clean_user = username.strip().lower()
     cache_key = (clean_role, clean_user)
 
-    # -------------------------------------------------------------------------
-    # ⚡ 1. KIỂM TRA RAM CACHE LOCAL (0ms)
-    # -------------------------------------------------------------------------
+    # 1. RAM CACHE
     cached = _WORKSPACE_SESSION_CACHE.get(cache_key)
     if cached and (now - cached.get("cached_at", 0) < WORKSPACE_SESSION_TTL):
         cookies = cached.get("cookies", {})
@@ -77,14 +71,11 @@ async def get_or_steal_role_session(
         else:
             _WORKSPACE_SESSION_CACHE.pop(cache_key, None)
 
-    # -------------------------------------------------------------------------
-    # 💾 2. ĐỐI VỚI SALES ADMIN & DISTRIBUTOR: ĐỌC TỪ KHO SUPABASE KEEPALIVE
-    # -------------------------------------------------------------------------
+    # 2. SUPABASE KEEPALIVE
     if clean_role in ("sales admin", "sales_admin", "distributor"):
         try:
             from app.services.session_keepalive_service import session_keepalive_service
 
-            # A. Luồng Sales Admin (Bốc session sales_admin hoặc admin_workspace)
             if clean_role in ("sales admin", "sales_admin"):
                 db_cookies = await session_keepalive_service.get_session_cookies("sales_admin") or \
                              await session_keepalive_service.get_session_cookies("admin_workspace")
@@ -98,7 +89,6 @@ async def get_or_steal_role_session(
                     logger.info(f"✨ [KeepAlive DB] Tái sử dụng Session Sales Admin từ Supabase cho '{username}' (Zero Playwright - 1ms)!")
                     return db_cookies, identity
 
-            # B. Luồng Master Distributor (Dò tìm distributor_2, distributor_36, distributor_42... từ Supabase)
             elif clean_role == "distributor":
                 from app.core.supabase import get_supabase_client
                 supabase = get_supabase_client()
@@ -110,7 +100,6 @@ async def get_or_steal_role_session(
 
                 if dist_res.data:
                     matched_row = None
-                    # So khớp username hoặc distributor_code với metadata trong DB
                     for row in dist_res.data:
                         meta = row.get("metadata") or {}
                         row_user = str(meta.get("user") or "").strip().lower()
@@ -119,7 +108,6 @@ async def get_or_steal_role_session(
                             matched_row = row
                             break
 
-                    # Fallback nếu truyền tên chung chung như "distributor" hoặc "testdistributor"
                     if not matched_row:
                         matched_row = dist_res.data[0]
 
@@ -127,7 +115,7 @@ async def get_or_steal_role_session(
                         db_cookies = matched_row["cookies"]
                         if await _is_session_valid(db_cookies, role_title):
                             meta = matched_row.get("metadata") or {}
-                            real_dist_id = meta.get("dist_id") or meta.get("distributor_code") or "36"
+                            real_dist_id = meta.get("dist_id") or meta.get("distributor_code")
                             identity = {
                                 "distributor_id": str(real_dist_id),
                                 "username": username or meta.get("user", "distributor")
@@ -143,9 +131,7 @@ async def get_or_steal_role_session(
         except Exception as db_err:
             logger.warning(f"⚠️ Không thể đọc session [{role_title}] từ Supabase: {db_err}")
 
-    # -------------------------------------------------------------------------
-    # 🔑 3. FALLBACK: CHỈ MỞ PLAYWRIGHT KHI CHƯA CÓ HOẶC SESSION HẾT HẠN
-    # -------------------------------------------------------------------------
+    # 3. PLAYWRIGHT AUTH GATEWAY
     async with _get_role_lock(role_title, username):
         now = time.time()
         cached = _WORKSPACE_SESSION_CACHE.get(cache_key)
@@ -183,15 +169,12 @@ async def get_or_steal_role_session(
                     cookies = await context.cookies()
                     cookies_dict = {c["name"]: c["value"] for c in cookies}
 
-                    # Lưu vào RAM Cache
                     _WORKSPACE_SESSION_CACHE[cache_key] = {
                         "cookies": cookies_dict,
                         "identity": wp_identity,
                         "cached_at": time.time()
                     }
-                    logger.info(f"✨ [Workspace Cache] Đã lưu Session mới cho [{role_title}: {username}] vào RAM.")
 
-                    # NẾU LÀ SALES ADMIN: LƯU NGƯỢC LẠI SUPABASE ĐỂ GIỮ ẤM
                     if clean_role in ("sales admin", "sales_admin"):
                         try:
                             from app.services.session_keepalive_service import session_keepalive_service
@@ -212,10 +195,7 @@ async def get_or_steal_role_session(
 
 
 class WorkspaceOrderService(WorkspaceBaseService):
-    """
-    Xử lý các nghiệp vụ School Order & Partner Approve.
-    HỖ TRỢ ĐA KHÓA HỌC (MULTI-COURSE ENGINE) 100% TOÀN TRÌNH.
-    """
+    """Xử lý các nghiệp vụ School Order & Partner Approve không nhân đôi license."""
 
     async def _steal_role_session(self, username: str, password: str, role_title: str) -> Tuple[Dict[str, str], Dict[str, Any]]:
         return await get_or_steal_role_session(self, username, password, role_title)
@@ -302,10 +282,9 @@ class WorkspaceOrderService(WorkspaceBaseService):
             logger.warning(f"⚠️ [DB SYNC] Lỗi ghi nhận Contract: {e}")
 
     # =========================================================================
-    # 🏫 1. SCHOOL TẠO ORDER (HỖ TRỢ ĐA KHÓA HỌC MULTI-COURSE)
+    # 🏫 1. SCHOOL TẠO ORDER (MULTI-COURSE CHUẨN XÁC)
     # =========================================================================
     async def school_create_order(self, credentials: Dict[str, str], order_data: Dict[str, Any]) -> Dict[str, Any]:
-        """School tạo Order với đầy đủ tất cả các khóa học có trong danh sách."""
         try:
             cookies, identity = await self._steal_role_session(
                 credentials.get("username", ""), 
@@ -316,17 +295,10 @@ class WorkspaceOrderService(WorkspaceBaseService):
 
             courses = order_data.get("courses", [])
             if not courses:
-                courses = [{
-                    "category": order_data.get("category", "SWRP"),
-                    "course_id": order_data.get("course_id", 1),
-                    "licenses": order_data.get("licenses", 50),
-                    "start_date": order_data.get("start_date", "2026-09-16"),
-                    "end_date": order_data.get("end_date", "2027-09-16")
-                }]
+                return {"status": "failed", "error": "Thiếu danh sách khóa học (courses) để tạo School Order"}
 
-            # 🎯 LẤY CHUẨN XÁC DỮ LIỆU ANH NHẬP TỪ GIAO DIỆN
             contact_val = str(order_data.get("contact_info") or "Admin Automation Hub (hungnm@dtt.vn)").strip()
-            notes_val = str(order_data.get("additional_notes") or order_data.get("notes") or "Order auto-generated by PTV Automation Hub").strip()
+            notes_val = str(order_data.get("additional_notes") or order_data.get("notes") or "Order generated by PTV Automation Hub").strip()
 
             payload = {
                 "school_id": str(school_id),
@@ -335,12 +307,11 @@ class WorkspaceOrderService(WorkspaceBaseService):
                 "type": "course"
             }
 
-            # 🎯 ĐÓNG GÓI TOÀN BỘ CÁC MÔN HỌC (MULTI-COURSE LOOP)
             summary_parts = []
             for idx, c in enumerate(courses):
                 cat_val = c.get("category", "SWRP")
                 cid_val = str(c.get("course_id", 1))
-                lic_qty = str(c.get("licenses", 50))
+                lic_qty = str(c.get("licenses", 1))
                 s_date = normalize_date_iso(c.get("start_date", "2026-09-16"))
                 e_date = normalize_date_iso(c.get("end_date", "2027-09-16"))
 
@@ -380,7 +351,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
             return {"status": "failed", "error": str(e)}
 
     # =========================================================================
-    # 🤝 2. PARTNER DUYỆT SCHOOL ORDER (ĐA KHÓA HỌC MULTI-COURSE ALLOCATION)
+    # 🤝 2. PARTNER DUYỆT SCHOOL ORDER (KHÔNG NHÂN ĐÔI, TOTAL AMOUNT THỰC)
     # =========================================================================
     async def partner_approve_school_order(
         self, 
@@ -388,9 +359,10 @@ class WorkspaceOrderService(WorkspaceBaseService):
         order_identifier: Optional[str] = None,
         auto_create_prt_if_short: bool = True,
         courses_needed: Optional[List[Dict[str, Any]]] = None,
-        note: Optional[str] = None
+        note: Optional[str] = None,
+        total_amount: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Partner duyệt School Order cấp đủ 100% tất cả các môn trong đơn hàng."""
+        """Partner duyệt School Order cấp vừa đủ đúng số lượng thiếu hụt."""
         try:
             cookies, identity = await self._steal_role_session(
                 credentials.get("username", ""), 
@@ -403,7 +375,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
             num_order_id = clean_num_match.group(0) if clean_num_match else str(order_identifier)
 
             async with httpx.AsyncClient(base_url=BASE_WORKSPACE_URL, cookies=cookies, timeout=25.0) as client:
-                # 1. Lấy chi tiết toàn bộ các môn trong đơn
+                # 1. Lấy chi tiết các môn
                 detail_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/partner_workspace_v3/api/orders_management/getOrderDetail.php?order_id={num_order_id}"
                 d_res = await client.get(detail_url)
                 detail_data = d_res.json() if d_res.status_code == 200 else {}
@@ -411,32 +383,29 @@ class WorkspaceOrderService(WorkspaceBaseService):
 
                 if not courses_req and courses_needed:
                     courses_req = [
-                        {"course_id": c.get("course_id"), "course_count": c.get("licenses", 5), "course_name": c.get("course_name", "")}
+                        {"course_id": c.get("course_id"), "course_count": c.get("licenses", 1), "course_name": c.get("course_name", "")}
                         for c in courses_needed
                     ]
 
                 if not courses_req:
                     return {"status": "failed", "error": f"Không tìm thấy chi tiết môn học của Order #{num_order_id}"}
 
-                # 2. Quét kho License Pool của Partner
+                # 2. Quét kho License Pool
                 pool_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/partner_workspace_v3/api/order_sale/getPartnerPoolLicense.php?partner_id={partner_id}"
                 p_res = await client.get(pool_url)
                 pool_courses = p_res.json().get("data", {}).get("pool_courses", []) if p_res.status_code == 200 else []
 
-                # Bản sao số dư kho để trừ dần (Virtual Pool Balance)
                 pool_balance = {str(p.get("id")): int(p.get("item_quantity", 0)) for p in pool_courses}
 
                 allocated_courses = []
                 short_courses = []
 
-                # 🎯 3. DUYỆT TỪNG MÔN TRONG ĐƠN ĐỂ TÌM POOL KHỚP
                 for req in courses_req:
                     cid = str(req.get("course_id", ""))
                     c_name = req.get("course_name", f"Khóa #{cid}")
                     qty = int(req.get("course_count", 0))
 
                     matched_pool = None
-                    # Bước A: Tìm pool có đúng course_id và đủ số lượng
                     for p in pool_courses:
                         pid = str(p.get("id"))
                         p_cid = str(p.get("course_id", ""))
@@ -444,7 +413,6 @@ class WorkspaceOrderService(WorkspaceBaseService):
                             matched_pool = p
                             break
 
-                    # Bước B: Fallback tìm pool bất kỳ còn đủ số lượng (nếu là pool dùng chung)
                     if not matched_pool:
                         for p in pool_courses:
                             pid = str(p.get("id"))
@@ -454,7 +422,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
 
                     if matched_pool:
                         pid = str(matched_pool.get("id"))
-                        pool_balance[pid] -= qty  # Trừ số dư ảo
+                        pool_balance[pid] -= qty
                         allocated_courses.append({
                             "course_id": cid,
                             "course_name": c_name,
@@ -468,7 +436,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                             "quantity": qty
                         })
 
-                # 🟢 NẾU TẤT CẢ CÁC MÔN ĐỀU ĐỦ LICENSE ➔ DUYỆT ĐƠN 100%
+                # ĐỦ LICENSE ➔ DUYỆT LUÔN
                 if not short_courses and len(allocated_courses) == len(courses_req):
                     approve_payload = {
                         "order_id": str(num_order_id),
@@ -500,31 +468,34 @@ class WorkspaceOrderService(WorkspaceBaseService):
                             "message": clean_msg
                         }
 
-                # 🔴 NẾU CÓ BẤT KỲ MÔN NÀO THIẾU ➔ TỰ ĐỘNG TẠO PRT CONTRACT GỒM TẤT CẢ CÁC MÔN THIẾU
+                # THIẾU LICENSE ➔ TẠO PRT BÙ VỪA ĐỦ (ZERO MULTIPLY)
                 short_desc = ", ".join([f"#{c['course_id']} (cần {c['quantity']})" for c in short_courses])
                 logger.warning(f"⚠️ Kho Partner thiếu License cho Order [{order_identifier}]: {short_desc}")
 
                 if auto_create_prt_if_short:
-                    # 🎯 HỆ THỐNG TỰ ĐỘNG TẠO GHI CHÚ PHẢ HỆ (LINEAGE PROVENANCE)
                     resolved_school_name = credentials.get("school_name") or order_identifier
-                    sys_topup_notes = f"[CẤP BÙ CHO ORDER: {order_identifier} | TRƯỜNG: {resolved_school_name}] Thiếu: {short_desc}"
+                    sys_topup_notes = f"[Top up for ORDER: {order_identifier} | School: {resolved_school_name}] Amount: {short_desc}"
+
+                    # SỐ TIỀN THỰC TẾ: Mặc định là '0' nếu không nhập, an toàn tuyệt đối
+                    safe_amount = str(total_amount if total_amount is not None else "0").strip()
 
                     topup_payload = {
                         "partner_id": str(partner_id),
                         "order_type": "License",
-                        "order_notes": sys_topup_notes,  # 🎯 Hệ thống tự đặt
+                        "order_notes": sys_topup_notes,
                         "status": "pending_distributor_review",
-                        "total_amount": "100"
+                        "total_amount": safe_amount
                     }
 
+                    # 🎯 CẤP VỪA ĐỦ ĐÚNG SỐ LƯỢNG THIẾU (KHÔNG NHÂN 2, KHÔNG FAKE $10)
                     for idx, sc in enumerate(short_courses):
-                        qty_topup = sc["quantity"] * 2 if sc["quantity"] < 50 else sc["quantity"]
+                        qty_topup = int(sc.get("quantity") or 1)
                         topup_payload[f"courses[{idx}][course_id]"] = str(sc["course_id"])
                         topup_payload[f"courses[{idx}][course_name]"] = str(sc["course_name"])
                         topup_payload[f"courses[{idx}][student_count]"] = str(qty_topup)
                         topup_payload[f"courses[{idx}][category]"] = "SWRP"
-                        topup_payload[f"courses[{idx}][unit_price]"] = "10"
-                        topup_payload[f"courses[{idx}][total_amount]"] = str(qty_topup * 10)
+                        topup_payload[f"courses[{idx}][unit_price]"] = "0"
+                        topup_payload[f"courses[{idx}][total_amount]"] = "0"
 
                     prt_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/partner_workspace_v3/api/order_sale/createOrderSale.php"
                     prt_res = await client.post(prt_url, files=self._to_multipart(topup_payload))
@@ -559,10 +530,9 @@ class WorkspaceOrderService(WorkspaceBaseService):
             return {"status": "failed", "error": str(e)}
 
     # =========================================================================
-    # 🔍 3. FETCH CHI TIẾT ĐƠN HÀNG (TRÍCH XUẤT 100% CÁC KHÓA HỌC)
+    # 🔍 3. FETCH CHI TIẾT ĐƠN HÀNG
     # =========================================================================
     async def fetch_school_order_detailed_courses(self, credentials: Dict[str, str], order_identifier: str) -> Dict[str, Any]:
-        """Trích xuất danh sách tất cả môn học trong Order."""
         clean_num_match = re.search(r"\d+$", str(order_identifier))
         num_order_id = clean_num_match.group(0) if clean_num_match else str(order_identifier)
         detail_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/distributor_workspace_v3/api/orders_management/getOrderDetail.php?order_id={num_order_id}"
@@ -587,9 +557,6 @@ class WorkspaceOrderService(WorkspaceBaseService):
         except Exception as e:
             return {"status": "failed", "error": str(e), "courses": []}
 
-    # =========================================================================
-    # 🔍 CÁC HÀM TRUY VẤN DỮ LIỆU CŨ
-    # =========================================================================
     async def fetch_partner_pending_school_orders(self, credentials: Dict[str, str]) -> Dict[str, Any]:
         try:
             cookies, identity = await self._steal_role_session(credentials.get("username", ""), credentials.get("password", ""), "Partner")
@@ -605,7 +572,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
     async def fetch_distributor_pending_contracts(self, credentials: Dict[str, str]) -> Dict[str, Any]:
         try:
             cookies, identity = await self._steal_role_session(credentials.get("username", ""), credentials.get("password", ""), "Distributor")
-            d_id = identity.get("distributor_id") or "36"
+            d_id = identity.get("distributor_id")
             url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/distributor_workspace_v3/api/orders_management/getPartnerOrder.php?distributor_id={d_id}"
             async with httpx.AsyncClient(base_url=BASE_WORKSPACE_URL, cookies=cookies, timeout=20.0) as client:
                 res = await client.get(url)

@@ -156,6 +156,32 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
         elif action in ("enroll_students_pipeline", "direct_workspace_enroll"):
             return await self.enroll_students_pipeline(payload)
 
+
+        elif action in ("bulk_account_creation", "bulk_accounts", "create_accounts"):
+            school_ident = payload.get("school_name") or payload.get("school_user") or ""
+            lineage = workspace_lineage_service.resolve_by_school(school_ident)
+            school_creds = lineage["school"] if lineage else {
+                "username": payload.get("school_user") or payload.get("username", ""),
+                "password": payload.get("school_password") or payload.get("password", "")
+            }
+            account_file = payload.get("account_file_path") or payload.get("uploaded_file_path") or payload.get("cof_file_path")
+            
+            if not account_file or not os.path.exists(account_file):
+                return {
+                    "status": "failed",
+                    "error": f"Không tìm thấy file tài khoản để nộp batch: {account_file}"
+                }
+
+            logger.info(f"🚀 [Bulk Accounts] Đang nộp batch tạo tài khoản cho trường: {school_creds.get('name', school_ident)}")
+            return await workspace_account_service.submit_account_creation_batch(
+                credentials=school_creds,
+                upload_file_path=account_file,
+                record_count=int(payload.get("record_count") or 50),
+                download_dir=os.path.join(os.getcwd(), "backend", "data", "results_download"),
+                checkpoint=payload.get("checkpoint")
+            )
+
+            
         # 8. Cập nhật hồ sơ người dùng Workspace
         elif action == "update_user_profile":
             user_id = str(payload.get("user_id", "")).strip()

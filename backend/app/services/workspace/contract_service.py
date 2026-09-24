@@ -1,4 +1,9 @@
-# backend/app/services/workspace/contract_service.py
+# =============================================================================
+# [VIẾT LẠI TOÀN BỘ] backend/app/services/workspace/contract_service.py
+# Sửa lỗi: Cấp bù vừa đủ (xóa bỏ * 2), loại bỏ tiền giả lập, sửa endpoint Sales Admin chống 302
+# Tác giả: Nguyễn Mạnh Hùng & Co-pilot
+# =============================================================================
+
 import re
 import os
 import gc
@@ -17,10 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class WorkspaceContractService(WorkspaceBaseService):
-    """
-    Xử lý các nghiệp vụ tạo và phê duyệt Contract giữa Partner - Distributor - Sales Admin.
-    HỖ TRỢ ĐA KHÓA HỌC (MULTI-COURSE) 100% CHO CẢ PRT VÀ DST CONTRACTS.
-    """
+    """Xử lý các nghiệp vụ tạo và phê duyệt Contract giữa Partner - Distributor - Sales Admin."""
 
     async def _steal_role_session(self, username: str, password: str, role_title: str) -> Tuple[Dict[str, str], Dict[str, Any]]:
         return await get_or_steal_role_session(self, username, password, role_title)
@@ -95,39 +97,37 @@ class WorkspaceContractService(WorkspaceBaseService):
             logger.warning(f"⚠️ [DB SYNC] Lỗi ghi nhận Contract: {e}")
 
     # =========================================================================
-    # 📝 1. PARTNER TẠO PRT CONTRACT (MULTI-COURSE)
+    # 📝 1. PARTNER TẠO PRT CONTRACT
     # =========================================================================
     async def partner_create_contract(self, credentials: Dict[str, str], contract_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Partner tạo PRT Contract hỗ trợ đa khóa học."""
         try:
             cookies, identity = await self._steal_role_session(credentials.get("username", ""), credentials.get("password", ""), "Partner")
             partner_id = identity.get("partner_id")
 
             courses = contract_data.get("courses", [])
-            if not courses:
-                courses = [{"course_id": 1344, "course_name": "SWRP 1", "licenses": 50, "category": "SWRP"}]
+            safe_amount = str(contract_data.get("total_amount", 0)).strip()
 
             payload = {
                 "partner_id": str(partner_id),
                 "order_type": "License",
-                "order_notes": contract_data.get("notes", "Auto-requested by PTV Automation Hub"),
+                "order_notes": contract_data.get("notes", "Requested by PTV Automation Hub"),
                 "status": "pending_distributor_review",
-                "total_amount": "100"
+                "total_amount": safe_amount
             }
 
             summary_parts = []
             for idx, c in enumerate(courses):
                 c_id = str(c.get("course_id", 1344))
                 c_name = c.get("course_name", f"Khóa #{c_id}")
-                c_lic = str(c.get("licenses", 50))
+                c_lic = str(c.get("licenses", 1))
                 c_cat = c.get("category", "SWRP")
 
                 payload[f"courses[{idx}][course_id]"] = c_id
                 payload[f"courses[{idx}][course_name]"] = c_name
                 payload[f"courses[{idx}][student_count]"] = c_lic
                 payload[f"courses[{idx}][category]"] = c_cat
-                payload[f"courses[{idx}][unit_price]"] = "10"
-                payload[f"courses[{idx}][total_amount]"] = str(int(c_lic) * 10)
+                payload[f"courses[{idx}][unit_price]"] = "0"
+                payload[f"courses[{idx}][total_amount]"] = "0"
                 summary_parts.append(f"#{c_id} ({c_lic} SL)")
 
             url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/partner_workspace_v3/api/order_sale/createOrderSale.php"
@@ -154,7 +154,7 @@ class WorkspaceContractService(WorkspaceBaseService):
             return {"status": "failed", "error": str(e)}
 
     # =========================================================================
-    # 🏢 2. DISTRIBUTOR DUYỆT PRT CONTRACT (MULTI-COURSE TOPUP NẾU THIẾU)
+    # 🏢 2. DISTRIBUTOR DUYỆT PRT CONTRACT (CẤP BÙ VỪA ĐỦ, KHÔNG NHÂN 2)
     # =========================================================================
     async def distributor_approve_partner_contract(
         self,
@@ -164,12 +164,13 @@ class WorkspaceContractService(WorkspaceBaseService):
         courses_needed: Optional[List[Dict[str, Any]]] = None,
         note: Optional[str] = None,
         origin_order_code: Optional[str] = None, 
-        school_name: Optional[str] = None
+        school_name: Optional[str] = None,
+        total_amount: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Distributor duyệt PRT Contract qua Direct API (Tạo DST bù cho tất cả các môn thiếu)."""
+        """Distributor duyệt PRT Contract. Nếu thiếu, cấp bù DST đúng số lượng cần."""
         try:
             cookies, identity = await self._steal_role_session(credentials.get("username", ""), credentials.get("password", ""), "Distributor")
-            dist_id = identity.get("distributor_id") or "36"
+            dist_id = identity.get("distributor_id")
 
             clean_num_match = re.search(r"\d+$", str(contract_identifier))
             prt_num_id = clean_num_match.group(0) if clean_num_match else str(contract_identifier)
@@ -200,42 +201,48 @@ class WorkspaceContractService(WorkspaceBaseService):
                             "message": clean_msg
                         }
 
-                    # THIẾU LICENSE ➔ TẠO DST CONTRACT BÙ TOÀN BỘ CÁC MÔN
+                    # THIẾU LICENSE ➔ TẠO DST CONTRACT VỪA ĐỦ
                     if auto_create_dst_if_short:
-                        courses_to_topup = courses_needed or [{"course_id": 1344, "course_name": "SWRP 1", "licenses": 100}]
-                        
-                        # 🎯 HỆ THỐNG TỰ ĐỘNG GẮN PHẢ HỆ 2 CẤP (PRT ➔ GỐC SCH)
+                        courses_to_topup = courses_needed or []
                         origin_part = f" ➔ GỐC ORDER: {origin_order_code}" if origin_order_code else ""
                         school_part = f" | TRƯỜNG: {school_name}" if school_name else ""
-                        sys_dst_notes = f"[CẤP BÙ CHO PRT: {contract_identifier}{origin_part}{school_part}] Yêu cầu Sales Admin cấp bù hạn ngạch"
+                        sys_dst_notes = f"[CẤP BÙ CHO PRT: {contract_identifier}{origin_part}{school_part}] Yêu cầu cấp bù hạn ngạch"
+
+                        safe_amount = str(total_amount if total_amount is not None else "0").strip()
 
                         dst_payload = {
                             "distributor_id": str(dist_id),
                             "order_type": "License",
-                            "order_notes": sys_dst_notes,  # 🎯 Hệ thống tự đặt
-                            "total_amount": "100"
+                            "order_notes": sys_dst_notes,
+                            "total_amount": safe_amount
                         }
 
                         topup_summary = []
+                        # 🎯 CẤP VỪA ĐỦ ĐÚNG SỐ LƯỢNG THIẾU (KHÔNG NHÂN 2, KHÔNG FAKE $10)
                         for idx, c in enumerate(courses_to_topup):
                             cid = str(c.get("course_id", 1344))
                             cname = c.get("course_name", f"Khóa #{cid}")
-                            lic = int(c.get("licenses", 50))
-                            qty_topup = lic * 2 if lic < 50 else lic
+                            qty_topup = int(c.get("licenses") or c.get("quantity") or 1)
 
                             dst_payload[f"courses[{idx}][course_id]"] = cid
                             dst_payload[f"courses[{idx}][course_name]"] = cname
                             dst_payload[f"courses[{idx}][student_count]"] = str(qty_topup)
                             dst_payload[f"courses[{idx}][category]"] = "SWRP"
-                            dst_payload[f"courses[{idx}][unit_price]"] = "10"
-                            dst_payload[f"courses[{idx}][total_amount]"] = str(qty_topup * 10)
+                            dst_payload[f"courses[{idx}][unit_price]"] = "0"
+                            dst_payload[f"courses[{idx}][total_amount]"] = "0"
                             topup_summary.append(f"#{cid} ({qty_topup} SL)")
 
                         dst_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/distributor_workspace_v3/api/order_sale/createOrder.php"
                         dst_res = await client.post(dst_url, files=self._to_multipart(dst_payload))
                         if dst_res.status_code == 200:
                             dst_data = dst_res.json().get("data", {})
-                            dst_code = dst_data.get("order_code")
+                            dst_code = dst_data.get("order_code") or dst_data.get("contract_code")
+                            if not dst_code and dst_data.get("id"):
+                                dst_code = f"DST-{dst_data.get('id')}"
+
+                            if not dst_code:
+                                return {"status": "failed", "error": "API createOrder thành công nhưng không trả về DST code"}
+
                             await self._record_created_contract_db(dst_code, "DST", "Awaiting Sales Admin", courses=courses_to_topup)
                             clean_msg = f"Thiếu License PRT {contract_identifier} ➔ Tạo DST: {dst_code} [{', '.join(topup_summary)}]"
                             logger.warning(f"⚠️ [Distributor Contract] {clean_msg}")
@@ -255,38 +262,36 @@ class WorkspaceContractService(WorkspaceBaseService):
             return {"status": "failed", "error": str(e)}
 
     # =========================================================================
-    # 📦 3. DISTRIBUTOR TẠO DST CONTRACT GỬI SALES ADMIN (MULTI-COURSE)
+    # 📦 3. DISTRIBUTOR TẠO DST CONTRACT GỬI SALES ADMIN
     # =========================================================================
     async def distributor_create_contract(self, credentials: Dict[str, str], contract_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Distributor tạo DST Contract với đầy đủ tất cả các khóa học."""
         try:
             cookies, identity = await self._steal_role_session(credentials.get("username", ""), credentials.get("password", ""), "Distributor")
             dist_id = identity.get("distributor_id") or "36"
 
             courses = contract_data.get("courses", [])
-            if not courses:
-                courses = [{"course_id": 1344, "course_name": "SWRP 1", "licenses": 100, "category": "SWRP"}]
+            safe_amount = str(contract_data.get("total_amount", 0)).strip()
 
             payload = {
                 "distributor_id": str(dist_id),
                 "order_type": "License",
-                "order_notes": contract_data.get("notes", "Auto-requested by PTV Automation Hub"),
-                "total_amount": "100"
+                "order_notes": contract_data.get("notes", "Requested by PTV Automation Hub"),
+                "total_amount": safe_amount
             }
 
             summary_parts = []
             for idx, c in enumerate(courses):
-                c_id = str(c.get("course_id", 1344))
+                c_id = str(c.get("course_id"))
                 c_name = c.get("course_name", f"Khóa #{c_id}")
-                c_lic = str(c.get("licenses", 100))
-                c_cat = c.get("category", "SWRP")
+                c_lic = str(c.get("licenses", 1))
+                c_cat = c.get("category", "")
 
                 payload[f"courses[{idx}][course_id]"] = c_id
                 payload[f"courses[{idx}][course_name]"] = c_name
                 payload[f"courses[{idx}][student_count]"] = c_lic
                 payload[f"courses[{idx}][category]"] = c_cat
-                payload[f"courses[{idx}][unit_price]"] = "10"
-                payload[f"courses[{idx}][total_amount]"] = str(int(c_lic) * 10)
+                payload[f"courses[{idx}][unit_price]"] = "0"
+                payload[f"courses[{idx}][total_amount]"] = "0"
                 summary_parts.append(f"#{c_id} ({c_lic} SL)")
 
             url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/distributor_workspace_v3/api/order_sale/createOrder.php"
@@ -295,7 +300,7 @@ class WorkspaceContractService(WorkspaceBaseService):
 
                 if res.status_code == 200:
                     data = res.json().get("data", {})
-                    dst_code = data.get("order_code")
+                    dst_code = data.get("order_code") or f"DST-{data.get('id')}"
                     dst_id_num = str(data.get("id"))
                     await self._record_created_contract_db(dst_code, "DST", "Awaiting Sales Admin", courses=courses)
                     
@@ -313,7 +318,7 @@ class WorkspaceContractService(WorkspaceBaseService):
             return {"status": "failed", "error": str(e)}
 
     # =========================================================================
-    # 👑 4. SALES ADMIN DUYỆT DST CONTRACT (DIRECT REST API)
+    # 👑 4. SALES ADMIN DUYỆT DST CONTRACT (FAIL-CLOSED + CHỐNG REDIRECT 302)
     # =========================================================================
     async def admin_approve_distributor_contract(
         self,
@@ -321,8 +326,16 @@ class WorkspaceContractService(WorkspaceBaseService):
         contract_identifier: Optional[str] = None,
         justification: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Sales Admin phê duyệt DST Contract qua REST API update-status."""
+        """Sales Admin duyệt DST Contract an toàn tuyệt đối, chống lỗi 302."""
         try:
+            # 🎯 1. KIỂM ĐỊNH BẢO MẬT: BẮT BUỘC PHẢI CÓ MÃ CONTRACT THỰC TẾ
+            clean_contract_code = str(contract_identifier or "").strip()
+            if not clean_contract_code or clean_contract_code.lower() in ("none", "null", ""):
+                return {
+                    "status": "failed", 
+                    "error": "Thiếu mã hợp đồng DST (contract_identifier) để Sales Admin duyệt"
+                }
+
             fallback_user = str(getattr(settings, "TEST_ADMIN_USER", "")).strip().strip("'\"")
             fallback_pass = str(getattr(settings, "TEST_ADMIN_PASS", "")).strip().strip("'\"")
 
@@ -332,29 +345,40 @@ class WorkspaceContractService(WorkspaceBaseService):
             cookies, _ = await self._steal_role_session(admin_user, admin_pass, "Sales Admin")
 
             payload = {
-                "order_code": str(contract_identifier).strip(),
+                "order_code": clean_contract_code,
                 "status": "approved",
                 "username": admin_user,
                 "note": justification or "Auto-approved by PTV Automation Hub",
                 "license_type": "license"
             }
 
-            url = f"{BASE_WORKSPACE_URL}/wp-json/sales-admin-workspace/v1/orders/update-status"
-            async with httpx.AsyncClient(base_url=BASE_WORKSPACE_URL, cookies=cookies, timeout=25.0) as client:
-                res = await client.post(url, files=self._to_multipart(payload))
+            # 🎯 2. ĐÍNH KÈM DẤU GẠCH CHÉO / VÀ BẬT FOLLOW_REDIRECTS CHỐNG LỖI 302
+            canonical_url = f"{BASE_WORKSPACE_URL}/wp-json/sales-admin-workspace/v1/orders/update-status/"
+            
+            async with httpx.AsyncClient(base_url=BASE_WORKSPACE_URL, cookies=cookies, timeout=25.0, follow_redirects=True) as client:
+                res = await client.post(canonical_url, files=self._to_multipart(payload))
 
-                if res.status_code == 200 and res.json().get("status") == "success":
-                    await self._sync_contract_status_db(contract_identifier, "DST", "Approved")
-                    clean_msg = f"Duyệt DST: {contract_identifier}"
-                    logger.info(f"✅ [Sales Admin] {clean_msg}")
-                    return {
-                        "status": "success",
-                        "contract_identifier": contract_identifier,
-                        "justification": justification or "Auto-approved by Automation Hub",
-                        "message": clean_msg
-                    }
+                if res.status_code == 200:
+                    try:
+                        res_data = res.json()
+                        if res_data.get("status") == "success" or res_data.get("code") in (200, 201):
+                            await self._sync_contract_status_db(clean_contract_code, "DST", "Approved")
+                            clean_msg = f"Duyệt DST: {clean_contract_code}"
+                            logger.info(f"✅ [Sales Admin] {clean_msg}")
+                            return {
+                                "status": "success",
+                                "contract_identifier": clean_contract_code,
+                                "justification": justification or "Auto-approved by Automation Hub",
+                                "message": clean_msg
+                            }
+                    except Exception:
+                        pass
 
-                return {"status": "failed", "error": f"API Sales Admin Duyệt thất bại: {res.text}"}
+                # Nếu thất bại, ghi nhận chi tiết để debug
+                return {
+                    "status": "failed", 
+                    "error": f"API Sales Admin Duyệt thất bại (HTTP {res.status_code}): {res.text[:300]}"
+                }
 
         except Exception as e:
             logger.error(f"❌ Lỗi Sales Admin Approve: {e}")

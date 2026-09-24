@@ -182,6 +182,13 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
             // NHÁNH 2: CREATE AND APPROVE FLOW (TẠO MỚI ORDER / CONTRACT)
             // =====================================================================
         } else if (params.workspaceMainCategory === 'create_and_approve') {
+            // 🎯 1. TỰ ĐỘNG TÍNH TOÁN TỔNG GIÁ TRỊ TOÀN BỘ ĐƠN HÀNG / HỢP ĐỒNG (TOTAL AMOUNT)
+            const calculatedTotalAmount = params.selectedCourses.reduce((sum, c) => {
+                const uPrice = Number((c as any).unit_price) || 0;
+                const qty = Number(c.licenses) || 0;
+                return sum + (uPrice * qty);
+            }, 0);
+
             if (params.createApproveSubFlow === 'end_to_end') {
                 if (!params.selectedSchool) {
                     toast.error('Vui lòng chọn trường học áp dụng từ danh sách!');
@@ -198,16 +205,23 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                         distributor_name: params.selectedSchool.distributor_name,
                     },
                     order_details: {
-                        contact_info: params.contactInfo,         // 🎯 Nhập trực tiếp
-                        additional_notes: params.additionalNotes, // 🎯 Nhập trực tiếp
-                        courses: params.selectedCourses.map((c) => ({
-                            category: c.category,
-                            course_id: c.course_id,
-                            course_name: c.course_name,
-                            licenses: c.licenses,
-                            start_date: c.start_date,
-                            end_date: c.end_date,
-                        })),
+                        contact_info: params.contactInfo,
+                        additional_notes: params.additionalNotes,
+                        total_amount: String(calculatedTotalAmount),
+                        courses: params.selectedCourses.map((c) => {
+                            const uPrice = Number((c as any).unit_price) || 0;
+                            const qty = Number(c.licenses) || 1;
+                            return {
+                                category: c.category,
+                                course_id: c.course_id,
+                                course_name: c.course_name,
+                                licenses: qty,
+                                unit_price: String(uPrice),
+                                total_amount: String(uPrice * qty),
+                                start_date: c.start_date || '2026-09-16',
+                                end_date: c.end_date || '2027-09-16',
+                            };
+                        }),
                     },
                     class_assignments: params.cofClassAssignments,
                     teachers_allocation: params.cofTeachersAllocation,
@@ -218,9 +232,9 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                 summary.targetEntity = params.selectedSchool.school_name;
                 summary.detailsList = [
                     `Tuyến phả hệ: ${params.selectedSchool.full_lineage}`,
-                    `Đầu mối liên hệ: ${params.contactInfo || 'Mặc định'}`,
-                    `Ghi chú: ${params.additionalNotes || 'Không có'}`,
                     `Tổng số môn cấp phép: ${params.selectedCourses.length} môn`,
+                    `Tổng giá trị đơn hàng: ${calculatedTotalAmount.toLocaleString()}`,
+                    `Đầu mối liên hệ: ${params.contactInfo || 'Mặc định'}`,
                 ];
             } else if (params.createApproveSubFlow === 'partner_create_chain') {
                 if (!params.selectedPartner) {
@@ -233,13 +247,22 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                     partner_name: params.selectedPartner.name,
                     partner_code: params.selectedPartner.code,
                     contract_data: {
-                        contact_info: params.contactInfo,         // 🎯 Nhập trực tiếp
-                        notes: params.additionalNotes,            // 🎯 Nhập trực tiếp
-                        courses: params.selectedCourses.map((c) => ({
-                            category: c.category,
-                            course_name: c.course_name,
-                            licenses: c.licenses,
-                        })),
+                        contact_info: params.contactInfo,
+                        notes: params.additionalNotes,
+                        total_amount: String(calculatedTotalAmount), // 🎯 Gửi số tiền thực
+                        courses: params.selectedCourses.map((c) => {
+                            const uPrice = Number((c as any).unit_price) || 0;
+                            const qty = Number(c.licenses) || 1;
+                            return {
+                                category: c.category,
+                                course_id: c.course_id,
+                                course_name: c.course_name,
+                                licenses: qty,
+                                unit_price: String(uPrice),
+                                total_amount: String(uPrice * qty),
+                                // 🎯 Không đính kèm start_date & end_date vì Hạn ngạch vĩnh viễn
+                            };
+                        }),
                     },
                 };
 
@@ -247,6 +270,8 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                 summary.targetEntity = params.selectedPartner.name;
                 summary.detailsList = [
                     `Đối tác: ${params.selectedPartner.name} (Mã: ${params.selectedPartner.code})`,
+                    `Tổng giá trị hợp đồng: ${calculatedTotalAmount.toLocaleString()}`,
+                    `Thời hạn: Vĩnh viễn (Cấp vào License Pool)`,
                     `Ghi chú: ${params.additionalNotes || 'Không có'}`,
                 ];
             } else if (params.createApproveSubFlow === 'distributor_create_chain') {
@@ -260,14 +285,22 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                     distributor_name: params.selectedDistributor.name,
                     distributor_code: params.selectedDistributor.code,
                     contract_data: {
-                        contact_info: params.contactInfo,         // 🎯 Nhập trực tiếp
-                        notes: params.additionalNotes,            // 🎯 Nhập trực tiếp
+                        contact_info: params.contactInfo,
+                        notes: params.additionalNotes,
                         justification: params.adminJustification,
-                        courses: params.selectedCourses.map((c) => ({
-                            category: c.category,
-                            course_name: c.course_name,
-                            licenses: c.licenses,
-                        })),
+                        total_amount: String(calculatedTotalAmount),
+                        courses: params.selectedCourses.map((c) => {
+                            const uPrice = Number((c as any).unit_price) || 0;
+                            const qty = Number(c.licenses) || 1;
+                            return {
+                                category: c.category,
+                                course_id: c.course_id,
+                                course_name: c.course_name,
+                                licenses: qty,
+                                unit_price: String(uPrice),
+                                total_amount: String(uPrice * qty),
+                            };
+                        }),
                     },
                 };
 
@@ -275,6 +308,8 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                 summary.targetEntity = params.selectedDistributor.name;
                 summary.detailsList = [
                     `Nhà phân phối: ${params.selectedDistributor.name} (Mã: ${params.selectedDistributor.code})`,
+                    `Tổng giá trị hợp đồng: ${calculatedTotalAmount.toLocaleString()}`,
+                    `Thời hạn: Vĩnh viễn (Cấp vào License Pool)`,
                     `Ghi chú: ${params.additionalNotes || 'Không có'}`,
                 ];
             }
