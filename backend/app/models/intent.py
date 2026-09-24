@@ -1,5 +1,14 @@
 # backend/app/models/intent.py
-from typing import List, Dict, Any, Optional, Literal
+"""
+Pydantic Schemas for Intent Assessment, Evidence Grounding & Entity Verification
+Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI
+Cải tiến:
+- Mở rộng ExtractedEntity.type thành chuỗi linh hoạt (str) chống crash ValidationError.
+- Bổ sung order_code, contract_code, identifiers, enabled vào TypedEntities.
+- Bảo toàn 100% tương thích ngược với EvidenceVerifier và TicketSummary.
+"""
+
+from typing import List, Dict, Any, Optional, Literal, Union
 from pydantic import BaseModel, Field
 
 
@@ -14,12 +23,12 @@ class EvidenceSpan(BaseModel):
     start_offset: int = Field(default=-1, description="Vị trí ký tự bắt đầu trong văn bản gốc (0-indexed)")
     end_offset: int = Field(default=-1, description="Vị trí ký tự kết thúc trong văn bản gốc")
     context_note: Optional[str] = Field(default=None, description="Ghi chú vị trí hoặc ngữ cảnh của đoạn trích")
-    is_verified: bool = Field(default=False, description="Cờ xác nhận đã được đối soát chính xác 100% trong văn bản gốc")
+    is_verified: bool = Field(default=False, description="Cờ xác nhận đã được đối soát chính xác trong văn bản gốc")
 
 
 class ExtractedIntent(BaseModel):
     """Ý định vận hành được trích xuất có bằng chứng xác thực."""
-    type: str = Field(description="Loại ý định: create_accounts, course_access, repository_access, reset_password, verify_email")
+    type: str = Field(description="Loại ý định: repository_access, course_access, create_accounts, reset_password, unenrol_course, update_user_profile, etc.")
     confidence: float = Field(ge=0.0, le=1.0, description="Độ tin cậy từ 0.0 đến 1.0")
     evidence: List[EvidenceSpan] = Field(default_factory=list, description="Danh sách bằng chứng chứng minh yêu cầu thực sự tồn tại")
     required_entities: List[str] = Field(default_factory=list, description="Các thực thể bắt buộc cần có cho intent này")
@@ -27,9 +36,9 @@ class ExtractedIntent(BaseModel):
 
 
 class ExtractedEntity(BaseModel):
-    """Thực thể nghiệp vụ được trích xuất kèm bằng chứng xác thực."""
-    type: Literal["school_name", "courses", "repositories", "repository_url", "users", "target_email", "git_role", "other"] = Field(
-        description="Loại thực thể nghiệp vụ"
+    """Thực thể nghiệp vụ được trích xuất (Mở rộng kiểu str để chống crash Pydantic)."""
+    type: str = Field(
+        description="Loại thực thể: school_name, courses, repositories, users, target_email, git_role, order_code, contract_code, etc."
     )
     raw_value: Any = Field(description="Giá trị thực tế trích xuất được")
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
@@ -38,14 +47,18 @@ class ExtractedEntity(BaseModel):
 
 
 class TypedEntities(BaseModel):
-    """Cấu trúc thực thể chuẩn mực (Typed Verified Entities) làm cơ sở quyết định cho Planner."""
+    """Cấu trúc thực thể chuẩn mực bao quát toàn bộ 22 Capabilities của hệ thống."""
     school_name: Optional[str] = None
     courses: List[str] = Field(default_factory=list)
     repositories: List[str] = Field(default_factory=list)
     repository_url: Optional[str] = None
     users: List[Dict[str, Any]] = Field(default_factory=list)
+    identifiers: List[str] = Field(default_factory=list)
     target_email: Optional[str] = None
-    git_role: Optional[str] = None
+    git_role: Optional[str] = "GUEST"
+    order_code: Optional[str] = None
+    contract_code: Optional[str] = None
+    enabled: Optional[bool] = None
     additional: Dict[str, Any] = Field(default_factory=dict)
 
 

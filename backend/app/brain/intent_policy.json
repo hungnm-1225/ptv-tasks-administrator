@@ -1,11 +1,11 @@
 {
-    "policy_version": "v1.3.0",
-    "updated_at": "2026-09-17",
-    "_comment": "Master Policy Registry v1.3.0 - Đồng bộ hóa 100% tính năng giữa Automation Studio và Unified Inbox",
+    "policy_version": "v1.4.0",
+    "updated_at": "2026-09-24",
+    "_comment": "Master Policy Registry v1.4.0 - Đồng bộ hóa 100% 12 Intents vận hành toàn diện hệ sinh thái Pythaverse",
     "intents": {
         "update_user_profile": {
             "name": "Cập nhật thông tin & Đổi trường học người dùng",
-            "description": "Dò tìm user qua getDataUser.php và cập nhật trường học, đối tác, họ tên, ngày sinh qua updateUser.php",
+            "description": "Dò tìm user qua getDataUser.php và cập nhật trường học, đối tác, họ tên qua updateUser.php",
             "required_entities": [
                 "school_name"
             ],
@@ -51,7 +51,6 @@
                         "school_name": "resolved_school.name",
                         "school_id": "resolved_school.id",
                         "attachment_url": "context.attachment_url",
-                        "total_count": "context.total_count",
                         "users": "context.users"
                     },
                     "depends_on": []
@@ -89,10 +88,7 @@
                         "student_emails": "context.user_emails",
                         "role": "context.role"
                     },
-                    "depends_on": [
-                        "create_accounts_batch_poll_if_exists",
-                        "update_user_profile_if_exists"
-                    ]
+                    "depends_on": []
                 }
             ]
         },
@@ -123,14 +119,12 @@
         },
         "repository_access": {
             "name": "Cấp quyền truy cập Git Pythaverse",
-            "description": "Thêm thành viên vào Repository Git Pythaverse",
+            "description": "Thêm thành viên vào Repository Git Pythaverse (Mặc định GUEST)",
             "required_entities": [
-                "repositories",
-                "git_role"
+                "repositories"
             ],
             "required_inputs": [
-                "repositories",
-                "git_role"
+                "repositories"
             ],
             "min_evidence_quotes": 1,
             "risk_level": "medium_mutation",
@@ -144,9 +138,7 @@
                         "collaborators": "context.collaborators",
                         "target_role": "context.target_role"
                     },
-                    "depends_on": [
-                        "create_accounts_batch_poll_if_exists"
-                    ]
+                    "depends_on": []
                 }
             ]
         },
@@ -192,8 +184,78 @@
                     "capability_id": "keycloak.reset_password",
                     "name": "Cấp lại mật khẩu tạm Keycloak",
                     "inputs_mapping": {
-                        "target_email": "entities.target_email",
-                        "temporary_password": "operator_manual_input"
+                        "target_email": "entities.target_email"
+                    },
+                    "depends_on": []
+                }
+            ]
+        },
+        "update_user_status": {
+            "name": "Khóa hoặc Mở khóa tài khoản Keycloak",
+            "description": "Kích hoạt hoặc Vô hiệu hóa (Enable/Disable) trạng thái tài khoản trên Keycloak",
+            "required_entities": [
+                "identifiers"
+            ],
+            "required_inputs": [
+                "identifiers"
+            ],
+            "min_evidence_quotes": 1,
+            "risk_level": "high_mutation",
+            "requires_manual_confirmation": true,
+            "capability_pipeline": [
+                {
+                    "capability_id": "keycloak.update_user_status",
+                    "name": "Cập nhật trạng thái tài khoản eID",
+                    "inputs_mapping": {
+                        "identifiers": "entities.identifiers",
+                        "action_type": "context.user_status_action"
+                    },
+                    "depends_on": []
+                }
+            ]
+        },
+        "approve_order": {
+            "name": "Phê duyệt đơn hàng School Order",
+            "description": "Duyệt đơn hàng của trường gửi lên qua updateStatusOrder.php",
+            "required_entities": [
+                "order_code"
+            ],
+            "required_inputs": [
+                "order_code"
+            ],
+            "min_evidence_quotes": 1,
+            "risk_level": "high_mutation",
+            "requires_manual_confirmation": true,
+            "capability_pipeline": [
+                {
+                    "capability_id": "workspace.approve_order",
+                    "name": "Phê duyệt đơn hàng School Workspace",
+                    "inputs_mapping": {
+                        "order_id": "entities.order_code",
+                        "school_name": "resolved_school.name"
+                    },
+                    "depends_on": []
+                }
+            ]
+        },
+        "approve_contract": {
+            "name": "Phê duyệt hợp đồng Partner Contract",
+            "description": "Duyệt hợp đồng đối tác bù quota license qua updateStatusPartnerOrder.php",
+            "required_entities": [
+                "contract_code"
+            ],
+            "required_inputs": [
+                "contract_code"
+            ],
+            "min_evidence_quotes": 1,
+            "risk_level": "high_mutation",
+            "requires_manual_confirmation": true,
+            "capability_pipeline": [
+                {
+                    "capability_id": "workspace.approve_contract",
+                    "name": "Phê duyệt hợp đồng đối tác Workspace",
+                    "inputs_mapping": {
+                        "contract_id": "entities.contract_code"
                     },
                     "depends_on": []
                 }

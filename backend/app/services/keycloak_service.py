@@ -520,9 +520,13 @@ class KeycloakService:
             actions_list.append(single_action)
 
         desired_enabled: Optional[bool] = None
-        if "disable_account" in actions_list or "disable_user" in actions_list:
+        # 1. Đọc trực tiếp cờ boolean từ payload
+        if payload.get("enabled") is not None:
+            desired_enabled = bool(payload["enabled"])
+        # 2. Đọc theo status_action hoặc action
+        elif payload.get("status_action") in ["disable", "lock", "deactivate"] or "disable_account" in actions_list or "disable_user" in actions_list:
             desired_enabled = False
-        elif "enable_account" in actions_list or "enable_user" in actions_list:
+        elif payload.get("status_action") in ["enable", "unlock", "activate"] or "enable_account" in actions_list or "enable_user" in actions_list:
             desired_enabled = True
         elif payload.get("target_status") == "disabled":
             desired_enabled = False

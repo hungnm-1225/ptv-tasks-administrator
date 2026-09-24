@@ -771,23 +771,33 @@ class PlaywrightLMSService:
     async def unenrol_users_pipeline(self, payload_or_course_id: Any, emails: Optional[List[str]] = None) -> Dict[str, Any]:
         """Hủy ghi danh người dùng qua API core_enrol_unenrol_user_enrolment (Có RAM Cache Session)."""
         if isinstance(payload_or_course_id, dict):
-            raw_courses = payload_or_course_id.get("courses", [])
-            if not raw_courses and payload_or_course_id.get("course_id"):
-                raw_courses = [{"course_id": str(payload_or_course_id.get("course_id"))}]
+            raw_courses_input = payload_or_course_id.get("courses", [])
+            if not raw_courses_input and payload_or_course_id.get("course_id"):
+                raw_courses_input = [{"course_id": str(payload_or_course_id.get("course_id"))}]
 
             raw_candidates = (
-                payload_or_course_id.get("emails")
+                payload_or_course_id.get("target_emails")
+                or payload_or_course_id.get("user_emails")
+                or payload_or_course_id.get("emails")
                 or payload_or_course_id.get("usernames")
                 or payload_or_course_id.get("users")
                 or payload_or_course_id.get("student_emails", [])
             )
             clean_emails = await self._normalize_identifiers_to_emails(raw_candidates)
         else:
-            raw_courses = [{"course_id": str(payload_or_course_id)}]
+            raw_courses_input = [{"course_id": str(payload_or_course_id)}]
             clean_emails = await self._normalize_identifiers_to_emails(emails or [])
 
         if not clean_emails:
             return {"status": "failed", "error": "Danh sách email hoặc username cần hủy ghi danh rỗng."}
+
+        # 🎯 CHUẨN HÓA RAW_COURSES AN TOÀN: Hỗ trợ cả list[dict], list[str], list[int]
+        raw_courses = []
+        for c in raw_courses_input:
+            if isinstance(c, dict):
+                raw_courses.append(c)
+            elif isinstance(c, (str, int)):
+                raw_courses.append({"course_id": str(c)})
 
         cookies_dict, sesskey = await self._get_or_steal_session()
         if not cookies_dict or not sesskey:
@@ -798,7 +808,9 @@ class PlaywrightLMSService:
 
         async with httpx.AsyncClient(base_url=MOODLE_BASE_URL, cookies=cookies_dict, timeout=custom_timeout) as client:
             for c_info in raw_courses:
-                c_id = str(c_info.get("course_id", "")).strip()
+                c_id = str(c_info.get("course_id", "")).strip() if isinstance(c_info, dict) else str(c_info).strip()
+                if not c_id:
+                    continue
                 _, _, existing_participants = await self._fetch_course_metadata_and_participants(client, c_id, sesskey)
 
                 c_res = {"course_id": c_id, "unenrolled": [], "not_found": []}

@@ -323,13 +323,15 @@ class AIEngine:
         # =========================================================================
         # 4. KHỞI TẠO PROMPT TỪ INTENT_EXTRACTION_V1.TXT
         # =========================================================================
+        ai_summary_context = f"[BẢN TÓM TẮT Ý ĐỊNH ĐÃ TINH CHẾ TỪ HỆ THỐNG]:\n{ai_summary}\n" if ai_summary else ""
+
         if self.intent_prompt_tpl:
             prompt = self.intent_prompt_tpl.format(
                 subject=subject,
                 sender_email=sender_email or "Không rõ",
                 catalog_context_str=catalog_context_str,
                 excel_info_str=excel_info_str,
-                full_content=full_content
+                full_content=f"{ai_summary_context}\n[NỘI DUNG CHI TIẾT]:\n{full_content}"
             )
         else:
             # Fallback nếu file prompt bị lỗi đọc

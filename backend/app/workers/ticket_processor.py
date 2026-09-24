@@ -283,7 +283,8 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
             source=source,
             excel_summary=excel_summary,
             source_revision_id=revision_id,
-            sender_email=sender_email
+            sender_email=sender_email,
+            ai_summary=summary_res.summary_vi
         )
 
         # =========================================================================
