@@ -46,20 +46,33 @@ async def download_temp_attachment(url: str) -> Optional[str]:
 
 class WorkflowPlannerService:
     def __init__(self):
+        self.capabilities: List[Dict[str, Any]] = []
         self.capabilities_map: Dict[str, Any] = {}
+        self.workflow_rules: Dict[str, Any] = {}
         self.policy_registry: Dict[str, Any] = {}
         self.policy_version: str = "v1.7.0"
         self._load_registries()
 
     def _load_registries(self):
         try:
+            # 1. Nạp capabilities.json (Lưu cả list lẫn map)
             cap_file = os.path.join(BRAIN_DIR, "capabilities.json")
             if os.path.exists(cap_file):
                 with open(cap_file, "r", encoding="utf-8") as f:
                     cap_data = json.load(f)
-                    for c in cap_data.get("capabilities", []):
+                    self.capabilities = cap_data.get("capabilities", [])
+                    for c in self.capabilities:
                         self.capabilities_map[c["id"]] = c
 
+            # 2. Nạp workflow_rules.json
+            rules_file = os.path.join(BRAIN_DIR, "workflow_rules.json")
+            if os.path.exists(rules_file):
+                with open(rules_file, "r", encoding="utf-8") as f:
+                    self.workflow_rules = json.load(f)
+            else:
+                self.workflow_rules = {}
+
+            # 3. Nạp intent_policy.json
             policy_file = os.path.join(BRAIN_DIR, "intent_policy.json")
             if os.path.exists(policy_file):
                 with open(policy_file, "r", encoding="utf-8") as f:
@@ -398,11 +411,9 @@ class WorkflowPlannerService:
                     depends_on=[]
                 ))
 
-        # 🛑 FAIL-CLOSED & ZERO-MOCKUP INVARIANT:
-        # Nếu thiếu dữ kiện bắt buộc, hạ trạng thái về needs_information và xóa sạch steps (steps = [])
+        # Nếu thiếu dữ kiện bắt buộc, hạ trạng thái về needs_information
         if missing_requirements or assessment.outcome == "needs_information":
             status = "needs_information"
-            steps = []
         elif warnings:
             status = "needs_review"
         elif steps:
