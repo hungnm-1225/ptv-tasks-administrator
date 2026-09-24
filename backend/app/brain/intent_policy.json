@@ -210,7 +210,7 @@
             "requires_manual_confirmation": true,
             "capability_pipeline": [
                 {
-                    "capability_id": "keycloak.update_user_status",
+                    "capability_id": "keycloak.enable_account",
                     "name": "Cập nhật trạng thái tài khoản eID",
                     "inputs_mapping": {
                         "identifiers": "entities.identifiers",
