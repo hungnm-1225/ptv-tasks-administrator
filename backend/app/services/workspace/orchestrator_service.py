@@ -428,12 +428,21 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
         # ------------------------------------------------------------------
         cp["current_step"] = "workspace_enroll_and_git"
         courses_plan = order_details.get("courses") or order_details.get("courses_plan") or []
+        has_class_assignments = bool(class_assignments or order_details.get("class_assignments"))
+        has_teachers = bool(teachers_allocation or order_details.get("teachers_allocation"))
 
         if "workspace_enroll_and_git" in completed:
             log_step("[5/5] Ghi danh & Git: Đã hoàn tất ở phiên trước")
+        elif not cof_file_path and not has_class_assignments and not has_teachers:
+            # 🎯 CHỐT CHẶN CỐT TỬ: KHÔNG CÓ FILE COF / KHÔNG CÓ LỚP THÌ BỎ QUA GHI DANH
+            completed.append("workspace_enroll_and_git")
+            log_step("[5/5] Ghi danh & Git: Bỏ qua (Đơn hàng tạo slot hạn ngạch, trường học sẽ tự quản lý người dùng)")
         elif courses_plan:
             enroll_payload = {
                 "school_name": school_creds.get("name") or school_identifier,
+                "school_id": school_creds.get("id") or school_creds.get("school_id") or school_creds.get("code"),
+                "school_code": school_creds.get("code"),
+                "credentials": school_creds,
                 "courses_plan": courses_plan,
                 "class_assignments": class_assignments or order_details.get("class_assignments", {}),
                 "teachers_allocation": teachers_allocation or order_details.get("teachers_allocation", []),

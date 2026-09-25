@@ -1,5 +1,13 @@
-// frontend/src/features/studio/components/tabs/workspace/CreateAndApproveSection.tsx
-import React, { useState, useRef, useEffect } from 'react';
+// =============================================================================
+// [VIẾT LẠI TOÀN BỘ] frontend/src/features/studio/components/tabs/workspace/CreateAndApproveSection.tsx
+// Phục hồi nguyên bản giao diện Khay COF chuẩn mực (Theo ảnh chụp của anh):
+// 1. Chỉ hiển thị Khay, Hàng đợi và Giáo viên KHI CÓ FILE COF ĐƯỢC NỘP.
+// 2. Nút Dropdown xếp lớp nhanh: "+ Xếp vào Khay..." hiển thị số slots còn trống.
+// 3. Băng chuyền Giáo viên với badge số groups và click mở Modal 1050px.
+// 4. Tích hợp ô nhập Đơn giá từng môn và Hạn ngạch vĩnh viễn (ẩn ngày) khi tạo Contract.
+// =============================================================================
+
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
     FileCheck2,
     Trash2,
@@ -8,39 +16,35 @@ import {
     AlertTriangle,
     XCircle,
     Sparkles,
-    Users,
     X,
+    Users,
     Building2,
     Search,
     Check,
     BookOpen,
     Plus,
+    DollarSign,
+    Infinity as InfinityIcon,
+    ChevronDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
     HierarchySchoolItem,
+    CourseItem,
     OrderCourseSelection,
     ClassGroupItem,
     TeacherAllocationItem,
     LicenseTrayItem,
     CofExtractionResult,
-    CourseItem,
 } from '../../../types';
 import { TeacherAllocationModal } from '../../modals/TeacherAllocationModal';
 
 interface CreateAndApproveSectionProps {
-    createApproveSubFlow: 'end_to_end' | 'partner_create_chain' | 'distributor_create_chain';
-    setCreateApproveSubFlow: (val: 'end_to_end' | 'partner_create_chain' | 'distributor_create_chain') => void;
-    selectedSchool: HierarchySchoolItem | null;
-    setSelectedSchool: (s: HierarchySchoolItem | null) => void;
-    setSelectedPartner: (p: { name: string; code: string } | null) => void;
-    setSelectedDistributor: (d: { name: string; code: string } | null) => void;
-    schoolsList: HierarchySchoolItem[];
     uploadedCofFile: File | null;
     setUploadedCofFile: (f: File | null) => void;
     cofExtractionResult: CofExtractionResult | null;
-    setCofExtractionResult: (res: CofExtractionResult | null) => void;
-    onProcessAndAutoFillCOF: (file: File) => void;
+    setCofExtractionResult: (r: CofExtractionResult | null) => void;
+    onProcessCofFile: (f: File) => void;
     cofTrays: LicenseTrayItem[];
     cofClassAssignments: Record<string, ClassGroupItem[]>;
     setCofClassAssignments: React.Dispatch<React.SetStateAction<Record<string, ClassGroupItem[]>>>;
@@ -48,45 +52,60 @@ interface CreateAndApproveSectionProps {
     setCofUnassignedClasses: React.Dispatch<React.SetStateAction<ClassGroupItem[]>>;
     cofTeachersAllocation: TeacherAllocationItem[];
     setCofTeachersAllocation: React.Dispatch<React.SetStateAction<TeacherAllocationItem[]>>;
+    editingTeacherIndex: number | null;
+    setEditingTeacherIndex: (idx: number | null) => void;
+    selectedSchool: HierarchySchoolItem | null;
+    setSelectedSchool: (s: HierarchySchoolItem | null) => void;
+    setSelectedPartner: (p: { name: string; code: string } | null) => void;
+    setSelectedDistributor: (d: { name: string; code: string } | null) => void;
+    schoolsList: HierarchySchoolItem[];
+    createApproveSubFlow: 'end_to_end' | 'partner_create_chain' | 'distributor_create_chain';
+    setCreateApproveSubFlow: (val: 'end_to_end' | 'partner_create_chain' | 'distributor_create_chain') => void;
     selectedCourses: OrderCourseSelection[];
     setSelectedCourses: React.Dispatch<React.SetStateAction<OrderCourseSelection[]>>;
     workspaceCoursesList: CourseItem[];
     workspaceCategoriesList: string[];
     onAddCourseRow: () => void;
-    onRemoveCourseRow: (index: number) => void;
+    onRemoveCourseRow: (idx: number) => void;
+    contactInfo: string;
+    setContactInfo: (val: string) => void;
+    additionalNotes: string;
+    setAdditionalNotes: (val: string) => void;
 }
 
 export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = ({
-    createApproveSubFlow,
-    setCreateApproveSubFlow,
-    selectedSchool,
-    setSelectedSchool,
-    setSelectedPartner,
-    setSelectedDistributor,
-    schoolsList,
     uploadedCofFile,
     setUploadedCofFile,
     cofExtractionResult,
     setCofExtractionResult,
-    onProcessAndAutoFillCOF,
+    onProcessCofFile,
     cofTrays,
-    cofClassAssignments,
     setCofClassAssignments,
     cofUnassignedClasses,
     setCofUnassignedClasses,
     cofTeachersAllocation,
     setCofTeachersAllocation,
+    editingTeacherIndex,
+    setEditingTeacherIndex,
+    selectedSchool,
+    setSelectedSchool,
+    setSelectedPartner,
+    setSelectedDistributor,
+    schoolsList,
+    createApproveSubFlow,
+    setCreateApproveSubFlow,
     selectedCourses,
     setSelectedCourses,
     workspaceCoursesList,
     workspaceCategoriesList,
     onAddCourseRow,
     onRemoveCourseRow,
+    contactInfo,
+    setContactInfo,
+    additionalNotes,
+    setAdditionalNotes,
 }) => {
-    const cofFileInputRef = useRef<HTMLInputElement | null>(null);
-
-    // Drag-and-drop state
-    const [editingTeacherIndex, setEditingTeacherIndex] = useState<number | null>(null);
+    // 1. Quản lý kéo thả
     const [draggedClassInfo, setDraggedClassInfo] = useState<{
         sourceTrayId: string | null;
         classItem: ClassGroupItem;
@@ -94,16 +113,56 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
     const [activeDropTrayId, setActiveDropTrayId] = useState<string | null>(null);
     const [isDropToUnassignedActive, setIsDropToUnassignedActive] = useState<boolean>(false);
 
-    // School Search Dropdown State
-    const [entitySearchQuery, setEntitySearchQuery] = useState<string>(
-        selectedSchool ? selectedSchool.school_name : ''
-    );
+    // 2. Ref cho input file COF
+    const cofFileInputRef = useRef<HTMLInputElement | null>(null);
+
+    // 3. Combobox tìm kiếm đối tượng
+    const [entitySearchQuery, setEntitySearchQuery] = useState<string>('');
     const [isEntityDropdownOpen, setIsEntityDropdownOpen] = useState<boolean>(false);
     const entityDropdownRef = useRef<HTMLDivElement | null>(null);
 
-    // Flexible course search dropdown state
+    // 4. Tìm kiếm môn học
     const [courseSearchTerms, setCourseSearchTerms] = useState<Record<number, string>>({});
     const [activeCourseDropdownRow, setActiveCourseDropdownRow] = useState<number | null>(null);
+
+    // Kiểm tra xem có đang ở chế độ Contract vĩnh viễn không
+    const isContractFlow = createApproveSubFlow === 'partner_create_chain' || createApproveSubFlow === 'distributor_create_chain';
+
+    // 5. Trích xuất danh sách Đối tác (Partners) & Nhà phân phối (Distributors) duy nhất
+    const uniquePartners = useMemo(() => {
+        const map = new Map<string, { name: string; code: string; distributor_name: string; distributor_code: string }>();
+        schoolsList.forEach((s) => {
+            if (s.partner_code && s.partner_name && !map.has(s.partner_code)) {
+                map.set(s.partner_code, {
+                    name: s.partner_name,
+                    code: s.partner_code,
+                    distributor_name: s.distributor_name,
+                    distributor_code: s.distributor_code,
+                });
+            }
+        });
+        return Array.from(map.values());
+    }, [schoolsList]);
+
+    const uniqueDistributors = useMemo(() => {
+        const map = new Map<string, { name: string; code: string }>();
+        schoolsList.forEach((s) => {
+            if (s.distributor_code && s.distributor_name && !map.has(s.distributor_code)) {
+                map.set(s.distributor_code, {
+                    name: s.distributor_name,
+                    code: s.distributor_code,
+                });
+            }
+        });
+        return Array.from(map.values());
+    }, [schoolsList]);
+
+    // Đồng bộ input hiển thị
+    useEffect(() => {
+        if (createApproveSubFlow === 'end_to_end') {
+            setEntitySearchQuery(selectedSchool ? selectedSchool.school_name : '');
+        }
+    }, [selectedSchool, createApproveSubFlow]);
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -115,121 +174,141 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
+    // 6. Tính toán tổng ngân sách thời gian thực
+    const totalOrderLicenses = useMemo(() => {
+        return selectedCourses.reduce((sum, c) => sum + (Number(c.licenses) || 0), 0);
+    }, [selectedCourses]);
+
+    const totalOrderAmount = useMemo(() => {
+        return selectedCourses.reduce((sum, c) => {
+            const price = Number((c as any).unit_price) || 0;
+            const count = Number(c.licenses) || 0;
+            return sum + price * count;
+        }, 0);
+    }, [selectedCourses]);
+
     return (
         <div className="space-y-5 pt-2">
-            {/* 1. KHU VỰC NỘP FILE COF ĐỂ AUTO-FILL */}
-            <div className="rounded-2xl border border-indigo-200/80 dark:border-indigo-900/50 bg-indigo-50/40 dark:bg-indigo-950/20 p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-xs">
-                            <FileCheck2 className="h-5 w-5 text-amber-300" />
+            {/* ========================================================================= */}
+            {/* 1. KHU VỰC NỘP FILE COF ĐỂ AUTO-FILL (CHỈ HIỆN KHI Ở SUB-FLOW END_TO_END)  */}
+            {/* ========================================================================= */}
+            {createApproveSubFlow === 'end_to_end' && (
+                <div className="rounded-2xl border border-indigo-200/80 dark:border-indigo-900/50 bg-indigo-50/40 dark:bg-indigo-950/20 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-xs">
+                                <FileCheck2 className="h-5 w-5 text-amber-300" />
+                            </div>
+                            <div>
+                                <h3 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                                    <span>Nộp File COF (Curriculum Order Form) Tự Động Điền Dữ Liệu</span>
+                                    <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-bold bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300">
+                                        Auto-Fill AI Engine
+                                    </span>
+                                </h3>
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                    Hệ thống tự bóc tách Tên Trường, Môn học, Số lượng License và điền vào các trường bên dưới.
+                                </p>
+                            </div>
                         </div>
-                        <div>
-                            <h3 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                                <span>Nộp File COF (Curriculum Order Form) Tự Động Điền Dữ Liệu</span>
-                                <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-bold bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300">
-                                    Auto-Fill AI Engine
-                                </span>
-                            </h3>
-                            <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                                Hệ thống tự bóc tách Tên Trường, Môn học, Số lượng License và điền vào các trường bên dưới.
-                            </p>
-                        </div>
+
+                        {uploadedCofFile && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setUploadedCofFile(null);
+                                    setCofExtractionResult(null);
+                                    if (cofFileInputRef.current) cofFileInputRef.current.value = '';
+                                }}
+                                className="text-xs text-rose-500 hover:text-rose-700 flex items-center gap-1 cursor-pointer font-semibold"
+                            >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Xóa file COF</span>
+                            </button>
+                        )}
                     </div>
 
-                    {uploadedCofFile && (
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setUploadedCofFile(null);
-                                setCofExtractionResult(null);
-                                if (cofFileInputRef.current) cofFileInputRef.current.value = '';
-                            }}
-                            className="text-xs text-rose-500 hover:text-rose-700 flex items-center gap-1 cursor-pointer font-semibold"
+                    <input
+                        type="file"
+                        ref={cofFileInputRef}
+                        accept=".xlsx,.xls"
+                        onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) onProcessCofFile(f);
+                        }}
+                        className="hidden"
+                    />
+
+                    <div
+                        onClick={() => cofFileInputRef.current?.click()}
+                        className="flex items-center justify-between p-4 rounded-xl border-2 border-dashed border-indigo-300 dark:border-indigo-800 bg-white dark:bg-slate-900/80 hover:border-indigo-500 transition cursor-pointer"
+                    >
+                        <div className="flex items-center gap-3">
+                            <Upload className="w-5 h-5 text-indigo-600" />
+                            <div>
+                                <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                                    {uploadedCofFile ? uploadedCofFile.name : 'Nhấp hoặc Kéo thả file COF (.xlsx) vào đây'}
+                                </p>
+                                <p className="text-[10px] text-slate-400">
+                                    Hỗ trợ file COF 3 Tabs (Curriculum Order Form, Student Info, Teacher Info)
+                                </p>
+                            </div>
+                        </div>
+                        <span className="px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-300 text-xs font-bold">
+                            {uploadedCofFile ? 'Đổi File' : 'Chọn File'}
+                        </span>
+                    </div>
+
+                    {/* BÁO CÁO KẾT QUẢ ĐỐI SOÁT TRƯỜNG */}
+                    {cofExtractionResult && (
+                        <div
+                            className={`p-3.5 rounded-xl border text-xs space-y-2 ${cofExtractionResult.confidence === 'high'
+                                ? 'bg-emerald-50/80 dark:bg-emerald-950/40 border-emerald-300 text-emerald-950 dark:text-emerald-100'
+                                : cofExtractionResult.confidence === 'medium'
+                                    ? 'bg-amber-50/80 dark:bg-amber-950/40 border-amber-300 text-amber-950 dark:text-amber-100'
+                                    : 'bg-rose-50/80 dark:bg-rose-950/40 border-rose-300 text-rose-950 dark:text-rose-100'
+                                }`}
                         >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            <span>Xóa file COF</span>
-                        </button>
+                            <div className="flex items-center justify-between font-bold">
+                                <span className="flex items-center gap-1.5">
+                                    {cofExtractionResult.confidence === 'high' && <CheckCircle2 className="w-4 h-4 text-emerald-600" />}
+                                    {cofExtractionResult.confidence === 'medium' && <AlertTriangle className="w-4 h-4 text-amber-600" />}
+                                    {cofExtractionResult.confidence === 'none' && <XCircle className="w-4 h-4 text-rose-600" />}
+                                    <span>
+                                        {cofExtractionResult.confidence === 'high' && 'ĐÃ KHỚP TRƯỜNG HỌC THÀNH CÔNG'}
+                                        {cofExtractionResult.confidence === 'medium' && 'CẢNH BÁO: KHỚP TRƯỜNG GẦN ĐÚNG'}
+                                        {cofExtractionResult.confidence === 'none' && 'LỖI: KHÔNG TÌM THẤY TRƯỜNG TRONG 480 TRƯỜNG'}
+                                    </span>
+                                </span>
+                                <span className="font-mono text-[11px] font-extrabold">
+                                    {Math.round(cofExtractionResult.score * 100)}% Match
+                                </span>
+                            </div>
+
+                            <div className="text-[11px] space-y-1">
+                                <p>• Tên trong file COF: <b>"{cofExtractionResult.rawSchoolName || 'Không tìm thấy'}"</b></p>
+                                {cofExtractionResult.matchedSchool ? (
+                                    <p>
+                                        • Trường xác định: <b>{cofExtractionResult.matchedSchool.school_name}</b> (Mã: {cofExtractionResult.matchedSchool.school_code})
+                                    </p>
+                                ) : (
+                                    <p className="text-rose-600 font-bold">• Vui lòng tự tìm và chọn trường ở danh sách bên dưới!</p>
+                                )}
+                                <p>
+                                    • Đã phân tích: <b>{cofExtractionResult.coursesCount} Môn học</b> | {cofExtractionResult.studentsCount} Học sinh | {cofExtractionResult.teachersCount} Giáo viên.
+                                </p>
+                            </div>
+                        </div>
                     )}
                 </div>
+            )}
 
-                <input
-                    type="file"
-                    ref={cofFileInputRef}
-                    accept=".xlsx,.xls"
-                    onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) onProcessAndAutoFillCOF(f);
-                    }}
-                    className="hidden"
-                />
-
-                <div
-                    onClick={() => cofFileInputRef.current?.click()}
-                    className="flex items-center justify-between p-4 rounded-xl border-2 border-dashed border-indigo-300 dark:border-indigo-800 bg-white dark:bg-slate-900/80 hover:border-indigo-500 transition cursor-pointer"
-                >
-                    <div className="flex items-center gap-3">
-                        <Upload className="w-5 h-5 text-indigo-600" />
-                        <div>
-                            <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                                {uploadedCofFile ? uploadedCofFile.name : 'Nhấp hoặc Kéo thả file COF (.xlsx) vào đây'}
-                            </p>
-                            <p className="text-[10px] text-slate-400">
-                                Hỗ trợ file COF 3 Tabs (Curriculum Order Form, Student Info, Teacher Info)
-                            </p>
-                        </div>
-                    </div>
-                    <span className="px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-300 text-xs font-bold">
-                        {uploadedCofFile ? 'Đổi File' : 'Chọn File'}
-                    </span>
-                </div>
-
-                {/* THẺ BÁO CÁO KẾT QUẢ ĐỐI SOÁT */}
-                {cofExtractionResult && (
-                    <div
-                        className={`p-3.5 rounded-xl border text-xs space-y-2 ${cofExtractionResult.confidence === 'high'
-                            ? 'bg-emerald-50/80 dark:bg-emerald-950/40 border-emerald-300 text-emerald-950 dark:text-emerald-100'
-                            : cofExtractionResult.confidence === 'medium'
-                                ? 'bg-amber-50/80 dark:bg-amber-950/40 border-amber-300 text-amber-950 dark:text-amber-100'
-                                : 'bg-rose-50/80 dark:bg-rose-950/40 border-rose-300 text-rose-950 dark:text-rose-100'
-                            }`}
-                    >
-                        <div className="flex items-center justify-between font-bold">
-                            <span className="flex items-center gap-1.5">
-                                {cofExtractionResult.confidence === 'high' && <CheckCircle2 className="w-4 h-4 text-emerald-600" />}
-                                {cofExtractionResult.confidence === 'medium' && <AlertTriangle className="w-4 h-4 text-amber-600" />}
-                                {cofExtractionResult.confidence === 'none' && <XCircle className="w-4 h-4 text-rose-600" />}
-                                <span>
-                                    {cofExtractionResult.confidence === 'high' && 'ĐÃ KHỚP TRƯỜNG HỌC THÀNH CÔNG'}
-                                    {cofExtractionResult.confidence === 'medium' && 'CẢNH BÁO: KHỚP TRƯỜNG GẦN ĐÚNG (CẦN KIỂM TRA)'}
-                                    {cofExtractionResult.confidence === 'none' && 'LỖI: KHÔNG TÌM THẤY TRƯỜNG TRONG 480 TRƯỜNG'}
-                                </span>
-                            </span>
-                            <span className="font-mono text-[11px] font-extrabold">
-                                {Math.round(cofExtractionResult.score * 100)}% Match
-                            </span>
-                        </div>
-
-                        <div className="text-[11px] space-y-1">
-                            <p>• Tên trong file COF: <b>"{cofExtractionResult.rawSchoolName || 'Không tìm thấy'}"</b></p>
-                            {cofExtractionResult.matchedSchool ? (
-                                <p>
-                                    • Trường được gán trên hệ thống: <b>{cofExtractionResult.matchedSchool.school_name}</b> (Mã: {cofExtractionResult.matchedSchool.school_code})
-                                </p>
-                            ) : (
-                                <p className="text-rose-600 font-bold">• Vui lòng tự tìm và chọn trường ở ô tìm kiếm bên dưới!</p>
-                            )}
-                            <p>
-                                • Bóc tách thành công: <b>{cofExtractionResult.coursesCount} Môn học</b> | {cofExtractionResult.studentsCount} Học sinh | {cofExtractionResult.teachersCount} Giáo viên.
-                            </p>
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* 2. GIAO DIỆN BENTO GRID KHAY KHÓA HỌC KÉO THẢ (TWO-WAY SYNC) */}
-            {cofTrays.length > 0 && (
+            {/* ========================================================================= */}
+            {/* 2. GIAO DIỆN KHAY KHÓA HỌC & XẾP LỚP (CHỈ HIỂN THỊ KHI CÓ FILE COF NỘP)    */}
+            {/* ========================================================================= */}
+            {uploadedCofFile && cofTrays.length > 0 && (
                 <div className="rounded-3xl border border-indigo-200 dark:border-indigo-900 bg-gradient-to-b from-indigo-50/40 via-white to-white dark:from-slate-900 dark:via-slate-900 dark:to-slate-900 p-5 sm:p-6 space-y-5 shadow-xs">
+                    {/* Header Khay Phân Bổ (Chuẩn Ảnh 1) */}
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-indigo-100 dark:border-slate-800 pb-4">
                         <div className="flex items-center gap-3">
                             <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-md shadow-indigo-500/20">
@@ -237,20 +316,20 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                             </div>
                             <div>
                                 <h4 className="text-sm font-extrabold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
-                                    <span>Khay Phân Bổ Khóa Học & Giấy Phép (Kéo & Thả)</span>
+                                    <span>KHAY PHÂN BỔ KHÓA HỌC & GIẤY PHÉP</span>
                                     <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
-                                        TWO-WAY SYNC
+                                        DRAG & DROP ENGINE
                                     </span>
                                 </h4>
                                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                                    Tự động đồng bộ số lượng & thông số môn học với bảng cấu hình bên dưới. Kéo thả để phân bổ lớp.
+                                    Kéo thả các thẻ lớp học trực tiếp vào khay hoặc dùng nút bấm nhanh để khớp đủ 100% hạn ngạch.
                                 </p>
                             </div>
                         </div>
 
                         <div className="flex items-center gap-2 text-xs font-mono font-bold">
                             <span className="px-3 py-1 rounded-xl bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                                Tổng Hạn Ngạch: {cofTrays.reduce((sum, t) => sum + t.quota, 0)} licenses
+                                Hạn Ngạch: {cofTrays.reduce((sum, t) => sum + t.quota, 0)} licenses
                             </span>
                             <span className="px-3 py-1 rounded-xl bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300">
                                 Đã Xếp: {cofTrays.reduce((sum, t) => sum + t.assignedStudentsCount, 0)} học sinh
@@ -258,7 +337,7 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                         </div>
                     </div>
 
-                    {/* DANH SÁCH KHAY */}
+                    {/* 2.1. DANH SÁCH 3 KHAY KHÓA HỌC (CHUẨN ẢNH 1 & 2) */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                         {cofTrays.map((tray) => {
                             const diff = tray.quota - tray.assignedStudentsCount;
@@ -300,7 +379,7 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                         }
 
                                         setDraggedClassInfo(null);
-                                        toast.success(`🎯 Đã thả lớp '${classItem.rawClassName}' vào Khay #${tray.courseId}!`);
+                                        toast.success(`Đã xếp lớp '${classItem.rawClassName}' vào Khay #${tray.courseId}!`);
                                     }}
                                     className={`rounded-2xl border p-4.5 flex flex-col justify-between transition-all duration-200 ${isBeingHovered
                                         ? 'border-indigo-500 bg-indigo-50/80 dark:bg-indigo-950/60 ring-2 ring-indigo-500 scale-[1.01] shadow-md'
@@ -335,14 +414,11 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                                         : 'bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300'
                                                     }`}
                                             >
-                                                {isOverflow
-                                                    ? `TRÀN +${Math.abs(diff)} (${displayPercent}%)`
-                                                    : isExact
-                                                        ? 'KHỚP 100%'
-                                                        : `DƯ ${diff} CHỖ (${displayPercent}%)`}
+                                                {isOverflow ? `TRÀN +${Math.abs(diff)}` : isExact ? 'KHỚP 100%' : `DƯ ${diff} CHỖ`}
                                             </span>
                                         </div>
 
+                                        {/* Thanh tiến độ sức chứa */}
                                         <div className="space-y-1">
                                             <div className="flex items-center justify-between text-[11px] font-mono">
                                                 <span className="text-slate-500">
@@ -361,9 +437,10 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                             </div>
                                         </div>
 
+                                        {/* Danh sách các lớp trong Khay */}
                                         <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800">
                                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
-                                                <span>Các Lớp Trong Khay ({tray.assignedClasses.length} lớp):</span>
+                                                <span>CÁC LỚP TRONG KHAY ({tray.assignedClasses.length} LỚP):</span>
                                                 <span className="text-[9px] lowercase font-normal italic text-slate-400">kéo để chuyển khay</span>
                                             </span>
 
@@ -389,7 +466,7 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                                                     <span>{clsItem.rawClassName}</span>
                                                                 </p>
                                                                 <p className="text-[10px] text-slate-400 font-mono truncate pl-3" title={clsItem.lmsGroupName}>
-                                                                    {clsItem.lmsGroupName}
+                                                                    Group: {clsItem.lmsGroupName}
                                                                 </p>
                                                             </div>
 
@@ -403,9 +480,7 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                                                         setCofClassAssignments((prev) => {
                                                                             const next = { ...prev };
                                                                             if (next[tray.courseId]) {
-                                                                                next[tray.courseId] = next[tray.courseId].filter(
-                                                                                    (c) => c.rawClassName !== clsItem.rawClassName
-                                                                                );
+                                                                                next[tray.courseId] = next[tray.courseId].filter((c) => c.rawClassName !== clsItem.rawClassName);
                                                                             }
                                                                             return next;
                                                                         });
@@ -429,7 +504,7 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                         })}
                     </div>
 
-                    {/* VÙNG LỚP CHỜ */}
+                    {/* 2.2. HÀNG ĐỢI LỚP CHƯA XẾP VÀO KHAY (CHUẨN ẢNH 1 - CÓ DROPDOWN CHỌN NHANH) */}
                     <div
                         onDragOver={(e) => {
                             e.preventDefault();
@@ -462,12 +537,11 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                             <div className="flex items-center gap-2">
                                 <AlertTriangle className="w-4 h-4 text-amber-600" />
                                 <h5 className="text-xs font-bold text-amber-900 dark:text-amber-200">
-                                    Hàng Đợi Các Khối Lớp Chưa Xếp Vào Khay ({cofUnassignedClasses.length} lớp -{' '}
-                                    {cofUnassignedClasses.reduce((s, c) => s + c.studentsCount, 0)} học sinh):
+                                    Các Khối Lớp Chưa Xếp Vào Khay ({cofUnassignedClasses.length} lớp - {cofUnassignedClasses.reduce((s, c) => s + c.studentsCount, 0)} học sinh):
                                 </h5>
                             </div>
                             <span className="text-[11px] text-amber-700 dark:text-amber-400 font-medium italic">
-                                ✋ Nắm kéo thẻ lớp thả vào khay, hoặc bấm nút xếp nhanh
+                                👉 Nhấp chọn khay để đưa lớp vào, hoặc nắm kéo thả
                             </span>
                         </div>
 
@@ -486,44 +560,43 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                             setDraggedClassInfo({ sourceTrayId: null, classItem: uCls });
                                             e.dataTransfer.setData('text/plain', uCls.rawClassName);
                                         }}
-                                        className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/40 flex flex-col justify-between gap-2.5 text-xs shadow-2xs hover:border-amber-400 cursor-grab active:cursor-grabbing transition"
+                                        className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/40 flex items-center justify-between gap-2.5 text-xs shadow-2xs hover:border-amber-400 cursor-grab active:cursor-grabbing transition"
                                     >
-                                        <div className="flex items-start justify-between gap-2">
-                                            <div>
-                                                <p className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                                                    <span className="text-slate-400">⠿</span>
-                                                    <span>{uCls.rawClassName || 'Chưa phân lớp (No Class)'}</span>
-                                                </p>
-                                                <span className="text-[10px] text-slate-400 font-mono pl-3">
-                                                    {uCls.studentsCount} học sinh {uCls.gradeDetected ? `(Khối ${uCls.gradeDetected})` : ''}
-                                                </span>
-                                            </div>
-                                            <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300 text-[10px] font-mono font-bold">
-                                                Chờ xếp
+                                        <div className="min-w-0 pr-2">
+                                            <p className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 truncate">
+                                                <span className="text-slate-400">⠿</span>
+                                                <span>{uCls.rawClassName || 'Chưa phân lớp'}</span>
+                                            </p>
+                                            <span className="text-[10px] text-slate-400 font-mono pl-3">
+                                                {uCls.studentsCount} học sinh {uCls.gradeDetected ? `(Khối ${uCls.gradeDetected})` : ''}
                                             </span>
                                         </div>
 
-                                        <div className="flex items-center gap-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800">
-                                            <span className="text-[10px] text-slate-400 font-semibold shrink-0">Xếp vào:</span>
-                                            <div className="flex flex-wrap gap-1">
+                                        {/* 🎯 NÚT SELECT DROPDOWN XẾP NHANH VÀO KHAY (CHUẨN ẢNH 1) */}
+                                        <div className="relative shrink-0">
+                                            <select
+                                                defaultValue=""
+                                                onChange={(e) => {
+                                                    const targetTrayId = e.target.value;
+                                                    if (!targetTrayId) return;
+
+                                                    setCofClassAssignments((prev) => ({
+                                                        ...prev,
+                                                        [targetTrayId]: [...(prev[targetTrayId] || []), uCls],
+                                                    }));
+                                                    setCofUnassignedClasses((prev) => prev.filter((c) => c.rawClassName !== uCls.rawClassName));
+                                                    toast.success(`Đã xếp lớp '${uCls.rawClassName}' vào Khay #${targetTrayId}!`);
+                                                }}
+                                                className="appearance-none px-3 py-1.5 pr-7 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/80 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-mono text-[11px] font-bold hover:bg-indigo-100 transition cursor-pointer outline-hidden"
+                                            >
+                                                <option value="" disabled>+ Xếp vào Khay...</option>
                                                 {cofTrays.map((t) => (
-                                                    <button
-                                                        key={t.courseId}
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setCofClassAssignments((prev) => ({
-                                                                ...prev,
-                                                                [t.courseId]: [...(prev[t.courseId] || []), uCls],
-                                                            }));
-                                                            setCofUnassignedClasses((prev) => prev.filter((c) => c.rawClassName !== uCls.rawClassName));
-                                                            toast.success(`Đã xếp lớp '${uCls.rawClassName}' vào Khay #${t.courseId}!`);
-                                                        }}
-                                                        className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 font-mono text-[10px] font-bold border border-indigo-200 dark:border-indigo-800 cursor-pointer transition"
-                                                    >
-                                                        #{t.courseId} ({t.quota - t.assignedStudentsCount})
-                                                    </button>
+                                                    <option key={t.courseId} value={t.courseId}>
+                                                        Khay #{t.courseId} ({t.quota - t.assignedStudentsCount} slots)
+                                                    </option>
                                                 ))}
-                                            </div>
+                                            </select>
+                                            <ChevronDown className="w-3.5 h-3.5 text-indigo-500 absolute right-2 top-2.5 pointer-events-none" />
                                         </div>
                                     </div>
                                 ))}
@@ -531,58 +604,40 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                         )}
                     </div>
 
-                    {/* PHÂN BỔ GIÁO VIÊN */}
+                    {/* 2.3. BĂNG CHUYỀN GIÁO VIÊN TỰ ĐỘNG DẠNG PILL BADGE (CHUẨN ẢNH 1 & 2) */}
                     {cofTeachersAllocation.length > 0 && (
-                        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-800 space-y-3">
-                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs">
+                        <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 space-y-2.5">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs">
                                 <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                                     <Users className="w-4 h-4 text-indigo-600" />
-                                    <span>Phân Bổ Giáo Viên ({cofTeachersAllocation.length} GV - Không tốn License):</span>
+                                    <span>Phân Bổ Giáo Viên Tự Động ({cofTeachersAllocation.length} GV - Không tốn License):</span>
                                 </span>
-                                <span className="text-[11px] text-slate-500 italic">
-                                    Click vào biểu tượng ✎ trên từng giáo viên để sửa môn hoặc gán lại Group LMS
+                                <span className="text-[11px] text-slate-400 italic">
+                                    Tự động gán vào toàn bộ Group của môn. Bấm vào tên để tinh chỉnh.
                                 </span>
                             </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                            <div className="flex flex-wrap items-center gap-2">
                                 {cofTeachersAllocation.map((t, tIdx) => (
-                                    <div
+                                    <button
                                         key={tIdx}
-                                        className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex flex-col justify-between gap-2 text-xs shadow-2xs hover:border-indigo-300 transition"
+                                        type="button"
+                                        onClick={() => setEditingTeacherIndex(tIdx)}
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-indigo-400 text-xs font-semibold shadow-2xs transition cursor-pointer group"
                                     >
-                                        <div className="flex items-start justify-between gap-1.5">
-                                            <div>
-                                                <p className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                                                    <span>🧑‍🏫 {t.teacherName}</span>
-                                                </p>
-                                                <p className="text-[10px] text-slate-400 font-mono">{t.email}</p>
-                                            </div>
-
-                                            <button
-                                                type="button"
-                                                onClick={() => setEditingTeacherIndex(tIdx)}
-                                                className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 dark:hover:bg-slate-800 cursor-pointer transition"
-                                                title="Sửa phân bổ môn & group cho giáo viên này"
-                                            >
-                                                ✎
-                                            </button>
-                                        </div>
-
-                                        <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800 text-[11px] space-y-1">
-                                            <p className="text-slate-600 dark:text-slate-300 truncate">
-                                                📚 Môn: <b>{t.courseAssign || 'Chưa gán'}</b>
-                                            </p>
-                                            <p className="text-indigo-600 dark:text-indigo-400 font-mono text-[10px]">
-                                                👥 {t.assignedLmsGroups.length} Group LMS được gán
-                                            </p>
-                                        </div>
-                                    </div>
+                                        <span className="text-slate-800 dark:text-slate-200 group-hover:text-indigo-600">
+                                            🧑‍🏫 {t.teacherName}
+                                        </span>
+                                        <span className="text-[10px] text-slate-400 font-mono">
+                                            ({t.assignedLmsGroups.length} groups)
+                                        </span>
+                                    </button>
                                 ))}
                             </div>
                         </div>
                     )}
 
-                    {/* Modal Giáo Viên Bự 1050px */}
+                    {/* MODAL PHÂN BỔ GIÁO VIÊN */}
                     <TeacherAllocationModal
                         isOpen={editingTeacherIndex !== null}
                         editingTeacherIndex={editingTeacherIndex}
@@ -594,19 +649,55 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                 </div>
             )}
 
-            {/* 3. Ô CHỌN TRƯỜNG HỌC ÁP DỤNG */}
+            {/* ========================================================================= */}
+            {/* 3. CHỌN SUB-FLOW TẠO & DUYỆT (SCHOOL ORDER vs PRT CONTRACT vs DST CONTRACT) */}
+            {/* ========================================================================= */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                {[
+                    { id: 'end_to_end', label: '1. School Order (Trường Học)', desc: 'Cấp theo niên khóa cho Trường' },
+                    { id: 'partner_create_chain', label: '2. PRT Contract (Đối Tác)', desc: 'Hạn ngạch vĩnh viễn cấp vào kho' },
+                    { id: 'distributor_create_chain', label: '3. DST Contract (Nhà Phân Phối)', desc: 'Hạn ngạch vĩnh viễn cấp vào kho' },
+                ].map((sub) => (
+                    <button
+                        key={sub.id}
+                        type="button"
+                        onClick={() => {
+                            setCreateApproveSubFlow(sub.id as any);
+                            setEntitySearchQuery('');
+                        }}
+                        className={`rounded-2xl border p-4 text-left transition-all cursor-pointer ${createApproveSubFlow === sub.id
+                            ? 'border-indigo-600 bg-indigo-50/80 dark:bg-indigo-950/40 ring-1 ring-indigo-500'
+                            : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50'
+                            }`}
+                    >
+                        <p className={`text-xs font-bold ${createApproveSubFlow === sub.id ? 'text-indigo-700 dark:text-indigo-300' : 'text-slate-900 dark:text-white'}`}>
+                            {sub.label}
+                        </p>
+                        <p className="text-[11px] text-slate-500 mt-0.5">{sub.desc}</p>
+                    </button>
+                ))}
+            </div>
+
+            {/* ========================================================================= */}
+            {/* 4. CHỌN ĐỐI TƯỢNG ÁP DỤNG (School vs Partner vs Distributor)              */}
+            {/* ========================================================================= */}
             <div className="space-y-1.5 relative" ref={entityDropdownRef}>
                 <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
                     <span className="flex items-center gap-1.5">
                         <Building2 className="h-3.5 w-3.5 text-indigo-600" />
-                        <span>Trường học áp dụng (Trong 480 trường phả hệ):</span>
+                        <span>
+                            {createApproveSubFlow === 'end_to_end' && 'Trường học áp dụng (School):'}
+                            {createApproveSubFlow === 'partner_create_chain' && 'Đối tác tạo hợp đồng (Partner):'}
+                            {createApproveSubFlow === 'distributor_create_chain' && 'Nhà phân phối tạo hợp đồng (Distributor):'}
+                        </span>
                     </span>
-                    {selectedSchool && (
+                    {createApproveSubFlow === 'end_to_end' && selectedSchool && (
                         <span className="text-xs text-indigo-600 font-bold font-mono">
                             Mã: {selectedSchool.school_code}
                         </span>
                     )}
                 </label>
+
                 <div className="relative">
                     <input
                         type="text"
@@ -616,7 +707,13 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                             setEntitySearchQuery(e.target.value);
                             setIsEntityDropdownOpen(true);
                         }}
-                        placeholder="Tìm kiếm trường học theo tên hoặc mã trường..."
+                        placeholder={
+                            createApproveSubFlow === 'end_to_end'
+                                ? 'Tìm kiếm trường học theo tên hoặc mã trường...'
+                                : createApproveSubFlow === 'partner_create_chain'
+                                    ? 'Tìm kiếm đối tác (Partner)...'
+                                    : 'Tìm kiếm nhà phân phối (Distributor)...'
+                        }
                         className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 px-4 py-2.5 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-hidden"
                     />
                     <Search className="absolute right-3 top-2.5 h-4 w-4 text-slate-400" />
@@ -624,186 +721,285 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
 
                 {isEntityDropdownOpen && (
                     <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-60 overflow-y-auto p-1.5 space-y-1">
-                        {schoolsList
-                            .filter(
-                                (s) =>
-                                    s.school_name.toLowerCase().includes(entitySearchQuery.toLowerCase()) ||
-                                    s.school_code.toLowerCase().includes(entitySearchQuery.toLowerCase())
-                            )
-                            .slice(0, 30)
-                            .map((s) => (
-                                <button
-                                    key={s.school_code}
-                                    type="button"
-                                    onClick={() => {
-                                        setSelectedSchool(s);
-                                        setSelectedPartner({ name: s.partner_name, code: s.partner_code });
-                                        setSelectedDistributor({ name: s.distributor_name, code: s.distributor_code });
-                                        setEntitySearchQuery(s.school_name);
-                                        setIsEntityDropdownOpen(false);
-                                    }}
-                                    className="w-full text-left p-3 rounded-xl text-xs hover:bg-indigo-50 dark:hover:bg-slate-800 flex items-center justify-between cursor-pointer transition"
-                                >
-                                    <div>
-                                        <div className="font-bold text-slate-900 dark:text-white">{s.school_name}</div>
-                                        <div className="text-[11px] text-slate-400 font-mono">
-                                            Mã: {s.school_code} | Tuyến: {s.partner_name} ➔ {s.distributor_name}
+                        {createApproveSubFlow === 'end_to_end' &&
+                            schoolsList
+                                .filter(
+                                    (s) =>
+                                        s.school_name.toLowerCase().includes(entitySearchQuery.toLowerCase()) ||
+                                        s.school_code.toLowerCase().includes(entitySearchQuery.toLowerCase())
+                                )
+                                .slice(0, 30)
+                                .map((s) => (
+                                    <button
+                                        key={s.school_code}
+                                        type="button"
+                                        onClick={() => {
+                                            setSelectedSchool(s);
+                                            setSelectedPartner({ name: s.partner_name, code: s.partner_code });
+                                            setSelectedDistributor({ name: s.distributor_name, code: s.distributor_code });
+                                            setEntitySearchQuery(s.school_name);
+                                            setIsEntityDropdownOpen(false);
+                                        }}
+                                        className="w-full text-left p-3 rounded-xl text-xs hover:bg-indigo-50 dark:hover:bg-slate-800 flex items-center justify-between cursor-pointer transition"
+                                    >
+                                        <div>
+                                            <div className="font-bold text-slate-900 dark:text-white">{s.school_name}</div>
+                                            <div className="text-[11px] text-slate-400 font-mono">
+                                                Mã: {s.school_code} | Tuyến: {s.partner_name} ➔ {s.distributor_name}
+                                            </div>
                                         </div>
-                                    </div>
-                                    {selectedSchool?.school_code === s.school_code && (
-                                        <Check className="w-4 h-4 text-indigo-600" />
-                                    )}
-                                </button>
-                            ))}
+                                        {selectedSchool?.school_code === s.school_code && (
+                                            <Check className="w-4 h-4 text-indigo-600" />
+                                        )}
+                                    </button>
+                                ))}
+
+                        {createApproveSubFlow === 'partner_create_chain' &&
+                            uniquePartners
+                                .filter(
+                                    (p) =>
+                                        p.name.toLowerCase().includes(entitySearchQuery.toLowerCase()) ||
+                                        p.code.toLowerCase().includes(entitySearchQuery.toLowerCase())
+                                )
+                                .map((p) => (
+                                    <button
+                                        key={p.code}
+                                        type="button"
+                                        onClick={() => {
+                                            setSelectedPartner({ name: p.name, code: p.code });
+                                            setSelectedDistributor({ name: p.distributor_name, code: p.distributor_code });
+                                            setSelectedSchool(null);
+                                            setEntitySearchQuery(p.name);
+                                            setIsEntityDropdownOpen(false);
+                                            toast.success(`Đã chọn Đối tác: ${p.name}`);
+                                        }}
+                                        className="w-full text-left p-3 rounded-xl text-xs hover:bg-indigo-50 dark:hover:bg-slate-800 flex items-center justify-between cursor-pointer transition"
+                                    >
+                                        <div>
+                                            <div className="font-bold text-slate-900 dark:text-white">{p.name}</div>
+                                            <div className="text-[11px] text-slate-400 font-mono">
+                                                Mã: {p.code} | Cấp trên: {p.distributor_name}
+                                            </div>
+                                        </div>
+                                    </button>
+                                ))}
+
+                        {createApproveSubFlow === 'distributor_create_chain' &&
+                            uniqueDistributors
+                                .filter(
+                                    (d) =>
+                                        d.name.toLowerCase().includes(entitySearchQuery.toLowerCase()) ||
+                                        d.code.toLowerCase().includes(entitySearchQuery.toLowerCase())
+                                )
+                                .map((d) => (
+                                    <button
+                                        key={d.code}
+                                        type="button"
+                                        onClick={() => {
+                                            setSelectedDistributor({ name: d.name, code: d.code });
+                                            setSelectedPartner(null);
+                                            setSelectedSchool(null);
+                                            setEntitySearchQuery(d.name);
+                                            setIsEntityDropdownOpen(false);
+                                            toast.success(`Đã chọn Nhà phân phối: ${d.name}`);
+                                        }}
+                                        className="w-full text-left p-3 rounded-xl text-xs hover:bg-indigo-50 dark:hover:bg-slate-800 flex items-center justify-between cursor-pointer transition"
+                                    >
+                                        <div>
+                                            <div className="font-bold text-slate-900 dark:text-white">{d.name}</div>
+                                            <div className="text-[11px] text-slate-400 font-mono">
+                                                Mã: {d.code} | Người nhận duyệt: Sales Admin
+                                            </div>
+                                        </div>
+                                    </button>
+                                ))}
                     </div>
                 )}
             </div>
 
-            {/* 4. CHỌN PHÂN LUỒNG CON */}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                {[
-                    { id: 'end_to_end', label: 'Trọn Gói Toàn Trình', desc: 'Trường ➔ Quản trị ➔ LMS' },
-                    { id: 'partner_create_chain', label: 'Đối Tác Tạo & Duyệt', desc: 'Đối tác ➔ Quản trị' },
-                    { id: 'distributor_create_chain', label: 'Nhà Phân Phối Tạo & Duyệt', desc: 'Nhà phân phối ➔ Quản trị' },
-                ].map((sub) => (
-                    <button
-                        key={sub.id}
-                        type="button"
-                        onClick={() => setCreateApproveSubFlow(sub.id as any)}
-                        className={`rounded-2xl border p-4 text-left transition-all cursor-pointer ${createApproveSubFlow === sub.id
-                            ? 'border-indigo-600 bg-indigo-50/80 dark:bg-indigo-950/40 ring-1 ring-indigo-500'
-                            : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50'
-                            }`}
-                    >
-                        <p
-                            className={`text-xs font-bold ${createApproveSubFlow === sub.id ? 'text-indigo-700 dark:text-indigo-300' : 'text-slate-900 dark:text-white'
-                                }`}
-                        >
-                            {sub.label}
-                        </p>
-                        <p className="text-[11px] text-slate-500 mt-0.5">{sub.desc}</p>
-                    </button>
-                ))}
+            {/* ========================================================================= */}
+            {/* 5. THÔNG TIN LIÊN HỆ & GHI CHÚ BỔ SUNG                                    */}
+            {/* ========================================================================= */}
+            <div className="rounded-2xl border border-indigo-200/80 dark:border-indigo-900/50 bg-gradient-to-r from-slate-50 via-indigo-50/20 to-slate-50 dark:from-slate-900 dark:via-indigo-950/20 dark:to-slate-900 p-4 space-y-3 shadow-2xs">
+                <div className="flex items-center justify-between border-b border-indigo-100 dark:border-slate-800 pb-2">
+                    <div className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-white">
+                        <span className="flex h-5 w-5 items-center justify-center rounded-lg bg-indigo-600 text-white font-mono text-[10px]">
+                            ℹ️
+                        </span>
+                        <span>Thông Tin Liên Hệ & Ghi Chú Đơn Hàng</span>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                            Đầu Mối Liên Hệ (Contact Info):
+                        </label>
+                        <input
+                            type="text"
+                            value={contactInfo}
+                            onChange={(e) => setContactInfo(e.target.value)}
+                            placeholder="VD: Nguyễn Văn A - 0912345678 (admin@school.edu.vn)"
+                            className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:border-indigo-500 focus:outline-hidden"
+                        />
+                    </div>
+
+                    <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                            Ghi Chú Bổ Sung (Additional Information):
+                        </label>
+                        <textarea
+                            rows={2}
+                            value={additionalNotes}
+                            onChange={(e) => setAdditionalNotes(e.target.value)}
+                            placeholder="Ghi chú đơn hàng hoặc nội dung hợp đồng bổ sung..."
+                            className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:border-indigo-500 focus:outline-hidden resize-none"
+                        />
+                    </div>
+                </div>
             </div>
 
-            {/* 5. COURSE LICENSE LIST BUILDER */}
+            {/* ========================================================================= */}
+            {/* 6. DANH SÁCH KHÓA HỌC, ĐƠN GIÁ & TÍNH TIỀN (REAL-TIME RECALCULATION)      */}
+            {/* ========================================================================= */}
             <div className="space-y-3 pt-2">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
                         <BookOpen className="h-4 w-4 text-indigo-600" />
                         <span>Danh Sách Khóa Học Cấp Phép ({selectedCourses.length} Môn):</span>
                     </div>
-                    <button
-                        type="button"
-                        onClick={onAddCourseRow}
-                        className="flex items-center gap-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 px-3 py-1.5 text-xs font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition-colors cursor-pointer"
-                    >
-                        <Plus className="h-3.5 w-3.5" />
-                        <span>Thêm Môn Học</span>
-                    </button>
-                </div>
 
-                {selectedCourses.map((cRow, idx) => (
-                    <div
-                        key={idx}
-                        className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 p-4 space-y-3"
-                    >
-                        <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
-                            <span>Khóa học #{idx + 1}</span>
-                            {selectedCourses.length > 1 && (
-                                <button
-                                    type="button"
-                                    onClick={() => onRemoveCourseRow(idx)}
-                                    className="text-rose-500 hover:text-rose-700 p-1 cursor-pointer"
-                                >
-                                    <Trash2 className="h-4 w-4" />
-                                </button>
-                            )}
+                    <div className="flex items-center gap-2">
+                        {/* Box tổng kết tài chính */}
+                        <div className="flex items-center gap-2 px-3 py-1 rounded-xl bg-slate-100 dark:bg-slate-800 font-mono text-xs">
+                            <span className="text-slate-500">Tổng: <b>{totalOrderLicenses}</b> licenses</span>
+                            <span className="text-slate-300">|</span>
+                            <span className="font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                                <DollarSign className="w-3.5 h-3.5" />
+                                {totalOrderAmount.toLocaleString()}
+                            </span>
                         </div>
 
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                            <div>
-                                <label className="text-[10px] font-bold uppercase text-slate-500">Phân loại:</label>
-                                <select
-                                    value={cRow.category}
-                                    onChange={(e) => {
-                                        const cat = e.target.value;
-                                        const match = workspaceCoursesList.filter((c) => c.category === cat);
-                                        const first = match[0] || workspaceCoursesList[0];
-                                        const updated = [...selectedCourses];
-                                        updated[idx] = {
-                                            ...updated[idx],
-                                            category: cat,
-                                            course_id: first.course_id,
-                                            course_name: first.course_name,
-                                            lms_url: first.lms_url,
-                                        };
-                                        setSelectedCourses(updated);
-                                    }}
-                                    className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs text-slate-900 dark:text-white"
-                                >
-                                    {workspaceCategoriesList.map((cat) => (
-                                        <option key={cat} value={cat}>
-                                            {cat}
-                                        </option>
-                                    ))}
-                                </select>
+                        <button
+                            type="button"
+                            onClick={onAddCourseRow}
+                            className="flex items-center gap-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 px-3 py-1.5 text-xs font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition-colors cursor-pointer"
+                        >
+                            <Plus className="h-3.5 w-3.5" />
+                            <span>Thêm Môn Học</span>
+                        </button>
+                    </div>
+                </div>
+
+                {selectedCourses.map((cRow, idx) => {
+                    const rowUnitPrice = Number((cRow as any).unit_price) || 0;
+                    const rowLicenses = Number(cRow.licenses) || 0;
+                    const rowTotalAmount = rowUnitPrice * rowLicenses;
+
+                    return (
+                        <div
+                            key={idx}
+                            className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 p-4 space-y-3"
+                        >
+                            <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
+                                <span>Khóa học #{idx + 1}</span>
+                                <div className="flex items-center gap-3">
+                                    <span className="font-mono text-xs text-emerald-600 dark:text-emerald-400 font-bold">
+                                        Thành tiền: {rowTotalAmount.toLocaleString()}
+                                    </span>
+                                    {selectedCourses.length > 1 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => onRemoveCourseRow(idx)}
+                                            className="text-rose-500 hover:text-rose-700 p-1 cursor-pointer"
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </button>
+                                    )}
+                                </div>
                             </div>
 
-                            <div className="sm:col-span-2 relative">
-                                <label className="text-[10px] font-bold uppercase text-slate-500 flex items-center justify-between">
-                                    <span>Chọn môn học (Tìm kiếm mọi Category):</span>
-                                    <span className="font-mono text-indigo-600 font-semibold">ID: {cRow.course_id}</span>
-                                </label>
-
-                                <div className="relative mt-1">
-                                    <input
-                                        type="text"
-                                        value={
-                                            activeCourseDropdownRow === idx
-                                                ? (courseSearchTerms[idx] ?? '')
-                                                : cRow.course_name
-                                        }
-                                        onFocus={() => {
-                                            setActiveCourseDropdownRow(idx);
-                                            setCourseSearchTerms((prev) => ({ ...prev, [idx]: '' }));
-                                        }}
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                <div>
+                                    <label className="text-[10px] font-bold uppercase text-slate-500">Phân loại:</label>
+                                    <select
+                                        value={cRow.category}
                                         onChange={(e) => {
-                                            const val = e.target.value;
-                                            setCourseSearchTerms((prev) => ({ ...prev, [idx]: val }));
+                                            const cat = e.target.value;
+                                            const match = workspaceCoursesList.filter((c) => c.category === cat);
+                                            const first = match[0] || workspaceCoursesList[0];
+                                            const updated = [...selectedCourses];
+                                            updated[idx] = {
+                                                ...updated[idx],
+                                                category: cat,
+                                                course_id: first.course_id,
+                                                course_name: first.course_name,
+                                                lms_url: first.lms_url,
+                                            };
+                                            setSelectedCourses(updated);
                                         }}
-                                        placeholder="Gõ tên môn, mã ID, hoặc category để tìm..."
-                                        className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-900 dark:text-white pr-8 focus:border-indigo-500 focus:outline-hidden"
-                                    />
-                                    <Search className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3" />
+                                        className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs text-slate-900 dark:text-white"
+                                    >
+                                        {workspaceCategoriesList.map((cat) => (
+                                            <option key={cat} value={cat}>
+                                                {cat}
+                                            </option>
+                                        ))}
+                                    </select>
                                 </div>
 
-                                {activeCourseDropdownRow === idx && (
-                                    <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-64 overflow-y-auto p-1.5 space-y-1 animate-in fade-in duration-100">
-                                        <div className="flex items-center justify-between px-2 py-1 text-[10px] text-slate-400 font-bold uppercase border-b border-slate-100 dark:border-slate-800">
-                                            <span>Gợi ý môn học</span>
-                                            <button
-                                                type="button"
-                                                onClick={() => setActiveCourseDropdownRow(null)}
-                                                className="text-slate-400 hover:text-slate-600"
-                                            >
-                                                ✕ Đóng
-                                            </button>
-                                        </div>
+                                <div className="sm:col-span-2 relative">
+                                    <label className="text-[10px] font-bold uppercase text-slate-500 flex items-center justify-between">
+                                        <span>Chọn môn học:</span>
+                                        <span className="font-mono text-indigo-600 font-semibold">ID: {cRow.course_id}</span>
+                                    </label>
 
-                                        {workspaceCoursesList
-                                            .filter((c) => {
-                                                const term = (courseSearchTerms[idx] || '').trim().toLowerCase();
-                                                if (!term) return true;
-                                                return (
-                                                    c.course_name.toLowerCase().includes(term) ||
-                                                    c.category.toLowerCase().includes(term) ||
-                                                    String(c.course_id).includes(term)
-                                                );
-                                            })
-                                            .map((c) => {
-                                                const isSameCategory = c.category === cRow.category;
-                                                return (
+                                    <div className="relative mt-1">
+                                        <input
+                                            type="text"
+                                            value={
+                                                activeCourseDropdownRow === idx
+                                                    ? (courseSearchTerms[idx] ?? '')
+                                                    : cRow.course_name
+                                            }
+                                            onFocus={() => {
+                                                setActiveCourseDropdownRow(idx);
+                                                setCourseSearchTerms((prev) => ({ ...prev, [idx]: '' }));
+                                            }}
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                setCourseSearchTerms((prev) => ({ ...prev, [idx]: val }));
+                                            }}
+                                            placeholder="Gõ tên môn hoặc ID để tìm..."
+                                            className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-900 dark:text-white pr-8 focus:border-indigo-500 focus:outline-hidden"
+                                        />
+                                        <Search className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3" />
+                                    </div>
+
+                                    {activeCourseDropdownRow === idx && (
+                                        <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-64 overflow-y-auto p-1.5 space-y-1">
+                                            <div className="flex items-center justify-between px-2 py-1 text-[10px] text-slate-400 font-bold uppercase border-b border-slate-100 dark:border-slate-800">
+                                                <span>Gợi ý môn học</span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setActiveCourseDropdownRow(null)}
+                                                    className="text-slate-400 hover:text-slate-600"
+                                                >
+                                                    ✕
+                                                </button>
+                                            </div>
+
+                                            {workspaceCoursesList
+                                                .filter((c) => {
+                                                    const term = (courseSearchTerms[idx] || '').trim().toLowerCase();
+                                                    if (!term) return true;
+                                                    return (
+                                                        c.course_name.toLowerCase().includes(term) ||
+                                                        c.category.toLowerCase().includes(term) ||
+                                                        String(c.course_id).includes(term)
+                                                    );
+                                                })
+                                                .map((c) => (
                                                     <button
                                                         key={c.course_id}
                                                         type="button"
@@ -818,7 +1014,6 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                                             };
                                                             setSelectedCourses(updated);
                                                             setActiveCourseDropdownRow(null);
-                                                            toast.success(`Đã chọn [${c.category}] - ${c.course_name}`);
                                                         }}
                                                         className="w-full text-left p-2.5 rounded-xl text-xs hover:bg-indigo-50 dark:hover:bg-slate-800 transition flex items-center justify-between cursor-pointer"
                                                     >
@@ -826,75 +1021,101 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                                             <div className="font-bold text-slate-800 dark:text-slate-200 truncate">
                                                                 {c.course_name}
                                                             </div>
-                                                            <div className="text-[10px] font-mono flex items-center gap-1.5 mt-0.5">
-                                                                <span
-                                                                    className={`px-1.5 py-0.2 rounded font-bold ${isSameCategory
-                                                                        ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300'
-                                                                        : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
-                                                                        }`}
-                                                                >
-                                                                    {c.category}
-                                                                </span>
-                                                                <span className="text-slate-400">ID: {c.course_id}</span>
+                                                            <div className="text-[10px] font-mono text-slate-400">
+                                                                [{c.category}] ID: #{c.course_id}
                                                             </div>
                                                         </div>
                                                         {cRow.course_id === c.course_id && (
                                                             <Check className="w-4 h-4 text-indigo-600 shrink-0" />
                                                         )}
                                                     </button>
-                                                );
-                                            })}
+                                                ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* CẤU HÌNH SỐ LƯỢNG, ĐƠN GIÁ & NGÀY THÁNG (ẨN KHI LÀ CONTRACT) */}
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-4 items-end">
+                                <div>
+                                    <label className="text-[10px] font-bold uppercase text-slate-500">Số lượng license:</label>
+                                    <input
+                                        type="number"
+                                        value={cRow.licenses}
+                                        min={1}
+                                        onChange={(e) => {
+                                            const updated = [...selectedCourses];
+                                            updated[idx].licenses = parseInt(e.target.value) || 1;
+                                            setSelectedCourses(updated);
+                                        }}
+                                        className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-mono font-bold text-slate-900 dark:text-white"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="text-[10px] font-bold uppercase text-slate-500 flex items-center gap-1">
+                                        <span>Đơn giá / License:</span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        value={(cRow as any).unit_price ?? 0}
+                                        min={0}
+                                        step={1}
+                                        placeholder="0"
+                                        onChange={(e) => {
+                                            const updated = [...selectedCourses];
+                                            const val = parseFloat(e.target.value) || 0;
+                                            (updated[idx] as any).unit_price = val;
+                                            (updated[idx] as any).total_amount = val * (updated[idx].licenses || 1);
+                                            setSelectedCourses(updated);
+                                        }}
+                                        className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400 focus:border-emerald-500 focus:outline-hidden"
+                                    />
+                                </div>
+
+                                {!isContractFlow ? (
+                                    <>
+                                        <div>
+                                            <label className="text-[10px] font-bold uppercase text-slate-500">Ngày bắt đầu:</label>
+                                            <input
+                                                type="text"
+                                                value={cRow.start_date || '2026-09-16'}
+                                                placeholder="YYYY-MM-DD"
+                                                onChange={(e) => {
+                                                    const updated = [...selectedCourses];
+                                                    updated[idx].start_date = e.target.value;
+                                                    setSelectedCourses(updated);
+                                                }}
+                                                className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-mono text-slate-900 dark:text-white"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] font-bold uppercase text-slate-500">Ngày kết thúc:</label>
+                                            <input
+                                                type="text"
+                                                value={cRow.end_date || '2027-09-16'}
+                                                placeholder="YYYY-MM-DD"
+                                                onChange={(e) => {
+                                                    const updated = [...selectedCourses];
+                                                    updated[idx].end_date = e.target.value;
+                                                    setSelectedCourses(updated);
+                                                }}
+                                                className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-mono text-slate-900 dark:text-white"
+                                            />
+                                        </div>
+                                    </>
+                                ) : (
+                                    <div className="sm:col-span-2 flex items-center gap-2 p-2.5 rounded-xl bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200/60 dark:border-indigo-900/40 text-indigo-700 dark:text-indigo-300 text-xs">
+                                        <InfinityIcon className="w-4 h-4 shrink-0 text-indigo-500" />
+                                        <span className="font-semibold">
+                                            Hạn ngạch vĩnh viễn: License cấp vào kho Pool không có thời hạn kết thúc.
+                                        </span>
                                     </div>
                                 )}
                             </div>
                         </div>
-
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                            <div>
-                                <label className="text-[10px] font-bold uppercase text-slate-500">Số lượng giấy phép:</label>
-                                <input
-                                    type="number"
-                                    value={cRow.licenses}
-                                    min={1}
-                                    onChange={(e) => {
-                                        const updated = [...selectedCourses];
-                                        updated[idx].licenses = parseInt(e.target.value) || 1;
-                                        setSelectedCourses(updated);
-                                    }}
-                                    className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-mono font-bold text-slate-900 dark:text-white"
-                                />
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-bold uppercase text-slate-500">Ngày bắt đầu:</label>
-                                <input
-                                    type="text"
-                                    value={cRow.start_date}
-                                    placeholder="dd-mm-yyyy"
-                                    onChange={(e) => {
-                                        const updated = [...selectedCourses];
-                                        updated[idx].start_date = e.target.value;
-                                        setSelectedCourses(updated);
-                                    }}
-                                    className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-mono text-slate-900 dark:text-white"
-                                />
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-bold uppercase text-slate-500">Ngày kết thúc:</label>
-                                <input
-                                    type="text"
-                                    value={cRow.end_date}
-                                    placeholder="dd-mm-yyyy"
-                                    onChange={(e) => {
-                                        const updated = [...selectedCourses];
-                                        updated[idx].end_date = e.target.value;
-                                        setSelectedCourses(updated);
-                                    }}
-                                    className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-mono text-slate-900 dark:text-white"
-                                />
-                            </div>
-                        </div>
-                    </div>
-                ))}
+                    );
+                })}
             </div>
         </div>
     );
