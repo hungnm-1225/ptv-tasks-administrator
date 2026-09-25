@@ -7,7 +7,9 @@ import {
     Check,
     UserPlus,
     UserMinus,
-    AlertTriangle
+    AlertTriangle,
+    PlusCircle,
+    Globe
 } from 'lucide-react';
 import { AvailableGitRepo } from '../../types';
 
@@ -38,33 +40,58 @@ export const GitCollaboratorTab: React.FC<GitCollaboratorTabProps> = ({
     setGitUsersList,
     allAvailableGitRepos,
 }) => {
-    const [isGitRepoDropdownOpen, setIsGitRepoDropdownOpen] = useState<boolean>(false);
-    const [gitRepoSearchQuery, setGitRepoSearchQuery] = useState<string>('');
-    const gitRepoDropdownRef = useRef<HTMLDivElement | null>(null);
+    const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
+    const dropdownRef = useRef<HTMLDivElement | null>(null);
 
     const isRemoveMode = gitActionType === 'remove';
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
-            if (gitRepoDropdownRef.current && !gitRepoDropdownRef.current.contains(event.target as Node)) {
-                setIsGitRepoDropdownOpen(false);
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+                setIsDropdownOpen(false);
             }
         };
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
+    // Khử ký tự HTML Entity &amp; ➔ &
+    const cleanHtmlEntities = (str: string) => {
+        return (str || '').replace(/&amp;/g, '&');
+    };
+
+    // Lọc danh sách repos theo từ khóa gõ trong ô thông minh
     const filteredAvailableGitRepos = useMemo(() => {
-        const q = gitRepoSearchQuery.trim().toLowerCase();
+        const q = customRepoInput.trim().toLowerCase();
         if (!q) return allAvailableGitRepos;
         return allAvailableGitRepos.filter(
             (r) =>
                 r.repo_name.toLowerCase().includes(q) ||
                 r.repo_url.toLowerCase().includes(q) ||
-                r.course_name.toLowerCase().includes(q) ||
+                cleanHtmlEntities(r.course_name).toLowerCase().includes(q) ||
                 r.category.toLowerCase().includes(q)
         );
-    }, [allAvailableGitRepos, gitRepoSearchQuery]);
+    }, [allAvailableGitRepos, customRepoInput]);
+
+    // Kiểm tra xem chuỗi nhập vào có phải repo ngoài (hoặc chưa có trong danh mục) không
+    const isCustomCandidate = useMemo(() => {
+        const val = customRepoInput.trim();
+        if (!val) return false;
+        const existsInCatalog = allAvailableGitRepos.some(
+            (r) => r.repo_url.toLowerCase() === val.toLowerCase() || r.repo_name.toLowerCase() === val.toLowerCase()
+        );
+        return !existsInCatalog && !gitSelectedRepos.includes(val);
+    }, [customRepoInput, allAvailableGitRepos, gitSelectedRepos]);
+
+    // Thêm repo tùy chỉnh ngoài
+    const handleAddCustomRepo = () => {
+        const val = customRepoInput.trim();
+        if (val && !gitSelectedRepos.includes(val)) {
+            setGitSelectedRepos([...gitSelectedRepos, val]);
+            setCustomRepoInput('');
+            setIsDropdownOpen(false);
+        }
+    };
 
     return (
         <div
@@ -80,7 +107,7 @@ export const GitCollaboratorTab: React.FC<GitCollaboratorTabProps> = ({
                         className={`h-4 w-4 ${isRemoveMode ? 'text-rose-600 dark:text-rose-400' : 'text-violet-600 dark:text-violet-400'
                             }`}
                     />
-                    <span>Quản Trị Cộng Tác Viên Pythaverse Git (Fast Engine Hybrid V3.6):</span>
+                    <span>Quản Trị Cộng Tác Viên Pythaverse Git (Fast Engine Hybrid V4.0):</span>
                 </div>
                 <div className="flex items-center gap-2">
                     {isRemoveMode ? (
@@ -95,7 +122,7 @@ export const GitCollaboratorTab: React.FC<GitCollaboratorTabProps> = ({
                 </div>
             </div>
 
-            {/* 🎯 BẬT/TẮT CHUYỂN ĐỔI HÀNH ĐỘNG: THÊM vs GỠ BỎ */}
+            {/* BẬT/TẮT CHUYỂN ĐỔI HÀNH ĐỘNG: THÊM vs GỠ BỎ */}
             {setGitActionType && (
                 <div className="flex items-center justify-between p-1.5 rounded-2xl bg-slate-100/80 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-750">
                     <button
@@ -125,8 +152,8 @@ export const GitCollaboratorTab: React.FC<GitCollaboratorTabProps> = ({
             )}
 
             <div className="space-y-4">
-                {/* 1. KHU VỰC MULTI-SELECT REPOS */}
-                <div className="space-y-2 relative" ref={gitRepoDropdownRef}>
+                {/* 1. KHU VỰC UNIFIED SMART COMBOBOX REPO */}
+                <div className="space-y-2 relative" ref={dropdownRef}>
                     <div className="flex items-center justify-between text-xs">
                         <label className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                             <span>
@@ -134,20 +161,15 @@ export const GitCollaboratorTab: React.FC<GitCollaboratorTabProps> = ({
                                 <span className="text-rose-500">*</span>
                             </span>
                         </label>
-                        <button
-                            type="button"
-                            onClick={() => setIsGitRepoDropdownOpen(!isGitRepoDropdownOpen)}
-                            className={`text-xs font-bold hover:underline cursor-pointer flex items-center gap-1 ${isRemoveMode
-                                ? 'text-rose-600 dark:text-rose-400'
-                                : 'text-violet-600 dark:text-violet-400'
-                                }`}
-                        >
-                            <span>
-                                {isGitRepoDropdownOpen
-                                    ? 'Đóng danh sách ✕'
-                                    : `+ Chọn thêm từ danh mục (${allAvailableGitRepos.length} repos) ▼`}
-                            </span>
-                        </button>
+                        {gitSelectedRepos.length > 0 && (
+                            <button
+                                type="button"
+                                onClick={() => setGitSelectedRepos([])}
+                                className="text-[11px] font-bold text-slate-400 hover:text-rose-500 transition cursor-pointer"
+                            >
+                                Xóa tất cả đã chọn
+                            </button>
+                        )}
                     </div>
 
                     {/* Danh sách Tags Pill các Repos đã chọn */}
@@ -177,99 +199,117 @@ export const GitCollaboratorTab: React.FC<GitCollaboratorTabProps> = ({
                         </div>
                     )}
 
-                    {/* Ô Nhập URL thủ công bổ sung */}
-                    <div className="flex gap-2">
-                        <input
-                            type="text"
-                            value={customRepoInput}
-                            onChange={(e) => setCustomRepoInput(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' && customRepoInput.trim()) {
-                                    e.preventDefault();
-                                    if (!gitSelectedRepos.includes(customRepoInput.trim())) {
-                                        setGitSelectedRepos([...gitSelectedRepos, customRepoInput.trim()]);
+                    {/* 🎯 Ô NHẬP THÔNG MINH DUY NHẤT (GỘP TÌM DANH MỤC VÀ DÁN LINK NGOÀI) */}
+                    <div className="relative flex items-center gap-2">
+                        <div className="relative flex-1">
+                            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            <input
+                                type="text"
+                                value={customRepoInput}
+                                onChange={(e) => {
+                                    setCustomRepoInput(e.target.value);
+                                    setIsDropdownOpen(true);
+                                }}
+                                onFocus={() => setIsDropdownOpen(true)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        if (isCustomCandidate) {
+                                            handleAddCustomRepo();
+                                        }
                                     }
-                                    setCustomRepoInput('');
-                                }
-                            }}
-                            placeholder="Dán link repo khác và bấm Enter (VD: https://git.pythaverse.space/...)"
-                            className="flex-1 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 px-4 py-2 font-mono text-xs text-slate-900 dark:text-white focus:border-violet-500 focus:bg-white focus:outline-hidden"
-                        />
-                        <button
-                            type="button"
-                            onClick={() => {
-                                if (customRepoInput.trim() && !gitSelectedRepos.includes(customRepoInput.trim())) {
-                                    setGitSelectedRepos([...gitSelectedRepos, customRepoInput.trim()]);
-                                    setCustomRepoInput('');
-                                }
-                            }}
-                            className={`px-3.5 py-2 rounded-xl text-white text-xs font-bold transition cursor-pointer ${isRemoveMode ? 'bg-rose-600 hover:bg-rose-700' : 'bg-violet-600 hover:bg-violet-700'
-                                }`}
-                        >
-                            Thêm Repo
-                        </button>
+                                }}
+                                placeholder="Gõ tìm repo trong danh mục (30 repos) hoặc dán link repo ngoài..."
+                                className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 font-mono text-xs text-slate-900 dark:text-white focus:border-violet-500 focus:bg-white dark:focus:bg-slate-900 focus:outline-hidden"
+                            />
+                        </div>
+                        {isCustomCandidate && (
+                            <button
+                                type="button"
+                                onClick={handleAddCustomRepo}
+                                className={`px-4 py-2.5 rounded-xl text-white text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer ${isRemoveMode ? 'bg-rose-600 hover:bg-rose-700' : 'bg-violet-600 hover:bg-violet-700'
+                                    }`}
+                            >
+                                <PlusCircle className="w-3.5 h-3.5" />
+                                <span>Thêm Repo Ngoài</span>
+                            </button>
+                        )}
                     </div>
 
-                    {/* Popover Danh Sách Repos Gợi Ý */}
-                    {isGitRepoDropdownOpen && (
-                        <div className="absolute z-30 top-full left-0 right-0 mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-80 overflow-hidden flex flex-col">
-                            <div className="p-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/50">
-                                <div className="relative">
-                                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-                                    <input
-                                        type="text"
-                                        autoFocus
-                                        value={gitRepoSearchQuery}
-                                        onChange={(e) => setGitRepoSearchQuery(e.target.value)}
-                                        placeholder="Gõ tên môn, category hoặc tên repo..."
-                                        className="w-full pl-8 pr-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white outline-none focus:border-violet-500"
-                                    />
+                    {/* DROPDOWN THÔNG MINH HIỂN THỊ KẾT QUẢ GỢI Ý & REPO NGOÀI */}
+                    {isDropdownOpen && (
+                        <div className="absolute z-30 top-full left-0 right-0 mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-80 overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-150">
+                            {/* Nút thêm nhanh repo ngoài nếu đang gõ chuỗi lạ */}
+                            {isCustomCandidate && (
+                                <div className="p-2 border-b border-slate-100 dark:border-slate-800 bg-violet-50/60 dark:bg-violet-950/40">
+                                    <button
+                                        type="button"
+                                        onClick={handleAddCustomRepo}
+                                        className="w-full text-left p-2 rounded-xl text-xs flex items-center gap-2 text-violet-700 dark:text-violet-300 hover:bg-violet-100/60 dark:hover:bg-violet-900/50 transition cursor-pointer font-semibold"
+                                    >
+                                        <Globe className="w-4 h-4 text-violet-500 shrink-0" />
+                                        <span className="truncate">
+                                            ➕ Thêm repo tùy chỉnh: <strong className="font-mono">{customRepoInput.trim()}</strong>
+                                        </span>
+                                        <span className="text-[10px] text-violet-500 ml-auto font-mono bg-white dark:bg-slate-800 px-1.5 py-0.5 rounded border border-violet-200 dark:border-violet-700">
+                                            Enter ↵
+                                        </span>
+                                    </button>
                                 </div>
-                            </div>
+                            )}
 
-                            <div className="overflow-y-auto p-2 space-y-1 scrollbar-thin max-h-60">
-                                {filteredAvailableGitRepos.map((repo, idx) => {
-                                    const isSelected = gitSelectedRepos.includes(repo.repo_url);
-                                    return (
-                                        <button
-                                            key={idx}
-                                            type="button"
-                                            onClick={() => {
-                                                if (isSelected) {
-                                                    setGitSelectedRepos(gitSelectedRepos.filter((u) => u !== repo.repo_url));
-                                                } else {
-                                                    setGitSelectedRepos([...gitSelectedRepos, repo.repo_url]);
-                                                }
-                                            }}
-                                            className={`w-full text-left p-2.5 rounded-xl text-xs flex items-center justify-between cursor-pointer transition ${isSelected
-                                                ? isRemoveMode
-                                                    ? 'bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-700'
-                                                    : 'bg-violet-50 dark:bg-violet-950/60 border border-violet-300 dark:border-violet-700'
-                                                : 'hover:bg-slate-50 dark:hover:bg-slate-800/80 border border-transparent'
-                                                }`}
-                                        >
-                                            <div className="space-y-0.5 min-w-0 flex-1 pr-2">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="font-mono font-bold text-slate-900 dark:text-white truncate">
-                                                        🐙 {repo.repo_name}
-                                                    </span>
-                                                    <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                                                        {repo.target === 'teacher_only' ? 'GV' : 'Cả Lớp'}
-                                                    </span>
+                            {/* Danh sách các repo khớp tìm kiếm */}
+                            <div className="overflow-y-auto p-2 space-y-1 scrollbar-thin max-h-64">
+                                {filteredAvailableGitRepos.length === 0 && !isCustomCandidate ? (
+                                    <p className="p-4 text-center text-xs text-slate-400">
+                                        Không tìm thấy repo nào khớp trong danh mục. Hãy nhập link repo để thêm ngoài!
+                                    </p>
+                                ) : (
+                                    filteredAvailableGitRepos.map((repo, idx) => {
+                                        const isSelected = gitSelectedRepos.includes(repo.repo_url);
+                                        const cleanCourseName = cleanHtmlEntities(repo.course_name);
+
+                                        return (
+                                            <button
+                                                key={idx}
+                                                type="button"
+                                                onClick={() => {
+                                                    if (isSelected) {
+                                                        setGitSelectedRepos(gitSelectedRepos.filter((u) => u !== repo.repo_url));
+                                                    } else {
+                                                        setGitSelectedRepos([...gitSelectedRepos, repo.repo_url]);
+                                                    }
+                                                }}
+                                                className={`w-full text-left p-2.5 rounded-xl text-xs flex items-center justify-between cursor-pointer transition ${isSelected
+                                                    ? isRemoveMode
+                                                        ? 'bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-700'
+                                                        : 'bg-violet-50 dark:bg-violet-950/60 border border-violet-300 dark:border-violet-700'
+                                                    : 'hover:bg-slate-50 dark:hover:bg-slate-800/80 border border-transparent'
+                                                    }`}
+                                            >
+                                                <div className="space-y-0.5 min-w-0 flex-1 pr-2">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="font-mono font-bold text-slate-900 dark:text-white truncate">
+                                                            🐙 {repo.repo_name}
+                                                        </span>
+                                                        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                                                            {repo.target === 'teacher_only' ? 'GV' : 'Cả Lớp'}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-[11px] text-slate-500 truncate">
+                                                        Môn: <strong>{cleanCourseName}</strong>
+                                                    </p>
                                                 </div>
-                                                <p className="text-[11px] text-slate-500 truncate">
-                                                    Môn: <strong>{repo.course_name}</strong>
-                                                </p>
-                                            </div>
-                                            {isSelected && (
-                                                <Check
-                                                    className={`w-4 h-4 shrink-0 ${isRemoveMode ? 'text-rose-600' : 'text-violet-600'
-                                                        }`}
-                                                />
-                                            )}
-                                        </button>
-                                    );
-                                })}
+                                                {isSelected && (
+                                                    <Check
+                                                        className={`w-4 h-4 shrink-0 ${isRemoveMode ? 'text-rose-600' : 'text-violet-600'
+                                                            }`}
+                                                    />
+                                                )}
+                                            </button>
+                                        );
+                                    })
+                                )}
                             </div>
                         </div>
                     )}

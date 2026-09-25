@@ -156,24 +156,37 @@ class WorkspaceContractService(WorkspaceBaseService):
     # =========================================================================
     # 🏢 2. DISTRIBUTOR DUYỆT PRT CONTRACT (CẤP BÙ VỪA ĐỦ, KHÔNG NHÂN 2)
     # =========================================================================
-    async def distributor_approve_partner_contract(
+   async def distributor_approve_partner_contract(
         self,
         credentials: Dict[str, str],
         contract_identifier: Optional[str] = None,
         auto_create_dst_if_short: bool = True,
         courses_needed: Optional[List[Dict[str, Any]]] = None,
         note: Optional[str] = None,
-        origin_order_code: Optional[str] = None, 
-        school_name: Optional[str] = None,
-        total_amount: Optional[str] = None
+        origin_order_code: Optional[str] = None,
+        school_name: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Distributor duyệt PRT Contract. Nếu thiếu, cấp bù DST đúng số lượng cần."""
+        """Distributor duyệt PRT Contract qua Direct API (Tạo DST bù cho tất cả các môn thiếu)."""
         try:
+            # 🛑 CHỐT CHẶN: KIỂM TRA MÃ HỢP ĐỒNG HỢP LỆ TRƯỚC KHI BẮN API
+            if not contract_identifier or str(contract_identifier).strip().lower() in ("none", "null", ""):
+                return {
+                    "status": "failed", 
+                    "error": "Mã hợp đồng PRT không hợp lệ (Bị rỗng hoặc mang giá trị None)"
+                }
+
             cookies, identity = await self._steal_role_session(credentials.get("username", ""), credentials.get("password", ""), "Distributor")
-            dist_id = identity.get("distributor_id")
+            
+            raw_did = identity.get("distributor_id") or identity.get("id") or "36"
+            dist_id = str(raw_did).strip() if str(raw_did).strip().isdigit() else "36"
 
             clean_num_match = re.search(r"\d+$", str(contract_identifier))
-            prt_num_id = clean_num_match.group(0) if clean_num_match else str(contract_identifier)
+            if not clean_num_match:
+                return {
+                    "status": "failed", 
+                    "error": f"Không trích xuất được ID số nguyên từ mã PRT '{contract_identifier}'"
+                }
+            prt_num_id = clean_num_match.group(0)
 
             async with httpx.AsyncClient(base_url=BASE_WORKSPACE_URL, cookies=cookies, timeout=25.0) as client:
                 payload = {
