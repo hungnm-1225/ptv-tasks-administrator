@@ -920,19 +920,6 @@ export const AutomationStudioPage: React.FC = () => {
 
       toast.success(
         <div className="space-y-1">
-          <div className="font-bold flex items-center gap-1.5 text-emerald-500">
-            <CheckCircle2 className="w-4 h-4" />
-            <span>Đã kích hoạt Worker tự động hóa!</span>
-          </div>
-          <div className="text-xs text-slate-500">Tác vụ đang được thực thi dưới nền. Bạn có thể theo dõi tiến trình ngay bên dưới.</div>
-        </div>,
-        { duration: 5000 }
-      );
-
-      setIsConfirmModalOpen(false);
-
-      toast.success(
-        <div className="space-y-1">
           <div className="font-bold flex items-center gap-1.5 text-emerald-400">
             <CheckCircle2 className="w-4 h-4" />
             <span>Đã kích hoạt Worker tự động hóa!</span>

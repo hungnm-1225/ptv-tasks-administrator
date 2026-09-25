@@ -2,7 +2,7 @@
 import re
 from typing import List, Optional, Tuple, Dict, Any
 
-from app.models.intent import EvidenceSpan, ExtractedEntity, ExtractedIntent, IntentAssessment
+from app.models.intent import EvidenceSpan, ExtractedEntity, ExtractedIntent, IntentAssessment, TypedEntities
 
 EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
 # Nhận diện cả mã khóa học dạng SWRP 7 lẫn Course ID số (ví dụ: Course ID 1445 hoặc id=1445)
@@ -201,6 +201,16 @@ def augment_assessment_with_request_facts(
     if normalized_courses:
         _append_entity(assessment, ExtractedEntity(type="courses", raw_value=normalized_courses, confidence=1.0, evidence=course_spans))
 
+    if parsed_users or normalized_courses:
+        if not assessment.typed_entities:
+            assessment.typed_entities = TypedEntities()
+        if parsed_users:
+            assessment.typed_entities.users = parsed_users
+            assessment.entities["users"] = parsed_users
+        if normalized_courses:
+            assessment.typed_entities.courses = normalized_courses
+            assessment.entities["courses"] = normalized_courses
+
     # 4. Gán intent nếu có bằng chứng và có tài khoản/khóa học
     if course_evidence and (parsed_users or normalized_courses):
         _append_intent(assessment, "course_access", course_evidence)
@@ -215,3 +225,4 @@ def augment_assessment_with_request_facts(
         assessment.outcome = "candidate_action"
 
     return assessment
+

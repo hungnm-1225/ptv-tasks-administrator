@@ -1,11 +1,16 @@
 # backend/app/services/workspace/account_service.py
+"""
+Pythaverse Central Admin - Workspace Bulk Account Provisioning Service
+ĐỘNG CƠ HYBRID V4.0: Ephemeral Session Caching + Pure HTTPX Polling + Precision Delay
+Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI (Master Enterprise Comprehensive Edition)
+"""
 import os
 import re
 import json
 import asyncio
 import logging
 from typing import Optional, Dict, Any, List, Tuple
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import openpyxl
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -14,83 +19,10 @@ from playwright.async_api import async_playwright
 
 from app.services.workspace.base import WorkspaceBaseService, BASE_WORKSPACE_URL
 from app.core.playwright_manager import acquire_playwright_slot
+from app.core.supabase import get_supabase_client
 
 logger = logging.getLogger(__name__)
 
-async def _get_or_steal_school_session(self, username: str, password: str, school_id: Optional[str] = None) -> Tuple[Dict[str, str], Dict[str, Any]]:
-        """Ưu tiên đọc session School tạm thời từ Supabase; chỉ mở Playwright khi chưa có hoặc hết hạn."""
-        from app.core.supabase import get_supabase_client
-        supabase = get_supabase_client()
-        clean_user = username.strip().lower()
-        
-        # 1. Thử tìm Session School đang lưu tạm trên Supabase (Zero Playwright - 10ms)
-        try:
-            query = supabase.table("workspace_active_sessions")\
-                .select("session_key, cookies, metadata")\
-                .eq("is_active", True)
-            
-            if school_id:
-                query = query.eq("session_key", f"school_{school_id}")
-            else:
-                query = query.ilike("session_key", "school_%")
-
-            res = query.execute()
-            if res.data:
-                for row in res.data:
-                    meta = row.get("metadata") or {}
-                    if not clean_user or meta.get("user", "").lower() == clean_user:
-                        cookies = row.get("cookies", {})
-                        identity = {
-                            "school_id": meta.get("school_id") or school_id,
-                            "partner_id": meta.get("partner_id"),
-                            "username": username
-                        }
-                        logger.info(f"⚡ [Account Auth] Tái sử dụng Session School [{row.get('session_key')}] từ Supabase (Zero Playwright)!")
-                        return cookies, identity
-        except Exception as e:
-            logger.warning(f"⚠️ Không thể đọc session School từ Supabase: {e}")
-
-        # 2. Nếu chưa có: Mở Playwright bốc Session mới và LƯU TẠM vào Supabase
-        logger.info(f"🔑 [Account Auth] Mở Chromium đăng nhập School cho '{username}'...")
-        async with acquire_playwright_slot("School Auth Session", lane="admin"):
-            async with async_playwright() as p:
-                browser, context, page = await self._create_context(p)
-                try:
-                    is_ok, login_err = await self.login_role(page, username, password, "School")
-                    if not is_ok:
-                        raise RuntimeError(f"Đăng nhập School thất bại: {login_err}")
-
-                    wp_identity = await page.evaluate("""() => {
-                        const u = window.user || {};
-                        let localUser = {};
-                        try { localUser = JSON.parse(localStorage.getItem('user') || '{}'); } catch(e) {}
-                        return {
-                            school_id: u.school_id || localUser.school_id,
-                            partner_id: u.partner_id || localUser.partner_id,
-                            username: u.username || localUser.username || ''
-                        };
-                    }""")
-
-                    cookies = await context.cookies()
-                    cookies_dict = {c["name"]: c["value"] for c in cookies}
-                    s_id = wp_identity.get("school_id")
-
-                    # LƯU TẠM VÀO SUPABASE ĐỂ CRONJOB 5 PHÚT DÙNG TRONG SUỐT 1 NGÀY CHỜ ĐỢI
-                    try:
-                        from app.services.session_keepalive_service import session_keepalive_service
-                        await session_keepalive_service.save_session_cookies(
-                            session_key=f"school_{s_id}",
-                            system_name=f"School Temp Session ({username})",
-                            cookies=cookies_dict,
-                            metadata={"school_id": s_id, "partner_id": wp_identity.get("partner_id"), "user": username}
-                        )
-                        logger.info(f"💾 [Account Auth] Đã lưu tạm session 'school_{s_id}' lên Supabase cho Cronjob dùng ngầm!")
-                    except Exception as s_err:
-                        logger.warning(f"⚠️ Lỗi lưu session school: {s_err}")
-
-                    return cookies_dict, wp_identity
-                finally:
-                    await browser.close()
 
 def is_status_done(status_val: Any) -> bool:
     """Nhận diện mã 1, '1' hoặc chữ Done/Completed/Success là hoàn thành."""
@@ -167,15 +99,52 @@ def generate_excel_from_api_data(user_records: List[Dict[str, Any]], output_file
 
 class WorkspaceAccountService(WorkspaceBaseService):
     """
-    Xử lý nộp file batch tạo tài khoản học sinh/giáo viên qua Direct API Sniffer & Playwright.
-    ĐỘNG CƠ HYBRID V3.6: Parse Excel cục bộ -> HTTPX nộp batch -> HTTPX Poll định kỳ (Zero RAM).
+    Xử lý nộp file batch tạo tài khoản học sinh/giáo viên qua Direct API & Pure HTTPX Polling.
+    ĐỘNG CƠ HYBRID V4.0: Bốc Session 1 lần ➔ Lưu Supabase ➔ HTTPX nộp batch ➔ HTTPX Poll định kỳ (Zero RAM).
     """
 
     # =========================================================================
-    # 🛠️ HELPER NỘI BỘ: BỐC SESSION PLAYWRIGHT CỰC NHANH
+    # 🛠️ SESSION KEEPALIVE & CACHING: ƯU TIÊN SUPABASE, KHÔNG MỞ PLAYWRIGHT THỪA
     # =========================================================================
-    async def _steal_school_session(self, username: str, password: str) -> Tuple[Dict[str, str], Dict[str, Any]]:
-        """Đăng nhập Playwright 3s bốc Cookie School và thông tin phả hệ."""
+    async def get_or_steal_school_session(
+        self, 
+        username: str, 
+        password: str, 
+        school_id: Optional[str] = None
+    ) -> Tuple[Dict[str, str], Dict[str, Any]]:
+        """Ưu tiên đọc session School tạm thời từ Supabase; chỉ mở Playwright khi chưa có."""
+        supabase = get_supabase_client()
+        clean_user = username.strip().lower()
+        
+        # 1. Thử tìm Session School đang lưu tạm trên Supabase (Zero Playwright - 10ms)
+        try:
+            query = supabase.table("workspace_active_sessions")\
+                .select("session_key, cookies, metadata")\
+                .eq("is_active", True)
+            
+            if school_id:
+                query = query.eq("session_key", f"school_{school_id}")
+            else:
+                query = query.ilike("session_key", "school_%")
+
+            res = query.execute()
+            if res.data:
+                for row in res.data:
+                    meta = row.get("metadata") or {}
+                    if not clean_user or meta.get("user", "").lower() == clean_user:
+                        cookies = row.get("cookies", {})
+                        identity = {
+                            "school_id": meta.get("school_id") or school_id,
+                            "partner_id": meta.get("partner_id"),
+                            "username": username
+                        }
+                        logger.info(f"⚡ [Account Auth] Tái sử dụng Session School [{row.get('session_key')}] từ Supabase (Zero Playwright)!")
+                        return cookies, identity
+        except Exception as e:
+            logger.warning(f"⚠️ Không thể đọc session School từ Supabase: {e}")
+
+        # 2. Nếu chưa có: Mở Playwright bốc Session mới và LƯU TẠM vào Supabase
+        logger.info(f"🔑 [Account Auth] Mở Chromium đăng nhập School cho '{username}'...")
         async with acquire_playwright_slot("School Auth Session", lane="admin"):
             async with async_playwright() as p:
                 browser, context, page = await self._create_context(p)
@@ -197,6 +166,21 @@ class WorkspaceAccountService(WorkspaceBaseService):
 
                     cookies = await context.cookies()
                     cookies_dict = {c["name"]: c["value"] for c in cookies}
+                    s_id = wp_identity.get("school_id") or school_id or "temp"
+
+                    # Lưu tạm vào Supabase để Cronjob 5 phút dùng ngầm
+                    try:
+                        from app.services.session_keepalive_service import session_keepalive_service
+                        await session_keepalive_service.save_session_cookies(
+                            session_key=f"school_{s_id}",
+                            system_name=f"School Temp Session ({username})",
+                            cookies=cookies_dict,
+                            metadata={"school_id": s_id, "partner_id": wp_identity.get("partner_id"), "user": username}
+                        )
+                        logger.info(f"💾 [Account Auth] Đã lưu tạm session 'school_{s_id}' lên Supabase cho Cronjob dùng ngầm!")
+                    except Exception as s_err:
+                        logger.warning(f"⚠️ Lỗi lưu session school: {s_err}")
+
                     return cookies_dict, wp_identity
                 finally:
                     await browser.close()
@@ -208,7 +192,6 @@ class WorkspaceAccountService(WorkspaceBaseService):
         wb = openpyxl.load_workbook(file_path, data_only=True)
         try:
             ws = wb.active
-            # Tìm dòng tiêu đề (thường ở hàng 5) và quét dữ liệu từ hàng 6
             start_row = 6
             for r in range(start_row, ws.max_row + 1):
                 first_name = str(ws.cell(row=r, column=2).value or "").strip()
@@ -316,7 +299,7 @@ class WorkspaceAccountService(WorkspaceBaseService):
         return result_excel_path
 
     # =========================================================================
-    # 🚀 NỘP BATCH TẠO TÀI KHOẢN (DIRECT API SIÊU TỐC)
+    # 🚀 NỘP BATCH TẠO TÀI KHOẢN (NGẮT LUỒNG THEO CHU KỲ 20S/TÀI KHOẢN)
     # =========================================================================
     async def submit_account_creation_batch(
         self,
@@ -326,7 +309,10 @@ class WorkspaceAccountService(WorkspaceBaseService):
         download_dir: str = "/tmp/ptv_results",
         checkpoint: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Nộp danh sách tạo tài khoản trực tiếp qua uploadFileAccount.php và createMultipleUser.php."""
+        """
+        Nộp batch tạo tài khoản qua Direct API.
+        Sau khi nộp thành công, ngắt luồng ngay và thiết lập next_check_at = now() + (số tài khoản * 20s).
+        """
         os.makedirs(download_dir, exist_ok=True)
         checkpoint = checkpoint or {}
 
@@ -336,13 +322,14 @@ class WorkspaceAccountService(WorkspaceBaseService):
             return await self.check_and_export_batch_result(credentials, existing_req_id, download_dir)
 
         try:
-            # 1. Bốc session School siêu tốc
-            cookies, identity = await self._steal_school_session(
+            # 1. Bốc session School (Ưu tiên Supabase Cache, không mở Playwright thừa)
+            cookies, identity = await self.get_or_steal_school_session(
                 credentials.get("username", ""), 
-                credentials.get("password", "")
+                credentials.get("password", ""),
+                credentials.get("school_id")
             )
-            school_id = identity.get("school_id")
-            partner_id = identity.get("partner_id")
+            school_id = identity.get("school_id") or credentials.get("school_id")
+            partner_id = identity.get("partner_id") or credentials.get("partner_id")
 
             # 2. Parse file Excel trực tiếp bằng Python
             accounts = self._parse_excel_accounts(upload_file_path)
@@ -390,39 +377,54 @@ class WorkspaceAccountService(WorkspaceBaseService):
                 await client.post(trigger_url, files=self._to_multipart(trig_payload))
                 logger.info(f"🚀 Đã kích hoạt lệnh tạo tài khoản ngầm cho Request #{request_id}!")
 
-                checkpoint["account_batch_request_id"] = request_id
+                # 🎯 TÍNH TOÁN CHUẨN XÁC: 20 GIÂY / 1 TÀI KHOẢN (TỐI THIỂU 60 GIÂY)
+                account_count = len(accounts)
+                wait_seconds = max(account_count * 20, 60)
+                next_check_dt = datetime.now(timezone.utc) + timedelta(seconds=wait_seconds)
+                next_check_iso = next_check_dt.isoformat()
 
-                # Fast-Path kiểm tra nhanh nếu số lượng ít (<= 20 tài khoản)
-                if len(accounts) <= 20:
-                    logger.info(f"⚡ [Fast-Path] Thăm dò nhanh trạng thái Request #{request_id}...")
-                    for _ in range(3):
-                        await asyncio.sleep(2.5)
-                        chk_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/request_approval/getListRequest.php?school_id={school_id}"
-                        chk_res = await client.get(chk_url)
-                        if chk_res.status_code == 200:
-                            req_list = chk_res.json().get("data", {}).get("accountData", [])
-                            matched_req = next((r for r in req_list if str(r.get("id")) == request_id), None)
-                            if matched_req and is_status_done(matched_req.get("status")):
-                                logger.info(f"✨ [Fast-Path SUCCESS] Request #{request_id} đã Done! Đang kéo file kết quả...")
-                                result_path = await self._download_export_file_httpx(client, request_id, download_dir, upload_file_path)
-                                return {
-                                    "status": "completed",
-                                    "request_id": request_id,
-                                    "result_file_path": result_path,
-                                    "fast_path": True,
-                                    "checkpoint": checkpoint
-                                }
+                logger.info(
+                    f"⏱️ [Smart Poll Schedule] {account_count} tài khoản x 20s = {wait_seconds}s. "
+                    f"Ngắt luồng an toàn, lần thăm dò đầu tiên sẽ vào lúc: {next_check_iso} (UTC)"
+                )
+
+                checkpoint["account_batch_request_id"] = request_id
+                checkpoint["next_check_at"] = next_check_iso
+                checkpoint["total_accounts"] = account_count
+
+                # Tự động cập nhật bảng bot_automation_tasks nếu có task_id
+                task_id = checkpoint.get("task_id")
+                if task_id:
+                    try:
+                        supabase = get_supabase_client()
+                        task_update_payload = {
+                            "request_id": request_id,
+                            "school_credentials": credentials,
+                            "next_check_at": next_check_iso,
+                            "total_count": account_count,
+                            "upload_file_path": upload_file_path,
+                            "checkpoint": checkpoint
+                        }
+                        supabase.table("bot_automation_tasks").update({
+                            "execution_status": "waiting_poll",
+                            "payload_data": task_update_payload
+                        }).eq("id", task_id).execute()
+                        logger.info(f"💾 Đã lưu trạng thái 'waiting_poll' (next_check_at: {next_check_iso}) cho Task #{task_id}!")
+                    except Exception as t_err:
+                        logger.warning(f"⚠️ Không thể cập nhật trạng thái bot task: {t_err}")
 
                 return {
                     "status": "waiting_poll",
                     "request_id": request_id,
-                    "record_count": len(accounts),
-                    "estimated_wait_seconds": len(accounts) * 10,
+                    "record_count": account_count,
+                    "estimated_wait_seconds": wait_seconds,
+                    "next_check_at": next_check_iso,
+                    "school_credentials": credentials,
                     "checkpoint": checkpoint
                 }
 
         except Exception as e:
-            logger.error(f"❌ Lỗi submit_account_creation_batch: {e}")
+            logger.error(f"❌ Lỗi submit_account_creation_batch: {e}", exc_info=True)
             return {"status": "failed", "error": str(e), "checkpoint": checkpoint}
 
     # =========================================================================
@@ -434,16 +436,17 @@ class WorkspaceAccountService(WorkspaceBaseService):
         request_id: str,
         download_dir: str
     ) -> Dict[str, Any]:
-        """Cronjob 10 phút kiểm tra tiến độ và tải kết quả thuần HTTPX (Zero RAM Render)."""
+        """Cronjob kiểm tra tiến độ và tải kết quả thuần HTTPX (Zero RAM Render)."""
         os.makedirs(download_dir, exist_ok=True)
         if not request_id or str(request_id).strip() in ["None", "null", ""]:
             return {"status": "failed", "error": "Request ID không hợp lệ"}
 
         try:
-            # 1. Bốc session School siêu nhẹ
-            cookies, identity = await self._steal_school_session(
+            # 1. Bốc session School (Ưu tiên đọc từ Supabase active_sessions 10ms - KHÔNG MỞ PLAYWRIGHT)
+            cookies, identity = await self.get_or_steal_school_session(
                 credentials.get("username", ""), 
-                credentials.get("password", "")
+                credentials.get("password", ""),
+                credentials.get("school_id")
             )
             school_id = identity.get("school_id") or credentials.get("school_id")
 
@@ -470,9 +473,8 @@ class WorkspaceAccountService(WorkspaceBaseService):
                 # 3. Khi đã Done: Xuất file kết quả & khôi phục Keycloak
                 result_path = await self._download_export_file_httpx(client, request_id, download_dir)
 
-                # 🧹 TỰ HỦY: XÓA SẠCH SESSION TẠM KHỎI SUPABASE SAU KHI BATCH HOÀN TẤT
+                # 🧹 DỌN DẸP SESSION TẠM KHỎI SUPABASE SAU KHI BATCH HOÀN TẤT
                 try:
-                    from app.core.supabase import get_supabase_client
                     supabase = get_supabase_client()
                     supabase.table("workspace_active_sessions")\
                         .delete()\

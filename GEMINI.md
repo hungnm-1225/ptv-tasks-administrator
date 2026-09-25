@@ -4,7 +4,7 @@
 > **Tài liệu này định hình tư duy, vai trò, nguyên tắc làm việc và quy chuẩn kỹ thuật bắt buộc của AI Assistant khi thực thi bất kỳ tác vụ nào trong không gian làm việc `ptv-tasks-administrator`.**  
 > **Kiến trúc sư trưởng & Tác giả sáng lập:** **Nguyễn Mạnh Hùng** (*Lead AI Engineer & Automation Architect – DTT Corporation / Pythaverse Ecosystem*)  
 > **GitHub:** [`https://github.com/hungnm-1225`](https://github.com/hungnm-1225) | **Email:** `hungnm@dtt.vn` / `hung.nguyenmanh@dtt.vn`  
-> **Phiên bản:** `v4.0.0 Master Enterprise Comprehensive Edition` | **Cập nhật:** `2026-09-24`
+> **Phiên bản:** `v4.2.0 Master Enterprise Comprehensive Edition` | **Cập nhật:** `2026-09-25`
 
 ---
 
@@ -21,10 +21,10 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
 | **3** | `database-architect` | [database-architect.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/database-architect.md) | Supabase PostgreSQL 16 (23 bảng CSDL bao gồm `workspace_active_sessions` và `cron_telemetry_state` + Storage Bucket `ticket-attachments`), Revisions, Assessments, Proposals, Append-only Execution Events, RLS Policies `@dtt.vn`, 2 Stored Procedures (`create_or_get_inbox_ticket_revision`, `approve_workflow_proposal`). |
 | **4** | `qa-automation-engineer` | [qa-automation-engineer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/qa-automation-engineer.md) | Playwright Async Chromium làm Auth Gateway (3-5s login bốc session rồi đóng trình duyệt), Single Playwright Semaphore (1 Slot cho 512MB RAM Render), Re-entrant ContextVar Lock, Zombie process cleanup `gc.collect()`, Pure HTTPX Async Engine executing backend APIs, Gói `workspace/` modularized 9 modules, 2-Vector Git Collaborator DOM Parser & bảo vệ vĩnh viễn Bot Admin. |
 | **5** | `security-auditor` | [security-auditor.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/security-auditor.md) | Whitelist Domain `@dtt.vn`, Fernet Credential Vault (`VAULT_SECRET_KEY`), Keycloak Admin REST API + Playwright Fallback, Credential Masking `[PROTECTED]`, Server-Side JWT Approval Gate (`get_current_user_email`), Render Env Credential Sanitization (`sanitize_env_credential`). |
-| **6** | `orchestrator` | [orchestrator.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/orchestrator.md) | Phân tích luồng end-to-end, giải quyết xung đột dữ liệu, thiết kế pipeline liên thông đa dịch vụ (Workspace ➔ LMS ➔ Git ➔ Keycloak), Chuỗi trọn gói 5-in-1 Master E2E, Điều phối 8 action Workspace Automation, Non-Destructive DAG Planner (v7.2) bảo tồn bước đề xuất khi `needs_information`, Server-Side Safety Gate v4.1 (Admin Override & RPC Fallback). |
+| **6** | `orchestrator` | [orchestrator.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/orchestrator.md) | Phân tích luồng end-to-end, giải quyết xung đột dữ liệu, thiết kế pipeline liên thông đa dịch vụ (Workspace ➔ LMS ➔ Git ➔ Keycloak), Chuỗi trọn gói 5-in-1 Master E2E, Điều phối 8 action Workspace Automation, Non-Destructive DAG Planner (v7.3) với Course-Repo Auto-Binding & Strict School Scoping, bảo tồn bước đề xuất khi `needs_information`, Server-Side Safety Gate v4.1 (Admin Override & RPC Fallback). |
 | **7** | `debugger` | [debugger.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/debugger.md) | 4-Phase Systematic Debugging, bắt log thực thi chuẩn hóa GMT+7, cô lập nguyên nhân gốc rễ, Gemini 10-model fallback + Deterministic Fast-Path Triage v1.2.0. |
 | **8** | `documentation-writer` | [documentation-writer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/documentation-writer.md) | Chuẩn hóa [README.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/README.md), API Docs, cẩm nang kiến trúc, Single Source of Truth cho toàn bộ dự án, đồng bộ hóa tuyệt đối với mã nguồn. |
-| **9** | `project-planner` | [project-planner.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/project-planner.md) | Phương pháp luận 4 pha (Analysis, Planning, Solutioning, Implementation), lập bản đồ công việc, duy trì 6 Invariants cốt lõi, Master Policy Registry v1.4.0 (12 operational intents). |
+| **9** | `project-planner` | [project-planner.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/project-planner.md) | Phương pháp luận 4 pha (Analysis, Planning, Solutioning, Implementation), lập bản đồ công việc, duy trì 6 Invariants cốt lõi, Master Policy Registry v1.7.3 (12 operational intents). |
 | **10** | `devops-engineer` | [devops-engineer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/devops-engineer.md) | Quản trị CI/CD GitHub Actions, cấu hình [render.yaml](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/render.yaml) (512MB RAM ASGI), [vercel.json](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/vercel.json) (Edge CDN Frontend), UptimeRobot (Keep-warm ping & Synthetic monitoring), Dockerfile, Staggered Cron Scheduler & Telemetry Registry. |
 | **11** | `performance-optimizer` | [performance-optimizer.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/performance-optimizer.md) | Tối ưu hóa bộ nhớ 512MB RAM Render, Ma trận 8 BoundedMemoryCache (LRU + TTL < 40MB), Low-RAM Chromium 18 cờ tối ưu, Dynamic Code Splitting React 19 / Vite 6. |
 | **12** | `penetration-tester` | [penetration-tester.md](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/.agent/agents/penetration-tester.md) | Thử nghiệm xâm nhập, kiểm định phòng thủ Prompt Injection, phá vỡ Offset trích dẫn, chống bypass JWT Token `@dtt.vn`, kiểm định an toàn két sắt Fernet. |
@@ -80,15 +80,15 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
     4. Tài khoản & Keycloak ➔ Category `account_keycloak`.
     5. Khác ➔ Category `other`, trích xuất preview 120 ký tự sạch từ thân email.
 
-### 2.3. Deterministic Planning Module & Master Policy Registry v1.4.0
-- Bộ lập kế hoạch `workflow_planner.py` (Master Enterprise v7.2 - AI-Grounded & Pure DAG Orchestrator) hoạt động hoàn toàn tất định, **không gọi LLM bên trong**.
-- **Master Policy Registry v1.4.0 với 12 Intents Nghiệp Vụ:**
+### 2.3. Deterministic Planning Module (v7.3) & Master Policy Registry v1.7.3
+- Bộ lập kế hoạch `workflow_planner.py` (Master Enterprise v7.3 - Course-Repo Auto-Binding & Strict School Scoping) hoạt động hoàn toàn tất định, **không gọi LLM bên trong**.
+- **Master Policy Registry v1.7.3 với 12 Intents Nghiệp Vụ:**
   Ánh xạ trực tiếp Intent ➔ Capability Pipeline thông qua `intent_policy.json`:
   1. `update_user_profile` ➔ `workspace.update_user_profile`
   2. `create_accounts` ➔ `workspace.bulk_account_creation`, `workspace.poll_account_batch`
   3. `course_access` ➔ `lms.direct_enroll`
   4. `unenrol_course` ➔ `lms.unenrol_users`
-  5. `repository_access` ➔ `git.add_collaborators` (mặc định role `GUEST` khi người dùng không chỉ định)
+  5. `repository_access` ➔ `git.add_collaborators` (mặc định role `GUEST` an toàn theo Principle of Least Privilege)
   6. `remove_repository_access` ➔ `git.remove_collaborators`
   7. `reset_password` ➔ `keycloak.reset_password`
   8. `update_user_status` ➔ `keycloak.enable_account` / `keycloak.update_user_status`
@@ -96,7 +96,13 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
   10. `approve_contract` ➔ `workspace.distributor_approve_contract` / `workspace.admin_approve_contract`
   11. `verify_email` ➔ `keycloak.verify_email`
   12. `keycloak_lookup` ➔ `keycloak.bulk_lookup`
-- **Non-Destructive DAG Planner (v7.2):**
+- **Bộ 4 Cải Tiến Đột Phá Trên Planner v7.3:**
+  1. **Course-Repo Auto-Binding:** Tự động tra cứu cột `git_repos` JSONB của bảng `lms_courses`, nhặt chính xác link Git Repository bám dính theo vai trò Giáo viên (`gv`) vs Học sinh (`hs`).
+  2. **Strict School Scoping:** Phân định rạch ròi phạm vi trường học: CHỈ yêu cầu chọn trường khi thao tác School Workspace (`workspace.*`). Các tác vụ Git (`git.*`), Keycloak (`keycloak.*`), Moodle LMS (`lms.*`) hoàn toàn **KHÔNG YÊU CẦU TRƯỜNG**, loại bỏ triệt để cảnh báo vàng oan trên giao diện Unified Inbox.
+  3. **Natural Course Range Expansion (`expand_course_range_text`):** Tự động bóc tách và mở rộng dải môn học tự nhiên (VD: "SWRP 5 to 10" / "SWRP từ 5 đến 10" ➔ "SWRP 5", "SWRP 6", "SWRP 7", "SWRP 8", "SWRP 9", "SWRP 10").
+  4. **Quyền Git Mặc Định GUEST An Toàn:** Tuân thủ nguyên tắc Principle of Least Privilege, gán role an toàn `GUEST` khi người dùng không chỉ định vai trò thay vì dừng gãy luồng hoặc tự gán admin.
+  5. **Chữ Ký Trả Về 5 Tham Số:** Hàm `build_workflow_proposal` trả về tuple 5 phần tử: `(status, steps, missing_requirements, plan_warnings, is_school_required)`.
+- **Non-Destructive DAG Planner (v7.3):**
   - Khi phát hiện thiếu hụt tham số vận hành bắt buộc, hệ thống sinh danh sách `missing_requirements` và đặt trạng thái outcome là `needs_information`.
   - **Bảo tồn các bước đề xuất (Proposed Steps Preservation):** Hệ thống KHÔNG xóa sạch DAG về 0 bước mà bảo tồn toàn bộ các bước đã lên khung để hiển thị trực quan trên giao diện Unified Inbox, giúp Điều hành viên có cái nhìn toàn diện về luồng thực thi dự kiến.
   - Kiểm tra tính hợp lệ của đồ thị DAG qua `validate_workflow_graph(steps)`.
@@ -112,11 +118,12 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
 - **Append-Only Execution Audit:** Ghi nhận từng mili-giây diễn biến vào bảng `workflow_execution_events`, bắt buộc mang theo `proposal_id`, tự động che mờ mật khẩu và token nhạy cảm (`[PROTECTED]`).
 
 ### 2.5. Gói Xử Lý Bảng Tính Chuyên Biệt `app.services.excel` & `EmailThreadService`
-- **Gói `app/services/excel/`:** Chuyên biệt hóa 4 dịch vụ xử lý Excel:
-  1. `COFService`: Bóc tách COF 3 Tabs & ghi ngược kết quả vào COF gốc (highlight cam `FCE4D6` + font đỏ đậm `C00000`).
-  2. `BulkTemplateService`: Chuẩn hóa phôi tạo tài khoản theo quy chuẩn của trường & bóc tách text trần sinh phôi Excel.
-  3. `GenericExcelService`: Bóc tách file Excel tự do, trích xuất email và liên kết hyperlinks.
-  4. `TOFExcelService`: Khung dịch vụ cho định dạng Training Order Form (TOF).
+- **Gói `app/services/excel/`:** Chuyên biệt hóa 5 dịch vụ xử lý Excel:
+  1. `excel_classifier.py`: Cỗ máy nhận diện phôi thông minh siêu nhẹ (`detect_excel_file_type`) dùng `openpyxl (read_only=True)` quét 1-5 hàng đầu, cột A-Z của Sheet đầu tiên để phân loại 4 nhóm phôi: `COF`, `TOF`, `BULK_ACCOUNTS`, `GENERIC`.
+  2. `COFService`: Bóc tách COF 3 Tabs & ghi ngược kết quả vào COF gốc (highlight cam `FCE4D6` + font đỏ đậm `C00000`).
+  3. `BulkTemplateService`: Chuẩn hóa phôi tạo tài khoản theo quy chuẩn của trường & bóc tách text trần sinh phôi Excel, uốn nắn email và role (`sanitize_email`, `sanitize_role`).
+  4. `GenericExcelService`: Bóc tách file Excel tự do, trích xuất email và liên kết hyperlinks.
+  5. `TOFExcelService`: Khung dịch vụ cho định dạng Training Order Form (`parse_tof_file`, `parse_tof_summary`).
   - Lớp `COFExcelService` đóng vai trò Facade Proxy bảo toàn tương thích ngược 100%.
 - **Dịch vụ `EmailThreadService`:** Tách email thread thành các lượt độc lập, khử sạch 100% quoted reply rác, nhận diện người gửi nội bộ (`@dtt.vn`, `@pythaverse.space`) so với khách hàng và phân loại 4 trạng thái vòng đời hội thoại (`WAITING_CUSTOMER_INFO`, `ACTIONABLE`, `RESOLVED_CONFIRMATION`, `SINGLE_MESSAGE`).
 
@@ -157,7 +164,7 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
    - Mọi ý định vận hành trích xuất bắt buộc phải có đoạn trích dẫn nguyên văn (`quote`). `EvidenceVerifierService` làm sạch quote (cắt dấu ngoặc kép, dấu chấm lửng `...`), so khớp trực tiếp và so khớp mềm dẻo không phân biệt khoảng trắng/xuống dòng (`\s+`). Nếu không có bằng chứng, outcome hạ xuống `needs_information`.
 2. **Attachment Evidence Fail-Closed Invariant (File đính kèm chưa đối soát ➔ Không Action):**
    - Các trích dẫn có `source_kind == "attachment_extract"` tạm thời bị gắn cờ `is_verified = False` (chuyển sang `needs_information`), nghiêm cấm việc dùng text thân email để đối soát trích dẫn từ file đính kèm khi chưa qua hạ tầng bóc tách bất biến.
-3. **Zero-Mockup Invariant & Triết Lý Non-Destructive DAG v7.2:**
+3. **Zero-Mockup Invariant & Triết Lý Non-Destructive DAG v7.3:**
    - Nghiêm cấm sử dụng bất kỳ giá trị mặc định giả lập nào (`SWRP 4-12`, count=4, mật khẩu `Ptv@2026`). Thiếu thông tin bắt buộc phải dừng lại ở `needs_information` kèm danh sách `missing_requirements`.
    - **Triết lý Non-Destructive DAG:** Khi ở trạng thái `needs_information`, hệ thống không xóa sạch đồ thị về 0 bước mà bảo tồn toàn bộ các bước tiềm năng để hiển thị trực quan trên giao diện Unified Inbox, giúp Quản trị viên nắm bắt bức tranh toàn cảnh.
 4. **Dual-Freeze Proposal & Immutable Provenance Linkage:**
@@ -201,9 +208,9 @@ Mỗi khi tiếp nhận yêu cầu từ người dùng, Antigravity **BẮT BU�
 1. [`email_thread_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/email_thread_service.py): Phân tách email thread, khử quoted reply rác, nhận diện `@dtt.vn` vs Khách hàng.
 2. [`evidence_verifier.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/evidence_verifier.py): Làm sạch trích dẫn, đối soát ký tự mềm dẻo không phân biệt khoảng trắng `\s+`, bảo toàn quote sạch.
 3. [`request_fact_normalizer.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/request_fact_normalizer.py): Bổ sung fact tất định (Email, Teacher/Student role, Course ID).
-4. [`workflow_planner.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_planner.py): Master Enterprise v7.2 AI-Grounded Pure DAG Orchestrator, Master Policy Registry v1.4.0 (12 intents), Non-Destructive DAG Planner, Auto Git Sync, `validate_workflow_graph`.
+4. [`workflow_planner.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_planner.py): Master Enterprise v7.3 AI-Grounded Pure DAG Orchestrator (Course-Repo Auto-Binding, Strict School Scoping, Natural Range Expansion, Git GUEST default, 5-tuple proposal return), Master Policy Registry v1.7.3 (12 intents), Non-Destructive DAG Planner, Auto Git Sync, `validate_workflow_graph`.
 5. [`workflow_executor.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_executor.py): Thuật toán Tô-pô Kahn DAG, OCC Lease, Smart BFS Retry.
-6. [`excel/`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/excel): Gói dịch vụ xử lý Excel chuyên biệt 4 module (`COFService`, `BulkTemplateService`, `GenericExcelService`, `TOFExcelService`).
+6. [`excel/`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/excel): Gói dịch vụ xử lý Excel chuyên biệt 5 module (`detect_excel_file_type` trong `excel_classifier.py`, `COFService`, `BulkTemplateService`, `GenericExcelService`, `TOFExcelService`).
 7. [`workspace/`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workspace): Gói RPA & Direct API Workspace 9 module (`base.py`, `account_service.py`, `order_service.py`, `contract_service.py`, `enroll_service.py`, `orchestrator_service.py`, `scanner_service.py`, `user_service.py`, `__init__.py`).
 8. [`playwright_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/playwright_service.py): Cỗ máy Hybrid Moodle PLearn V4.0 (SSO Playwright Cookie ➔ HTTPX Direct WebService + UI 2 nhịp fallback, hỗ trợ hủy ghi danh `unenrol_users_pipeline` đa dạng định dạng khóa học).
 9. [`git_service.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/git_service.py): Pythaverse Git Fast Engine Hybrid V4.0 (Session Stealer ➔ `POST /_user/existence` 20ms ➔ `POST /settings/collaborators` 200ms, 2-Vector DOM Parser, bảo vệ vĩnh viễn Bot Admin).

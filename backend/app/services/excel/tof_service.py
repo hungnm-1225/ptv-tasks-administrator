@@ -74,3 +74,15 @@ class TOFExcelService:
             "status": "ready_for_specification",
             "message": "Đang chờ cập nhật quy chuẩn bóc tách TOF từ Kiến trúc sư Nguyễn Mạnh Hùng."
         }
+
+    @classmethod
+    def parse_tof_summary(cls, file_path: str) -> Dict[str, Any]:
+        """Bóc tách summary của TOF phục vụ AI Intake."""
+        data = cls.parse_tof_file(file_path)
+        return {
+            "school_name": data.get("school_name", ""),
+            "courses_detected": data.get("courses_detected", [])
+        }
+
+
+tof_service = TOFExcelService()

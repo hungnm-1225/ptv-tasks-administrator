@@ -97,8 +97,13 @@ class BulkTemplateService:
         return False, -1, {}
 
     @classmethod
-    def normalize_input_accounts_excel(cls, input_file_path: str, output_file_path: str) -> Tuple[str, int, List[Dict[str, Any]]]:
+    def normalize_input_accounts_excel(cls, input_file_path: str, output_file_path: Optional[str] = None) -> Tuple[str, int, List[Dict[str, Any]]]:
         """Chuẩn hóa mọi file thành PHÔI CHUẨN: Tiêu đề Hàng 2, Header Hàng 5, Data Hàng 6."""
+        if not output_file_path:
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tf:
+                output_file_path = tf.name
+
         wb_in = openpyxl.load_workbook(input_file_path, data_only=True)
         try:
             ws_in = wb_in.active
@@ -372,3 +377,6 @@ class BulkTemplateService:
         st_count = sum(1 for u in users_list if u.get("role", "").lower() == "student")
         tc_count = total_c - st_count
         return ready_file, st_count, tc_count, total_c, False, {}
+
+
+bulk_template_service = BulkTemplateService()

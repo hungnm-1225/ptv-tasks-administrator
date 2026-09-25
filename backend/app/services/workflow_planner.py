@@ -225,8 +225,31 @@ class WorkflowPlannerService:
         missing_requirements: List[Dict[str, str]] = []
         warnings: List[str] = list(assessment.warnings)
         step_counter = 1
+        entities: Dict[str, Any] = {}
+        if assessment.typed_entities:
+            entities = assessment.typed_entities.model_dump(exclude_none=True)
+            if assessment.entities and isinstance(assessment.entities, dict):
+                for k, v in assessment.entities.items():
+                    if k not in entities and v is not None:
+                        entities[k] = v
+        elif assessment.entities and isinstance(assessment.entities, dict):
+            # 🛡️ KIỂM ĐỊNH AN TOÀN: Legacy entities thuần túy không được tự ý kích hoạt action nếu không có TypedEntities
+            missing_requirements.append({
+                "field": "verified_entities",
+                "message": "Thiếu thực thể có kiểu dữ liệu chuẩn (TypedEntities) đã qua kiểm chứng."
+            })
+            return "needs_information", [], missing_requirements, warnings, False
+        elif isinstance(assessment.entities, dict):
+            entities = assessment.entities
 
-        entities = assessment.entities if isinstance(assessment.entities, dict) else {}
+        # 🎯 KIỂM TRA BẰNG CHỨNG CHO TỪNG INTENT
+        for it in assessment.intents:
+            if it.type in self.policy_registry:
+                if not it.evidence:
+                    missing_requirements.append({
+                        "field": "evidence",
+                        "message": f"Ý định '{it.type}' không có bằng chứng trích dẫn xác thực."
+                    })
 
         # 🎯 1. BÓC TÁCH NGƯỜI DÙNG & VAI TRÒ
         users_list = entities.get("users") or []
@@ -299,8 +322,9 @@ class WorkflowPlannerService:
         active_intent_types = [i.type for i in assessment.intents if i.type in self.policy_registry]
 
         # Bảo vệ ngữ nghĩa: Nếu người dùng chỉ yêu cầu kho lưu trữ Git mà không xin vào lớp LMS
-        if any(i.type == "repository_access" for i in assessment.intents):
-            if not any(k in summary_text.lower() for k in ["ghi danh", "enrol", "học sinh vào lớp"]):
+        has_explicit_course_intent = any(i.type == "course_access" and i.evidence for i in assessment.intents)
+        if any(i.type == "repository_access" for i in assessment.intents) and not has_explicit_course_intent:
+            if not any(k in summary_text.lower() for k in ["ghi danh", "enrol", "học sinh vào lớp", "học môn", "course"]):
                 active_intent_types = [t for t in active_intent_types if t != "course_access"]
 
         if not active_intent_types:
@@ -333,9 +357,10 @@ class WorkflowPlannerService:
                     if collected_repos:
                         step_name = f"{action_vi} Git ({len(collected_repos)} Repos) vai trò {git_role}"
                     else:
+                        missing_field = "repository_url" if raw_repos_or_shorthands else "repositories"
                         missing_requirements.append({
-                            "field": "repositories",
-                            "message": f"Không tìm thấy link Repository trong CSDL cho các môn yêu cầu. Vui lòng cung cấp link Git repo."
+                            "field": missing_field,
+                            "message": f"Không tìm thấy link Repository URL hợp lệ cho các môn yêu cầu. Vui lòng cung cấp link Git repo bắt đầu bằng http:// hoặc https://."
                         })
 
                 # --- 2. NHÓM GHI DANH LMS MOODLE ---
@@ -429,14 +454,31 @@ class WorkflowPlannerService:
                     if not target_code:
                         missing_requirements.append({"field": "order_code" if is_order else "contract_code", "message": "Thiếu mã đơn hàng hoặc hợp đồng cần duyệt."})
 
-                steps.append(WorkflowStepDraft(
-                    step_id=curr_step_id,
-                    capability_id=cap_id,
-                    name=step_name,
-                    status="ready",
-                    inputs=step_inputs,
-                    depends_on=[]
-                ))
+                # Chỉ append bước thực thi nếu không bị thiếu thông tin cốt lõi
+                has_critical_missing = False
+                if cap_id in ["git.add_collaborators", "git.remove_collaborators"] and not collected_repos:
+                    has_critical_missing = True
+                elif cap_id in ["lms.direct_enroll", "lms.unenrol_users"] and not c_names:
+                    has_critical_missing = True
+                elif cap_id == "keycloak.reset_password" and not user_emails:
+                    has_critical_missing = True
+                elif cap_id in ["workspace.partner_approve_order", "workspace.distributor_approve_contract"] and not target_code:
+                    has_critical_missing = True
+
+                # Nếu bản thân intent không có bằng chứng, không sinh bước thực thi
+                parent_intent = next((it for it in assessment.intents if it.type == itype), None)
+                if parent_intent and not parent_intent.evidence:
+                    has_critical_missing = True
+
+                if not has_critical_missing:
+                    steps.append(WorkflowStepDraft(
+                        step_id=curr_step_id,
+                        capability_id=cap_id,
+                        name=step_name,
+                        status="ready",
+                        inputs=step_inputs,
+                        depends_on=[]
+                    ))
 
         # 🎯 6. ĐÁNH GIÁ XEM CÓ BẮT BUỘC PHẢI CHỌN TRƯỜNG HAY KHÔNG (STRICT SCOPE)
         # Chỉ các tác vụ đụng vào Workspace Organization mới cần trường!
@@ -603,9 +645,39 @@ class WorkflowPlannerService:
         step_ids = {s.step_id for s in step_objs}
 
         for s in step_objs:
+            # 1. Kiểm tra bước phụ thuộc có tồn tại không
             for dep in s.depends_on:
                 if dep not in step_ids:
                     errors.append(f"Bước '{s.name}' phụ thuộc bước '{dep}' không tồn tại.")
+
+            # 2. Kiểm định Fail-Closed Capability: Kiểm tra tính khả dụng của capability
+            if s.capability_id in self.capabilities_map:
+                cap = self.capabilities_map[s.capability_id]
+                if not cap.get("supported_by_handler", True) or not cap.get("available", True):
+                    errors.append(f"Bước '{s.name}' chứa capability '{s.capability_id}' không khả dụng để thực thi.")
+            elif self.capabilities_map:
+                errors.append(f"Bước '{s.name}' chứa capability '{s.capability_id}' không khả dụng để thực thi.")
+
+        # 3. Phát hiện chu trình vòng kín trong đồ thị DAG (DFS Cycle Detection)
+        adj: Dict[str, List[str]] = {s.step_id: list(s.depends_on) for s in step_objs}
+        visited: Dict[str, int] = {}  # 0: unvisited, 1: visiting, 2: visited
+
+        def dfs(node: str, path: List[str]):
+            visited[node] = 1
+            path.append(node)
+            for neighbor in adj.get(node, []):
+                if neighbor in visited and visited[neighbor] == 1:
+                    cycle_nodes = " -> ".join(path + [neighbor])
+                    errors.append(f"Phát hiện chu trình vòng kín (Circular Dependency): {cycle_nodes}")
+                    return
+                if neighbor not in visited or visited[neighbor] == 0:
+                    dfs(neighbor, path)
+            visited[node] = 2
+            path.pop()
+
+        for s in step_objs:
+            if visited.get(s.step_id, 0) == 0:
+                dfs(s.step_id, [])
 
         is_valid = len(errors) == 0
         return WorkflowValidationResult(
@@ -613,7 +685,7 @@ class WorkflowPlannerService:
             status="ready" if is_valid else "invalid",
             errors=errors,
             warnings=warnings,
-            stats={"total_steps": len(step_objs), "ready_steps": len(step_objs), "dependent_steps": 0}
+            stats={"total_steps": len(step_objs), "ready_steps": len(step_objs) if is_valid else 0, "dependent_steps": sum(1 for s in step_objs if s.depends_on)}
         )
 
 

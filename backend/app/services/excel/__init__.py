@@ -11,6 +11,7 @@ from app.services.excel.cof_service import COFService
 from app.services.excel.bulk_template_service import BulkTemplateService
 from app.services.excel.generic_excel_service import GenericExcelService
 from app.services.excel.tof_service import TOFExcelService
+from .bulk_template_service import BulkTemplateService, bulk_template_service
 
 __all__ = [
     "COFService",

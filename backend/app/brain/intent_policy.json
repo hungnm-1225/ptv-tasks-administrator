@@ -234,7 +234,7 @@
             "requires_manual_confirmation": true,
             "capability_pipeline": [
                 {
-                    "capability_id": "workspace.approve_order",
+                    "capability_id": "workspace.partner_approve_order",
                     "name": "Phê duyệt đơn hàng School Workspace",
                     "inputs_mapping": {
                         "order_id": "entities.order_code",
@@ -258,7 +258,7 @@
             "requires_manual_confirmation": true,
             "capability_pipeline": [
                 {
-                    "capability_id": "workspace.approve_contract",
+                    "capability_id": "workspace.distributor_approve_contract",
                     "name": "Phê duyệt hợp đồng đối tác Workspace",
                     "inputs_mapping": {
                         "contract_id": "entities.contract_code"
