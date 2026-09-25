@@ -104,7 +104,6 @@ async def get_hierarchy_schools(
     if all_schools is None:
         supabase = get_supabase_client()
         try:
-            # 🎯 NÂNG LIMIT TỪ 500 LÊN 2500 ĐỂ KHÔNG BAO GIỜ BỎ SÓT VNV SCHOOL!
             schools_res = supabase.table("workspace_organizations")\
                 .select("id, code, name, role_type, parent_id")\
                 .eq("role_type", "school")\
