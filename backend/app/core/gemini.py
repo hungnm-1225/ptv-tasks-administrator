@@ -1,12 +1,13 @@
-# backend/app/core/gemini.py
 """
-Dual-Key Gemini Cognition Engine (Master Enterprise v3.3 - Multimodal Vision & Grounded Reasoning)
+Dual-Key Gemini Cognition Engine (Master Enterprise v4.0 - Multimodal Vision & Attachment Ledger)
 Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI
 Chuyên trách:
 - Multimodal Vision: Hỗ trợ truyền mảng ảnh đính kèm (image_parts) để Gemini đọc trực tiếp ảnh chụp lỗi màn hình.
-- Nạp Bản Tóm Tắt AI (ai_summary) vào thẳng context prompt làm kim chỉ nam.
+- Phân tách rạch ròi Sổ cái tệp đính kèm: Tệp mới (ACTIVE) vs Tệp cũ đã xử lý (ARCHIVED).
+- Nạp Bản Tóm Tắt AI (ai_summary) vào vị trí chuyên biệt làm kim chỉ nam.
 - Khử sạch lỗi KeyError khi format prompt bằng .replace() an toàn.
 - Bọc an toàn Pydantic ValidationError cho missing_requirements.
+- ZERO-MOCKUP INVARIANT: Thiếu dữ liệu thì báo needs_information, không tự bịa data.
 """
 
 import os
@@ -249,7 +250,7 @@ class AIEngine:
             return IntentAssessment(
                 outcome="no_action",
                 model_name="fast_path_system_filter",
-                prompt_version="v4.6_vision_enabled",
+                prompt_version="v4.7_provenance_ledger",
                 intents=[], entities={}, extracted_entities=[], missing_requirements=[],
                 warnings=["Email thông báo tự động từ hệ thống."],
                 raw_evidence_quotes=[]
@@ -258,7 +259,7 @@ class AIEngine:
         parsed_thread = thread_service.parse_thread(raw_content, sender_email)
         full_content = parsed_thread.compact_prompt_context if parsed_thread.is_thread else (raw_content[:20000] if raw_content else "(Trống)")
 
-        # Định dạng danh mục khóa học
+        # 1. Định dạng danh mục khóa học LMS
         excel_data = excel_summary or {}
         catalog_list = excel_data.get("catalog_reference", [])
         if catalog_list:
@@ -274,23 +275,42 @@ class AIEngine:
         else:
             catalog_context_str = "(Không có danh mục khóa học LMS trong bộ nhớ)"
 
-        # Định dạng dữ liệu bóc tách thô
-        if excel_data and any(k != "catalog_reference" for k in excel_data.keys()):
+        # 🌟 2. XÂY DỰNG SỔ CÁI TỆP ĐÍNH KÈM (ATTACHMENT PROVENANCE LEDGER STR)
+        provenance = excel_data.get("provenance_ledger") or {}
+        active_files = provenance.get("active_new_files") or []
+        archived_files = provenance.get("archived_completed_files") or []
+
+        ledger_lines = []
+        ledger_lines.append("=== SỔ CÁI VÒNG ĐỜI TỆP ĐÍNH KÈM (ATTACHMENT PROVENANCE LEDGER) ===")
+        if active_files:
+            ledger_lines.append(f"🟢 [TỆP MỚI CẦN PHÂN TÍCH - ACTIVE]: {', '.join(active_files)}")
+        else:
+            ledger_lines.append("🟢 [TỆP MỚI CẦN PHÂN TÍCH - ACTIVE]: (Không có tệp mới ở lượt này)")
+
+        if archived_files:
+            ledger_lines.append(f"⚪ [TỆP ĐÃ HOÀN TẤT TRƯỚC ĐÓ - ARCHIVED/BỎ QUA]: {', '.join(archived_files)}")
+        else:
+            ledger_lines.append("⚪ [TỆP ĐÃ HOÀN TẤT TRƯỚC ĐÓ - ARCHIVED/BỎ QUA]: (Chưa có tệp nào hoàn tất)")
+
+        # Chi tiết dữ liệu của tệp mới (ACTIVE)
+        if excel_data and any(k not in ["catalog_reference", "provenance_ledger"] for k in excel_data.keys()):
             slim_excel = {
+                "active_filename": excel_data.get("filename"),
                 "is_cof": excel_data.get("is_cof", False),
-                "filename": excel_data.get("filename"),
+                "lifecycle_status": excel_data.get("lifecycle_status", "new_pending"),
                 "school_detected": excel_data.get("school_detected"),
                 "courses_detected": excel_data.get("courses_detected", []),
                 "repo_urls": excel_data.get("repo_urls", []),
-                "identifiers_sample": excel_data.get("identifiers", [])[:15]
+                "identifiers_sample": excel_data.get("identifiers", [])[:15],
+                "account_profiles_sample": excel_data.get("account_profiles", [])[:15]
             }
-            excel_info_str = json.dumps(slim_excel, ensure_ascii=False, indent=2)
-        else:
-            excel_info_str = "(Không có tệp đính kèm bảng tính hoặc dữ liệu bóc tách thô)"
+            ledger_lines.append("\n[CHI TIẾT DỮ LIỆU TỆP MỚI ACTIVE]:")
+            ledger_lines.append(json.dumps(slim_excel, ensure_ascii=False, indent=2))
+        
+        excel_info_str = "\n".join(ledger_lines)
 
-        # 🎯 BƠM TÓM TẮT AI VÀO FULL CONTENT LÀM KIM CHỈ NAM
-        ai_summary_prefix = f"[BẢN TÓM TẮT Ý ĐỊNH ĐÃ TINH CHẾ TỪ HỆ THỐNG]:\n{ai_summary}\n" if ai_summary else ""
-        enriched_content = f"{ai_summary_prefix}\n[NỘI DUNG VĂN BẢN VÀ LỊCH SỬ]:\n{full_content}"
+        # 3. Nạp Prompt Template
+        ai_summary_clean = str(ai_summary or "Chưa có bản tóm tắt").strip()
 
         if self.intent_prompt_tpl:
             prompt = self.intent_prompt_tpl
@@ -299,14 +319,22 @@ class AIEngine:
                 "{sender_email}": str(sender_email or "Không rõ"),
                 "{catalog_context_str}": str(catalog_context_str or ""),
                 "{excel_info_str}": str(excel_info_str or ""),
-                "{full_content}": enriched_content
+                "{ai_summary}": ai_summary_clean,
+                "{full_content}": str(full_content or "")
             }
             for ph, val in replacements.items():
                 prompt = prompt.replace(ph, val)
         else:
-            prompt = f"Bóc tách sự thật vận hành:\nTiêu đề: {subject}\nCatalog: {catalog_context_str}\nNội dung: {enriched_content}"
+            prompt = (
+                f"Bóc tách sự thật vận hành:\n"
+                f"Tiêu đề: {subject}\n"
+                f"Tóm tắt: {ai_summary_clean}\n"
+                f"Catalog: {catalog_context_str}\n"
+                f"Ledger: {excel_info_str}\n"
+                f"Nội dung: {full_content}"
+            )
 
-        # 🎯 GOM NỘI DUNG MULTIMODAL: PROMPT TEXT + CÁC ẢNH ĐÍNH KÈM
+        # 4. GOM NỘI DUNG MULTIMODAL: TEXT PROMPT + CÁC ẢNH LỖI MỚI
         contents_payload: Any = prompt
         if image_parts and len(image_parts) > 0:
             contents_payload = [prompt]
@@ -315,7 +343,7 @@ class AIEngine:
                     "mime_type": img["mime_type"],
                     "data": img["data"]
                 })
-            logger.info(f"👁️ [Gemini Multimodal Vision] Gửi kèm {len(image_parts)} ảnh chụp lỗi vào AI để phân tích trực quan!")
+            logger.info(f"👁️ [Gemini Multimodal Vision] Đã truyền {len(image_parts)} ảnh chụp lỗi vào Gemini Vision!")
 
         parsed_data, used_model = self._call_gemini_with_fallback(contents_payload, primary_key=self.api_key_facts)
 
@@ -323,7 +351,7 @@ class AIEngine:
             return IntentAssessment(
                 outcome="needs_information",
                 model_name=used_model or "ai_extraction_failed",
-                prompt_version="v4.6_vision_enabled",
+                prompt_version="v4.7_provenance_ledger",
                 intents=[], entities={}, extracted_entities=[],
                 missing_requirements=[{"field": "ai_analysis", "message": "Không thể phân tích yêu cầu từ AI."}],
                 warnings=["Kích hoạt van an toàn."],
@@ -371,7 +399,6 @@ class AIEngine:
         git_role = entities_raw.get("git_role")
         target_email = entities_raw.get("target_email")
 
-        # Tự động gộp email từ target_email vào identifiers nếu có
         if target_email and target_email not in clean_identifiers:
             clean_identifiers.append(target_email)
 
@@ -389,7 +416,7 @@ class AIEngine:
             "already_completed_actions": parsed_data.get("already_completed_actions", [])
         }
 
-        # Bọc an toàn missing_requirements chống lỗi Pydantic
+        # Bọc an toàn missing_requirements (ZERO-MOCKUP INVARIANT)
         raw_missing = parsed_data.get("missing_requirements") or []
         clean_missing: List[Dict[str, str]] = []
         if isinstance(raw_missing, list):
@@ -407,7 +434,7 @@ class AIEngine:
         raw_assessment = IntentAssessment(
             outcome=final_outcome,
             model_name=used_model,
-            prompt_version="v4.6_vision_enabled",
+            prompt_version="v4.7_provenance_ledger",
             intents=structured_intents,
             entities=entities_payload,
             extracted_entities=[],

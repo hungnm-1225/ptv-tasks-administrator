@@ -25,7 +25,8 @@ import {
     CheckCheck,
     Eye,
     RefreshCw,
-    GitPullRequest
+    GitPullRequest,
+    History
 } from 'lucide-react';
 import { InboxTicket } from '../../../types';
 import { PreviewAttachmentFile } from '../types';
@@ -101,6 +102,13 @@ export const TicketCard: React.FC<TicketCardProps> = ({
     const attachments = ticket.attachments || [];
     const cleanRawContent = stripHtmlTags(ticket.raw_content);
     const excelMeta = ticket.metadata?.excel_summary;
+
+    // 🌟 NHẬN DIỆN THỜI ĐIỂM HOẠT ĐỘNG GẦN NHẤT ĐỂ HIỂN THỊ CHUẨN XÁC
+    const latestActivityDate = (ticket as any).source_updated_at || ticket.updated_at || ticket.created_at;
+    const hasBeenUpdated = Boolean(
+        ((ticket as any).source_updated_at && (ticket as any).source_updated_at !== ticket.created_at) ||
+        (ticket.updated_at && ticket.updated_at !== ticket.created_at)
+    );
 
     const getDirectSourceUrl = (t: InboxTicket) => {
         if (t.source === 'gmail') {
@@ -252,11 +260,27 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                     {getCategoryBadge(ticket.category || 'other', ticket.id)}
                 </div>
 
+                {/* 🌟 HIỂN THỊ THỜI GIAN THÔNG MINH: ƯU TIÊN NGÀY CẬP NHẬT HOẠT ĐỘNG MỚI NHẤT */}
                 <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
-                    <span className="flex items-center gap-1">
-                        <Calendar className="w-3.5 h-3.5" />
-                        <span>{formatDateTime(ticket.created_at)}</span>
-                    </span>
+                    <div
+                        className="flex items-center gap-1.5"
+                        title={`Thời điểm tạo gốc: ${formatDateTime(ticket.created_at)}`}
+                    >
+                        {hasBeenUpdated ? (
+                            <>
+                                <History className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                                <span className="font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/50 px-2 py-0.5 rounded-md">
+                                    Cập nhật: {formatDateTime(latestActivityDate)}
+                                </span>
+                            </>
+                        ) : (
+                            <>
+                                <Calendar className="w-3.5 h-3.5" />
+                                <span>{formatDateTime(ticket.created_at)}</span>
+                            </>
+                        )}
+                    </div>
+
                     <a
                         href={getDirectSourceUrl(ticket)}
                         target="_blank"

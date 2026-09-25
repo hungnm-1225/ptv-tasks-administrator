@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import {
     Network, Building2, ShieldCheck, ShieldAlert, Search, Filter,
     Edit3, KeyRound, Eye, EyeOff, RefreshCw, Layers, School, Check, X, ArrowRight,
-    ChevronLeft, ChevronRight, Plus, Sparkles
+    ChevronLeft, ChevronRight, Plus, Sparkles, ArrowUpDown, ArrowUp, ArrowDown,
+    AlertCircle, CheckCircle2, Loader2
 } from 'lucide-react';
 import { fetchApi } from '../../lib/api';
 import { toast } from 'sonner';
@@ -29,9 +30,12 @@ interface HierarchyResponse {
     status: string;
     total: number;
     organizations: OrganizationItem[];
-    distributors: Array<{ id: string; name: string; code: string }>;
-    partners: Array<{ id: string; name: string; code: string; parent_id: string }>;
+    distributors: Array<{ id: string; name: string; code: string; country?: string }>;
+    partners: Array<{ id: string; name: string; code: string; parent_id: string; country?: string }>;
 }
+
+type SortField = 'name' | 'code' | 'role_type' | 'parent_name' | 'username' | 'has_vault_pass';
+type SortDirection = 'asc' | 'desc';
 
 export const HierarchyManagerPage: React.FC = () => {
     const [data, setData] = useState<HierarchyResponse | null>(null);
@@ -43,6 +47,10 @@ export const HierarchyManagerPage: React.FC = () => {
     const [selectedPartnerFilter, setSelectedPartnerFilter] = useState<string>('all');
 
     const [countriesList, setCountriesList] = useState<Array<{ code: string; name: string; flag_emoji: string }>>([]);
+
+    // 🎯 State Sắp Xếp Bảng Dữ Liệu (Sortable Columns)
+    const [sortField, setSortField] = useState<SortField>('name');
+    const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
     // 🎯 State phân trang Local (Client-side Pagination)
     const [currentPage, setCurrentPage] = useState<number>(1);
@@ -64,9 +72,11 @@ export const HierarchyManagerPage: React.FC = () => {
     const [showPassword, setShowPassword] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isLoadingPassword, setIsLoadingPassword] = useState(false);
+    const [editCodeStatus, setEditCodeStatus] = useState<'idle' | 'checking' | 'valid' | 'duplicate'>('idle');
+    const [editCodeErrorMsg, setEditCodeErrorMsg] = useState('');
 
     // =========================================================================
-    // STATE MODAL THÊM MỚI (CREATE)
+    // STATE MODAL THÊM MỚI (CREATE - CHỈ THỦ CÔNG DB BÊN MÌNH)
     // =========================================================================
     const [isCreateOpen, setIsCreateOpen] = useState(false);
     const [createRoleType, setCreateRoleType] = useState<'school' | 'partner' | 'distributor'>('school');
@@ -81,6 +91,10 @@ export const HierarchyManagerPage: React.FC = () => {
     });
     const [showCreatePassword, setShowCreatePassword] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
+
+    // 🎯 State xác minh ID / Code trùng lặp theo thời gian thực (Debounce)
+    const [createCodeStatus, setCreateCodeStatus] = useState<'idle' | 'checking' | 'valid' | 'duplicate'>('idle');
+    const [createCodeErrorMsg, setCreateCodeErrorMsg] = useState('');
 
     // Tải danh mục quốc gia & phả hệ
     useEffect(() => {
@@ -105,9 +119,82 @@ export const HierarchyManagerPage: React.FC = () => {
         }
     };
 
+    // 🎯 DEBOUNCE KIỂM TRA TRÙNG MÃ CODE / ID KHI THÊM MỚI
+    useEffect(() => {
+        const trimmedCode = createForm.code.trim();
+        if (!trimmedCode) {
+            setCreateCodeStatus('idle');
+            setCreateCodeErrorMsg('');
+            return;
+        }
+
+        setCreateCodeStatus('checking');
+        const timer = setTimeout(async () => {
+            try {
+                const res = await fetchApi<{ exists: boolean; message?: string }>(
+                    `/workspace/organizations/check-code?code=${encodeURIComponent(trimmedCode)}`
+                );
+                if (res?.exists) {
+                    setCreateCodeStatus('duplicate');
+                    setCreateCodeErrorMsg(res.message || `Mã "${trimmedCode}" đã tồn tại trên hệ thống!`);
+                } else {
+                    setCreateCodeStatus('valid');
+                    setCreateCodeErrorMsg('');
+                }
+            } catch {
+                setCreateCodeStatus('idle');
+            }
+        }, 350);
+
+        return () => clearTimeout(timer);
+    }, [createForm.code]);
+
+    // 🎯 DEBOUNCE KIỂM TRA TRÙNG MÃ CODE / ID KHI SỬA
+    useEffect(() => {
+        if (!editingOrg) return;
+        const trimmedCode = editForm.code.trim();
+        if (!trimmedCode || trimmedCode.toLowerCase() === (editingOrg.code || '').toLowerCase()) {
+            setEditCodeStatus('idle');
+            setEditCodeErrorMsg('');
+            return;
+        }
+
+        setEditCodeStatus('checking');
+        const timer = setTimeout(async () => {
+            try {
+                const res = await fetchApi<{ exists: boolean; message?: string }>(
+                    `/workspace/organizations/check-code?code=${encodeURIComponent(trimmedCode)}&exclude_id=${editingOrg.id}`
+                );
+                if (res?.exists) {
+                    setEditCodeStatus('duplicate');
+                    setEditCodeErrorMsg(res.message || `Mã "${trimmedCode}" đã bị trùng lặp!`);
+                } else {
+                    setEditCodeStatus('valid');
+                    setEditCodeErrorMsg('');
+                }
+            } catch {
+                setEditCodeStatus('idle');
+            }
+        }, 350);
+
+        return () => clearTimeout(timer);
+    }, [editForm.code, editingOrg]);
+
+    // 🎯 Đổi cột và chiều sắp xếp
+    const handleSort = (field: SortField) => {
+        if (sortField === field) {
+            setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
+        } else {
+            setSortField(field);
+            setSortDirection('asc');
+        }
+    };
+
     // 🎯 Mở modal chỉnh sửa & tự động nạp mật khẩu đã giải mã từ Két Sắt
     const handleOpenEdit = async (org: OrganizationItem) => {
         setEditingOrg(org);
+        setEditCodeStatus('idle');
+        setEditCodeErrorMsg('');
 
         const safeCountry = (org.country && org.country !== 'Unknown')
             ? org.country
@@ -124,7 +211,6 @@ export const HierarchyManagerPage: React.FC = () => {
         });
         setShowPassword(false);
 
-        // Nếu tổ chức này đã có mật khẩu trong Vault -> Tự động kéo mật khẩu đã giải mã về
         if (org.has_vault_pass) {
             setIsLoadingPassword(true);
             try {
@@ -144,6 +230,20 @@ export const HierarchyManagerPage: React.FC = () => {
     const handleSaveEdit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!editingOrg) return;
+
+        if (editCodeStatus === 'duplicate') {
+            toast.error('Vui lòng đổi mã định danh khác vì mã này đã tồn tại!');
+            return;
+        }
+
+        if (editingOrg.role_type === 'school' && !editForm.parent_id) {
+            toast.error('Trường học bắt buộc phải trực thuộc một Đối Tác (Partner)!');
+            return;
+        }
+        if (editingOrg.role_type === 'partner' && !editForm.parent_id) {
+            toast.error('Đối tác bắt buộc phải trực thuộc một Nhà Phân Phối (Distributor)!');
+            return;
+        }
 
         try {
             setIsSubmitting(true);
@@ -165,6 +265,8 @@ export const HierarchyManagerPage: React.FC = () => {
     // 🎯 Mở modal Thêm Mới
     const handleOpenCreate = (role: 'school' | 'partner' | 'distributor' = 'school') => {
         setCreateRoleType(role);
+        setCreateCodeStatus('idle');
+        setCreateCodeErrorMsg('');
         setCreateForm({
             name: '',
             code: '',
@@ -196,12 +298,28 @@ export const HierarchyManagerPage: React.FC = () => {
             return;
         }
 
+        // Chặn submit nếu mã bị trùng
+        if (createCodeStatus === 'duplicate') {
+            toast.error('Mã ID/Code này đã bị trùng, vui lòng kiểm tra lại!');
+            return;
+        }
+
+        // Cưỡng chế quan hệ phả hệ chặt chẽ
+        if (createRoleType === 'school' && !createForm.parent_id) {
+            toast.error('Trường học bắt buộc phải chọn Đối Tác Quản Lý (Partner)!');
+            return;
+        }
+        if (createRoleType === 'partner' && !createForm.parent_id) {
+            toast.error('Đối tác bắt buộc phải chọn Nhà Phân Phối Trực Thuộc (Distributor)!');
+            return;
+        }
+
         try {
             setIsCreating(true);
             const payload = {
                 ...createForm,
                 role_type: createRoleType,
-                parent_id: createForm.parent_id || null
+                parent_id: createRoleType === 'distributor' ? null : createForm.parent_id
             };
 
             await fetchApi('/workspace/organizations', {
@@ -219,7 +337,7 @@ export const HierarchyManagerPage: React.FC = () => {
         }
     };
 
-    // Lọc dữ liệu hiển thị
+    // 🎯 Lọc dữ liệu hiển thị
     const filteredOrgs = useMemo(() => {
         if (!data?.organizations) return [];
         return data.organizations.filter(org => {
@@ -238,17 +356,39 @@ export const HierarchyManagerPage: React.FC = () => {
         });
     }, [data, searchQuery, selectedRole, selectedCountry, selectedPartnerFilter]);
 
+    // 🎯 Sắp xếp dữ liệu (Sorting Engine)
+    const sortedOrgs = useMemo(() => {
+        const list = [...filteredOrgs];
+        list.sort((a, b) => {
+            let aVal: any = a[sortField];
+            let bVal: any = b[sortField];
+
+            if (sortField === 'has_vault_pass') {
+                aVal = a.has_vault_pass ? 1 : 0;
+                bVal = b.has_vault_pass ? 1 : 0;
+            } else {
+                aVal = (aVal || '').toString().toLowerCase();
+                bVal = (bVal || '').toString().toLowerCase();
+            }
+
+            if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+            if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+            return 0;
+        });
+        return list;
+    }, [filteredOrgs, sortField, sortDirection]);
+
     // Khi lọc hoặc đổi page size thì reset về trang 1
     useEffect(() => {
         setCurrentPage(1);
-    }, [searchQuery, selectedRole, selectedCountry, selectedPartnerFilter, pageSize]);
+    }, [searchQuery, selectedRole, selectedCountry, selectedPartnerFilter, pageSize, sortField, sortDirection]);
 
     // 🎯 Danh sách sau khi cắt theo Trang (Pagination Slicing)
-    const totalPages = Math.ceil(filteredOrgs.length / pageSize) || 1;
+    const totalPages = Math.ceil(sortedOrgs.length / pageSize) || 1;
     const paginatedOrgs = useMemo(() => {
         const start = (currentPage - 1) * pageSize;
-        return filteredOrgs.slice(start, start + pageSize);
-    }, [filteredOrgs, currentPage, pageSize]);
+        return sortedOrgs.slice(start, start + pageSize);
+    }, [sortedOrgs, currentPage, pageSize]);
 
     // Thống kê nhanh
     const stats = useMemo(() => {
@@ -260,6 +400,16 @@ export const HierarchyManagerPage: React.FC = () => {
             vaultReady: data.organizations.filter(o => o.has_vault_pass).length
         };
     }, [data]);
+
+    // Helper render icon mũi tên sort
+    const renderSortIcon = (field: SortField) => {
+        if (sortField !== field) {
+            return <ArrowUpDown className="w-3.5 h-3.5 text-slate-300 dark:text-slate-600 inline ml-1" />;
+        }
+        return sortDirection === 'asc'
+            ? <ArrowUp className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 inline ml-1" />
+            : <ArrowDown className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 inline ml-1" />;
+    };
 
     return (
         <div className="space-y-6">
@@ -380,7 +530,7 @@ export const HierarchyManagerPage: React.FC = () => {
                     <select
                         value={selectedRole}
                         onChange={(e) => setSelectedRole(e.target.value)}
-                        className="px-3 py-2 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700/80 rounded-xl text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                        className="px-3 py-2 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700/80 rounded-xl text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer"
                     >
                         <option value="all">Tất cả cấp bậc</option>
                         <option value="school">Trường học (School)</option>
@@ -390,21 +540,40 @@ export const HierarchyManagerPage: React.FC = () => {
                 </div>
             </div>
 
-            {/* Main Table */}
+            {/* Main Table With Sortable Headers */}
             <div className="bg-white dark:bg-[#131B2B] rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm overflow-hidden">
                 <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse">
                         <thead>
-                            <tr className="border-b border-slate-200/80 dark:border-slate-800 text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50/50 dark:bg-slate-900/30">
-                                <th className="py-3.5 px-4">Tổ Chức / Đơn Vị</th>
-                                <th className="py-3.5 px-4">Cấp Bậc</th>
-                                <th className="py-3.5 px-4">Trực thuộc</th>
-                                <th className="py-3.5 px-4">Username / Email</th>
+                            <tr className="border-b border-slate-200/80 dark:border-slate-800 text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50/50 dark:bg-slate-900/30 select-none">
+                                <th onClick={() => handleSort('name')} className="py-3.5 px-4 cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+                                    <div className="flex items-center gap-1">
+                                        <span>Tổ Chức / Đơn Vị</span>
+                                        {renderSortIcon('name')}
+                                    </div>
+                                </th>
+                                <th onClick={() => handleSort('role_type')} className="py-3.5 px-4 cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+                                    <div className="flex items-center gap-1">
+                                        <span>Cấp Bậc</span>
+                                        {renderSortIcon('role_type')}
+                                    </div>
+                                </th>
+                                <th onClick={() => handleSort('parent_name')} className="py-3.5 px-4 cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+                                    <div className="flex items-center gap-1">
+                                        <span>Trực thuộc (Phả hệ)</span>
+                                        {renderSortIcon('parent_name')}
+                                    </div>
+                                </th>
+                                <th onClick={() => handleSort('username')} className="py-3.5 px-4 cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+                                    <div className="flex items-center gap-1">
+                                        <span>Username / Két Sắt</span>
+                                        {renderSortIcon('username')}
+                                    </div>
+                                </th>
                                 <th className="py-3.5 px-4 text-right">Thao Tác</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 text-sm">
-                            {/* 🌟 SKELETON LOADING STATE CHO DANH SÁCH */}
                             {loading ? (
                                 Array.from({ length: pageSize > 20 ? 10 : pageSize }).map((_, idx) => (
                                     <tr key={`skeleton-${idx}`} className="animate-pulse">
@@ -445,7 +614,7 @@ export const HierarchyManagerPage: React.FC = () => {
                                                     {org.name}
                                                 </div>
                                                 <div className="text-xs text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
-                                                    <span>ID: {org.code}</span>
+                                                    <span className="font-bold text-slate-600 dark:text-slate-300">Mã ID: {org.code}</span>
                                                     <span>•</span>
                                                     <span>{org.country}</span>
                                                 </div>
@@ -470,7 +639,7 @@ export const HierarchyManagerPage: React.FC = () => {
                                                 )}
                                             </td>
 
-                                            {/* Parent Lineage */}
+                                            {/* Parent Lineage (3 Cấp Chặt Chẽ) */}
                                             <td className="py-3.5 px-4">
                                                 {isSchool && (
                                                     <div className="flex items-center gap-1.5 text-xs">
@@ -490,7 +659,9 @@ export const HierarchyManagerPage: React.FC = () => {
                                                     </div>
                                                 )}
                                                 {org.role_type === 'distributor' && (
-                                                    <span className="text-xs text-slate-400 italic">Admin</span>
+                                                    <span className="text-xs text-amber-600 dark:text-amber-400 font-medium italic">
+                                                        👑 Master Distributor ({org.country})
+                                                    </span>
                                                 )}
                                             </td>
 
@@ -501,11 +672,14 @@ export const HierarchyManagerPage: React.FC = () => {
                                                         {org.username || <span className="text-slate-400 italic">Chưa cấu hình</span>}
                                                     </span>
                                                     {org.has_vault_pass ? (
-                                                        <></>
+                                                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-md border border-emerald-200/50 dark:border-emerald-900/50" title="Đã có mật khẩu an toàn trong Fernet Vault">
+                                                            <ShieldCheck className="w-3 h-3" />
+                                                            Vault OK
+                                                        </span>
                                                     ) : (
                                                         <span className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 px-2 py-0.5 rounded-md border border-rose-200/50 dark:border-rose-900/50" title="Chưa cấu hình mật khẩu trong két sắt">
                                                             <ShieldAlert className="w-3 h-3" />
-                                                            Thiếu thông tin
+                                                            Thiếu Pass
                                                         </span>
                                                     )}
                                                 </div>
@@ -530,26 +704,25 @@ export const HierarchyManagerPage: React.FC = () => {
                 </div>
 
                 {/* 🎯 BENTO LOCAL PAGINATION TOOLBAR */}
-                {!loading && filteredOrgs.length > 0 && (
+                {!loading && sortedOrgs.length > 0 && (
                     <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 text-xs text-slate-500 dark:text-slate-400">
                         <div className="flex items-center gap-2">
                             <span>Hiển thị</span>
                             <span className="font-semibold text-slate-800 dark:text-slate-200">
-                                {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, filteredOrgs.length)}
+                                {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, sortedOrgs.length)}
                             </span>
                             <span>trên tổng số</span>
-                            <span className="font-bold text-indigo-600 dark:text-indigo-400">{filteredOrgs.length}</span>
+                            <span className="font-bold text-indigo-600 dark:text-indigo-400">{sortedOrgs.length}</span>
                             <span>đơn vị</span>
                         </div>
 
                         <div className="flex items-center gap-3">
-                            {/* Chọn số dòng hiển thị */}
                             <div className="flex items-center gap-1.5">
                                 <span>Số dòng:</span>
                                 <select
                                     value={pageSize}
                                     onChange={(e) => setPageSize(Number(e.target.value))}
-                                    className="px-2 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-200 focus:outline-none"
+                                    className="px-2 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer"
                                 >
                                     <option value={20}>20</option>
                                     <option value={50}>50</option>
@@ -558,7 +731,6 @@ export const HierarchyManagerPage: React.FC = () => {
                                 </select>
                             </div>
 
-                            {/* Điều hướng trang */}
                             <div className="flex items-center gap-1">
                                 <button
                                     onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
@@ -588,7 +760,7 @@ export const HierarchyManagerPage: React.FC = () => {
             </div>
 
             {/* ========================================================================= */}
-            {/* 🌟 MODAL THÊM MỚI ĐƠN VỊ (CREATE ORG PORTAL)                             */}
+            {/* 🌟 MODAL THÊM MỚI ĐƠN VỊ (THÊM THỦ CÔNG DB - CHỐNG TRÙNG ID & STRICT PHẢ HỆ) */}
             {/* ========================================================================= */}
             {isCreateOpen && typeof document !== 'undefined' && createPortal(
                 <div
@@ -610,7 +782,7 @@ export const HierarchyManagerPage: React.FC = () => {
                                     <h3 className="font-bold text-slate-900 dark:text-white">
                                         Thêm mới đơn vị / tổ chức
                                     </h3>
-                                    <p className="text-xs text-slate-500">Khởi tạo thực thể mới và lưu mã hóa vào Fernet Vault</p>
+                                    <p className="text-xs text-slate-500">Thêm thủ công vào cơ sở dữ liệu và lưu mã hóa vào Fernet Vault</p>
                                 </div>
                             </div>
                             <button
@@ -636,8 +808,8 @@ export const HierarchyManagerPage: React.FC = () => {
                                             setCreateForm(prev => ({ ...prev, parent_id: '' }));
                                         }}
                                         className={`flex flex-col items-center gap-1 p-2.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${createRoleType === 'school'
-                                                ? 'bg-sky-50 border-sky-400 text-sky-700 dark:bg-sky-950/60 dark:border-sky-700 dark:text-sky-300 shadow-sm'
-                                                : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400'
+                                            ? 'bg-sky-50 border-sky-400 text-sky-700 dark:bg-sky-950/60 dark:border-sky-700 dark:text-sky-300 shadow-sm'
+                                            : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400'
                                             }`}
                                     >
                                         <School className="w-4 h-4 text-sky-500" />
@@ -651,8 +823,8 @@ export const HierarchyManagerPage: React.FC = () => {
                                             setCreateForm(prev => ({ ...prev, parent_id: '' }));
                                         }}
                                         className={`flex flex-col items-center gap-1 p-2.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${createRoleType === 'partner'
-                                                ? 'bg-indigo-50 border-indigo-400 text-indigo-700 dark:bg-indigo-950/60 dark:border-indigo-700 dark:text-indigo-300 shadow-sm'
-                                                : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400'
+                                            ? 'bg-indigo-50 border-indigo-400 text-indigo-700 dark:bg-indigo-950/60 dark:border-indigo-700 dark:text-indigo-300 shadow-sm'
+                                            : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400'
                                             }`}
                                     >
                                         <Layers className="w-4 h-4 text-indigo-500" />
@@ -666,8 +838,8 @@ export const HierarchyManagerPage: React.FC = () => {
                                             setCreateForm(prev => ({ ...prev, parent_id: '' }));
                                         }}
                                         className={`flex flex-col items-center gap-1 p-2.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${createRoleType === 'distributor'
-                                                ? 'bg-amber-50 border-amber-400 text-amber-700 dark:bg-amber-950/60 dark:border-amber-700 dark:text-amber-300 shadow-sm'
-                                                : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400'
+                                            ? 'bg-amber-50 border-amber-400 text-amber-700 dark:bg-amber-950/60 dark:border-amber-700 dark:text-amber-300 shadow-sm'
+                                            : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400'
                                             }`}
                                     >
                                         <Building2 className="w-4 h-4 text-amber-500" />
@@ -691,18 +863,44 @@ export const HierarchyManagerPage: React.FC = () => {
                                 />
                             </div>
 
-                            {/* Mã code */}
+                            {/* Mã ID / Code kèm Real-time Collision Check */}
                             <div>
-                                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                                    Mã định danh (ID / Code)
-                                </label>
-                                <input
-                                    type="text"
-                                    value={createForm.code}
-                                    onChange={(e) => setCreateForm(prev => ({ ...prev, code: e.target.value }))}
-                                    className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                                    placeholder="VD: 10267, PRT_VN_05, DST_MY..."
-                                />
+                                <div className="flex items-center justify-between mb-1">
+                                    <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                                        Mã định danh (ID / Code) <span className="text-rose-500 font-bold">*</span>
+                                    </label>
+                                    {createCodeStatus === 'checking' && (
+                                        <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                                            <Loader2 className="w-3 h-3 animate-spin text-indigo-500" />
+                                            Đang kiểm tra...
+                                        </span>
+                                    )}
+                                    {createCodeStatus === 'valid' && (
+                                        <span className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-semibold">
+                                            <CheckCircle2 className="w-3 h-3" />
+                                            Mã hợp lệ (chưa tồn tại)
+                                        </span>
+                                    )}
+                                </div>
+                                <div className="relative">
+                                    <input
+                                        type="text"
+                                        required
+                                        value={createForm.code}
+                                        onChange={(e) => setCreateForm(prev => ({ ...prev, code: e.target.value }))}
+                                        className={`w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border rounded-xl text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 ${createCodeStatus === 'duplicate'
+                                            ? 'border-rose-400 dark:border-rose-600 focus:ring-rose-500/20 bg-rose-50/20'
+                                            : 'border-slate-200 dark:border-slate-700 focus:ring-indigo-500/20'
+                                            }`}
+                                        placeholder="VD: 10267, PRT_VN_05, DST_MY..."
+                                    />
+                                </div>
+                                {createCodeStatus === 'duplicate' && (
+                                    <p className="mt-1.5 text-xs text-rose-600 dark:text-rose-400 flex items-center gap-1 bg-rose-50 dark:bg-rose-950/40 p-2 rounded-lg border border-rose-200 dark:border-rose-900">
+                                        <AlertCircle className="w-4 h-4 shrink-0" />
+                                        <span>{createCodeErrorMsg}</span>
+                                    </p>
+                                )}
                             </div>
 
                             {/* Quốc gia */}
@@ -728,44 +926,54 @@ export const HierarchyManagerPage: React.FC = () => {
                                 </select>
                             </div>
 
-                            {/* Gán đơn vị cha theo role */}
+                            {/* Gán đơn vị cha theo role - KHÓA CHẶT BẮT BUỘC KHÔNG BỎ QUA */}
                             {createRoleType === 'school' && (
                                 <div>
                                     <label className="block text-xs font-semibold text-indigo-600 dark:text-indigo-400 mb-1">
-                                        Đối Tác Quản Lý (Partner)
+                                        Đối Tác Quản Lý (Partner) <span className="text-rose-500 font-bold">*</span>
                                     </label>
                                     <select
+                                        required
                                         value={createForm.parent_id}
                                         onChange={(e) => setCreateForm(prev => ({ ...prev, parent_id: e.target.value }))}
                                         className="w-full px-3.5 py-2 bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-800 rounded-xl text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer"
                                     >
-                                        <option value="">-- Trực tiếp (Không qua Partner) --</option>
+                                        <option value="">-- Vui lòng chọn Đối Tác Quản Lý --</option>
                                         {data?.partners.map(p => (
                                             <option key={p.id} value={p.id}>
-                                                {p.name} ({p.code || 'N/A'})
+                                                {p.name} (Mã: {p.code || 'N/A'})
                                             </option>
                                         ))}
                                     </select>
+                                    <p className="text-[11px] text-slate-400 mt-1">Trường học bắt buộc phải trực thuộc một đối tác cụ thể.</p>
                                 </div>
                             )}
 
                             {createRoleType === 'partner' && (
                                 <div>
                                     <label className="block text-xs font-semibold text-amber-600 dark:text-amber-400 mb-1">
-                                        Nhà Phân Phối Trực Thuộc (Distributor)
+                                        Nhà Phân Phối Trực Thuộc (Distributor) <span className="text-rose-500 font-bold">*</span>
                                     </label>
                                     <select
+                                        required
                                         value={createForm.parent_id}
                                         onChange={(e) => setCreateForm(prev => ({ ...prev, parent_id: e.target.value }))}
                                         className="w-full px-3.5 py-2 bg-amber-50/40 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-xl text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/20 cursor-pointer"
                                     >
-                                        <option value="">-- Trực tiếp Master --</option>
+                                        <option value="">-- Vui lòng chọn Nhà Phân Phối Trực Thuộc --</option>
                                         {data?.distributors.map(d => (
                                             <option key={d.id} value={d.id}>
-                                                {d.name} ({d.code || 'N/A'})
+                                                {d.name} (Mã: {d.code || 'N/A'})
                                             </option>
                                         ))}
                                     </select>
+                                    <p className="text-[11px] text-slate-400 mt-1">Đối tác bắt buộc phải nằm dưới quyền 1 Nhà phân phối khu vực.</p>
+                                </div>
+                            )}
+
+                            {createRoleType === 'distributor' && (
+                                <div className="p-3 bg-amber-50/60 dark:bg-amber-950/30 rounded-xl border border-amber-200/80 dark:border-amber-900/60 text-xs text-amber-800 dark:text-amber-300">
+                                    👑 <strong>Cấp bậc Nhà Phân Phối (Distributor)</strong> là đơn vị tối cao quản trị khu vực/quốc gia, không trực thuộc đơn vị nào khác.
                                 </div>
                             )}
 
@@ -849,7 +1057,7 @@ export const HierarchyManagerPage: React.FC = () => {
                                 </button>
                                 <button
                                     type="submit"
-                                    disabled={isCreating}
+                                    disabled={isCreating || createCodeStatus === 'duplicate'}
                                     className="flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl transition-all shadow-md shadow-indigo-500/20 disabled:opacity-50 active:scale-95 cursor-pointer"
                                 >
                                     <Check className="w-4 h-4" />
@@ -863,7 +1071,7 @@ export const HierarchyManagerPage: React.FC = () => {
             )}
 
             {/* ========================================================================= */}
-            {/* 🌟 MODAL CHỈNH SỬA PHẢ HỆ & KÉT SẮT VAULT (CÓ SKELETON KHI LOAD PASS)    */}
+            {/* 🌟 MODAL CHỈNH SỬA PHẢ HỆ & KÉT SẮT VAULT                                */}
             {/* ========================================================================= */}
             {editingOrg && typeof document !== 'undefined' && createPortal(
                 <div
@@ -912,18 +1120,35 @@ export const HierarchyManagerPage: React.FC = () => {
                                 />
                             </div>
 
-                            {/* Mã code */}
+                            {/* Mã ID / Code */}
                             <div>
-                                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                                    ID
-                                </label>
+                                <div className="flex items-center justify-between mb-1">
+                                    <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                                        Mã định danh (ID / Code)
+                                    </label>
+                                    {editCodeStatus === 'checking' && (
+                                        <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                                            <Loader2 className="w-3 h-3 animate-spin text-indigo-500" />
+                                            Đang kiểm tra...
+                                        </span>
+                                    )}
+                                </div>
                                 <input
                                     type="text"
                                     value={editForm.code}
                                     onChange={(e) => setEditForm(prev => ({ ...prev, code: e.target.value }))}
-                                    className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                                    className={`w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border rounded-xl text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 ${editCodeStatus === 'duplicate'
+                                        ? 'border-rose-400 dark:border-rose-600 focus:ring-rose-500/20'
+                                        : 'border-slate-200 dark:border-slate-700 focus:ring-indigo-500/20'
+                                        }`}
                                     placeholder="VD: 10266, PRT_VN_01..."
                                 />
+                                {editCodeStatus === 'duplicate' && (
+                                    <p className="mt-1 text-xs text-rose-500 flex items-center gap-1">
+                                        <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                        <span>{editCodeErrorMsg}</span>
+                                    </p>
+                                )}
                             </div>
 
                             {/* Chọn Quốc gia */}
@@ -968,42 +1193,44 @@ export const HierarchyManagerPage: React.FC = () => {
                                 </div>
                             )}
 
-                            {/* Gán lại đơn vị cha (School -> Partner) */}
+                            {/* Gán lại đơn vị cha (School -> Partner) - STRICT */}
                             {editingOrg.role_type === 'school' && (
                                 <div>
                                     <label className="block text-xs font-semibold text-indigo-600 dark:text-indigo-400 mb-1">
-                                        Đối tác Quản Lý (Partner)
+                                        Đối tác Quản Lý (Partner) <span className="text-rose-500 font-bold">*</span>
                                     </label>
                                     <select
+                                        required
                                         value={editForm.parent_id}
                                         onChange={(e) => setEditForm(prev => ({ ...prev, parent_id: e.target.value }))}
                                         className="w-full px-3.5 py-2 bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-800 rounded-xl text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer"
                                     >
-                                        <option value="">-- Trực tiếp (Không qua Partner) --</option>
+                                        <option value="">-- Vui lòng chọn Đối Tác Quản Lý --</option>
                                         {data?.partners.map(p => (
                                             <option key={p.id} value={p.id}>
-                                                {p.name} ({p.code || 'N/A'})
+                                                {p.name} (Mã: {p.code || 'N/A'})
                                             </option>
                                         ))}
                                     </select>
                                 </div>
                             )}
 
-                            {/* Gán lại đơn vị cha (Partner -> Distributor) */}
+                            {/* Gán lại đơn vị cha (Partner -> Distributor) - STRICT */}
                             {editingOrg.role_type === 'partner' && (
                                 <div>
                                     <label className="block text-xs font-semibold text-amber-600 dark:text-amber-400 mb-1">
-                                        Nhà Phân Phối Trực Thuộc (Distributor)
+                                        Nhà Phân Phối Trực Thuộc (Distributor) <span className="text-rose-500 font-bold">*</span>
                                     </label>
                                     <select
+                                        required
                                         value={editForm.parent_id}
                                         onChange={(e) => setEditForm(prev => ({ ...prev, parent_id: e.target.value }))}
                                         className="w-full px-3.5 py-2 bg-amber-50/40 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-xl text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/20 cursor-pointer"
                                     >
-                                        <option value="">-- Trực tiếp Master --</option>
+                                        <option value="">-- Vui lòng chọn Nhà Phân Phối Trực Thuộc --</option>
                                         {data?.distributors.map(d => (
                                             <option key={d.id} value={d.id}>
-                                                {d.name} ({d.code || 'N/A'})
+                                                {d.name} (Mã: {d.code || 'N/A'})
                                             </option>
                                         ))}
                                     </select>
@@ -1039,13 +1266,9 @@ export const HierarchyManagerPage: React.FC = () => {
                                 </div>
 
                                 <div>
-                                    <div className="flex items-center justify-between mb-1">
-                                        <label className="text-[11px] font-semibold text-slate-500">
-                                            Mật khẩu
-                                        </label>
-                                    </div>
-
-                                    {/* 🌟 SKELETON SHIMMER KHI ĐANG GIẢI MÃ MẬT KHẨU */}
+                                    <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                                        Mật khẩu
+                                    </label>
                                     {isLoadingPassword ? (
                                         <div className="h-9 w-full bg-slate-200 dark:bg-slate-800/80 rounded-lg animate-pulse border border-slate-200 dark:border-slate-700" />
                                     ) : (
@@ -1080,7 +1303,7 @@ export const HierarchyManagerPage: React.FC = () => {
                                 </button>
                                 <button
                                     type="submit"
-                                    disabled={isSubmitting || isLoadingPassword}
+                                    disabled={isSubmitting || isLoadingPassword || editCodeStatus === 'duplicate'}
                                     className="flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl transition-all shadow-md shadow-indigo-500/20 disabled:opacity-50 active:scale-95 cursor-pointer"
                                 >
                                     <Check className="w-4 h-4" />

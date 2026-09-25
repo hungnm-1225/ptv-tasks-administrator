@@ -1,12 +1,14 @@
-# backend/app/workers/ticket_processor.py
 """
-Ticket Processor Worker (Canonical Intake Orchestrator with Multimodal Vision)
+Ticket Processor Worker (Master Canonical Intake with Attachment Provenance & Multimodal Vision)
 Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI
 Chuyên trách:
-- Multimodal Vision: Tự động tải ảnh đính kèm (.png, .jpg, .jpeg) vào RAM cho Gemini Vision đọc ảnh lỗi.
-- Khai thác tệp đính kèm Excel đa năng trong RAM qua GenericExcelService.
-- Nạp chuẩn xác Dynamic LMS Catalog (dùng đúng tên cột course_name & sku).
-- Bơm Tóm Tắt AI (ai_summary) vào Fact Extraction làm kim chỉ nam.
+- Quản trị Sổ Cái Tệp Đính Kèm (Attachment Provenance State Machine):
+  + Tự động nhận diện file đã xử lý ở các Workflow thành công trước đó -> Đánh dấu BỎ QUA.
+  + Nhận diện tệp mới/ảnh mới ở lượt hội thoại cuối cùng -> Đánh dấu ACTIVE cần phân tích.
+- Bóc tách ĐA TỆP ĐÍNH KÈM (quét sạch mọi file Excel, không bị nghẽn ở file đầu tiên).
+- Gemini Multimodal Vision: Đọc ảnh chụp màn hình báo lỗi verify/login ở lượt mới nhất.
+- Bơm ngữ cảnh lũy tiến (Incremental Turn Context) để AI không lặp lại thao tác cũ.
+- TUYỆT ĐỐI TUÂN THỦ: ZERO-MOCKUP INVARIANT (Thiếu thì báo thiếu, cấm tự bịa data).
 """
 
 import os
@@ -16,7 +18,7 @@ import logging
 import tempfile
 import httpx
 import urllib.request
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, Set
 from datetime import datetime, timezone
 
 from app.core.supabase import get_supabase_client
@@ -89,7 +91,7 @@ def create_or_get_ticket_revision(
 
 
 def get_catalog_context(supabase) -> List[Dict[str, Any]]:
-    """Lấy danh mục các khóa học LMS kèm Git Repos liên kết (dùng đúng tên cột course_name & sku)."""
+    """Lấy danh mục các khóa học LMS kèm Git Repos liên kết chuẩn xác."""
     try:
         res = supabase.table("lms_courses")\
             .select("id, course_id, course_name, sku, git_repos, git_repo_url")\
@@ -111,8 +113,46 @@ def get_catalog_context(supabase) -> List[Dict[str, Any]]:
     return []
 
 
+def get_already_processed_attachments(supabase, ticket_id: str, current_rev_no: int) -> Set[str]:
+    """
+    Xác định danh sách các tệp đính kèm ĐÃ XỬ LÝ THÀNH CÔNG trong lịch sử:
+    - Nếu các workflow trước đó đã ở trạng thái 'success' / 'succeeded'
+    - Tất cả các file thuộc các revision trước đều được đưa vào danh sách 'đã hoàn thành'.
+    """
+    processed_files: Set[str] = set()
+    if current_rev_no <= 1:
+        return processed_files
+
+    try:
+        # Kiểm tra xem vé này đã từng có workflow nào thành công chưa
+        wf_res = supabase.table("automation_workflows")\
+            .select("id, status, steps")\
+            .eq("ticket_id", ticket_id)\
+            .in_("status", ["success", "succeeded"])\
+            .execute()
+
+        if wf_res.data and len(wf_res.data) > 0:
+            # Lấy toàn bộ file đính kèm của các revision cũ hơn
+            old_revs = supabase.table("inbox_ticket_revisions")\
+                .select("attachments")\
+                .eq("ticket_id", ticket_id)\
+                .lt("revision_no", current_rev_no)\
+                .execute()
+
+            for r in old_revs.data or []:
+                for att in r.get("attachments") or []:
+                    if isinstance(att, dict) and att.get("filename"):
+                        processed_files.add(att["filename"].strip().lower())
+                        
+            logger.info(f"📂 [Attachment Provenance] Phát hiện {len(processed_files)} tệp đã được xử lý thành công ở các lần trước: {list(processed_files)}")
+    except Exception as e:
+        logger.warning(f"⚠️ Lỗi truy vấn attachment provenance: {e}")
+
+    return processed_files
+
+
 async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
-    """CANONICAL INTAKE ORCHESTRATOR với Hỗ trợ Multimodal Vision."""
+    """CANONICAL INTAKE ORCHESTRATOR với Quản Lý Sổ Cái Tệp Đính Kèm Đa Kỳ & Vision."""
     supabase = get_supabase_client()
     try:
         rev_res = supabase.table("inbox_ticket_revisions").select("*, inbox_tickets(*)").eq("id", revision_id).execute()
@@ -123,26 +163,44 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
         revision = rev_res.data[0]
         ticket = revision.get("inbox_tickets") or {}
         ticket_id = revision.get("ticket_id")
+        rev_no = revision.get("revision_no", 1)
         raw_content = revision.get("raw_content") or ""
         subject = ticket.get("subject") or ""
         source = ticket.get("source") or "gmail"
         sender_email = ticket.get("sender_email") or ""
         attachments = revision.get("attachments") or ticket.get("attachments") or []
 
-        excel_summary: Optional[Dict[str, Any]] = None
+        # 🌟 1. TRA CỨU SỔ CÁI TỆP ĐÍNH KÈM: PHÂN BIỆT FILE CŨ ĐÃ XỬ LÝ VS FILE MỚI
+        processed_file_names = get_already_processed_attachments(supabase, ticket_id, rev_no)
+
+        parsed_excel_files: List[Dict[str, Any]] = []
         image_parts: List[Dict[str, Any]] = []
+        new_active_filenames: List[str] = []
+        archived_filenames: List[str] = []
 
         # =========================================================================
-        # 1. BÓC TÁCH TỆP ĐÍNH KÈM: EXCEL VÀ ẢNH CHỤP MÀN HÌNH (MULTIMODAL)
+        # 2. BÓC TÁCH TỆP ĐÍNH KÈM CÓ GẮN NHÃN PROVENANCE
         # =========================================================================
         for att in attachments:
-            fname = att.get("filename", "").lower()
+            fname = str(att.get("filename") or "").strip()
+            fname_lower = fname.lower()
             furl = att.get("url", "")
-            if not furl:
+            turn_idx = att.get("turn_index", 1)
+            is_initial = att.get("is_initial_form", False)
+            if not furl or not fname:
                 continue
 
-            # A. BÓC TÁCH FILE EXCEL (.xlsx, .xls)
-            if (fname.endswith(".xlsx") or fname.endswith(".xls")) and not excel_summary:
+            # Phân loại trạng thái vòng đời của tệp
+            is_already_done = fname_lower in processed_file_names
+            lifecycle_status = "processed" if is_already_done else "new_pending"
+
+            if is_already_done:
+                archived_filenames.append(f"{fname} (ĐÃ HOÀN TẤT Ở LƯỢT TRƯỚC)")
+            else:
+                new_active_filenames.append(fname)
+
+            # A. BÓC TÁCH FILE EXCEL VỚI BỘ PHÂN LOẠI TEMPLATE TỰ ĐỘNG (COF, TOF, BULK_ACCOUNTS, GENERIC)
+            if fname_lower.endswith(".xlsx") or fname_lower.endswith(".xls"):
                 temp_path = None
                 try:
                     file_bytes = None
@@ -164,27 +222,70 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                                 tmp_file.write(file_bytes)
                                 temp_path = tmp_file.name
 
-                        if COFExcelService.is_cof_file(temp_path):
+                        # 🌟 1. GỌI BỘ NHẬN DIỆN PHÔI THÔNG MINH (QUÉT 1-5 HÀNG, CỘT A-Z)
+                        from app.services.excel.excel_classifier import detect_excel_file_type
+                        from app.services.excel.bulk_template_service import bulk_template_service
+                        from app.services.excel.tof_service import tof_service
+
+                        excel_type, type_meta = detect_excel_file_type(temp_path)
+
+                        # 🌟 2. ĐIỀU PHỐI ĐÚNG THEO TỪNG LOẠI PHÔI
+                        if excel_type == "COF":
                             parsed_cof = COFExcelService.parse_cof_file(temp_path)
-                            excel_summary = {
+                            parsed_excel_files.append({
                                 "is_cof": True,
+                                "excel_type": "COF",
                                 "filename": fname,
+                                "lifecycle_status": lifecycle_status,
+                                "turn_index": turn_idx,
+                                "is_initial": is_initial,
                                 "school_name": parsed_cof.get("school_name"),
                                 "courses": parsed_cof.get("courses", []),
                                 "total_students": len(parsed_cof.get("students_all", [])),
                                 "total_teachers": len(parsed_cof.get("teachers_all", []))
-                            }
-                        else:
-                            parsed_universal = GenericExcelService.extract_universal_data(file_bytes)
-                            excel_summary = {
-                                "is_cof": False,
+                            })
+                        elif excel_type == "TOF":
+                            parsed_tof = tof_service.parse_tof_summary(temp_path)
+                            parsed_excel_files.append({
+                                "is_tof": True,
+                                "excel_type": "TOF",
                                 "filename": fname,
+                                "lifecycle_status": lifecycle_status,
+                                "turn_index": turn_idx,
+                                "is_initial": is_initial,
+                                "school_name": parsed_tof.get("school_name"),
+                                "courses_detected": parsed_tof.get("courses_detected", [])
+                            })
+                        elif excel_type == "BULK_ACCOUNTS":
+                            # Bóc tách và uốn nắn 100% email và role
+                            normalized_users = bulk_template_service.normalize_input_accounts_excel(temp_path)
+                            parsed_excel_files.append({
+                                "is_bulk_accounts": True,
+                                "excel_type": "BULK_ACCOUNTS",
+                                "filename": fname,
+                                "lifecycle_status": lifecycle_status,
+                                "turn_index": turn_idx,
+                                "is_initial": is_initial,
+                                "account_profiles": normalized_users[:50],
+                                "identifiers": [u["email"] for u in normalized_users if u.get("email")],
+                                "total_users": len(normalized_users)
+                            })
+                        else:
+                            # Phôi tự do (GENERIC)
+                            parsed_universal = GenericExcelService.extract_universal_data(file_bytes)
+                            parsed_excel_files.append({
+                                "is_cof": False,
+                                "excel_type": "GENERIC",
+                                "filename": fname,
+                                "lifecycle_status": lifecycle_status,
+                                "turn_index": turn_idx,
+                                "is_initial": is_initial,
                                 "identifiers": parsed_universal.get("identifiers", []),
                                 "courses_detected": parsed_universal.get("courses_detected", []),
                                 "repo_urls": parsed_universal.get("repo_urls", []),
                                 "school_detected": parsed_universal.get("school_detected"),
                                 "account_profiles": parsed_universal.get("account_profiles", [])[:50]
-                            }
+                            })
                 except Exception as ex_err:
                     logger.warning(f"⚠️ Lỗi bóc tách Excel [{fname}]: {ex_err}")
                 finally:
@@ -194,44 +295,95 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                         except Exception:
                             pass
 
-            # B. 🎯 TẢI ẢNH CHỤP MÀN HÌNH BÁO LỖI (.png, .jpg, .jpeg, .webp) CHO GEMINI VISION
-            elif any(fname.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".webp"]) and len(image_parts) < 2:
+            # B. 🎯 TẢI ẢNH CHỤP BÁO LỖI (.png, .jpg, .jpeg, .webp) CHO GEMINI VISION (ƯU TIÊN ẢNH MỚI)
+            elif any(fname_lower.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".webp"]) and not is_already_done and len(image_parts) < 3:
                 try:
                     async with httpx.AsyncClient(timeout=20.0) as client:
                         resp = await client.get(furl)
                         if resp.status_code == 200 and len(resp.content) < 5 * 1024 * 1024:
-                            mime = "image/png" if fname.endswith(".png") else "image/webp" if fname.endswith(".webp") else "image/jpeg"
+                            mime = "image/png" if fname_lower.endswith(".png") else "image/webp" if fname_lower.endswith(".webp") else "image/jpeg"
                             image_parts.append({
                                 "mime_type": mime,
-                                "data": resp.content
+                                "data": resp.content,
+                                "filename": fname
                             })
-                            logger.info(f"📸 [Multimodal Vision] Đã nạp ảnh lỗi [{fname}] ({len(resp.content)} bytes) vào Gemini Vision!")
+                            logger.info(f"📸 [Multimodal Vision] Đã nạp ảnh lỗi MỚI [{fname}] vào Gemini Vision!")
                 except Exception as img_err:
                     logger.warning(f"⚠️ Lỗi tải ảnh đính kèm [{fname}]: {img_err}")
 
-        # 2. Fallback bóc tách văn bản trần nếu không có file Excel
-        if not excel_summary and raw_content:
+        # 3. XÂY DỰNG CẤU TRÚC TÓM TẮT TỆP ĐÍNH KÈM CÓ SỔ CÁI PROVENANCE
+        excel_summary: Optional[Dict[str, Any]] = None
+        if parsed_excel_files:
+            # Ưu tiên lấy file mới nhất thuộc nhóm 'new_pending' làm file active
+            new_pending_files = [f for f in parsed_excel_files if f.get("lifecycle_status") == "new_pending"]
+            new_pending_files.sort(key=lambda x: x.get("turn_index", 0), reverse=True)
+
+            active_file = new_pending_files[0] if new_pending_files else parsed_excel_files[0]
+            
+            excel_summary = {
+                **active_file,
+                "provenance_ledger": {
+                    "active_new_files": new_active_filenames,
+                    "archived_completed_files": archived_filenames
+                },
+                "all_parsed_files": parsed_excel_files,
+                "total_excel_files": len(parsed_excel_files)
+            }
+        elif raw_content:
             text_parsed = GenericExcelService.parse_universal_text(raw_content)
             if text_parsed.get("identifiers") or text_parsed.get("repo_urls"):
                 excel_summary = {
                     "is_cof": False,
                     "filename": "email_raw_text",
+                    "lifecycle_status": "new_pending",
+                    "provenance_ledger": {
+                        "active_new_files": ["email_raw_text"],
+                        "archived_completed_files": archived_filenames
+                    },
                     "identifiers": text_parsed.get("identifiers", []),
                     "repo_urls": text_parsed.get("repo_urls", []),
                     "courses_detected": text_parsed.get("courses_detected", [])
                 }
 
-        # 3. Nạp LMS Catalog
+        # 4. Nạp LMS Catalog
         catalog_context = get_catalog_context(supabase)
         if excel_summary is not None:
             excel_summary["catalog_reference"] = catalog_context
         else:
             excel_summary = {"catalog_reference": catalog_context}
 
-        # 4. Tóm tắt mềm
+        # 🌟 5. KÉO LỊCH SỬ WORKFLOW ĐÃ THỰC THI ĐỂ NHẮC NHỞ AI BẰNG VĂN BẢN
+        historical_context_note = ""
+        if rev_no > 1:
+            try:
+                prev_wf_res = supabase.table("automation_workflows")\
+                    .select("title, status, steps, updated_at")\
+                    .eq("ticket_id", ticket_id)\
+                    .order("version", desc=True)\
+                    .limit(1)\
+                    .execute()
+                if prev_wf_res.data:
+                    prev_wf = prev_wf_res.data[0]
+                    prev_status = prev_wf.get("status")
+                    prev_steps = prev_wf.get("steps") or []
+                    done_steps = [s.get("name") for s in prev_steps if s.get("status") in ["success", "succeeded"]]
+                    
+                    if done_steps:
+                        historical_context_note = (
+                            f"\n[SỔ CÁI CÔNG VIỆC ĐÃ HOÀN TẤT Ở LƯỢT TRƯỚC]:\n"
+                            f"- Trạng thái luồng trước: {prev_status}\n"
+                            f"- Các bước ĐÃ THỰC THI THÀNH CÔNG: {', '.join(done_steps)}\n"
+                            f"- Các tệp ĐÃ HOÀN TẤT XỬ LÝ (BỎ QUA): {', '.join(archived_filenames) if archived_filenames else 'Không có'}\n"
+                            f"- Các tệp MỚI CẦN XỬ LÝ: {', '.join(new_active_filenames) if new_active_filenames else 'Chỉ có văn bản'}\n"
+                            f"⚠️ CHỈ TẬP TRUNG BÓC TÁCH Ý ĐỊNH MỚI PHÁT SINH Ở LƯỢT GẦN NHẤT, TUYỆT ĐỐI KHÔNG TẠO LẠI CÁC BƯỚC ĐÃ XONG!"
+                        )
+            except Exception as h_err:
+                logger.warning(f"Lỗi nạp lịch sử workflow: {h_err}")
+
+        # 6. Tóm tắt mềm (Key 1)
         summary_res = gemini_engine.summarize_ticket(
             subject=subject, 
-            raw_content=raw_content, 
+            raw_content=raw_content + historical_context_note, 
             source=source,
             sender_email=sender_email
         )
@@ -240,19 +392,19 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
             import asyncio
             await asyncio.sleep(1.2)
 
-        # 5. Bóc tách Sự Thật Vận Hành (Truyền CẢ Tóm Tắt AI và Ảnh Đính Kèm)
+        # 7. Bóc tách Sự Thật Vận Hành (Key 2) - ZERO-MOCKUP INVARIANT
         facts_res = gemini_engine.extract_operational_facts(
             subject=subject,
-            raw_content=raw_content,
+            raw_content=raw_content + historical_context_note,
             source=source,
             excel_summary=excel_summary,
             source_revision_id=revision_id,
             sender_email=sender_email,
             ai_summary=summary_res.summary_vi,
-            image_parts=image_parts  # << BƠM ẢNH ĐÍNH KÈM CHO GEMINI VISION!
+            image_parts=image_parts
         )
 
-        # 6. Lưu assessments vào Supabase
+        # 8. Lưu assessments vào Supabase
         now_iso = datetime.now(timezone.utc).isoformat()
         try:
             supabase.table("ticket_ai_assessments").insert([
@@ -280,7 +432,7 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
         except Exception as assess_err:
             logger.warning(f"⚠️ Lỗi ghi ticket_ai_assessments: {assess_err}")
 
-        # 7. Đồng bộ metadata vào inbox_tickets
+        # 9. Đồng bộ metadata vào inbox_tickets
         combined_meta = ticket.get("metadata") or {}
         combined_meta["ai_analysis"] = {
             "workflow_outcome": "NO_ACTION" if facts_res.outcome == "no_action" else "NEEDS_INFORMATION" if facts_res.outcome == "needs_information" else "ACTIONABLE",
@@ -308,7 +460,7 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
             "metadata": combined_meta
         }).eq("id", ticket_id).execute()
 
-        # 8. Lập kế hoạch Workflow
+        # 10. Lập kế hoạch Workflow (Non-Destructive DAG v7.2)
         wf_draft = await workflow_planner_service.plan_workflow_for_ticket(
             ticket_id=ticket_id, 
             revision_id=revision_id
@@ -333,7 +485,7 @@ async def process_incoming_ticket(ticket_data: Dict[str, Any]) -> Dict[str, Any]
 
     raw_content = ticket_data.get("raw_content") or ""
     attachments = ticket_data.get("attachments") or []
-    source_updated_at = ticket_data.get("updated_at")
+    source_updated_at = ticket_data.get("source_updated_at") or ticket_data.get("updated_at")
 
     revision_id, rev_no, is_new = create_or_get_ticket_revision(
         ticket_id=ticket_id,

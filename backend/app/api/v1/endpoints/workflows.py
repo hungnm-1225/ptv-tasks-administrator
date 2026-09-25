@@ -112,13 +112,14 @@ async def get_workflow_by_id(workflow_id: str):
 @router.put("/{workflow_id}")
 async def update_workflow_draft(
     workflow_id: str, 
-    payload: WorkflowDraftUpdate,
+    payload: Dict[str, Any] = Body(...),
     current_user_email: str = Depends(get_current_user_email)
 ):
     """
-    Quản trị viên tinh chỉnh Workflow Draft:
-    - Kiểm định tính hợp lệ của đồ thị các bước.
-    - TỰ ĐỘNG ĐỒNG BỘ: Cập nhật cả automation_workflows lẫn workflow_proposals liên kết sang trạng thái 'ready_for_review'.
+    Quản trị viên tinh chỉnh Workflow Draft (Enterprise v4.2):
+    - Đón nhận linh hoạt cả Steps, School Override (detected_school) và ai_analysis.
+    - Tự động đồng bộ tên trường vào tất cả inputs của các bước phụ thuộc trong DAG.
+    - Cập nhật song song Proposal.entity_resolution để Supabase và AI không bị lệch pha.
     """
     supabase = get_supabase_client()
     res = supabase.table("automation_workflows").select("*").eq("id", workflow_id).execute()
@@ -135,23 +136,76 @@ async def update_workflow_draft(
     now_iso = datetime.now(timezone.utc).isoformat()
     update_fields: Dict[str, Any] = {"updated_at": now_iso}
 
-    if payload.title is not None:
-        update_fields["title"] = payload.title
-    if payload.goal is not None:
-        update_fields["goal"] = payload.goal
+    # 1. Cập nhật Title & Goal
+    if payload.get("title") is not None:
+        update_fields["title"] = payload["title"]
+    if payload.get("goal") is not None:
+        update_fields["goal"] = payload["goal"]
 
+    # 2. XỬ LÝ ĐỒNG BỘ AI_ANALYSIS & TARGET SCHOOL (KHẮC PHỤC TRIỆT ĐỂ LỖI REVERT)
     ai_data = dict(old_wf.get("ai_analysis") or {})
-    if payload.operator_reason:
-        ai_data["operator_reason"] = payload.operator_reason
-        update_fields["ai_analysis"] = ai_data
+    
+    # Merge ai_analysis nếu client gửi lên
+    if payload.get("ai_analysis") and isinstance(payload["ai_analysis"], dict):
+        ai_data.update(payload["ai_analysis"])
 
-    target_status = payload.status or old_wf.get("status")
+    # Xử lý khi có school override trực tiếp từ UI
+    new_school = payload.get("detected_school") or payload.get("school")
+    target_school_name = None
+    target_school_id = None
 
-    if payload.steps is not None:
-        steps_dicts = [s.model_dump() for s in payload.steps]
+    if new_school:
+        if isinstance(new_school, dict):
+            target_school_name = new_school.get("school_name") or new_school.get("name")
+            target_school_id = new_school.get("school_id") or new_school.get("id")
+            ai_data["detected_school"] = {
+                "id": target_school_id,
+                "name": target_school_name,
+                "code": new_school.get("school_code") or new_school.get("code", ""),
+                "partner_name": new_school.get("partner_name", ""),
+                "confidence": 1.0,
+                "is_manual_override": True
+            }
+        elif isinstance(new_school, str):
+            target_school_name = new_school
+            ai_data["detected_school"] = {
+                "name": target_school_name,
+                "confidence": 1.0,
+                "is_manual_override": True
+            }
+
+    if payload.get("operator_reason"):
+        ai_data["operator_reason"] = payload["operator_reason"]
+
+    # Ghi nhận ai_analysis mới vào update_fields
+    update_fields["ai_analysis"] = ai_data
+
+    # 3. XỬ LÝ CÁC BƯỚC THỰC THI (STEPS) VÀ AUTO-PROPAGATE TÊN TRƯỜNG VÀO INPUTS
+    target_status = payload.get("status") or old_wf.get("status")
+    steps_payload = payload.get("steps")
+    steps_dicts = None
+
+    if steps_payload is not None:
+        steps_dicts = []
+        for s in steps_payload:
+            s_dict = s if isinstance(s, dict) else s.model_dump()
+            
+            # Tự động bơm tên trường mới vào input của các bước cần school
+            if target_school_name:
+                s_inputs = dict(s_dict.get("inputs") or {})
+                if "school_name" in s_inputs:
+                    s_inputs["school_name"] = target_school_name
+                if "school_id" in s_inputs and target_school_id:
+                    s_inputs["school_id"] = target_school_id
+                s_dict["inputs"] = s_inputs
+
+            steps_dicts.append(s_dict)
+
         update_fields["steps"] = steps_dicts
 
-        val_res = workflow_planner_service.validate_workflow_graph(payload.steps)
+        # Kiểm định tính toàn vẹn DAG
+        step_objs = [WorkflowStepDraft(**s) for s in steps_dicts]
+        val_res = workflow_planner_service.validate_workflow_graph(step_objs)
         if not val_res.is_valid:
             target_status = "invalid"
         elif val_res.warnings:
@@ -161,20 +215,31 @@ async def update_workflow_draft(
         
         update_fields["status"] = target_status
 
-        # 🎯 ĐỒNG BỘ SANG BẢNG PROPOSAL ĐỂ MỞ KHÓA PHÊ DUYỆT CSDL
-        proposal_id = old_wf.get("proposal_id")
-        if proposal_id:
-            try:
-                proposal_status = "ready_for_review" if target_status in ["ready", "needs_review"] else target_status
-                supabase.table("workflow_proposals").update({
-                    "plan": steps_dicts,
-                    "status": proposal_status,
-                    "updated_at": now_iso
-                }).eq("id", proposal_id).execute()
-                logger.info(f"🔄 Đã đồng bộ Proposal #{proposal_id[:8]} sang trạng thái '{proposal_status}'.")
-            except Exception as p_err:
-                logger.warning(f"Lỗi đồng bộ proposal khi update workflow: {p_err}")
+    # 4. ĐỒNG BỘ PROPOSAL LIÊN KẾT (CẢ PLAN VÀ ENTITY_RESOLUTION TRƯỜNG HỌC)
+    proposal_id = old_wf.get("proposal_id")
+    if proposal_id:
+        try:
+            proposal_status = "ready_for_review" if target_status in ["ready", "needs_review"] else target_status
+            proposal_update: Dict[str, Any] = {
+                "status": proposal_status,
+                "updated_at": now_iso
+            }
+            if steps_dicts is not None:
+                proposal_update["plan"] = steps_dicts
+            
+            # Đồng bộ target_school vào entity_resolution của Proposal
+            if "detected_school" in ai_data:
+                p_res = supabase.table("workflow_proposals").select("entity_resolution").eq("id", proposal_id).execute()
+                current_ent = (p_res.data[0].get("entity_resolution") if p_res.data else {}) or {}
+                current_ent["school"] = ai_data["detected_school"]
+                proposal_update["entity_resolution"] = current_ent
 
+            supabase.table("workflow_proposals").update(proposal_update).eq("id", proposal_id).execute()
+            logger.info(f"🔄 Đã đồng bộ Proposal #{proposal_id[:8]} (Status: '{proposal_status}', School: {target_school_name or 'Keep'}).")
+        except Exception as p_err:
+            logger.warning(f"Lỗi đồng bộ proposal khi update workflow: {p_err}")
+
+    # 5. LƯU VÀ TRẢ VỀ DỮ LIỆU ĐÃ CẬP NHẬT
     up_res = supabase.table("automation_workflows").update(update_fields).eq("id", workflow_id).execute()
     new_record = up_res.data[0] if up_res.data else old_wf
 
@@ -182,11 +247,15 @@ async def update_workflow_draft(
     try:
         supabase.table("automation_workflow_history").insert({
             "workflow_id": workflow_id,
-            "field_changed": "steps_edited",
-            "old_val": {"steps_count": len(old_wf.get("steps") or [])},
+            "field_changed": "steps_and_school_edited",
+            "old_val": {
+                "steps_count": len(old_wf.get("steps") or []),
+                "school": old_wf.get("ai_analysis", {}).get("detected_school", {}).get("name")
+            },
             "new_val": {
                 "steps_count": len(new_record.get("steps") or []),
-                "operator_reason": payload.operator_reason
+                "school": new_record.get("ai_analysis", {}).get("detected_school", {}).get("name"),
+                "operator_reason": payload.get("operator_reason")
             },
             "changed_by": current_user_email
         }).execute()
@@ -194,6 +263,8 @@ async def update_workflow_draft(
         logger.warning(f"Lỗi ghi audit log update_workflow_draft: {log_err}")
 
     return new_record
+
+
 
 
 @router.post("/{workflow_id}/approve_and_run")

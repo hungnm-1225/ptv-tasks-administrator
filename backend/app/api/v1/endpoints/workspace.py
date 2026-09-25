@@ -543,9 +543,97 @@ async def get_workspace_countries():
             {"code": "PH", "name": "Philippines", "flag_emoji": "🇵🇭"},
         ]
 
+
+
+@router.delete("/organizations/{org_id}")
+async def delete_organization(org_id: str):
+    """Xóa bỏ một đơn vị khỏi hệ thống (Bảo vệ: Chặn xóa nếu còn đơn vị cấp con)."""
+    supabase = get_supabase_client()
+    try:
+        check_res = supabase.table("workspace_organizations").select("id, name, role_type").eq("id", org_id).execute()
+        if not check_res.data:
+            raise HTTPException(status_code=404, detail="Không tìm thấy đơn vị yêu cầu.")
+        org = check_res.data[0]
+
+        # Chặn xoá nếu đang có trường/đối tác con trực thuộc
+        children = supabase.table("workspace_organizations").select("id").eq("parent_id", org_id).limit(1).execute()
+        if children.data:
+            raise HTTPException(status_code=400, detail="Không thể xóa đơn vị này vì đang có các đơn vị trực thuộc cấp dưới!")
+
+        # Xóa vault credentials liên kết trước
+        supabase.table("workspace_credentials_vault").delete().eq("org_id", org_id).execute()
+
+        # Xóa organization
+        supabase.table("workspace_organizations").delete().eq("id", org_id).execute()
+
+        # Invalidate cache
+        ws_cache.invalidate("all_hierarchy_schools")
+
+        return {
+            "status": "success",
+            "message": f"Đã xóa thành công đơn vị '{org['name']}'!"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Lỗi xóa organization {org_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Lỗi máy chủ: {str(e)}")
+
+# =============================================================================
+# KIỂM TRA TRÙNG MÃ ID / CODE REALTIME & QUẢN TRỊ PHẢ HỆ CHẶT CHẼ
+# =============================================================================
+@router.get("/organizations/check-code")
+async def check_organization_code(
+    code: str = Query(..., description="Mã định danh cần kiểm tra"),
+    exclude_id: Optional[str] = Query(None, description="ID bản ghi bỏ qua khi kiểm tra lúc edit")
+):
+    """Kiểm tra xem mã định danh (Code/ID) đã tồn tại trong hệ thống hay chưa."""
+    clean_code = code.strip()
+    if not clean_code:
+        return {"exists": False}
+
+    supabase = get_supabase_client()
+    try:
+        query = supabase.table("workspace_organizations")\
+            .select("id, name, code, role_type")\
+            .ilike("code", clean_code)
+        
+        if exclude_id and exclude_id.strip():
+            query = query.neq("id", exclude_id.strip())
+            
+        res = query.limit(1).execute()
+        if res.data:
+            matched = res.data[0]
+            role_vi = {
+                "distributor": "Nhà Phân Phối",
+                "partner": "Đối Tác",
+                "school": "Trường Học"
+            }.get(matched.get("role_type", ""), matched.get("role_type", ""))
+            return {
+                "exists": True,
+                "conflict_with": {
+                    "id": matched["id"],
+                    "name": matched["name"],
+                    "code": matched.get("code"),
+                    "role_type": role_vi
+                },
+                "message": f"Mã '{clean_code}' đã được sử dụng bởi {role_vi}: '{matched['name']}'!"
+            }
+        return {"exists": False}
+    except Exception as e:
+        logger.error(f"❌ Lỗi kiểm tra trùng mã code '{clean_code}': {e}")
+        return {"exists": False}
+
+
 @router.post("/organizations")
 async def create_organization(payload: OrgCreateRequest):
-    """Khởi tạo Đơn vị mới (School/Partner/Distributor) và lưu mã hóa vào Fernet Vault."""
+    """
+    Khởi tạo Đơn vị mới thủ công trong Database bên mình.
+    CƯỠNG CHẾ RÀNG BUỘC PHẢ HỆ 3 TẦNG:
+    - School BẮT BUỘC thuộc 1 Partner.
+    - Partner BẮT BUỘC thuộc 1 Distributor.
+    - Distributor là cấp cao nhất (parent_id = NULL).
+    """
     supabase = get_supabase_client()
     try:
         name_clean = payload.name.strip()
@@ -554,21 +642,48 @@ async def create_organization(payload: OrgCreateRequest):
 
         role_type = (payload.role_type or "school").strip().lower()
         if role_type not in ["distributor", "partner", "school"]:
-            raise HTTPException(status_code=400, detail="Cấp bậc role_type không hợp lệ (phải là distributor, partner, hoặc school).")
+            raise HTTPException(status_code=400, detail="Cấp bậc thực thể không hợp lệ.")
 
-        # 1. Kiểm tra trùng mã code nếu có nhập
+        # 1. KIỂM TRA DUPLICATE CODE CHỐNG TRÙNG LẶP TUYỆT ĐỐI
         clean_code = payload.code.strip() if payload.code and payload.code.strip() else None
         if clean_code:
-            dup_code = supabase.table("workspace_organizations").select("id").eq("code", clean_code).execute()
-            if dup_code.data:
-                raise HTTPException(status_code=400, detail=f"Mã định danh (Code) '{clean_code}' đã tồn tại trong hệ thống!")
+            dup_check = supabase.table("workspace_organizations")\
+                .select("id, name, role_type")\
+                .ilike("code", clean_code)\
+                .execute()
+            if dup_check.data:
+                exist_item = dup_check.data[0]
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Mã định danh (ID/Code) '{clean_code}' đã tồn tại ở {exist_item.get('role_type').upper()}: '{exist_item.get('name')}'!"
+                )
 
-        # 2. Kiểm tra parent_id nếu có
+        # 2. RÀNG BUỘC PHẢ HỆ CHẶT CHẼ THEO CẤP BẬC
         clean_parent_id = payload.parent_id.strip() if payload.parent_id and payload.parent_id.strip() else None
-        if clean_parent_id:
-            parent_check = supabase.table("workspace_organizations").select("id, role_type").eq("id", clean_parent_id).execute()
+
+        if role_type == "distributor":
+            # Distributor là đỉnh Master, không có parent_id
+            clean_parent_id = None
+
+        elif role_type == "partner":
+            # Partner BẮT BUỘC phải có Distributor làm cha
+            if not clean_parent_id:
+                raise HTTPException(status_code=400, detail="Đối Tác (Partner) bắt buộc phải trực thuộc một Nhà Phân Phối (Distributor)!")
+            parent_check = supabase.table("workspace_organizations").select("id, name, role_type").eq("id", clean_parent_id).execute()
             if not parent_check.data:
-                raise HTTPException(status_code=400, detail="Đơn vị quản lý cấp cha (parent_id) không tồn tại!")
+                raise HTTPException(status_code=400, detail="Nhà Phân Phối được chọn không tồn tại trong hệ thống!")
+            if parent_check.data[0].get("role_type") != "distributor":
+                raise HTTPException(status_code=400, detail="Cấp trên của Đối Tác bắt buộc phải là một Nhà Phân Phối (Distributor)!")
+
+        elif role_type == "school":
+            # School BẮT BUỘC phải có Partner làm cha
+            if not clean_parent_id:
+                raise HTTPException(status_code=400, detail="Trường Học (School) bắt buộc phải trực thuộc một Đối Tác (Partner)!")
+            parent_check = supabase.table("workspace_organizations").select("id, name, role_type").eq("id", clean_parent_id).execute()
+            if not parent_check.data:
+                raise HTTPException(status_code=400, detail="Đối Tác được chọn không tồn tại trong hệ thống!")
+            if parent_check.data[0].get("role_type") != "partner":
+                raise HTTPException(status_code=400, detail="Cấp trên của Trường Học bắt buộc phải là một Đối Tác (Partner)!")
 
         # 3. Bóc tách Google Drive Folder ID
         drive_id = None
@@ -645,42 +760,9 @@ async def create_organization(payload: OrgCreateRequest):
         raise HTTPException(status_code=500, detail=f"Lỗi máy chủ: {str(e)}")
 
 
-@router.delete("/organizations/{org_id}")
-async def delete_organization(org_id: str):
-    """Xóa bỏ một đơn vị khỏi hệ thống (Bảo vệ: Chặn xóa nếu còn đơn vị cấp con)."""
-    supabase = get_supabase_client()
-    try:
-        check_res = supabase.table("workspace_organizations").select("id, name, role_type").eq("id", org_id).execute()
-        if not check_res.data:
-            raise HTTPException(status_code=404, detail="Không tìm thấy đơn vị yêu cầu.")
-        org = check_res.data[0]
-
-        # Chặn xoá nếu đang có trường/đối tác con trực thuộc
-        children = supabase.table("workspace_organizations").select("id").eq("parent_id", org_id).limit(1).execute()
-        if children.data:
-            raise HTTPException(status_code=400, detail="Không thể xóa đơn vị này vì đang có các đơn vị trực thuộc cấp dưới!")
-
-        # Xóa vault credentials liên kết trước
-        supabase.table("workspace_credentials_vault").delete().eq("org_id", org_id).execute()
-
-        # Xóa organization
-        supabase.table("workspace_organizations").delete().eq("id", org_id).execute()
-
-        # Invalidate cache
-        ws_cache.invalidate("all_hierarchy_schools")
-
-        return {
-            "status": "success",
-            "message": f"Đã xóa thành công đơn vị '{org['name']}'!"
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Lỗi xóa organization {org_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Lỗi máy chủ: {str(e)}")
-
 @router.put("/organizations/{org_id}")
 async def update_organization_and_vault(org_id: str, payload: OrgUpdateRequest):
+    """Cập nhật thông tin thực thể, thẩm định phả hệ và bảo vệ Fernet Vault."""
     supabase = get_supabase_client()
     try:
         check_res = supabase.table("workspace_organizations").select("*").eq("id", org_id).execute()
@@ -688,9 +770,37 @@ async def update_organization_and_vault(org_id: str, payload: OrgUpdateRequest):
             raise HTTPException(status_code=404, detail="Không tìm thấy tổ chức yêu cầu.")
 
         current_org = check_res.data[0]
+        role_type = current_org.get("role_type", "school")
 
+        # 1. Chống tự làm cha của chính mình
         if payload.parent_id and payload.parent_id == org_id:
             raise HTTPException(status_code=400, detail="Một đơn vị không thể tự làm cấp cha của chính mình!")
+
+        # 2. Kiểm tra trùng mã ID/Code với đơn vị khác
+        clean_code = payload.code.strip() if payload.code and payload.code.strip() else None
+        if clean_code:
+            dup_check = supabase.table("workspace_organizations")\
+                .select("id, name, role_type")\
+                .ilike("code", clean_code)\
+                .neq("id", org_id)\
+                .execute()
+            if dup_check.data:
+                exist_item = dup_check.data[0]
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Mã định danh (ID/Code) '{clean_code}' đang thuộc về {exist_item.get('role_type').upper()}: '{exist_item.get('name')}'!"
+                )
+
+        # 3. Ràng buộc phả hệ khi update
+        clean_parent_id = payload.parent_id.strip() if payload.parent_id and payload.parent_id.strip() else None
+        if role_type == "distributor":
+            clean_parent_id = None
+        elif role_type == "partner":
+            if not clean_parent_id:
+                raise HTTPException(status_code=400, detail="Đối Tác bắt buộc phải trực thuộc một Nhà Phân Phối (Distributor)!")
+        elif role_type == "school":
+            if not clean_parent_id:
+                raise HTTPException(status_code=400, detail="Trường Học bắt buộc phải trực thuộc một Đối Tác (Partner)!")
 
         drive_id = None
         if payload.drive_folder_url:
@@ -705,8 +815,8 @@ async def update_organization_and_vault(org_id: str, payload: OrgUpdateRequest):
 
         update_org_data: Dict[str, Any] = {
             "name": payload.name.strip(),
-            "code": payload.code.strip() if payload.code else None,
-            "parent_id": payload.parent_id if (payload.parent_id and payload.parent_id.strip()) else None,
+            "code": clean_code,
+            "parent_id": clean_parent_id,
             "country": payload.country.strip() if (payload.country and payload.country != "Unknown") else "Vietnam",
             "country_code": country_code,
             "drive_folder_url": payload.drive_folder_url.strip() if payload.drive_folder_url else None,

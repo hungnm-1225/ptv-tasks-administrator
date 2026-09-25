@@ -1,16 +1,20 @@
+# backend/app/services/excel/bulk_template_service.py
 """
-Bulk Account Creation Template Service
+Bulk Account Creation Template Service (Enterprise Edition v4.2 - Strict Sanitization)
 Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI
 Chuyên trách:
 - Chuẩn hóa file Excel thành 'phôi' chuẩn của trường (Header hàng 5, Data hàng 6).
 - Tự động bóc tách text trần sinh phôi Excel.
+- Uốn nắn dữ liệu cực hạn: Khử toàn bộ khoảng trắng trong email ("Teacher 01@gmail.com" -> "teacher01@gmail.com").
+- Chuẩn hóa Role: Đưa "students", "sssteachers" về chuẩn "Student" / "Teacher".
+- Quét Hàng 1-5, Cột A-Z để phân luồng COF / TOF / Phôi Accounts / Generic.
 - Ghi kết quả tài khoản đã tạo vào các cột H (Username), I (Password), J (Note).
 """
 import os
 import gc
 import re
 import logging
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 import openpyxl
 from openpyxl.styles import Font, Alignment
 from app.services.excel.cof_service import COFService
@@ -18,7 +22,59 @@ from app.services.excel.cof_service import COFService
 logger = logging.getLogger(__name__)
 
 
+def sanitize_email(raw_email: Any) -> str:
+    """
+    Uốn nắn email về chuẩn mực:
+    - Loại bỏ 100% khoảng trắng kể cả bên trong chuỗi: 'Teacher 01@gmail.com' -> 'teacher01@gmail.com'
+    - Chuyển về chữ thường toàn bộ.
+    """
+    if not raw_email:
+        return ""
+    # Cắt sạch dấu cách, ký tự tab, ngắt dòng vô tình bấm nhầm
+    clean = re.sub(r"[\s\t\r\n]+", "", str(raw_email)).strip().lower()
+    return clean
+
+
+def sanitize_role(raw_role: Any) -> str:
+    """
+    Uốn nắn Role về đúng 2 giá trị chuẩn mực của hệ thống: 'Teacher' hoặc 'Student'.
+    Khắc phục các lỗi gõ ẩu như 'students', 'sssteachers', 'ssstudents':
+    """
+    if not raw_role:
+        return "Student"
+
+    r = str(raw_role).strip().lower()
+    # Làm sạch ký tự lạ
+    r = re.sub(r"[^a-zA-Z]", "", r)
+
+    # 1. Nhận diện nhóm Giáo viên
+    if any(k in r for k in ["teach", "instructor", "gv"]):
+        return "Teacher"
+
+    # 2. Nhận diện nhóm Học sinh
+    if any(k in r for k in ["stud", "pupil", "hs"]):
+        return "Student"
+
+    return "Student"
+
+
 class BulkTemplateService:
+
+    @classmethod
+    def scan_header_signature(cls, ws_in) -> str:
+        """Quét 1-5 dòng đầu, cột A-Z để tìm chữ ký nhận diện phôi biểu mẫu (bao trọn ô Merge C1:R3)."""
+        text_parts = []
+        try:
+            for row in ws_in.iter_rows(min_row=1, max_row=5, min_col=1, max_col=26, values_only=True):
+                for cell in row:
+                    if cell is not None:
+                        val = str(cell).strip()
+                        if val:
+                            text_parts.append(val)
+        except Exception:
+            pass
+        combined = re.sub(r"\s+", " ", " ".join(text_parts)).upper()
+        return combined
 
     @classmethod
     def is_already_standard_accounts_file(cls, ws_in) -> Tuple[bool, int, Dict[str, int]]:
@@ -62,10 +118,16 @@ class BulkTemplateService:
                     continue
 
                 mob = str(row[col_map.get("mobile", 3)] or '').strip() if "mobile" in col_map else ""
-                em = str(row[col_map.get("email", 4)] or '').strip() if "email" in col_map else ""
+                
+                # 🌟 UỐN NẮN EMAIL & ROLE TẠI ĐÂY (Cắt sạch dấu cách thừa, nắn students -> Student)
+                raw_em = str(row[col_map.get("email", 4)] or '').strip() if "email" in col_map else ""
+                em = sanitize_email(raw_em)
+
                 raw_dob = row[col_map.get("dob", 5)] if "dob" in col_map else ""
                 dob = COFService.format_date_dob(raw_dob)
-                role = str(row[col_map.get("role", 6)] or 'Student').strip() if "role" in col_map else "Student"
+
+                raw_role = str(row[col_map.get("role", 6)] or 'Student').strip() if "role" in col_map else "Student"
+                role = sanitize_role(raw_role)
 
                 extracted_users.append({
                     "first_name": fn, "last_name": ln, "mobile": mob, "email": em, "dob": dob, "role": role
@@ -118,7 +180,7 @@ class BulkTemplateService:
 
             os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
             wb_out.save(output_file_path)
-            logger.info(f"✨ Chuẩn hóa phôi mới cố định lưới ({len(extracted_users)} users): {output_file_path}")
+            logger.info(f"✨ Chuẩn hóa phôi mới cố định lưới ({len(extracted_users)} users đã uốn nắn sạch sẽ): {output_file_path}")
             return output_file_path, len(extracted_users), extracted_users
         finally:
             wb_out.close()
@@ -140,28 +202,26 @@ class BulkTemplateService:
             ws.cell(row=5, column=9, value="Password").font = Font(name="Arial", size=10, bold=True)
             ws.cell(row=5, column=10, value="Note").font = Font(name="Arial", size=10, bold=True)
 
-            api_map_by_email = {str(item.get("email") or '').strip().lower(): item for item in api_user_records if item.get("email")}
+            api_map_by_email = {sanitize_email(item.get("email")): item for item in api_user_records if item.get("email")}
             api_map_by_name = {f"{str(i.get('firstname') or '').strip().lower()}_{str(i.get('lastname') or '').strip().lower()}": i for i in api_user_records}
 
             for r in range(6, ws.max_row + 1):
-                row_email = str(ws.cell(row=r, column=5).value or '').strip().lower()
+                row_email = sanitize_email(ws.cell(row=r, column=5).value)
                 row_fn = str(ws.cell(row=r, column=2).value or '').strip().lower()
                 row_ln = str(ws.cell(row=r, column=3).value or '').strip().lower()
 
-                # 🎯 NẾU LÀ DÒNG TRỐNG (Không có cả Email lẫn Họ tên): BỎ QUA, ĐỂ NGUYÊN Ô TRẮNG
+                # 🎯 NẾU LÀ DÒNG TRỐNG: BỎ QUA, ĐỂ NGUYÊN Ô TRẮNG
                 if not row_email and not row_fn and not row_ln:
                     continue
 
                 matched = api_map_by_email.get(row_email) or api_map_by_name.get(f"{row_fn}_{row_ln}")
                 if matched:
                     if matched.get("is_create", False):
-                        # Tài khoản MỚI tạo thành công trên Workspace
                         ws.cell(row=r, column=8, value=matched.get("username", ""))
                         ws.cell(row=r, column=9, value=matched.get("password", ""))
                         ws.cell(row=r, column=10, value="Tạo mới thành công")
                         ws.cell(row=r, column=10).font = Font(name="Arial", size=9, color="2E7D32", bold=True)
                     else:
-                        # Tài khoản ĐÃ TỒN TẠI: Điền Real Username và Password (= Email)
                         real_username = matched.get("username", "")
                         reset_password = matched.get("password") or row_email
                         ws.cell(row=r, column=8, value=real_username)
@@ -170,7 +230,6 @@ class BulkTemplateService:
                         note_c = ws.cell(row=r, column=10, value="Tài khoản đã tồn tại (Đã reset pass về email)")
                         note_c.font = Font(name="Arial", size=9, italic=True, color="1565C0", bold=True)
                 else:
-                    # Chỉ ghi chú nếu dòng đó THỰC SỰ có dữ liệu người dùng nhưng không match được
                     note_c = ws.cell(row=r, column=10, value="Chưa xử lý")
                     note_c.font = Font(name="Arial", size=9, italic=True, color="7F7F7F")
 
@@ -196,7 +255,8 @@ class BulkTemplateService:
             clean_line = re.sub(r'^[\s\-\*•\d\.\)]+', '', line).strip()
             emails = email_pattern.findall(clean_line)
             if emails:
-                email = emails[0].lower().strip()
+                raw_email = emails[0]
+                email = sanitize_email(raw_email)
                 inline_name = email_pattern.sub('', clean_line).strip(' -:()')
                 name_to_use = inline_name or pending_name or email.split('@')[0]
                 parts = [p for p in name_to_use.split() if p]
@@ -244,9 +304,9 @@ class BulkTemplateService:
                 ws.cell(row=r, column=2, value=u.get("first_name", ""))
                 ws.cell(row=r, column=3, value=u.get("last_name", ""))
                 ws.cell(row=r, column=4, value=u.get("mobile", ""))
-                ws.cell(row=r, column=5, value=u.get("email", ""))
+                ws.cell(row=r, column=5, value=sanitize_email(u.get("email", "")))
                 ws.cell(row=r, column=6, value=COFService.format_date_dob(u.get("dob", "01/01/2000")))
-                ws.cell(row=r, column=7, value=str(u.get("role", "Teacher")).capitalize())
+                ws.cell(row=r, column=7, value=sanitize_role(u.get("role", "Teacher")))
 
             wb.save(output_file_path)
             return output_file_path
@@ -257,11 +317,33 @@ class BulkTemplateService:
 
     @classmethod
     def detect_and_process_excel(cls, file_path: str, temp_dir: str) -> Tuple[str, int, int, int, bool, Dict[str, Any]]:
-        """Bộ điều phối thông minh: Phân luồng COF 3 Tabs vs File Phôi 1 Tab."""
+        """
+        Bộ điều phối thông minh: Quét nội dung Hàng 1-5 (Cột A-Z) của Tab đầu tiên để phân luồng:
+        - Chứa "CURRICULUM ORDER FORM" / "(COF)" -> Xử lý COF 3 Tabs.
+        - Chứa "TRAINING ORDER FORM" / "(TOF)" -> Nhận diện TOF (Tạm thời trả về thông tin TOF sơ bộ).
+        - Phôi Accounts / Generic -> Chuẩn hóa về Phôi Tạo Tài Khoản 1 Tab.
+        """
         os.makedirs(temp_dir, exist_ok=True)
-        is_cof = COFService.is_cof_file(file_path)
+        
+        # 🌟 QUÉT CHỮ KÝ HÀNG 1-5 CỘT A-Z
+        wb_check = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+        try:
+            ws_check = wb_check[wb_check.sheetnames[0]]
+            signature = cls.scan_header_signature(ws_check)
+            sheet_names_upper = [s.upper() for s in wb_check.sheetnames]
+        finally:
+            wb_check.close()
+            del wb_check
+            gc.collect()
 
+        # 1. NHẬNH DIỆN COF
+        is_cof = (
+            "CURRICULUM ORDER FORM" in signature 
+            or "(COF)" in signature 
+            or COFService.is_cof_file(file_path)
+        )
         if is_cof:
+            logger.info(f"🎯 [detect_and_process_excel] Phân luồng: File COF -> {file_path}")
             parsed = COFService.parse_cof_file(file_path)
             students = parsed.get("students_to_create", [])
             teachers = parsed.get("teachers_to_create", [])
@@ -269,9 +351,24 @@ class BulkTemplateService:
             output_acc_path = os.path.join(temp_dir, f"ready_accounts_{os.path.basename(file_path)}")
             cls.generate_accounts_excel_from_users(all_accounts, output_acc_path)
             return output_acc_path, len(students), len(teachers), len(all_accounts), True, parsed
-        else:
-            normalized_file = os.path.join(temp_dir, f"STANDARDIZED_{os.path.basename(file_path)}")
-            ready_file, total_c, users_list = cls.normalize_input_accounts_excel(file_path, normalized_file)
-            st_count = sum(1 for u in users_list if u.get("role", "").lower() == "student")
-            tc_count = total_c - st_count
-            return ready_file, st_count, tc_count, total_c, False, {}
+
+        # 2. NHẬN DIỆN TOF
+        is_tof = (
+            "TRAINING ORDER FORM" in signature 
+            or "(TOF)" in signature 
+            or any("TRAINING ORDER FORM" in s for s in sheet_names_upper)
+        )
+        if is_tof:
+            logger.info(f"🎯 [detect_and_process_excel] Phân luồng: File TOF -> {file_path} (Tạm thời phân loại theo yêu cầu)")
+            from app.services.excel.tof_service import TOFExcelService
+            tof_meta = TOFExcelService.parse_tof_file(file_path)
+            # Trả về metadata của TOF và không ép tạo accounts bừa bãi
+            return file_path, 0, 0, 0, False, tof_meta
+
+        # 3. PHÔI TẠO TÀI KHOẢN (HOẶC GENERIC CẦN CHUẨN HÓA)
+        logger.info(f"🎯 [detect_and_process_excel] Phân luồng: Phôi Tài Khoản / Generic -> Chuẩn hóa...")
+        normalized_file = os.path.join(temp_dir, f"STANDARDIZED_{os.path.basename(file_path)}")
+        ready_file, total_c, users_list = cls.normalize_input_accounts_excel(file_path, normalized_file)
+        st_count = sum(1 for u in users_list if u.get("role", "").lower() == "student")
+        tc_count = total_c - st_count
+        return ready_file, st_count, tc_count, total_c, False, {}

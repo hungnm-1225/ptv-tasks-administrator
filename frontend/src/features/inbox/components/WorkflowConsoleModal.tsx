@@ -1,5 +1,5 @@
 // frontend/src/features/inbox/components/WorkflowConsoleModal.tsx
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import {
@@ -20,14 +20,14 @@ import {
     HelpCircle,
     Edit3,
     Info,
-    ListChecks,
     Quote,
     ShieldAlert,
     FileEdit,
     Zap,
     ChevronDown,
     Eye,
-    XCircle
+    XCircle,
+    PlusCircle
 } from 'lucide-react';
 import {
     InboxTicket,
@@ -139,7 +139,30 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
     const [operatorReason, setOperatorReason] = useState<string>('');
     const [isSchoolPickerOpen, setIsSchoolPickerOpen] = useState<boolean>(false);
     const [schoolSearchQuery, setSchoolSearchQuery] = useState<string>('');
+
+    // 🌟 STATE OPTIMISTIC CHO TRƯỜNG HỌC (CHỐNG GIẬT LAG & REVERT)
+    const [optimisticSchool, setOptimisticSchool] = useState<HierarchySchoolItem | null>(null);
     const schoolPickerRef = useRef<HTMLDivElement | null>(null);
+
+    // Reset optimistic state khi đổi ticket hoặc activeWorkflow mới
+    useEffect(() => {
+        setOptimisticSchool(null);
+    }, [activeWorkflow?.id, selectedTicket?.id]);
+
+    // Click outside để tự đóng popup chọn trường
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (schoolPickerRef.current && !schoolPickerRef.current.contains(event.target as Node)) {
+                setIsSchoolPickerOpen(false);
+            }
+        };
+        if (isSchoolPickerOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+        }
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
+    }, [isSchoolPickerOpen]);
 
     const filteredSchools = useMemo(() => {
         const q = schoolSearchQuery.trim().toLowerCase();
@@ -149,38 +172,63 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
                 (s) =>
                     s.school_name.toLowerCase().includes(q) ||
                     (s.school_code && s.school_code.toLowerCase().includes(q)) ||
-                    s.partner_name.toLowerCase().includes(q)
+                    (s.partner_name && s.partner_name.toLowerCase().includes(q))
             )
             .slice(0, 30);
     }, [schoolsList, schoolSearchQuery]);
+
+    // Tên trường hiển thị ưu tiên Optimistic State -> Dữ liệu từ ActiveWorkflow
+    const displayedSchoolName = useMemo(() => {
+        if (optimisticSchool) return optimisticSchool.school_name;
+        return activeWorkflow?.ai_analysis?.detected_school?.name || null;
+    }, [optimisticSchool, activeWorkflow]);
 
     // 🎯 KIỂM ĐỊNH TÍNH KHẢ THI KHỞI CHẠY (BẬT CHẾ ĐỘ OVERRIDE KHI ADMIN SỬA LUỒNG)
     const isWorkflowRunnable = useMemo(() => {
         if (!activeWorkflow) return false;
 
-        // Các trạng thái đang chạy ngầm hoặc đã xong thì khóa nút
         const permanentBlocked = ['cancelled', 'running', 'waiting_poll', 'success', 'succeeded'];
         if (permanentBlocked.includes(activeWorkflow.status)) {
             return false;
         }
 
-        // Nếu không có bước nào
         if (!activeWorkflow.steps || activeWorkflow.steps.length === 0) {
             return false;
         }
 
-        // Nếu lỗi chu trình phụ thuộc (DAG cycle)
         if (validationResult && !validationResult.is_valid) {
             return false;
         }
 
-        // 🌟 NẾU LÀ NEEDS_INFORMATION NHƯNG ADMIN ĐANG MỞ CHẾ ĐỘ CHỈNH SỬA -> CHO PHÉP CHẠY OVERRIDE!
         if (activeWorkflow.status === 'needs_information') {
             return isEditingWorkflow;
         }
 
         return true;
     }, [activeWorkflow, validationResult, isEditingWorkflow]);
+
+    // Khởi tạo luồng mẫu tạo tài khoản cho trường đang chọn khi luồng bị 0 bước
+    const handleSeedDefaultAccountSteps = () => {
+        const schoolName = displayedSchoolName || 'Trường chưa xác định';
+        const defaultSteps: WorkflowStep[] = [
+            {
+                step_id: 'step_1_bulk_accounts',
+                capability_id: 'workspace.bulk_account_creation',
+                name: `Tạo tài khoản học sinh/giáo viên (${schoolName})`,
+                status: 'pending',
+                inputs: {
+                    school_name: schoolName,
+                    role: 'student',
+                    users_count: 1
+                },
+                outputs: {},
+                depends_on: [],
+                is_manual: false
+            }
+        ];
+        onStepsChange(defaultSteps);
+        setIsEditingWorkflow(true);
+    };
 
     if (!selectedTicket || typeof document === 'undefined') return null;
 
@@ -470,7 +518,7 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
                                         )}
                                     </div>
 
-                                    {/* Autocomplete Chọn Trường Học */}
+                                    {/* Autocomplete Chọn Trường Học (BẢN SỬA ĐỒNG BỘ 100%) */}
                                     {activeWorkflow.ai_analysis?.school_required === false ? (
                                         <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
                                             <div className="flex items-center gap-2">
@@ -496,12 +544,9 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
                                                     <span>Trường Học Mục Tiêu (Target School):</span>
                                                 </span>
 
-                                                {activeWorkflow.ai_analysis?.detected_school && (
+                                                {displayedSchoolName && (
                                                     <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                                                        ✓ Khớp{' '}
-                                                        {activeWorkflow.ai_analysis.detected_school.confidence
-                                                            ? `${Math.round(activeWorkflow.ai_analysis.detected_school.confidence * 100)}%`
-                                                            : 'Đã xác nhận'}
+                                                        ✓ Đã chọn
                                                     </span>
                                                 )}
                                             </div>
@@ -509,26 +554,25 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
                                             <div className="relative" ref={schoolPickerRef}>
                                                 <div
                                                     onClick={() => setIsSchoolPickerOpen(!isSchoolPickerOpen)}
-                                                    className={`flex items-center justify-between p-3 rounded-xl border transition cursor-pointer shadow-xs ${activeWorkflow.ai_analysis?.detected_school?.name
+                                                    className={`flex items-center justify-between p-3 rounded-xl border transition cursor-pointer shadow-xs ${displayedSchoolName
                                                         ? 'border-emerald-300 dark:border-emerald-800/60 bg-emerald-50/70 dark:bg-emerald-950/30 hover:bg-emerald-100/60'
                                                         : 'border-amber-400 dark:border-amber-700 bg-amber-100/80 dark:bg-amber-950/40 hover:bg-amber-100'
                                                         }`}
                                                 >
                                                     <div className="flex items-center gap-2 min-w-0">
                                                         <Building2
-                                                            className={`w-4 h-4 shrink-0 ${activeWorkflow.ai_analysis?.detected_school?.name
+                                                            className={`w-4 h-4 shrink-0 ${displayedSchoolName
                                                                 ? 'text-emerald-600'
                                                                 : 'text-amber-700 dark:text-amber-400'
                                                                 }`}
                                                         />
                                                         <span
-                                                            className={`text-xs font-black truncate ${activeWorkflow.ai_analysis?.detected_school?.name
+                                                            className={`text-xs font-black truncate ${displayedSchoolName
                                                                 ? 'text-slate-900 dark:text-white'
                                                                 : 'text-amber-950 dark:text-amber-200'
                                                                 }`}
                                                         >
-                                                            {activeWorkflow.ai_analysis?.detected_school?.name ||
-                                                                '⚠️ Chưa xác định trường học (Bấm vào đây để chọn)'}
+                                                            {displayedSchoolName || '⚠️ Chưa xác định trường học (Bấm vào đây để chọn)'}
                                                         </span>
                                                     </div>
 
@@ -560,6 +604,8 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
                                                                     type="button"
                                                                     onClick={() => {
                                                                         setIsSchoolPickerOpen(false);
+                                                                        // Cập nhật Optimistic UI 0ms ngay lập tức
+                                                                        setOptimisticSchool(s);
                                                                         onSelectSchool(s);
                                                                     }}
                                                                     className="w-full text-left p-2 rounded-lg text-xs hover:bg-indigo-50 dark:hover:bg-slate-800 transition flex items-center justify-between cursor-pointer"
@@ -731,19 +777,46 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
                                         </div>
                                     )}
 
-                                    {/* Bộ Dựng Đồ Thị DAG */}
-                                    <WorkflowBuilder
-                                        steps={activeWorkflow.steps || []}
-                                        capabilities={capabilities}
-                                        isEditable={isEditingWorkflow}
-                                        onStepsChange={onStepsChange}
-                                        onRetryStep={onRetryStep}
-                                    />
+                                    {/* NẾU LUỒNG ĐANG CÓ 0 BƯỚC: HIỂN THỊ NÚT KHỞI TẠO BƯỚC MẪU */}
+                                    {(!activeWorkflow.steps || activeWorkflow.steps.length === 0) ? (
+                                        <div className="p-6 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-dashed border-slate-300 dark:border-slate-700 text-center space-y-3">
+                                            <div className="inline-flex p-3 rounded-2xl bg-indigo-100 text-indigo-600 dark:bg-indigo-950 dark:text-indigo-400">
+                                                <Layers className="w-6 h-6" />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <h5 className="text-xs font-extrabold text-slate-800 dark:text-slate-200 uppercase tracking-wide">
+                                                    Chưa có bước thực thi nào được tạo
+                                                </h5>
+                                                <p className="text-[11px] text-slate-500 max-w-md mx-auto">
+                                                    Do yêu cầu ban đầu chưa đủ bằng chứng trích xuất từ văn bản gốc. Bạn có thể tự dựng các bước hoặc bấm nút bên dưới để tạo luồng mẫu.
+                                                </p>
+                                            </div>
+                                            <div className="pt-2 flex items-center justify-center gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={handleSeedDefaultAccountSteps}
+                                                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-500/20 transition cursor-pointer"
+                                                >
+                                                    <PlusCircle className="w-4 h-4" />
+                                                    <span>Tạo Bước Tạo Tài Khoản ({displayedSchoolName || 'Mặc Định'})</span>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        /* Bộ Dựng Đồ Thị DAG Khi Đã Có Bước */
+                                        <WorkflowBuilder
+                                            steps={activeWorkflow.steps || []}
+                                            capabilities={capabilities}
+                                            isEditable={isEditingWorkflow}
+                                            onStepsChange={onStepsChange}
+                                            onRetryStep={onRetryStep}
+                                        />
+                                    )}
 
                                     <WorkflowValidationPanel
                                         validation={validationResult}
                                         isValidating={workflowValidating}
-                                        isSchoolResolved={activeWorkflow.ai_analysis?.school_required === false || !!activeWorkflow.ai_analysis?.detected_school}
+                                        isSchoolResolved={activeWorkflow.ai_analysis?.school_required === false || !!displayedSchoolName}
                                         totalSteps={(activeWorkflow.steps || []).length}
                                     />
                                 </div>

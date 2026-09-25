@@ -1,7 +1,8 @@
 """
-Pythaverse Central Admin - OS Ticket Hybrid RPA-API Ingestion Service (V3.6 Master Enterprise)
+Pythaverse Central Admin - OS Ticket Hybrid RPA-API Ingestion Service (V4.0 Master Enterprise)
 Kiến trúc: Ephemeral Session Caching (Playwright Auth Gateway 3s) + Non-blocking Async HTTP Engine (HTTPX 300ms)
 Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI
+Cam kết an toàn: ZERO-MOCKUP INVARIANT, Tự động mở lại vé đã Hoàn thành khi khách reply, Đồng bộ thời gian thực.
 """
 import re
 import os
@@ -9,8 +10,8 @@ import gc
 import time
 import mimetypes
 import logging
-from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime
+from typing import Dict, Any, List, Optional
+from datetime import datetime, timezone
 from urllib.parse import urljoin
 import httpx
 from bs4 import BeautifulSoup
@@ -38,14 +39,14 @@ BROWSER_HEADERS = {
 
 class OSTicketService:
     """
-    Cỗ máy Hybrid OS Ticket:
+    Cỗ máy Hybrid OS Ticket V4.0:
     - Playwright Auth Gateway: Bốc Session Cookie (3-5s) rồi đóng Chromium ngay.
     - HTTPX Async Engine: Cào Open Queue, bóc tách chi tiết form & thread messages siêu tốc (300ms).
+    - Lifecycle SOT: Tự động kích hoạt Reopen và đảo ngày cập nhật khi khách hàng phản hồi mới.
     """
 
     def __init__(self):
         self.headless = True
-        # Bộ nhớ đệm phiên Ephemeral Session Cache (TTL 2 giờ)
         self._cached_cookies: Optional[Dict[str, str]] = None
         self._cookies_expire_at: float = 0.0
         self._session_ttl_seconds: float = 7200.0  # 2 tiếng an toàn
@@ -74,7 +75,6 @@ class OSTicketService:
                     login_url = f"{OSTICKET_BASE_URL}/scp/login.php"
                     await page.goto(login_url, wait_until="domcontentloaded", timeout=25000)
 
-                    # Kiểm tra nếu đã đăng nhập từ trước
                     if "login.php" not in page.url and "/scp/" in page.url:
                         pass
                     else:
@@ -101,7 +101,6 @@ class OSTicketService:
                     logger.info(f"✨ [Auth Gateway] Bốc session thành công! Đã lưu {len(cookies_dict)} cookies vào RAM Cache (TTL: 2h).")
                     return cookies_dict
                 finally:
-                    # 🛑 GIẢI PHÓNG CHROMIUM NGAY LẬP TỨC (RAM Render < 15MB)
                     await browser.close()
                     gc.collect()
 
@@ -157,10 +156,9 @@ class OSTicketService:
             return None
 
     def _extract_text_by_candidates(self, soup: BeautifulSoup, candidates: List[str]) -> str:
-        """Helper tìm kiếm phần tử an toàn qua nhiều CSS selectors / XPath giả lập trên BeautifulSoup."""
+        """Helper tìm kiếm phần tử an toàn qua nhiều CSS selectors trên BeautifulSoup."""
         for sel in candidates:
             try:
-                # Xử lý selector dạng xpath giả lập tr:contains
                 if sel.startswith("tr:contains("):
                     text_search = sel.split("('")[1].split("')")[0]
                     for tr in soup.find_all("tr"):
@@ -229,7 +227,7 @@ class OSTicketService:
             "tr:contains('Assigned To:')"
         ])
 
-        # 4. CUSTOM FORM FIELDS (ĐẶC THÙ HỆ THỐNG CỦA ANH)
+        # 4. CUSTOM FORM FIELDS
         school_name = self._extract_text_by_candidates(soup, [
             "#inline-answer-93",
             "td[id*='inline-answer-93']",
@@ -256,10 +254,12 @@ class OSTicketService:
             "tr:contains('Belongs to Distributor')"
         ])
 
-        # 5. Bóc tách Toàn bộ Danh sách Tin nhắn trong Thread
+        # 5. Bóc tách Toàn bộ Danh sách Tin nhắn trong Thread & Phân loại tệp đính kèm theo lượt
         thread_entries = soup.select("#thread-items .thread-entry")
         messages_history: List[Dict[str, Any]] = []
         attachments_list: List[Dict[str, str]] = []
+        latest_message_iso: Optional[str] = None
+        latest_turn_attachments: List[Dict[str, str]] = []
 
         for i, entry in enumerate(thread_entries):
             entry_class = " ".join(entry.get("class", []))
@@ -271,6 +271,8 @@ class OSTicketService:
 
             time_el = entry.select_one(".header time")
             post_time = time_el.get_text(strip=True) if time_el else ""
+            if time_el and time_el.get("datetime"):
+                latest_message_iso = time_el["datetime"]
 
             body_el = entry.select_one(".thread-body")
             body_text = body_el.get_text("\n", strip=True) if body_el else ""
@@ -285,10 +287,15 @@ class OSTicketService:
                         full_url = urljoin(OSTICKET_BASE_URL + "/scp/", raw_href)
                         storage_url = await self.upload_attachment_to_supabase(client, full_url, fname, ticket_number)
                         if storage_url:
-                            entry_attachments.append({"filename": fname, "url": storage_url})
-                            attachments_list.append({"filename": fname, "url": storage_url})
+                            item = {"filename": fname, "url": storage_url, "turn_index": i + 1}
+                            entry_attachments.append(item)
+                            attachments_list.append(item)
                 except Exception as att_err:
                     logger.warning(f"⚠️ Lỗi bóc tách file đính kèm trong thread entry {i}: {att_err}")
+
+            # Lưu vết tệp đính kèm ở lượt cuối cùng của khách hàng
+            if not is_response and entry_attachments:
+                latest_turn_attachments = entry_attachments
 
             messages_history.append({
                 "index": i + 1,
@@ -299,7 +306,7 @@ class OSTicketService:
                 "attachments": entry_attachments
             })
 
-        # 6. File đính kèm từ Custom Form (COF / TOF File)
+        # 6. File đính kèm từ Custom Form (COF / TOF File ban đầu)
         for form_sel in ["td[id*='inline-answer-97'] a", "#inline-answer-97 a"]:
             try:
                 form_link = soup.select_one(form_sel)
@@ -310,7 +317,7 @@ class OSTicketService:
                         full_url = urljoin(OSTICKET_BASE_URL + "/scp/", raw_href)
                         storage_url = await self.upload_attachment_to_supabase(client, full_url, fname, ticket_number)
                         if storage_url:
-                            attachments_list.insert(0, {"filename": fname, "url": storage_url})
+                            attachments_list.insert(0, {"filename": fname, "url": storage_url, "turn_index": 0, "is_initial_form": True})
                     break
             except Exception:
                 continue
@@ -336,7 +343,7 @@ class OSTicketService:
                     except Exception as dt_err:
                         logger.warning(f"⚠️ Không parse được Create Date '{created_at_str}': {dt_err}")
 
-        # Ghép nội dung hội thoại theo template chuẩn của anh
+        # Ghép nội dung hội thoại chi tiết theo lượt
         formatted_dialogue = ""
         for msg in messages_history:
             formatted_dialogue += (
@@ -345,7 +352,7 @@ class OSTicketService:
             )
             if msg['attachments']:
                 att_names = ", ".join([a['filename'] for a in msg['attachments']])
-                formatted_dialogue += f"📎 File đính kèm trong tin nhắn này: {att_names}\n"
+                formatted_dialogue += f"📎 File đính kèm trong lượt này: {att_names}\n"
 
         raw_content = (
             f"📌 MÃ VÉ: #{ticket_number}\n"
@@ -371,6 +378,7 @@ class OSTicketService:
             "raw_content": raw_content,
             "created_at": created_at_iso,
             "ticket_timestamp": created_at_str or created_at_iso,
+            "latest_message_iso": latest_message_iso,
             "country": country,
             "school_name": school_name,
             "attachments": attachments_list,
@@ -383,7 +391,8 @@ class OSTicketService:
                 "distributor_name": distributor_name,
                 "assigned_to": assigned_to,
                 "total_messages": len(messages_history),
-                "created_date_raw": created_at_str
+                "created_date_raw": created_at_str,
+                "latest_turn_attachments": latest_turn_attachments
             }
         }
 
@@ -394,8 +403,8 @@ class OSTicketService:
         """
         Quét danh sách Open Queue bằng Direct HTTPX (~300ms) và đồng bộ vào Supabase:
         - Tự động lấy Session từ Cache RAM.
-        - Không chiếm giữ Playwright Semaphore.
-        - Chỉ bốc Session khi hết hạn (Self-Healing).
+        - Khắc phục triệt để lỗi bỏ sót vé Reopened (Vé Completed xuất hiện lại ở Open Queue).
+        - Cập nhật source_updated_at và updated_at để vé mới cập nhật lập tức nhảy lên đầu trang!
         """
         supabase = get_supabase_client()
         retry_auth = True
@@ -411,12 +420,11 @@ class OSTicketService:
                 try:
                     res = await client.get(queue_url)
 
-                    # Tự chữa lành: Nếu phiên hết hạn (bị redirect về login) -> Thử bốc lại session mới!
                     if "login.php" in str(res.url) or "id=\"login-form\"" in res.text:
                         logger.warning("⚠️ Session osTicket trong cache đã hết hạn. Đang kích hoạt làm tươi mới...")
                         self.invalidate_session()
                         cookies = await self.get_valid_cookies(force_refresh=True)
-                        retry_auth = False  # Đã làm mới xong, không loop lại
+                        retry_auth = False
                         res = await client.get(queue_url)
 
                     if res.status_code != 200:
@@ -447,7 +455,7 @@ class OSTicketService:
                             id_match = re.search(r'id=(\d+)', href)
                             internal_id = id_match.group(1) if id_match else ticket_number
 
-                            # Kiểm tra vé trong Database Supabase
+                            # 1. Kiểm tra vé trong Supabase Database
                             check_db = supabase.table("inbox_tickets")\
                                 .select("id, status, metadata, attachments")\
                                 .eq("source", "osticket")\
@@ -456,9 +464,14 @@ class OSTicketService:
 
                             existing_ticket = check_db.data[0] if check_db.data else None
 
+                            # 🌟 QUY TẮC BẢO VỆ VÒNG ĐỜI VÉ (CHỐNG BỎ SÓT VÉ REOPENED):
+                            # Nếu vé đã đánh dấu completed/dismissed trong hệ thống mình nhưng vẫn xuất hiện ở Open Queue osTicket
+                            # -> CHẮC CHẮN VÉ ĐÃ ĐƯỢC KHÁCH HÀNG REOPEN HOẶC CÓ REPLY MỚI -> TUYỆT ĐỐI KHÔNG ĐƯỢC SKIP!
                             if existing_ticket:
+                                is_closed_in_db = existing_ticket.get("status") in ["completed", "dismissed"]
                                 db_last_updated = existing_ticket.get("metadata", {}).get("last_updated_raw", "")
-                                if db_last_updated == last_updated_str and last_updated_str != "":
+                                
+                                if not is_closed_in_db and db_last_updated == last_updated_str and last_updated_str != "":
                                     continue
 
                             logger.info(f"✨ [HTTPX Engine] Phát hiện vé #{ticket_number} (Cập nhật lúc: {last_updated_str}), đang cào chi tiết...")
@@ -467,8 +480,11 @@ class OSTicketService:
                             if ticket_data:
                                 meta = ticket_data.get("metadata", {})
                                 meta["last_updated_raw"] = last_updated_str
+                                now_iso = datetime.now(timezone.utc).isoformat()
+                                calculated_update_time = ticket_data.get("latest_message_iso") or now_iso
 
                                 if not existing_ticket:
+                                    # Vé hoàn toàn mới
                                     insert_payload = {
                                         "source": ticket_data["source"],
                                         "source_id": ticket_data["source_id"],
@@ -481,7 +497,9 @@ class OSTicketService:
                                         "ticket_timestamp": ticket_data.get("ticket_timestamp"),
                                         "attachments": ticket_data.get("attachments", []),
                                         "metadata": meta,
-                                        "status": "pending"
+                                        "status": "pending",
+                                        "updated_at": calculated_update_time,
+                                        "source_updated_at": calculated_update_time
                                     }
                                     if ticket_data.get("created_at"):
                                         insert_payload["created_at"] = ticket_data["created_at"]
@@ -492,6 +510,7 @@ class OSTicketService:
                                         logger.info(f"💾 Đã lưu vé mới #{ticket_number}! Kích hoạt Canonical Intake Pipeline...")
                                         await process_incoming_ticket(created_ticket)
                                 else:
+                                    # Vé cũ có cập nhật hội thoại hoặc được khách hàng reopen
                                     ticket_db_id = existing_ticket["id"]
                                     old_attachments = existing_ticket.get("attachments") or []
                                     new_attachments = ticket_data.get("attachments") or []
@@ -502,21 +521,27 @@ class OSTicketService:
                                             merged_attachments.append(att)
                                             seen_urls.add(att.get("url"))
 
+                                    # Nếu vé từng completed mà có tin nhắn mới -> Bẻ về pending ngay!
+                                    next_status = "pending" if existing_ticket.get("status") in ["completed", "dismissed"] else existing_ticket.get("status")
+
                                     update_payload = {
                                         "subject": ticket_data["subject"],
                                         "raw_content": ticket_data["raw_content"],
                                         "doc_url": ticket_data.get("doc_url"),
                                         "attachments": merged_attachments,
                                         "metadata": meta,
-                                        "status": "pending" if existing_ticket.get("status") in ["completed", "dismissed"] else existing_ticket.get("status")
+                                        "status": next_status,
+                                        "updated_at": calculated_update_time,
+                                        "source_updated_at": calculated_update_time
                                     }
-                                    if ticket_data.get("created_at"):
-                                        update_payload["created_at"] = ticket_data["created_at"]
 
                                     up_res = supabase.table("inbox_tickets").update(update_payload).eq("id", ticket_db_id).execute()
                                     if up_res.data:
                                         updated_ticket = up_res.data[0]
-                                        logger.info(f"🔄 Đã cập nhật hội thoại mới cho vé #{ticket_number}! Kích hoạt Canonical Intake...")
+                                        if existing_ticket.get("status") in ["completed", "dismissed"]:
+                                            logger.info(f"🔄 [REOPEN DETECTED] Vé #{ticket_number} đã được mở lại thành 'pending' do phát hiện phản hồi mới từ khách hàng!")
+                                        else:
+                                            logger.info(f"🔄 Đã cập nhật hội thoại mới cho vé #{ticket_number}! Kích hoạt Canonical Intake...")
                                         await process_incoming_ticket(updated_ticket)
 
                         except Exception as row_err:

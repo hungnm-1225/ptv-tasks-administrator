@@ -1,4 +1,13 @@
-# backend/app/api/v1/endpoints/tickets.py
+"""
+Pythaverse Central Admin - Tickets Router & Dual Re-analysis API (V4.1 Master Enterprise)
+Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI
+Chuyên trách:
+- Sắp xếp thông minh: Ưu tiên ngày cập nhật mới nhất (updated_at) để vé khách vừa reply lập tức nhảy lên đầu.
+- Hỗ trợ bộ lọc đa tầng kết hợp BoundedMemoryCache 1ms (Tier C Summary <= 40MB).
+- Re-assess Intent chuẩn mực: Tích hợp đầy đủ cỗ máy Multimodal Vision và bóc tách Đa Tệp Đính Kèm.
+- Tuyệt đối tuân thủ: ZERO-MOCKUP INVARIANT.
+"""
+
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
@@ -26,10 +35,15 @@ async def list_tickets(
     status: Optional[str] = Query("all"),
     category: Optional[str] = Query("all"),
     source: Optional[str] = Query("all"),
-    sort: str = Query("desc", regex="^(desc|asc)$")
+    sort: str = Query("desc", regex="^(desc|asc)$"),
+    sort_by: str = Query("updated_at", regex="^(updated_at|created_at|source_updated_at)$")
 ):
-    """Lấy danh sách tickets từ Supabase hỗ trợ lọc đa tầng (RAM Cache 1ms)."""
-    cache_key = f"tickets_{status}_{category}_{source}_{sort}"
+    """
+    Lấy danh sách tickets từ Supabase hỗ trợ lọc đa tầng (RAM Cache 1ms):
+    - Mặc định sắp xếp theo 'updated_at' (ưu tiên hoạt động mới nhất).
+    - Vé có tương tác mới hoặc vừa được reopen sẽ luôn hiển thị ở trên cùng.
+    """
+    cache_key = f"tickets_{status}_{category}_{source}_{sort}_{sort_by}"
     cached = tickets_cache.get(cache_key)
     if cached is not None:
         return cached
@@ -49,7 +63,8 @@ async def list_tickets(
         if source and source != "all":
             query = query.eq("source", source)
 
-        query = query.order("created_at", desc=(sort == "desc"))
+        # 🌟 ƯU TIÊN SẮP XẾP THEO NGÀY CẬP NHẬT HOẠT ĐỘNG MỚI NHẤT
+        query = query.order(sort_by, desc=(sort == "desc"))
 
         res = query.limit(300).execute()
         data = res.data or []
@@ -154,8 +169,12 @@ async def update_ticket_category(ticket_id: str, payload: Dict[str, Any]):
     """Cập nhật nhanh phân loại category của ticket."""
     supabase = get_supabase_client()
     new_cat = payload.get("category", "other")
+    now_iso = datetime.now(timezone.utc).isoformat()
     try:
-        supabase.table("inbox_tickets").update({"category": new_cat}).eq("id", ticket_id).execute()
+        supabase.table("inbox_tickets").update({
+            "category": new_cat,
+            "updated_at": now_iso
+        }).eq("id", ticket_id).execute()
         tickets_cache.invalidate()
         return {"status": "success", "category": new_cat}
     except Exception as e:
@@ -191,7 +210,8 @@ async def re_summarize_ticket(ticket_id: str):
     summary_res = gemini_engine.summarize_ticket(
         subject=ticket.get("subject", ""),
         raw_content=raw_content,
-        source=ticket.get("source", "gmail")
+        source=ticket.get("source", "gmail"),
+        sender_email=ticket.get("sender_email")
     )
 
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -201,7 +221,7 @@ async def re_summarize_ticket(ticket_id: str):
             "assessment_kind": "summary",
             "model_name": summary_res.model_name or "unknown",
             "prompt_version": summary_res.prompt_version,
-            "registry_version": "v1.2.0",
+            "registry_version": "v1.4.0",
             "structured_result": summary_res.model_dump(),
             "status": "failed" if summary_res.model_name == "ai_analysis_failed" else "completed",
             "created_at": now_iso
@@ -228,9 +248,9 @@ async def re_summarize_ticket(ticket_id: str):
 @router.post("/{ticket_id}/re-assess-intent")
 async def re_assess_ticket_intent(ticket_id: str):
     """
-    ĐÁNH GIÁ LẠI TOÀN DIỆN Ý ĐỊNH & TÁI LẬP WORKFLOW PROPOSAL (SUMMARY-GUIDED):
-    - Tiêm trực tiếp bản tóm tắt (ai_summary) vào Fact Extraction để trích xuất đúng việc hiện tại.
-    - Tự động bốc bằng chứng mới nhất từ tin nhắn phản hồi của khách hàng.
+    ĐÁNH GIÁ LẠI TOÀN DIỆN Ý ĐỊNH & TÁI LẬP WORKFLOW PROPOSAL (CHUẨN HÓA FULL-PIPELINE):
+    - Sử dụng trực tiếp process_ticket_revision từ ticket_processor.py để bóc tách TOÀN BỘ tệp Excel và Ảnh lỗi Vision.
+    - Tự động nạp LMS Catalog và lịch sử các bước đã thành công ở lần trước.
     """
     supabase = get_supabase_client()
     res = supabase.table("inbox_tickets").select("*").eq("id", ticket_id).execute()
@@ -240,9 +260,8 @@ async def re_assess_ticket_intent(ticket_id: str):
     ticket = res.data[0]
     raw_content = ticket.get("raw_content") or ""
     attachments = ticket.get("attachments") or []
-    ai_summary = ticket.get("ai_summary") or ""
 
-    # 1. Lấy hoặc cấp phát revision
+    # 1. Cấp phát hoặc lấy revision hiện tại
     revision_id, rev_no, _ = create_or_get_ticket_revision(
         ticket_id=ticket_id,
         raw_content=raw_content,
@@ -253,63 +272,19 @@ async def re_assess_ticket_intent(ticket_id: str):
     if not revision_id:
         raise HTTPException(status_code=500, detail="Không thể xác định revision để đánh giá lại ý định.")
 
-    now_iso = datetime.now(timezone.utc).isoformat()
-
-    # 2. TRÍCH XUẤT SỰ THẬT MỚI (BÁM SÁT THEO BẢN TÓM TẮT & ĐỀ XUẤT HIỆN TẠI)
-    facts_res = gemini_engine.extract_operational_facts(
-        subject=ticket.get("subject", ""),
-        raw_content=raw_content,
-        source=ticket.get("source", "gmail"),
-        source_revision_id=revision_id,
-        sender_email=ticket.get("sender_email"),
-        ai_summary=ai_summary  # 🎯 TRUYỀN TÓM TẮT VÀO ĐÂY!
-    )
-
-    # 3. GHI NHẬN BẢN ĐÁNH GIÁ MỚI VÀO ticket_ai_assessments
-    assessment_id = None
-    try:
-        ins_res = supabase.table("ticket_ai_assessments").insert({
-            "ticket_revision_id": revision_id,
-            "assessment_kind": "fact_extraction",
-            "model_name": facts_res.model_name or "summary_guided_engine",
-            "prompt_version": facts_res.prompt_version,
-            "registry_version": "v1.3.0",
-            "structured_result": facts_res.model_dump(),
-            "status": "failed" if facts_res.model_name == "ai_analysis_failed" else "completed",
-            "created_at": now_iso
-        }).execute()
-        if ins_res.data:
-            assessment_id = ins_res.data[0]["id"]
-    except Exception as assess_err:
-        print(f"⚠️ Lỗi ghi nhận ticket_ai_assessments: {assess_err}")
-
-    # 4. KÍCH HOẠT LẬP KẾ HOẠCH WORKFLOW PROPOSAL MỚI
-    new_workflow = await workflow_planner_service.plan_workflow_for_ticket(
-        ticket_id=ticket_id,
-        revision_id=revision_id
-    )
-
-    # 5. Cập nhật metadata cho ticket
-    try:
-        existing_meta = ticket.get("metadata") or {}
-        if not isinstance(existing_meta, dict):
-            existing_meta = {}
-        existing_meta["workflow_outcome"] = "ACTIONABLE" if facts_res.outcome in ["actionable", "ready", "candidate_action"] else "NEEDS_INFORMATION"
-        existing_meta["evidence_quotes"] = facts_res.raw_evidence_quotes
-        supabase.table("inbox_tickets").update({
-            "metadata": existing_meta,
-            "updated_at": now_iso
-        }).eq("id", ticket_id).execute()
-    except Exception:
-        pass
+    # 2. GIAO TOÀN QUYỀN CHO MASTER PIPELINE CỦA TICKET_PROCESSOR (XỬ LÝ ĐA TỆP + VISION + CATALOG + PROPOSAL)
+    pipeline_result = await process_ticket_revision(revision_id)
 
     tickets_cache.invalidate()
 
     return {
         "status": "success",
-        "message": "✨ Đã đánh giá lại toàn diện ý định bám theo bản tóm tắt!",
-        "workflow": new_workflow
+        "message": "✨ Đã đánh giá lại toàn diện ý định và lập lại Workflow Proposal có bóc tách tệp đính kèm!",
+        "workflow": pipeline_result.get("workflow_draft"),
+        "facts": pipeline_result.get("facts"),
+        "summary": pipeline_result.get("summary")
     }
+
 
 @router.post("/{ticket_id}/triage")
 async def force_ai_triage(ticket_id: str):
