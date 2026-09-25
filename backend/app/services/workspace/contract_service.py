@@ -156,7 +156,7 @@ class WorkspaceContractService(WorkspaceBaseService):
     # =========================================================================
     # 🏢 2. DISTRIBUTOR DUYỆT PRT CONTRACT (CẤP BÙ VỪA ĐỦ, KHÔNG NHÂN 2)
     # =========================================================================
-   async def distributor_approve_partner_contract(
+    async def distributor_approve_partner_contract(
         self,
         credentials: Dict[str, str],
         contract_identifier: Optional[str] = None,
