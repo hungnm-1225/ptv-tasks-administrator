@@ -605,6 +605,34 @@ class WorkspaceAccountService(WorkspaceBaseService):
                             except Exception as kc_err:
                                 logger.warning(f"⚠️ Lỗi sync Keycloak cho {em}: {kc_err}")
 
+                    # 🎯 2.5. KÍCH HOẠT JIT TRÊN GIT CHO TOÀN BỘ TÀI KHOẢN (CẢ TẠO MỚI & RESET)
+                    try:
+                        from app.services.git_service import git_playwright_service
+                        
+                        accounts_for_jit = []
+                        for item in raw_records:
+                            clean_em = str(item.get("email") or "").strip().lower()
+                            # Mật khẩu luôn là mật khẩu của item hoặc email viết thường
+                            clean_pass = str(item.get("password") or clean_em).strip().lower()
+                            # Ưu tiên username thật từ Keycloak (đã sync ở bước 2), fallback về username gốc hoặc email
+                            u_name = str(item.get("username") or clean_em).strip()
+                            
+                            if u_name and clean_pass:
+                                accounts_for_jit.append({
+                                    "username": u_name,
+                                    "password": clean_pass
+                                })
+
+                        if accounts_for_jit:
+                            logger.info(f"🚀 [JIT Auto-Activation] Bắt đầu kích hoạt JIT Git cho TOÀN BỘ {len(accounts_for_jit)} tài khoản (Mới tạo & Đã reset)...")
+                            # Chạy song song 3 tài khoản/lượt bằng HTTPX thuần (~300ms/user)
+                            jit_res = await git_playwright_service.batch_activate_jit(accounts_for_jit, concurrency=3)
+                            success_count = len(jit_res.get("activated", []))
+                            logger.info(f"🎉 [JIT Auto-Activation] Hoàn tất! {success_count}/{len(accounts_for_jit)} tài khoản đã chính thức Online trên GitBucket!")
+                    except Exception as jit_err:
+                        # Bọc try-except để nếu Git có sự cố mạng cũng không làm gãy tiến trình tạo file Excel kết quả
+                        logger.warning(f"⚠️ [JIT Auto-Activation] Lỗi trong quá trình kích hoạt JIT ngầm: {jit_err}")
+
                     # 🎯 3. SINH FILE EXCEL KẾT QUẢ ĐẦY ĐỦ CỘT
                     generate_excel_from_api_data(raw_records, result_excel_path)
 
