@@ -6,6 +6,7 @@ Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI (Master Enterprise Comprehensive
 """
 import os
 import re
+import gc
 import json
 import asyncio
 import logging
