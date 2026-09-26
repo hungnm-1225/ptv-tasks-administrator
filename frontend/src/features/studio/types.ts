@@ -139,6 +139,7 @@ export interface LoadedUserProfile {
 }
 
 export interface CofExtractionResult {
+    fileType?: 'COF' | 'BULK_ACCOUNTS';
     rawSchoolName: string;
     matchedSchool: HierarchySchoolItem | null;
     confidence: 'high' | 'medium' | 'none';

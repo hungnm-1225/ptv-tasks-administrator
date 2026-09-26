@@ -1,12 +1,3 @@
-// =============================================================================
-// [VIẾT LẠI TOÀN BỘ] frontend/src/features/studio/components/tabs/workspace/CreateAndApproveSection.tsx
-// Phục hồi nguyên bản giao diện Khay COF chuẩn mực (Theo ảnh chụp của anh):
-// 1. Chỉ hiển thị Khay, Hàng đợi và Giáo viên KHI CÓ FILE COF ĐƯỢC NỘP.
-// 2. Nút Dropdown xếp lớp nhanh: "+ Xếp vào Khay..." hiển thị số slots còn trống.
-// 3. Băng chuyền Giáo viên với badge số groups và click mở Modal 1050px.
-// 4. Tích hợp ô nhập Đơn giá từng môn và Hạn ngạch vĩnh viễn (ẩn ngày) khi tạo Contract.
-// =============================================================================
-
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
     FileCheck2,
@@ -26,6 +17,8 @@ import {
     DollarSign,
     Infinity as InfinityIcon,
     ChevronDown,
+    UserCheck,
+    GraduationCap,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -105,7 +98,7 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
     additionalNotes,
     setAdditionalNotes,
 }) => {
-    // 1. Quản lý kéo thả
+    // 1. Quản lý kéo thả lớp
     const [draggedClassInfo, setDraggedClassInfo] = useState<{
         sourceTrayId: string | null;
         classItem: ClassGroupItem;
@@ -113,7 +106,7 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
     const [activeDropTrayId, setActiveDropTrayId] = useState<string | null>(null);
     const [isDropToUnassignedActive, setIsDropToUnassignedActive] = useState<boolean>(false);
 
-    // 2. Ref cho input file COF
+    // 2. Ref cho input file
     const cofFileInputRef = useRef<HTMLInputElement | null>(null);
 
     // 3. Combobox tìm kiếm đối tượng
@@ -125,10 +118,12 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
     const [courseSearchTerms, setCourseSearchTerms] = useState<Record<number, string>>({});
     const [activeCourseDropdownRow, setActiveCourseDropdownRow] = useState<number | null>(null);
 
-    // Kiểm tra xem có đang ở chế độ Contract vĩnh viễn không
+    // 5. State cho Popover Gán Giáo Viên nhanh trong thẻ lớp
+    const [activeTeacherPopoverGroup, setActiveTeacherPopoverGroup] = useState<string | null>(null);
+
     const isContractFlow = createApproveSubFlow === 'partner_create_chain' || createApproveSubFlow === 'distributor_create_chain';
 
-    // 5. Trích xuất danh sách Đối tác (Partners) & Nhà phân phối (Distributors) duy nhất
+    // 6. Danh sách Đối tác & Nhà phân phối duy nhất
     const uniquePartners = useMemo(() => {
         const map = new Map<string, { name: string; code: string; distributor_name: string; distributor_code: string }>();
         schoolsList.forEach((s) => {
@@ -157,7 +152,7 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
         return Array.from(map.values());
     }, [schoolsList]);
 
-    // Đồng bộ input hiển thị
+    // Đồng bộ input hiển thị trường học
     useEffect(() => {
         if (createApproveSubFlow === 'end_to_end') {
             setEntitySearchQuery(selectedSchool ? selectedSchool.school_name : '');
@@ -174,7 +169,53 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    // 6. Tính toán tổng ngân sách thời gian thực
+    // 7. Helpers xử lý gán & gỡ Giáo viên thời gian thực
+    const getTeachersForGroup = (lmsGroupName: string) => {
+        return cofTeachersAllocation.filter((t) => t.assignedLmsGroups.includes(lmsGroupName));
+    };
+
+    const toggleTeacherInGroup = (teacherEmail: string, lmsGroupName: string, teacherName: string) => {
+        setCofTeachersAllocation((prev) =>
+            prev.map((t) => {
+                if (t.email !== teacherEmail) return t;
+                const exists = t.assignedLmsGroups.includes(lmsGroupName);
+                const nextGroups = exists
+                    ? t.assignedLmsGroups.filter((g) => g !== lmsGroupName)
+                    : [...t.assignedLmsGroups, lmsGroupName];
+
+                if (!exists) {
+                    toast.success(`Đã gán GV ${teacherName} vào nhóm '${lmsGroupName}'`);
+                } else {
+                    toast.info(`Đã gỡ GV ${teacherName} khỏi nhóm '${lmsGroupName}'`);
+                }
+
+                return { ...t, assignedLmsGroups: nextGroups };
+            })
+        );
+    };
+
+    const assignTeacherToAllTrayGroups = (teacherEmail: string, trayGroupNames: string[], teacherName: string) => {
+        setCofTeachersAllocation((prev) =>
+            prev.map((t) => {
+                if (t.email !== teacherEmail) return t;
+                const merged = Array.from(new Set([...t.assignedLmsGroups, ...trayGroupNames]));
+                return { ...t, assignedLmsGroups: merged };
+            })
+        );
+        toast.success(`Đã gán GV ${teacherName} vào toàn bộ lớp trong khay!`);
+    };
+
+    const clearTeacherAllGroups = (teacherEmail: string, teacherName: string) => {
+        setCofTeachersAllocation((prev) =>
+            prev.map((t) => {
+                if (t.email !== teacherEmail) return t;
+                return { ...t, assignedLmsGroups: [] };
+            })
+        );
+        toast.info(`Đã gỡ tất cả nhóm của GV ${teacherName}`);
+    };
+
+    // 8. Tính toán tổng ngân sách thời gian thực
     const totalOrderLicenses = useMemo(() => {
         return selectedCourses.reduce((sum, c) => sum + (Number(c.licenses) || 0), 0);
     }, [selectedCourses]);
@@ -190,7 +231,7 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
     return (
         <div className="space-y-5 pt-2">
             {/* ========================================================================= */}
-            {/* 1. KHU VỰC NỘP FILE COF ĐỂ AUTO-FILL (CHỈ HIỆN KHI Ở SUB-FLOW END_TO_END)  */}
+            {/* 1. KHU VỰC NỘP FILE ĐỂ AUTO-FILL (HỖ TRỢ CẢ COF VÀ BULK ACCOUNTS FORM)     */}
             {/* ========================================================================= */}
             {createApproveSubFlow === 'end_to_end' && (
                 <div className="rounded-2xl border border-indigo-200/80 dark:border-indigo-900/50 bg-indigo-50/40 dark:bg-indigo-950/20 p-4 space-y-3">
@@ -201,13 +242,13 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                             </div>
                             <div>
                                 <h3 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                                    <span>Nộp File COF (Curriculum Order Form) Tự Động Điền Dữ Liệu</span>
+                                    <span>Nộp File COF hoặc Phôi Bulk Account Tự Động Điền Dữ Liệu</span>
                                     <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-bold bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300">
                                         Auto-Fill AI Engine
                                     </span>
                                 </h3>
                                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                                    Hệ thống tự bóc tách Tên Trường, Môn học, Số lượng License và điền vào các trường bên dưới.
+                                    Hệ thống hỗ trợ cả file COF 3 Tabs và file Bulk Account Request Form (đa sheet theo khối lớp).
                                 </p>
                             </div>
                         </div>
@@ -223,7 +264,7 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                 className="text-xs text-rose-500 hover:text-rose-700 flex items-center gap-1 cursor-pointer font-semibold"
                             >
                                 <Trash2 className="w-3.5 h-3.5" />
-                                <span>Xóa file COF</span>
+                                <span>Xóa file</span>
                             </button>
                         )}
                     </div>
@@ -247,10 +288,10 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                             <Upload className="w-5 h-5 text-indigo-600" />
                             <div>
                                 <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                                    {uploadedCofFile ? uploadedCofFile.name : 'Nhấp hoặc Kéo thả file COF (.xlsx) vào đây'}
+                                    {uploadedCofFile ? uploadedCofFile.name : 'Nhấp hoặc Kéo thả file COF / Bulk Accounts (.xlsx) vào đây'}
                                 </p>
                                 <p className="text-[10px] text-slate-400">
-                                    Hỗ trợ file COF 3 Tabs (Curriculum Order Form, Student Info, Teacher Info)
+                                    Hỗ trợ COF 3 Tabs hoặc Account Creation Request Form (Class 7s, Class 8a...)
                                 </p>
                             </div>
                         </div>
@@ -259,7 +300,7 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                         </span>
                     </div>
 
-                    {/* BÁO CÁO KẾT QUẢ ĐỐI SOÁT TRƯỜNG */}
+                    {/* BÁO CÁO KẾT QUẢ ĐỐI SOÁT TRƯỜNG & LOẠI PHÔI */}
                     {cofExtractionResult && (
                         <div
                             className={`p-3.5 rounded-xl border text-xs space-y-2 ${cofExtractionResult.confidence === 'high'
@@ -280,13 +321,18 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                         {cofExtractionResult.confidence === 'none' && 'LỖI: KHÔNG TÌM THẤY TRƯỜNG TRONG 480 TRƯỜNG'}
                                     </span>
                                 </span>
-                                <span className="font-mono text-[11px] font-extrabold">
-                                    {Math.round(cofExtractionResult.score * 100)}% Match
-                                </span>
+                                <div className="flex items-center gap-2">
+                                    <span className="px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-white/80 dark:bg-slate-800 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                                        Phôi: {cofExtractionResult.fileType === 'BULK_ACCOUNTS' ? 'Bulk Accounts Form' : 'Curriculum Order Form (COF)'}
+                                    </span>
+                                    <span className="font-mono text-[11px] font-extrabold">
+                                        {Math.round(cofExtractionResult.score * 100)}% Match
+                                    </span>
+                                </div>
                             </div>
 
                             <div className="text-[11px] space-y-1">
-                                <p>• Tên trong file COF: <b>"{cofExtractionResult.rawSchoolName || 'Không tìm thấy'}"</b></p>
+                                <p>• Tên nhận diện: <b>"{cofExtractionResult.rawSchoolName || 'Chưa xác định từ file'}"</b></p>
                                 {cofExtractionResult.matchedSchool ? (
                                     <p>
                                         • Trường xác định: <b>{cofExtractionResult.matchedSchool.school_name}</b> (Mã: {cofExtractionResult.matchedSchool.school_code})
@@ -304,11 +350,11 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
             )}
 
             {/* ========================================================================= */}
-            {/* 2. GIAO DIỆN KHAY KHÓA HỌC & XẾP LỚP (CHỈ HIỂN THỊ KHI CÓ FILE COF NỘP)    */}
+            {/* 2. GIAO DIỆN KHAY KHÓA HỌC & XẾP LỚP (CÓ GIÁO VIÊN TÍCH HỢP TRỰC TIẾP)      */}
             {/* ========================================================================= */}
             {uploadedCofFile && cofTrays.length > 0 && (
                 <div className="rounded-3xl border border-indigo-200 dark:border-indigo-900 bg-gradient-to-b from-indigo-50/40 via-white to-white dark:from-slate-900 dark:via-slate-900 dark:to-slate-900 p-5 sm:p-6 space-y-5 shadow-xs">
-                    {/* Header Khay Phân Bổ (Chuẩn Ảnh 1) */}
+                    {/* Header Khay Phân Bổ */}
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-indigo-100 dark:border-slate-800 pb-4">
                         <div className="flex items-center gap-3">
                             <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-md shadow-indigo-500/20">
@@ -337,7 +383,7 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                         </div>
                     </div>
 
-                    {/* 2.1. DANH SÁCH 3 KHAY KHÓA HỌC (CHUẨN ẢNH 1 & 2) */}
+                    {/* 2.1. DANH SÁCH CÁC KHAY KHÓA HỌC */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                         {cofTrays.map((tray) => {
                             const diff = tray.quota - tray.assignedStudentsCount;
@@ -347,6 +393,9 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                             const displayPercent = isNaN(rawPercent) ? 0 : rawPercent;
                             const barWidth = Math.min(displayPercent, 100);
                             const isBeingHovered = activeDropTrayId === tray.courseId;
+
+                            // Danh sách tên Group LMS trong khay này
+                            const trayGroupNames = tray.assignedClasses.map((c) => c.lmsGroupName);
 
                             return (
                                 <div
@@ -439,62 +488,168 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
 
                                         {/* Danh sách các lớp trong Khay */}
                                         <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800">
-                                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                                            <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                                                 <span>CÁC LỚP TRONG KHAY ({tray.assignedClasses.length} LỚP):</span>
                                                 <span className="text-[9px] lowercase font-normal italic text-slate-400">kéo để chuyển khay</span>
-                                            </span>
+                                            </div>
 
-                                            <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
+                                            <div className="max-h-64 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
                                                 {tray.assignedClasses.length === 0 ? (
                                                     <div className="p-4 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-[11px] text-slate-400 italic">
                                                         Thả các lớp học từ bên dưới vào đây
                                                     </div>
                                                 ) : (
-                                                    tray.assignedClasses.map((clsItem) => (
-                                                        <div
-                                                            key={clsItem.rawClassName}
-                                                            draggable
-                                                            onDragStart={(e) => {
-                                                                setDraggedClassInfo({ sourceTrayId: tray.courseId, classItem: clsItem });
-                                                                e.dataTransfer.setData('text/plain', clsItem.rawClassName);
-                                                            }}
-                                                            className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/60 dark:border-slate-700 text-xs cursor-grab active:cursor-grabbing hover:border-indigo-400 hover:shadow-2xs transition"
-                                                        >
-                                                            <div className="min-w-0 pr-2">
-                                                                <p className="font-bold text-slate-800 dark:text-slate-200 truncate flex items-center gap-1.5">
-                                                                    <span className="text-slate-400">⠿</span>
-                                                                    <span>{clsItem.rawClassName}</span>
-                                                                </p>
-                                                                <p className="text-[10px] text-slate-400 font-mono truncate pl-3" title={clsItem.lmsGroupName}>
-                                                                    Group: {clsItem.lmsGroupName}
-                                                                </p>
-                                                            </div>
+                                                    tray.assignedClasses.map((clsItem) => {
+                                                        const classTeachers = getTeachersForGroup(clsItem.lmsGroupName);
+                                                        const isPopoverOpen = activeTeacherPopoverGroup === clsItem.lmsGroupName;
 
-                                                            <div className="flex items-center gap-1.5 shrink-0">
-                                                                <span className="px-2 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-mono font-bold text-[11px]">
-                                                                    {clsItem.studentsCount} hs
-                                                                </span>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => {
-                                                                        setCofClassAssignments((prev) => {
-                                                                            const next = { ...prev };
-                                                                            if (next[tray.courseId]) {
-                                                                                next[tray.courseId] = next[tray.courseId].filter((c) => c.rawClassName !== clsItem.rawClassName);
-                                                                            }
-                                                                            return next;
-                                                                        });
-                                                                        setCofUnassignedClasses((prev) => [...prev, clsItem]);
-                                                                        toast.info(`Đã đưa lớp '${clsItem.rawClassName}' ra danh sách chờ.`);
-                                                                    }}
-                                                                    className="text-slate-400 hover:text-rose-500 p-1 cursor-pointer transition"
-                                                                    title="Đưa lớp này ra danh sách chờ"
-                                                                >
-                                                                    <X className="w-3.5 h-3.5" />
-                                                                </button>
+                                                        return (
+                                                            <div
+                                                                key={clsItem.rawClassName}
+                                                                draggable
+                                                                onDragStart={(e) => {
+                                                                    setDraggedClassInfo({ sourceTrayId: tray.courseId, classItem: clsItem });
+                                                                    e.dataTransfer.setData('text/plain', clsItem.rawClassName);
+                                                                }}
+                                                                className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/60 dark:border-slate-700 text-xs cursor-grab active:cursor-grabbing hover:border-indigo-400 hover:shadow-2xs transition space-y-1.5"
+                                                            >
+                                                                {/* Tên Lớp & Nút Thao Tác */}
+                                                                <div className="flex items-center justify-between">
+                                                                    <div className="min-w-0 pr-2">
+                                                                        <p className="font-bold text-slate-800 dark:text-slate-200 truncate flex items-center gap-1.5">
+                                                                            <span className="text-slate-400">⠿</span>
+                                                                            <span>{clsItem.rawClassName}</span>
+                                                                        </p>
+                                                                        <p className="text-[10px] text-slate-400 font-mono truncate pl-3" title={clsItem.lmsGroupName}>
+                                                                            Group: {clsItem.lmsGroupName}
+                                                                        </p>
+                                                                    </div>
+
+                                                                    <div className="flex items-center gap-1.5 shrink-0">
+                                                                        <span className="px-2 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-mono font-bold text-[11px]">
+                                                                            {clsItem.studentsCount} hs
+                                                                        </span>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                setCofClassAssignments((prev) => {
+                                                                                    const next = { ...prev };
+                                                                                    if (next[tray.courseId]) {
+                                                                                        next[tray.courseId] = next[tray.courseId].filter(
+                                                                                            (c) => c.rawClassName !== clsItem.rawClassName
+                                                                                        );
+                                                                                    }
+                                                                                    return next;
+                                                                                });
+                                                                                setCofUnassignedClasses((prev) => [...prev, clsItem]);
+                                                                                toast.info(`Đã đưa lớp '${clsItem.rawClassName}' ra danh sách chờ.`);
+                                                                            }}
+                                                                            className="text-slate-400 hover:text-rose-500 p-1 cursor-pointer transition"
+                                                                            title="Đưa lớp này ra danh sách chờ"
+                                                                        >
+                                                                            <X className="w-3.5 h-3.5" />
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* 🎯 HÀNG GIÁO VIÊN GẮN TRỰC TIẾP TRONG THẺ LỚP */}
+                                                                <div className="flex flex-wrap items-center gap-1 pl-3 pt-1 border-t border-slate-200/50 dark:border-slate-700/50 text-[10px] relative">
+                                                                    <span className="font-semibold text-slate-400 flex items-center gap-0.5">
+                                                                        <GraduationCap className="w-3 h-3 text-indigo-500" />
+                                                                        <span>GV:</span>
+                                                                    </span>
+
+                                                                    {classTeachers.length === 0 ? (
+                                                                        <span className="text-[10px] text-amber-500 dark:text-amber-400 italic">
+                                                                            Chưa có GV
+                                                                        </span>
+                                                                    ) : (
+                                                                        classTeachers.map((t) => (
+                                                                            <span
+                                                                                key={t.email}
+                                                                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 font-medium border border-indigo-200/60 dark:border-indigo-800"
+                                                                            >
+                                                                                <span className="truncate max-w-[85px]" title={t.teacherName}>
+                                                                                    {t.teacherName}
+                                                                                </span>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={(e) => {
+                                                                                        e.stopPropagation();
+                                                                                        toggleTeacherInGroup(t.email, clsItem.lmsGroupName, t.teacherName);
+                                                                                    }}
+                                                                                    className="text-slate-400 hover:text-rose-500 font-bold ml-0.5 cursor-pointer"
+                                                                                    title="Gỡ GV khỏi group này"
+                                                                                >
+                                                                                    ×
+                                                                                </button>
+                                                                            </span>
+                                                                        ))
+                                                                    )}
+
+                                                                    {/* Nút bấm mở menu Gán Giáo Viên nhanh */}
+                                                                    <div className="relative inline-block ml-auto">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                setActiveTeacherPopoverGroup(isPopoverOpen ? null : clsItem.lmsGroupName);
+                                                                            }}
+                                                                            className="px-1.5 py-0.5 rounded-md bg-slate-200/70 hover:bg-indigo-100 text-slate-700 hover:text-indigo-700 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-indigo-950 dark:hover:text-indigo-300 font-bold text-[9px] transition cursor-pointer flex items-center gap-0.5"
+                                                                        >
+                                                                            <Plus className="w-2.5 h-2.5" />
+                                                                            <span>Gán GV</span>
+                                                                        </button>
+
+                                                                        {/* Popover danh sách GV để chọn nhanh */}
+                                                                        {isPopoverOpen && (
+                                                                            <div
+                                                                                onClick={(e) => e.stopPropagation()}
+                                                                                className="absolute z-40 right-0 top-full mt-1 w-48 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl p-1.5 space-y-1 animate-in fade-in zoom-in-95 duration-100"
+                                                                            >
+                                                                                <div className="px-2 py-1 text-[9px] font-bold uppercase text-slate-400 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                                                                                    <span>Chọn GV cho lớp</span>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => setActiveTeacherPopoverGroup(null)}
+                                                                                        className="text-slate-400 hover:text-slate-600"
+                                                                                    >
+                                                                                        ✕
+                                                                                    </button>
+                                                                                </div>
+
+                                                                                {cofTeachersAllocation.length === 0 ? (
+                                                                                    <div className="p-2 text-center text-[10px] text-slate-400 italic">
+                                                                                        Không có GV nào trong danh sách
+                                                                                    </div>
+                                                                                ) : (
+                                                                                    cofTeachersAllocation.map((t) => {
+                                                                                        const isAssigned = t.assignedLmsGroups.includes(clsItem.lmsGroupName);
+                                                                                        return (
+                                                                                            <button
+                                                                                                key={t.email}
+                                                                                                type="button"
+                                                                                                onClick={() => {
+                                                                                                    toggleTeacherInGroup(t.email, clsItem.lmsGroupName, t.teacherName);
+                                                                                                }}
+                                                                                                className={`w-full text-left p-1.5 rounded-lg text-[10px] flex items-center justify-between transition cursor-pointer ${isAssigned
+                                                                                                    ? 'bg-indigo-50 dark:bg-indigo-950/60 font-bold text-indigo-700 dark:text-indigo-300'
+                                                                                                    : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                                                                                                    }`}
+                                                                                            >
+                                                                                                <span className="truncate pr-1">{t.teacherName}</span>
+                                                                                                {isAssigned && <Check className="w-3 h-3 text-indigo-600 shrink-0" />}
+                                                                                            </button>
+                                                                                        );
+                                                                                    })
+                                                                                )}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
                                                             </div>
-                                                        </div>
-                                                    ))
+                                                        );
+                                                    })
                                                 )}
                                             </div>
                                         </div>
@@ -504,7 +659,7 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                         })}
                     </div>
 
-                    {/* 2.2. HÀNG ĐỢI LỚP CHƯA XẾP VÀO KHAY (CHUẨN ẢNH 1 - CÓ DROPDOWN CHỌN NHANH) */}
+                    {/* 2.2. HÀNG ĐỢI LỚP CHƯA XẾP VÀO KHAY (CÓ DROPDOWN CHỌN NHANH) */}
                     <div
                         onDragOver={(e) => {
                             e.preventDefault();
@@ -572,7 +727,7 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                             </span>
                                         </div>
 
-                                        {/* 🎯 NÚT SELECT DROPDOWN XẾP NHANH VÀO KHAY (CHUẨN ẢNH 1) */}
+                                        {/* NÚT SELECT DROPDOWN XẾP NHANH VÀO KHAY */}
                                         <div className="relative shrink-0">
                                             <select
                                                 defaultValue=""
@@ -604,40 +759,87 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                         )}
                     </div>
 
-                    {/* 2.3. BĂNG CHUYỀN GIÁO VIÊN TỰ ĐỘNG DẠNG PILL BADGE (CHUẨN ẢNH 1 & 2) */}
+                    {/* 2.3. TRẠM ĐIỀU PHỐI GIÁO VIÊN THÔNG MINH (INTERACTIVE TEACHER HUB) */}
                     {cofTeachersAllocation.length > 0 && (
-                        <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 space-y-2.5">
-                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs">
+                        <div className="p-4.5 rounded-2xl bg-slate-50/80 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 space-y-3">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs border-b border-slate-200/60 dark:border-slate-800 pb-2">
                                 <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                                     <Users className="w-4 h-4 text-indigo-600" />
-                                    <span>Phân Bổ Giáo Viên Tự Động ({cofTeachersAllocation.length} GV - Không tốn License):</span>
+                                    <span>Trạm Điều Phối Giáo Viên ({cofTeachersAllocation.length} GV - Không tốn License):</span>
                                 </span>
                                 <span className="text-[11px] text-slate-400 italic">
-                                    Tự động gán vào toàn bộ Group của môn. Bấm vào tên để tinh chỉnh.
+                                    Bấm vào thẻ để cấu hình chi tiết, hoặc dùng nút thao tác nhanh bên cạnh.
                                 </span>
                             </div>
 
-                            <div className="flex flex-wrap items-center gap-2">
-                                {cofTeachersAllocation.map((t, tIdx) => (
-                                    <button
-                                        key={tIdx}
-                                        type="button"
-                                        onClick={() => setEditingTeacherIndex(tIdx)}
-                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-indigo-400 text-xs font-semibold shadow-2xs transition cursor-pointer group"
-                                    >
-                                        <span className="text-slate-800 dark:text-slate-200 group-hover:text-indigo-600">
-                                            🧑‍🏫 {t.teacherName}
-                                        </span>
-                                        <span className="text-[10px] text-slate-400 font-mono">
-                                            ({t.assignedLmsGroups.length} groups)
-                                        </span>
-                                    </button>
-                                ))}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
+                                {cofTeachersAllocation.map((t, tIdx) => {
+                                    const hasGroups = t.assignedLmsGroups.length > 0;
+                                    const allSchoolGroupNames = cofTrays.flatMap((tray) =>
+                                        tray.assignedClasses.map((c) => c.lmsGroupName)
+                                    );
+
+                                    return (
+                                        <div
+                                            key={tIdx}
+                                            className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-indigo-400 text-xs shadow-2xs transition flex flex-col justify-between space-y-2 group"
+                                        >
+                                            <div
+                                                onClick={() => setEditingTeacherIndex(tIdx)}
+                                                className="cursor-pointer space-y-1"
+                                            >
+                                                <div className="flex items-center justify-between">
+                                                    <p className="font-bold text-slate-900 dark:text-white group-hover:text-indigo-600 truncate flex items-center gap-1">
+                                                        <span>🧑‍🏫</span>
+                                                        <span className="truncate">{t.teacherName}</span>
+                                                    </p>
+                                                    <span
+                                                        className={`px-2 py-0.5 rounded-full font-mono text-[9px] font-bold ${hasGroups
+                                                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                                                            : 'bg-amber-50 text-amber-700 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                                                            }`}
+                                                    >
+                                                        {hasGroups ? `✓ ${t.assignedLmsGroups.length} groups` : 'Chưa gán'}
+                                                    </span>
+                                                </div>
+                                                <p className="text-[10px] text-slate-400 font-mono truncate" title={t.email}>
+                                                    {t.email}
+                                                </p>
+                                            </div>
+
+                                            {/* Thao tác 1-Click gán nhanh */}
+                                            <div className="flex items-center justify-between pt-1.5 border-t border-slate-100 dark:border-slate-800 text-[10px]">
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        assignTeacherToAllTrayGroups(t.email, allSchoolGroupNames, t.teacherName)
+                                                    }
+                                                    className="text-indigo-600 dark:text-indigo-400 font-bold hover:underline cursor-pointer flex items-center gap-0.5"
+                                                    title="Gán thầy/cô này vào tất cả các lớp của trường"
+                                                >
+                                                    <UserCheck className="w-3 h-3" />
+                                                    <span>Gán hết lớp</span>
+                                                </button>
+
+                                                {hasGroups && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => clearTeacherAllGroups(t.email, t.teacherName)}
+                                                        className="text-slate-400 hover:text-rose-500 cursor-pointer"
+                                                        title="Gỡ khỏi tất cả nhóm"
+                                                    >
+                                                        Bỏ gán
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
                     )}
 
-                    {/* MODAL PHÂN BỔ GIÁO VIÊN */}
+                    {/* MODAL PHÂN BỔ GIÁO VIÊN TOÀN DIỆN */}
                     <TeacherAllocationModal
                         isOpen={editingTeacherIndex !== null}
                         editingTeacherIndex={editingTeacherIndex}
@@ -1035,7 +1237,7 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                 </div>
                             </div>
 
-                            {/* CẤU HÌNH SỐ LƯỢNG, ĐƠN GIÁ & NGÀY THÁNG (ẨN KHI LÀ CONTRACT) */}
+                            {/* CẤU HÌNH SỐ LƯỢNG, ĐƠN GIÁ & NGÀY THÁNG */}
                             <div className="grid grid-cols-1 gap-3 sm:grid-cols-4 items-end">
                                 <div>
                                     <label className="text-[10px] font-bold uppercase text-slate-500">Số lượng license:</label>

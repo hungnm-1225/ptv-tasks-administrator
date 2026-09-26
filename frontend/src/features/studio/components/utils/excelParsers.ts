@@ -176,7 +176,213 @@ export const parseCofExcelFile = async (
     const workbook = XLSX.read(data, { type: 'array' });
     const sheetNames = workbook.SheetNames;
 
-    // 1. ĐỌC TAB 1: CURRICULUM ORDER FORM
+    // -------------------------------------------------------------------------
+    // BƯỚC 1: NHẬN DIỆN LOẠI PHÔI (COF vs BULK ACCOUNTS REQUEST FORM)
+    // -------------------------------------------------------------------------
+    const isCOF = sheetNames.some(
+        (s) => s.toLowerCase().includes('cof') || s.toLowerCase().includes('curriculum')
+    ) || sheetNames.some((s) => s.toLowerCase().includes('student info'));
+
+    const dateSuffix = new Date().toLocaleString('en-US', { month: 'short', year: 'numeric' }).replace(' ', '');
+    const today = new Date();
+    const nextYear = new Date(today);
+    nextYear.setFullYear(today.getFullYear() + 1);
+    nextYear.setDate(nextYear.getDate() - 1);
+
+    // =========================================================================
+    // NHÁNH A: XỬ LÝ PHÔI BULK ACCOUNTS (NHƯ ẢNH 2 - SHEET TABS LÀ TÊN LỚP)
+    // =========================================================================
+    if (!isCOF) {
+        let extractedSchoolName = '';
+        // Cố gắng trích xuất tên trường từ tên file (VD: 2026Mar02_TGSI-COLLEGEOFMAASIN...)
+        const cleanFileName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]+/g, ' ');
+        const matchedFromFileName = matchSchoolWithHierarchy(cleanFileName, context.schoolsList);
+        if (matchedFromFileName.matched) {
+            extractedSchoolName = matchedFromFileName.matched.school_name;
+        }
+
+        const cleanSchool = cleanLmsText(extractedSchoolName) || 'School';
+        const classesMap: Record<string, { count: number; grade: number | null }> = {};
+        const teacherMap: Record<string, { name: string; email: string; classes: Set<string> }> = {};
+        let totalStudents = 0;
+        let totalTeachers = 0;
+
+        // Quét từng Sheet Tab (Mỗi tab thường là 1 lớp: Class 7s, Class 8a...)
+        sheetNames.forEach((sheetName) => {
+            const ws = workbook.Sheets[sheetName];
+            const rawJson: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+            if (rawJson.length < 5) return;
+
+            // Dò dòng Header chứa: First Name, Last Name, Email, Role (Hàng 5 trong ảnh 2)
+            let headerRowIndex = -1;
+            for (let i = 0; i < Math.min(rawJson.length, 10); i++) {
+                const rowStr = rawJson[i].map((c) => String(c).toLowerCase()).join(' ');
+                if (rowStr.includes('first name') && (rowStr.includes('role') || rowStr.includes('email'))) {
+                    headerRowIndex = i;
+                    break;
+                }
+            }
+            if (headerRowIndex === -1) headerRowIndex = 4; // Mặc định hàng 5 (index 4)
+
+            const headers = rawJson[headerRowIndex].map((h) => String(h).trim().toLowerCase());
+            const fnIdx = headers.findIndex((h) => h.includes('first name') || h.includes('tên'));
+            const lnIdx = headers.findIndex((h) => h.includes('last name') || h.includes('họ'));
+            const emIdx = headers.findIndex((h) => h.includes('email'));
+            const roleIdx = headers.findIndex((h) => h.includes('role') || h.includes('vai trò'));
+
+            const className = sheetName.trim();
+            const gradeNum = extractGradeNumberClient(className);
+            let sheetStudentCount = 0;
+
+            const dataRows = rawJson.slice(headerRowIndex + 1);
+            dataRows.forEach((row) => {
+                const fn = String(row[fnIdx !== -1 ? fnIdx : 1] || '').trim();
+                const ln = String(row[lnIdx !== -1 ? lnIdx : 2] || '').trim();
+                const email = String(row[emIdx !== -1 ? emIdx : 4] || '').trim().toLowerCase();
+                const role = String(row[roleIdx !== -1 ? roleIdx : 6] || '').trim().toLowerCase();
+
+                if (!fn && !ln && !email) return;
+
+                const isTeacher = role.includes('teacher') || role.includes('giáo viên');
+
+                if (isTeacher) {
+                    if (email) {
+                        if (!teacherMap[email]) {
+                            teacherMap[email] = {
+                                name: `${fn} ${ln}`.trim() || 'Teacher',
+                                email,
+                                classes: new Set(),
+                            };
+                            totalTeachers++;
+                        }
+                        teacherMap[email].classes.add(className);
+                    }
+                } else {
+                    totalStudents++;
+                    sheetStudentCount++;
+                }
+            });
+
+            if (sheetStudentCount > 0) {
+                classesMap[className] = {
+                    count: sheetStudentCount,
+                    grade: gradeNum,
+                };
+            }
+        });
+
+        // Tự động tìm Môn học tương ứng theo Khối lớp (Grade) từ danh mục môn học
+        const traysMap: Record<string, LicenseTrayItem> = {};
+        const parsedCoursesForForm: OrderCourseSelection[] = [];
+        const newClassAssignments: Record<string, ClassGroupItem[]> = {};
+        const unassigned: ClassGroupItem[] = [];
+
+        Object.entries(classesMap).forEach(([className, info]) => {
+            const cleanClass = cleanLmsText(className);
+            const lmsGroupName = `${cleanSchool} ${cleanClass} ${dateSuffix}`.replace(/\s+/g, ' ').trim();
+            const classItem: ClassGroupItem = {
+                rawClassName: className,
+                lmsGroupName,
+                studentsCount: info.count,
+                gradeDetected: info.grade,
+            };
+
+            // Tìm môn học khớp với Khối lớp trong danh mục môn học (VD: Khối 7 -> SWRP 7)
+            let matchedCourse: CourseItem | undefined;
+            if (info.grade !== null) {
+                matchedCourse = context.workspaceCoursesList.find((c) => {
+                    const gradeMatch = c.course_name.match(/SWRP\s*(\d+)/i);
+                    return gradeMatch && parseInt(gradeMatch[1], 10) === info.grade;
+                });
+            }
+
+            if (matchedCourse) {
+                const cIdStr = String(matchedCourse.course_id);
+                if (!traysMap[cIdStr]) {
+                    traysMap[cIdStr] = {
+                        courseId: cIdStr,
+                        courseName: matchedCourse.course_name,
+                        category: matchedCourse.category || 'SWRP',
+                        targetGrade: info.grade,
+                        quota: info.count,
+                        assignedStudentsCount: 0,
+                        assignedClasses: [],
+                        startDate: getFormattedDate(today),
+                        endDate: getFormattedDate(nextYear),
+                    };
+
+                    parsedCoursesForForm.push({
+                        category: matchedCourse.category || 'SWRP',
+                        course_id: matchedCourse.course_id,
+                        course_name: matchedCourse.course_name,
+                        lms_url: matchedCourse.lms_url || '',
+                        licenses: info.count,
+                        start_date: getFormattedDate(today),
+                        end_date: getFormattedDate(nextYear),
+                    });
+                } else {
+                    traysMap[cIdStr].quota += info.count;
+                    const cRow = parsedCoursesForForm.find((c) => String(c.course_id) === cIdStr);
+                    if (cRow) cRow.licenses += info.count;
+                }
+
+                if (!newClassAssignments[cIdStr]) newClassAssignments[cIdStr] = [];
+                newClassAssignments[cIdStr].push(classItem);
+            } else {
+                unassigned.push(classItem);
+            }
+        });
+
+        // Chuyển đổi danh sách Giáo viên
+        const teachersAlloc: TeacherAllocationItem[] = Object.values(teacherMap).map((t) => {
+            const assignedGroups: string[] = [];
+            t.classes.forEach((clsName) => {
+                assignedGroups.push(`${cleanSchool} ${cleanLmsText(clsName)} ${dateSuffix}`);
+            });
+
+            return {
+                teacherName: t.name,
+                email: t.email,
+                assignedCourses: Object.keys(traysMap),
+                courseAssign: Object.values(traysMap).map((tray) => tray.courseName).join(' | '),
+                assignedLmsGroups: assignedGroups,
+            };
+        });
+
+        const matchResult = matchSchoolWithHierarchy(extractedSchoolName, context.schoolsList);
+
+        return {
+            classAssignments: newClassAssignments,
+            unassignedClasses: unassigned,
+            teachersAllocation: teachersAlloc,
+            parsedCoursesForForm,
+            extractedSchoolName,
+            matchedSchool: matchResult.matched,
+            matchedPartner: matchResult.matched
+                ? { name: matchResult.matched.partner_name, code: matchResult.matched.partner_code }
+                : null,
+            matchedDistributor: matchResult.matched
+                ? { name: matchResult.matched.distributor_name, code: matchResult.matched.distributor_code }
+                : null,
+            extractionResult: {
+                fileType: 'BULK_ACCOUNTS', // Đánh dấu là file Bulk Account
+                rawSchoolName: extractedSchoolName,
+                matchedSchool: matchResult.matched,
+                confidence: matchResult.confidence,
+                score: matchResult.score,
+                coursesCount: Object.keys(traysMap).length,
+                studentsCount: totalStudents,
+                teachersCount: totalTeachers,
+            },
+            coursesCount: Object.keys(traysMap).length,
+            totalStudents,
+            totalTeachers,
+        };
+    }
+
+    // =========================================================================
+    // NHÁNH B: XỬ LÝ PHÔI COF CHUẨN 3 TABS (BẢO TOÀN NGUYÊN BẢN LOGIC CỦA ANH)
+    // =========================================================================
     const cofSheetName =
         sheetNames.find((s) => s.toLowerCase().includes('cof') || s.toLowerCase().includes('curriculum')) || sheetNames[0];
     const ws1 = workbook.Sheets[cofSheetName];
@@ -187,16 +393,9 @@ export const parseCofExcelFile = async (
         extractedSchoolName = String(rawJson1[5]?.[2] || '').trim(); // Cột C hàng 6
     }
 
-    const dateSuffix = new Date().toLocaleString('en-US', { month: 'short', year: 'numeric' }).replace(' ', '');
     const cleanSchool = cleanLmsText(extractedSchoolName) || 'School';
-
     const traysMap: Record<string, LicenseTrayItem> = {};
     const parsedCoursesForForm: OrderCourseSelection[] = [];
-
-    const today = new Date();
-    const nextYear = new Date(today);
-    nextYear.setFullYear(today.getFullYear() + 1);
-    nextYear.setDate(nextYear.getDate() - 1);
 
     // Quét bảng môn học từ hàng 28
     for (let r = 27; r < rawJson1.length; r++) {
@@ -248,7 +447,7 @@ export const parseCofExcelFile = async (
         });
     }
 
-    // 2. ĐỌC TAB 2: STUDENT INFORMATION & GOM LỚP
+    // ĐỌC TAB 2: STUDENT INFORMATION & GOM LỚP
     const studentSheetName = sheetNames.find((s) => s.toLowerCase().includes('student'));
     const classesMap: Record<string, { count: number; grade: number | null }> = {};
     let totalStudents = 0;
@@ -283,7 +482,7 @@ export const parseCofExcelFile = async (
         }
     }
 
-    // 3. THUẬT TOÁN GHÉP LỚP VÀO KHAY
+    // THUẬT TOÁN GHÉP LỚP VÀO KHAY
     const newClassAssignments: Record<string, ClassGroupItem[]> = {};
     const unassigned: ClassGroupItem[] = [];
 
@@ -314,7 +513,7 @@ export const parseCofExcelFile = async (
         }
     });
 
-    // 4. ĐỌC TAB 3: TEACHER INFORMATION (GỘP GIÁO VIÊN & FORWARD-FILL)
+    // ĐỌC TAB 3: TEACHER INFORMATION (GỘP GIÁO VIÊN & FORWARD-FILL)
     const teacherSheetName = sheetNames.find((s) => s.toLowerCase().includes('teacher'));
     const teachersAlloc: TeacherAllocationItem[] = [];
     let totalTeachers = 0;
@@ -405,7 +604,7 @@ export const parseCofExcelFile = async (
         });
     }
 
-    // 5. ĐỐI SOÁT PHẢ HỆ VỚI 480 TRƯỜNG
+    // ĐỐI SOÁT PHẢ HỆ VỚI 480 TRƯỜNG
     const matchResult = matchSchoolWithHierarchy(extractedSchoolName, context.schoolsList);
 
     return {
@@ -422,6 +621,7 @@ export const parseCofExcelFile = async (
             ? { name: matchResult.matched.distributor_name, code: matchResult.matched.distributor_code }
             : null,
         extractionResult: {
+            fileType: 'COF',
             rawSchoolName: extractedSchoolName,
             matchedSchool: matchResult.matched,
             confidence: matchResult.confidence,
