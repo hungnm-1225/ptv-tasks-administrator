@@ -208,32 +208,77 @@ class WorkspaceAccountService(WorkspaceBaseService):
 
     @staticmethod
     def _parse_excel_accounts(file_path: str) -> List[Dict[str, str]]:
-        """Bóc tách nhanh danh sách tài khoản từ file Excel phôi chuẩn."""
+        """Bóc tách thông minh danh sách tài khoản: Tự động quét Header chống lệch cột."""
         accounts = []
         wb = openpyxl.load_workbook(file_path, data_only=True)
         try:
             ws = wb.active
-            start_row = 6
+            
+            # 🎯 1. TỰ ĐỘNG QUÉT DÒNG HEADER (DÒNG 1 ĐẾN 6) ĐỂ ĐỊNH VỊ CHÍNH XÁC TỌA ĐỘ TỪNG CỘT
+            header_row_idx = 5
+            col_map = {
+                "first_name": 3,  # Mặc định Cột C
+                "last_name": 4,   # Mặc định Cột D
+                "mobile": 5,      # Mặc định Cột E
+                "email": 6,       # Mặc định Cột F
+                "dob": 7,         # Mặc định Cột G
+                "role": 8,        # Mặc định Cột H
+                "note": 9
+            }
+
+            for r in range(1, 7):
+                row_vals = [str(ws.cell(row=r, column=c).value or "").strip().lower() for c in range(1, 15)]
+                if any("email" in v for v in row_vals) and any("first" in v for v in row_vals):
+                    header_row_idx = r
+                    for col_idx in range(1, 15):
+                        val = str(ws.cell(row=r, column=col_idx).value or "").strip().lower()
+                        if "first name" in val:
+                            col_map["first_name"] = col_idx
+                        elif "last name" in val:
+                            col_map["last_name"] = col_idx
+                        elif "mobile" in val or "phone" in val:
+                            col_map["mobile"] = col_idx
+                        elif "email" in val:
+                            col_map["email"] = col_idx
+                        elif "birth" in val or "dob" in val:
+                            col_map["dob"] = col_idx
+                        elif "role" in val:
+                            col_map["role"] = col_idx
+                        elif "note" in val:
+                            col_map["note"] = col_idx
+                    break
+
+            logger.info(f"📊 [Excel Dynamic Parser] Bản đồ cột tại dòng {header_row_idx}: {col_map}")
+
+            # 🎯 2. ĐỌC DỮ LIỆU CHUẨN XÁC TỪ DÒNG SAU HEADER
+            start_row = header_row_idx + 1
             for r in range(start_row, ws.max_row + 1):
-                first_name = str(ws.cell(row=r, column=2).value or "").strip()
-                last_name = str(ws.cell(row=r, column=3).value or "").strip()
-                email = str(ws.cell(row=r, column=5).value or "").strip().lower()
+                first_name = str(ws.cell(row=r, column=col_map["first_name"]).value or "").strip()
+                last_name = str(ws.cell(row=r, column=col_map["last_name"]).value or "").strip()
+                email = str(ws.cell(row=r, column=col_map["email"]).value or "").strip().lower()
                 
+                # Bỏ qua dòng trống hoặc không có email hợp lệ
                 if not email or "@" not in email:
                     continue
 
-                mobile = str(ws.cell(row=r, column=4).value or "").strip()
-                dob_raw = ws.cell(row=r, column=6).value
+                mobile = str(ws.cell(row=r, column=col_map["mobile"]).value or "").strip()
+                dob_raw = ws.cell(row=r, column=col_map["dob"]).value
                 dob = "01/01/2016"
                 if dob_raw:
                     if isinstance(dob_raw, datetime):
                         dob = dob_raw.strftime("%d/%m/%Y")
                     else:
-                        dob = str(dob_raw).strip()
+                        clean_dob = str(dob_raw).strip()
+                        # Chuẩn hóa nếu là định dạng YYYY-MM-DD sang DD/MM/YYYY
+                        if re.match(r"^\d{4}-\d{2}-\d{2}", clean_dob):
+                            parts = clean_dob.split("-")
+                            dob = f"{parts[2]}/{parts[1]}/{parts[0]}"
+                        else:
+                            dob = clean_dob
 
-                role_raw = str(ws.cell(row=r, column=7).value or "student").strip().lower()
-                role = "teacher" if "teach" in role_raw or "gv" in role_raw else "student"
-                note = str(ws.cell(row=r, column=8).value or "").strip()
+                role_raw = str(ws.cell(row=r, column=col_map["role"]).value or "student").strip().lower()
+                role = "teacher" if any(k in role_raw for k in ["teach", "gv", "giáo viên"]) else "student"
+                note = str(ws.cell(row=r, column=col_map["note"]).value or "").strip()
 
                 accounts.append({
                     "firstName": first_name,
@@ -244,6 +289,8 @@ class WorkspaceAccountService(WorkspaceBaseService):
                     "role": role,
                     "note": note
                 })
+
+            logger.info(f"✅ Đã trích xuất chính xác {len(accounts)} tài khoản (Tài khoản đầu tiên: {accounts[0]['email']} - Role: {accounts[0]['role']})")
         finally:
             wb.close()
         return accounts
@@ -515,7 +562,7 @@ class WorkspaceAccountService(WorkspaceBaseService):
             logger.error(f"❌ Lỗi submit_account_creation_batch: {e}", exc_info=True)
             return {"status": "failed", "error": str(e), "checkpoint": checkpoint}
 
-            
+
     # =========================================================================
     # ⏳ CRONJOB POLL KẾT QUẢ ĐỊNH KỲ (100% PURE HTTPX - KHÔNG CẦN PLAYWRIGHT)
     # =========================================================================
