@@ -14,6 +14,7 @@ import {
     FileCheck2,
     Download,
     Clock,
+    Timer,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -70,6 +71,15 @@ export const BulkAccountsSection: React.FC<BulkAccountsSectionProps> = ({
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
+
+    // 🎯 TÍNH TOÁN THỜI GIAN ƯỚC TÍNH (15S / TÀI KHOẢN HỢP LỆ, TỐI THIỂU 30S)
+    const validAccountsCount = accountValidationStats.validCount || parsedAccountRows.length || 0;
+    const totalEstimatedSeconds = Math.max(validAccountsCount * 15, 30);
+    const estMinutes = Math.floor(totalEstimatedSeconds / 60);
+    const estRemainingSecs = totalEstimatedSeconds % 60;
+    const formattedEtaText = estMinutes > 0
+        ? `~${estMinutes} phút${estRemainingSecs > 0 ? ` ${estRemainingSecs}s` : ''}`
+        : `~${estRemainingSecs} giây`;
 
     return (
         <div className="space-y-5 pt-2">
@@ -234,10 +244,10 @@ export const BulkAccountsSection: React.FC<BulkAccountsSectionProps> = ({
                 </div>
             </div>
 
-            {/* 3. BẢNG THỐNG KÊ & PREVIEW NỘI DUNG EXCEL */}
+            {/* 3. BẢNG THỐNG KÊ (5 BENTO CARDS KÈM THỜI GIAN ƯỚC TÍNH) & PREVIEW EXCEL */}
             {parsedAccountRows.length > 0 && (
                 <div className="space-y-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs">
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
                         <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
                             <p className="text-[10px] font-bold text-slate-400 uppercase">Tổng Tài Khoản</p>
                             <p className="text-lg font-mono font-extrabold text-slate-900 dark:text-white">
@@ -270,6 +280,18 @@ export const BulkAccountsSection: React.FC<BulkAccountsSectionProps> = ({
                                 {accountValidationStats.duplicateCount}
                             </p>
                             <p className="text-[10px] text-amber-600">Trong file</p>
+                        </div>
+
+                        {/* 🎯 BENTO CARD THỨ 5: THỜI GIAN ƯỚC TÍNH HOÀN THÀNH */}
+                        <div className="p-3 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/50 col-span-2 sm:col-span-1 shadow-2xs">
+                            <p className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase flex items-center gap-1">
+                                <Timer className="w-3 h-3" />
+                                <span>Ước Tính Xử Lý</span>
+                            </p>
+                            <p className="text-lg font-mono font-extrabold text-indigo-600 dark:text-indigo-300">
+                                {formattedEtaText}
+                            </p>
+                            <p className="text-[10px] text-indigo-500/80 font-medium">⏱️ Chuẩn 15s / tài khoản</p>
                         </div>
                     </div>
 
@@ -353,7 +375,7 @@ export const BulkAccountsSection: React.FC<BulkAccountsSectionProps> = ({
                 </div>
             )}
 
-            {/* 4. WIDGET TIẾN TRÌNH THỰC THI & ĐÓN FILE KẾT QUẢ TRỰC TIẾP TẠI CHỖ */}
+            {/* 4. WIDGET TIẾN TRÌNH THỰC THI & HIỂN THỊ ĐẾM GIỜ ƯỚC TÍNH */}
             {liveExecutedTask && (
                 <div className="rounded-2xl border-2 border-indigo-200 dark:border-indigo-900 bg-gradient-to-br from-indigo-50/80 via-white to-purple-50/80 dark:from-slate-900 dark:via-slate-900 dark:to-indigo-950/40 p-5 shadow-md space-y-4 animate-in fade-in duration-200">
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-indigo-100 dark:border-slate-800 pb-3">
@@ -384,7 +406,7 @@ export const BulkAccountsSection: React.FC<BulkAccountsSectionProps> = ({
                                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 text-xs font-bold">
                                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
                                     {liveExecutedTask.status === 'waiting_poll'
-                                        ? `Đang chờ hệ thống trường (${liveExecutedTask.request_id ? `#REQ-${liveExecutedTask.request_id}` : 'Polling'})`
+                                        ? `Đang tạo ngầm (${liveExecutedTask.request_id ? `#REQ-${liveExecutedTask.request_id}` : 'Polling'} - Dự kiến ${formattedEtaText})`
                                         : 'Worker đang thực thi...'}
                                 </span>
                             )}
@@ -399,7 +421,7 @@ export const BulkAccountsSection: React.FC<BulkAccountsSectionProps> = ({
                                     <span>File kết quả tài khoản đã tạo xong thành công!</span>
                                 </p>
                                 <p className="text-[11px] text-emerald-700 dark:text-emerald-300/80">
-                                    Bao gồm tài khoản, mật khẩu định danh và nhóm lớp đã được phân bổ.
+                                    Bao gồm username thật từ Keycloak, mật khẩu email chuẩn và nhóm lớp phân bổ.
                                 </p>
                             </div>
 
@@ -414,10 +436,16 @@ export const BulkAccountsSection: React.FC<BulkAccountsSectionProps> = ({
                             </a>
                         </div>
                     ) : (
-                        <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
-                            <Clock className="w-4 h-4 text-indigo-500 animate-pulse" />
-                            <span>
-                                Hệ thống đang tự động xử lý. File kết quả sẽ hiển thị ngay tại đây khi quá trình tạo hoàn tất!
+                        <div className="p-3.5 rounded-xl bg-indigo-50/70 dark:bg-slate-800/60 border border-indigo-100 dark:border-indigo-900/40 text-xs text-slate-700 dark:text-slate-300 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                            <div className="flex items-center gap-2">
+                                <Clock className="w-4 h-4 text-indigo-600 dark:text-indigo-400 animate-pulse shrink-0" />
+                                <span>
+                                    Hệ thống đang tự động tạo ngầm cho <strong>{validAccountsCount}</strong> tài khoản.
+                                    Thời gian ước tính: <strong className="text-indigo-600 dark:text-indigo-400">{formattedEtaText}</strong>.
+                                </span>
+                            </div>
+                            <span className="text-[11px] font-mono font-bold text-indigo-600 dark:text-indigo-400 bg-white dark:bg-slate-900 px-2.5 py-1 rounded-lg border border-indigo-200 dark:border-slate-700 shadow-2xs self-start sm:self-auto shrink-0">
+                                Cron kiểm tra: 5 phút/lần
                             </span>
                         </div>
                     )}
