@@ -164,7 +164,8 @@ class WorkspaceContractService(WorkspaceBaseService):
         courses_needed: Optional[List[Dict[str, Any]]] = None,
         note: Optional[str] = None,
         origin_order_code: Optional[str] = None,
-        school_name: Optional[str] = None
+        school_name: Optional[str] = None,
+        total_amount: Optional[str] = "0"
     ) -> Dict[str, Any]:
         """Distributor duyệt PRT Contract qua Direct API (Tạo DST bù cho tất cả các môn thiếu)."""
         try:
@@ -221,7 +222,8 @@ class WorkspaceContractService(WorkspaceBaseService):
                         school_part = f" | TRƯỜNG: {school_name}" if school_name else ""
                         sys_dst_notes = f"[CẤP BÙ CHO PRT: {contract_identifier}{origin_part}{school_part}] Yêu cầu cấp bù hạn ngạch"
 
-                        safe_amount = str(total_amount if total_amount is not None else "0").strip()
+                        # 🎯 [CẬP NHẬT SỬA LỖI]: Ép kiểu an toàn từ tham số, không còn lỗi name 'total_amount' is not defined
+                        safe_amount = str(total_amount or "0").strip()
 
                         dst_payload = {
                             "distributor_id": str(dist_id),
@@ -231,7 +233,6 @@ class WorkspaceContractService(WorkspaceBaseService):
                         }
 
                         topup_summary = []
-                        # 🎯 CẤP VỪA ĐỦ ĐÚNG SỐ LƯỢNG THIẾU (KHÔNG NHÂN 2, KHÔNG FAKE $10)
                         for idx, c in enumerate(courses_to_topup):
                             cid = str(c.get("course_id", 1344))
                             cname = c.get("course_name", f"Khóa #{cid}")
