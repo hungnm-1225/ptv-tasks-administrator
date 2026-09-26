@@ -134,10 +134,67 @@ async def execute_approved_bot_task(
                 action in ["remove", "remove_collaborator", "remove_collaborators", "remove_repo_collaborators", "delete"]
                 or payload_data.get("git_action") == "remove"
             )
+            is_jit_action = (
+                action in ["activate_jit", "batch_activate_jit", "jit_seeding", "jit"]
+                or payload_data.get("git_action") == "jit"
+                or payload_data.get("sub_action") == "jit"
+            )
 
-            if is_remove_action:
+            # ⚡ NHÁNH 1: KÍCH HOẠT JIT HÀNG LOẠT (HEADLESS OIDC HANDSHAKE)
+            if is_jit_action:
+                logger.info(f"⚡ {task_tag} Kích hoạt Pythaverse Git JIT Engine (KÍCH HOẠT JIT HÀNG LOẠT)...")
+                accounts = payload_data.get("accounts", [])
+                
+                # Bọc lót an toàn: Nếu chưa bóc tách mảng accounts thì tự bóc từ text thô copy từ Sheet
+                if not accounts:
+                    raw_text = payload_data.get("raw_text") or payload_data.get("gitUsersList") or payload_data.get("users") or ""
+                    if isinstance(raw_text, str):
+                        for line in raw_text.strip().splitlines():
+                            line_clean = line.strip()
+                            if not line_clean:
+                                continue
+                            parts = re.split(r"[\t,;\s]+", line_clean)
+                            if len(parts) >= 2:
+                                u, p = parts[0].strip(), parts[1].strip()
+                                if u.lower() not in ["username", "tài khoản"] and p.lower() not in ["password", "mật khẩu"]:
+                                    accounts.append({"username": u, "password": p})
+                    elif isinstance(raw_text, list):
+                        for item in raw_text:
+                            if isinstance(item, dict):
+                                accounts.append(item)
+
+                if not accounts:
+                    return {"status": "failed", "error": "Không tìm thấy danh sách tài khoản & mật khẩu hợp lệ để kích hoạt JIT."}
+
+                concurrency = int(payload_data.get("concurrency", 3))
+                res = await git_playwright_service.batch_activate_jit(accounts, concurrency=concurrency)
+                
+                success_count = len(res.get("activated", []))
+                failed_count = len(res.get("failed", []))
+
+                log_lines = [
+                    f"⚡ KẾT QUẢ KÍCH HOẠT JIT GIT ({len(accounts)} TÀI KHOẢN):",
+                    f"- Thành công ({success_count}): {', '.join(res.get('activated', [])) if success_count else 'Không'}"
+                ]
+                if failed_count:
+                    log_lines.append(f"- Thất bại ({failed_count}): {', '.join(res.get('failed', []))}")
+                log_lines.append(f"- Thời gian thực thi: {res.get('elapsed_seconds', 0)}s")
+
+                return {
+                    "status": "success" if success_count > 0 and failed_count == 0 else "partial_success" if success_count > 0 else "failed",
+                    "success_count": success_count,
+                    "failed_count": failed_count,
+                    "message": f"Kích hoạt JIT hoàn tất: {success_count}/{len(accounts)} tài khoản thành công ({res.get('elapsed_seconds', 0)}s).",
+                    "execution_logs": "\n".join(log_lines),
+                    "breakdown": res
+                }
+
+            # 🐙 NHÁNH 2: GỠ BỎ COLLABORATORS
+            elif is_remove_action:
                 logger.info(f"🐙 {task_tag} Kích hoạt Pythaverse Git Direct Engine (GỠ BỎ / REMOVE COLLABORATORS)...")
                 return await git_playwright_service.remove_collaborators_pipeline(payload_data)
+
+            # 🐙 NHÁNH 3: THÊM COLLABORATORS
             else:
                 logger.info(f"🐙 {task_tag} Kích hoạt Pythaverse Git Direct Engine (THÊM / ADD COLLABORATORS)...")
                 return await git_playwright_service.add_collaborators_pipeline(payload_data)

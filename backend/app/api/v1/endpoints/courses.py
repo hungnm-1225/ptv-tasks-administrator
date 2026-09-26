@@ -13,8 +13,6 @@ router = APIRouter()
 # =============================================================================
 # ⚡ IN-MEMORY CACHE ENGINE (TỐC ĐỘ 1MS - KHÔNG CẦN REDIS/THƯ VIỆN NGOÀI)
 # =============================================================================
-# ⚡ IN-MEMORY CACHE CHO KHÓA HỌC (TIER A CATALOG - BUDGET <= 40MB)
-# =============================================================================
 from app.core.cache_policy import BoundedMemoryCache, CacheTier
 
 course_cache = BoundedMemoryCache(tier=CacheTier.TIER_A_CATALOG, max_entries=50, default_ttl=600)
