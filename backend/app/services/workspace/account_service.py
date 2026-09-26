@@ -331,7 +331,7 @@ class WorkspaceAccountService(WorkspaceBaseService):
         download_dir: str = "/tmp/ptv_results",
         checkpoint: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Nộp batch tạo tài khoản qua Direct API có chốt chặn chống lỗi 302."""
+        """Nộp batch tạo tài khoản qua Direct API có chốt chặn chống lỗi 302 và thiếu ID."""
         os.makedirs(download_dir, exist_ok=True)
         checkpoint = checkpoint or {}
 
@@ -350,20 +350,83 @@ class WorkspaceAccountService(WorkspaceBaseService):
                 school_pwd,
                 credentials.get("school_id")
             )
-            school_id = identity.get("school_id") or credentials.get("school_id") or ""
-            partner_id = identity.get("partner_id") or credentials.get("partner_id") or ""
 
-            # 2. Parse file Excel
+            # 🎯 2. GIẢI MÃ CHUẨN XÁC INTEGER SCHOOL_ID & PARTNER_ID (CHỐNG BỊ RỖNG)
+            clean_school_id = ""
+            clean_partner_id = ""
+
+            # Thử lấy từ identity hoặc credentials nếu là số
+            for cand in [identity.get("school_id"), credentials.get("school_id"), credentials.get("code"), credentials.get("school_code")]:
+                if cand:
+                    m = re.search(r"\d+", str(cand))
+                    if m:
+                        clean_school_id = m.group(0)
+                        break
+
+            for cand in [identity.get("partner_id"), credentials.get("partner_id"), credentials.get("partner_code")]:
+                if cand:
+                    m = re.search(r"\d+", str(cand))
+                    if m:
+                        clean_partner_id = m.group(0)
+                        break
+
+            # Nếu chưa có, truy vết Supabase Vault Bridge & phả hệ parent_id
+            if not clean_school_id or not clean_partner_id:
+                try:
+                    from app.core.supabase import get_supabase_client
+                    supabase = get_supabase_client()
+                    
+                    # Tìm trường từ username trong Vault
+                    vault_res = supabase.table("workspace_credentials_vault") \
+                        .select("org_id") \
+                        .ilike("username", school_user) \
+                        .execute()
+                    
+                    org_id = vault_res.data[0].get("org_id") if vault_res.data else None
+                    if org_id:
+                        school_org = supabase.table("workspace_organizations") \
+                            .select("code, parent_id") \
+                            .eq("id", org_id) \
+                            .execute()
+                        if school_org.data:
+                            s_data = school_org.data[0]
+                            if not clean_school_id and s_data.get("code"):
+                                m = re.search(r"\d+", str(s_data["code"]))
+                                if m:
+                                    clean_school_id = m.group(0)
+                            
+                            parent_id = s_data.get("parent_id")
+                            if parent_id and not clean_partner_id:
+                                partner_org = supabase.table("workspace_organizations") \
+                                    .select("code") \
+                                    .eq("id", parent_id) \
+                                    .execute()
+                                if partner_org.data and partner_org.data[0].get("code"):
+                                    pm = re.search(r"\d+", str(partner_org.data[0]["code"]))
+                                    if pm:
+                                        clean_partner_id = pm.group(0)
+                except Exception as db_err:
+                    logger.warning(f"⚠️ Lỗi resolve School/Partner ID từ Supabase: {db_err}")
+
+            # Fallback an toàn cho partner_id nếu không tìm thấy (60 là Partner DTTE)
+            if not clean_partner_id:
+                clean_partner_id = "60"
+
+            logger.info(f"🏫 [Bulk Accounts] Tham số nộp batch: School ID = [{clean_school_id}] | Partner ID = [{clean_partner_id}]")
+
+            # 3. Parse file Excel
             accounts = self._parse_excel_accounts(upload_file_path)
             if not accounts:
                 return {"status": "failed", "error": "Không trích xuất được tài khoản nào từ file Excel tải lên."}
 
             logger.info(f"📄 Đã bóc tách {len(accounts)} tài khoản từ file. Chuẩn bị nộp batch qua Direct API...")
 
-            # 3. Dựng payload nộp batch
+            # 4. Dựng payload nộp batch (Gửi song song cả camelCase lẫn snake_case)
             payload: Dict[str, str] = {
-                "schoolId": str(school_id),
-                "partnerId": str(partner_id),
+                "schoolId": str(clean_school_id),
+                "school_id": str(clean_school_id),
+                "partnerId": str(clean_partner_id),
+                "partner_id": str(clean_partner_id),
                 "fileName": os.path.basename(upload_file_path)
             }
             for idx, acc in enumerate(accounts):
@@ -377,26 +440,30 @@ class WorkspaceAccountService(WorkspaceBaseService):
 
             upload_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/request_approval/uploadFileAccount.php"
 
-            # 🎯 GỬI REQUEST VÀ TỰ ĐỘNG LÀM MỚI NẾU BỊ 302 REDIRECT DO COOKIE HẾT HẠN
+            # 5. Gửi Request có chống 302 và in log phản hồi thật
             async with httpx.AsyncClient(base_url=BASE_WORKSPACE_URL, cookies=cookies, timeout=40.0) as client:
                 up_res = await client.post(upload_url, files=self._to_multipart(payload))
 
-                # NẾU GẶP 302 FOUND: Bắt tận tay Session chết, làm mới và thử lại ngay lập tức!
+                # NẾU GẶP 302: Re-login và thử lại
                 if up_res.status_code == 302:
-                    logger.warning("🔄 Phát hiện HTTP 302 Found (Session cũ đã hết hạn)! Đang tự động mở Playwright đăng nhập mới để thử lại...")
+                    logger.warning("🔄 Phát hiện HTTP 302 Found! Đang tự động mở Playwright đăng nhập mới để thử lại...")
                     cookies, identity = await self.get_or_steal_school_session(school_user, school_pwd, credentials.get("school_id"), force_fresh=True)
-                    # Tạo client mới với cookies mới
                     async with httpx.AsyncClient(base_url=BASE_WORKSPACE_URL, cookies=cookies, timeout=40.0) as fresh_client:
                         up_res = await fresh_client.post(upload_url, files=self._to_multipart(payload))
 
                 if up_res.status_code != 200:
-                    return {"status": "failed", "error": f"Lỗi uploadFileAccount (HTTP {up_res.status_code}): {up_res.text[:200]}"}
+                    err_msg = f"Lỗi uploadFileAccount (HTTP {up_res.status_code}): {up_res.text[:300]}"
+                    logger.error(f"❌ {err_msg}")
+                    return {"status": "failed", "error": err_msg}
 
                 up_json = up_res.json()
-                request_id = str(up_json.get("request_id") or up_json.get("id", "")).strip()
+                request_id = str(up_json.get("request_id") or up_json.get("id") or "").strip()
 
-                if not request_id:
-                    return {"status": "failed", "error": "Không lấy được request_id từ phản hồi upload."}
+                # 🎯 CHỐT CHẶN: NẾU THIẾU REQUEST_ID, IN THẲNG PHẢN HỒI THỰC TẾ ĐỂ KHÔNG BỊ "MÙ" LOG
+                if not request_id or request_id.lower() in ("none", "null", ""):
+                    err_msg = f"API uploadFileAccount phản hồi không có request_id: {up_res.text}"
+                    logger.error(f"❌ {err_msg}")
+                    return {"status": "failed", "error": err_msg}
 
                 logger.info(f"🎉 NỘP DANH SÁCH THÀNH CÔNG! Request ID: [ #{request_id} ]")
 
@@ -448,6 +515,7 @@ class WorkspaceAccountService(WorkspaceBaseService):
             logger.error(f"❌ Lỗi submit_account_creation_batch: {e}", exc_info=True)
             return {"status": "failed", "error": str(e), "checkpoint": checkpoint}
 
+            
     # =========================================================================
     # ⏳ CRONJOB POLL KẾT QUẢ ĐỊNH KỲ (100% PURE HTTPX - KHÔNG CẦN PLAYWRIGHT)
     # =========================================================================
