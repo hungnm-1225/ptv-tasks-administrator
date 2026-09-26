@@ -282,49 +282,101 @@ class WorkspaceOrderService(WorkspaceBaseService):
             logger.warning(f"⚠️ [DB SYNC] Lỗi ghi nhận Contract: {e}")
 
     # =========================================================================
-    # 🏫 1. SCHOOL TẠO ORDER (MULTI-TIER BUYER RESOLVER & CHUẨN FORM DEVTOOLS)
+    # 🏫 1. SCHOOL TẠO ORDER (TRUY VẾT INTEGER ID TỪ VAULT & ORGANIZATIONS)
     # =========================================================================
     async def school_create_order(self, credentials: Dict[str, str], order_data: Dict[str, Any]) -> Dict[str, Any]:
         try:
+            school_user = credentials.get("username", "").strip()
             cookies, identity = await self._steal_role_session(
-                credentials.get("username", ""), 
+                school_user, 
                 credentials.get("password", ""), 
                 "School"
             )
 
-            # 🎯 TẦNG 1: Lấy school_id từ session identity hoặc credentials truyền vào
-            raw_sid = (
-                identity.get("school_id") 
-                or identity.get("user_id") 
-                or identity.get("id") 
-                or credentials.get("school_id") 
-                or credentials.get("id")
-            )
+            raw_sid = None
+            source_found = ""
 
-            # 🎯 TẦNG 2: Nếu chưa có, bóc tách số từ mã trường (VD: SCH-10266 ➔ 10266)
-            if not raw_sid or str(raw_sid).strip().lower() in ("none", "null", ""):
-                code_str = str(credentials.get("school_code") or credentials.get("code") or "").strip()
-                code_match = re.search(r"\d+", code_str)
+            # 🎯 TẦNG 1: Lấy trực tiếp từ session identity nếu có
+            session_sid = identity.get("school_id")
+            if session_sid and str(session_sid).strip().isdigit():
+                raw_sid = str(session_sid).strip()
+                source_found = "Session Identity"
+
+            # 🎯 TẦNG 2: Bóc tách từ order_data hoặc credentials (VD: code='SCH-10266' ➔ 10266)
+            if not raw_sid:
+                code_val = (
+                    order_data.get("hierarchy", {}).get("school_code")
+                    or order_data.get("school_code")
+                    or credentials.get("school_code")
+                    or credentials.get("code")
+                    or ""
+                )
+                code_match = re.search(r"\d+", str(code_val))
                 if code_match:
                     raw_sid = code_match.group(0)
+                    source_found = f"Code Parameter ({code_val})"
 
-            # 🎯 TẦNG 3: Truy vết phả hệ Supabase từ username/tên trường để lấy ID số nguyên
-            if not raw_sid or str(raw_sid).strip().lower() in ("none", "null", ""):
+            # 🎯 TẦNG 3: CẦU NỐI VÀNG SUPABASE: Từ username 'htdttemd' ➔ Vault ➔ Organizations ➔ code 'SCH-10266'
+            if not raw_sid and school_user:
                 try:
-                    from app.services.workspace_lineage_service import workspace_lineage_service
-                    lookup_name = credentials.get("username", "") or credentials.get("name", "")
-                    lineage = workspace_lineage_service.resolve_by_school(lookup_name)
-                    if lineage and lineage.get("school"):
-                        raw_sid = lineage["school"].get("school_id") or lineage["school"].get("id")
-                except Exception as e:
-                    logger.warning(f"⚠️ Không thể tra cứu school_id từ Supabase phả hệ: {e}")
+                    from app.core.supabase import get_supabase_client
+                    supabase = get_supabase_client()
+                    
+                    # 1. Tìm org_id từ username trong Vault
+                    vault_res = supabase.table("workspace_credentials_vault") \
+                        .select("org_id") \
+                        .ilike("username", school_user) \
+                        .execute()
 
-            # 🛑 CHỐT CHẶN BẢO VỆ: Ép kiểu số nguyên thực sự (Chống gửi chuỗi "None" gây lỗi 422)
+                    org_id = vault_res.data[0].get("org_id") if vault_res.data else None
+
+                    # 2. Lấy code từ workspace_organizations
+                    if org_id:
+                        org_res = supabase.table("workspace_organizations") \
+                            .select("code, name") \
+                            .eq("id", org_id) \
+                            .execute()
+                        if org_res.data:
+                            org_code = org_res.data[0].get("code", "")
+                            num_match = re.search(r"\d+", str(org_code))
+                            if num_match:
+                                raw_sid = num_match.group(0)
+                                source_found = f"Supabase Vault Bridge ({org_res.data[0].get('name')} ➔ {org_code})"
+                except Exception as db_err:
+                    logger.warning(f"⚠️ Lỗi tra cứu Supabase Vault Bridge: {db_err}")
+
+            # 🎯 TẦNG 4: Tra cứu theo tên trường học nếu có
+            if not raw_sid:
+                target_school_name = (
+                    order_data.get("school_name") 
+                    or credentials.get("name") 
+                    or credentials.get("school_name")
+                )
+                if target_school_name:
+                    try:
+                        from app.core.supabase import get_supabase_client
+                        supabase = get_supabase_client()
+                        org_res = supabase.table("workspace_organizations") \
+                            .select("code, name") \
+                            .ilike("name", f"%{target_school_name}%") \
+                            .eq("role_type", "school") \
+                            .execute()
+                        if org_res.data:
+                            org_code = org_res.data[0].get("code", "")
+                            num_match = re.search(r"\d+", str(org_code))
+                            if num_match:
+                                raw_sid = num_match.group(0)
+                                source_found = f"Supabase Name Lookup ({target_school_name} ➔ {org_code})"
+                    except Exception as db_err:
+                        logger.warning(f"⚠️ Lỗi tra cứu Supabase School Name: {db_err}")
+
             clean_school_id = str(raw_sid).strip() if (raw_sid and str(raw_sid).strip().isdigit()) else ""
             if not clean_school_id:
-                err_msg = f"Không xác định được Integer ID cho trường '{credentials.get('username')}' (buyer must be an integer)"
+                err_msg = f"Không xác định được Integer ID cho trường '{school_user}' (buyer must be an integer)"
                 logger.error(f"❌ [School Order] {err_msg}")
                 return {"status": "failed", "error": err_msg}
+
+            logger.info(f"🏫 [School Order] Đã xác định School Integer ID: [{clean_school_id}] (Nguồn: {source_found})")
 
             courses = order_data.get("courses", [])
             if not courses:
@@ -333,10 +385,10 @@ class WorkspaceOrderService(WorkspaceBaseService):
             contact_val = str(order_data.get("contact_info") or "Admin Automation Hub (hungnm@dtt.vn)").strip()
             notes_val = str(order_data.get("additional_notes") or order_data.get("notes") or "Order generated by PTV Automation Hub").strip()
 
-            # 🎯 ĐÓNG GÓI PAYLOAD 100% THEO ĐÚNG DEVTOOLS THỰC TẾ
+            # 🎯 ĐÓNG GÓI FORM DATA CHUẨN XÁC 100% THEO DEVTOOLS
             payload = {
                 "school_id": clean_school_id,
-                "buyer": clean_school_id,  # Gửi song song buyer để thỏa mãn mọi tầng validator PHP
+                "buyer": clean_school_id,
                 "contactInfoId": contact_val,
                 "notes": notes_val,
                 "type": "course"
