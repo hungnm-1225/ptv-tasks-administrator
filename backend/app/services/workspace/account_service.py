@@ -110,42 +110,61 @@ class WorkspaceAccountService(WorkspaceBaseService):
         self, 
         username: str, 
         password: str, 
-        school_id: Optional[str] = None
+        school_id: Optional[str] = None,
+        force_fresh: bool = False
     ) -> Tuple[Dict[str, str], Dict[str, Any]]:
-        """Ưu tiên đọc session School tạm thời từ Supabase; chỉ mở Playwright khi chưa có."""
+        """Ưu tiên đọc session School hợp lệ (< 60 phút); tự làm mới nếu hết hạn hoặc ép buộc."""
         supabase = get_supabase_client()
         clean_user = username.strip().lower()
+        session_key = f"school_{clean_user}" if clean_user else f"school_{school_id or 'default'}"
         
-        # 1. Thử tìm Session School đang lưu tạm trên Supabase (Zero Playwright - 10ms)
-        try:
-            query = supabase.table("workspace_active_sessions")\
-                .select("session_key, cookies, metadata")\
-                .eq("is_active", True)
-            
-            if school_id:
-                query = query.eq("session_key", f"school_{school_id}")
-            else:
-                query = query.ilike("session_key", "school_%")
+        # 1. Kiểm tra Session cũ trên Supabase kèm điều kiện TTL 60 phút
+        if not force_fresh:
+            try:
+                res = supabase.table("workspace_active_sessions")\
+                    .select("session_key, cookies, metadata, updated_at")\
+                    .eq("session_key", session_key)\
+                    .eq("is_active", True)\
+                    .execute()
+                
+                if res.data:
+                    row = res.data[0]
+                    updated_at_str = row.get("updated_at")
+                    is_valid_ttl = False
+                    
+                    if updated_at_str:
+                        try:
+                            # Parse UTC timestamp từ Supabase
+                            clean_ts = updated_at_str.replace("Z", "+00:00")
+                            session_time = datetime.fromisoformat(clean_ts)
+                            age_seconds = (datetime.now(timezone.utc) - session_time).total_seconds()
+                            # Chỉ chấp nhận session còn sống dưới 60 phút (3600s)
+                            if age_seconds < 3600:
+                                is_valid_ttl = True
+                            else:
+                                logger.warning(f"⏰ Session School '{session_key}' đã cũ ({int(age_seconds/60)} phút > 60 phút). Tự động hủy để bốc mới!")
+                        except Exception as parse_err:
+                            logger.warning(f"⚠️ Lỗi parse timestamp session: {parse_err}")
 
-            res = query.execute()
-            if res.data:
-                for row in res.data:
-                    meta = row.get("metadata") or {}
-                    if not clean_user or meta.get("user", "").lower() == clean_user:
+                    if is_valid_ttl:
                         cookies = row.get("cookies", {})
+                        meta = row.get("metadata") or {}
                         identity = {
                             "school_id": meta.get("school_id") or school_id,
                             "partner_id": meta.get("partner_id"),
                             "username": username
                         }
-                        logger.info(f"⚡ [Account Auth] Tái sử dụng Session School [{row.get('session_key')}] từ Supabase (Zero Playwright)!")
+                        logger.info(f"⚡ [Account Auth] Tái sử dụng Session School [{session_key}] còn tươi mới (< 60p) từ Supabase!")
                         return cookies, identity
-        except Exception as e:
-            logger.warning(f"⚠️ Không thể đọc session School từ Supabase: {e}")
+                    else:
+                        # Session quá hạn -> Xóa dọn rác ngay
+                        supabase.table("workspace_active_sessions").delete().eq("session_key", session_key).execute()
+            except Exception as e:
+                logger.warning(f"⚠️ Không thể đọc session School từ Supabase: {e}")
 
-        # 2. Nếu chưa có: Mở Playwright bốc Session mới và LƯU TẠM vào Supabase
-        logger.info(f"🔑 [Account Auth] Mở Chromium đăng nhập School cho '{username}'...")
-        async with acquire_playwright_slot("School Auth Session", lane="admin"):
+        # 2. Mở Playwright bốc Session mới toanh
+        logger.info(f"🔑 [Account Auth] Đang mở Chromium đăng nhập School cho '{username}'...")
+        async with acquire_playwright_slot(f"School Auth [{username}]", lane="admin"):
             async with async_playwright() as p:
                 browser, context, page = await self._create_context(p)
                 try:
@@ -166,24 +185,25 @@ class WorkspaceAccountService(WorkspaceBaseService):
 
                     cookies = await context.cookies()
                     cookies_dict = {c["name"]: c["value"] for c in cookies}
-                    s_id = wp_identity.get("school_id") or school_id or "temp"
+                    s_id = wp_identity.get("school_id") or school_id or ""
 
-                    # Lưu tạm vào Supabase để Cronjob 5 phút dùng ngầm
+                    # Lưu session mới kèm thông tin chuẩn xác vào Supabase
                     try:
                         from app.services.session_keepalive_service import session_keepalive_service
                         await session_keepalive_service.save_session_cookies(
-                            session_key=f"school_{s_id}",
-                            system_name=f"School Temp Session ({username})",
+                            session_key=session_key,
+                            system_name=f"School Session ({username})",
                             cookies=cookies_dict,
                             metadata={"school_id": s_id, "partner_id": wp_identity.get("partner_id"), "user": username}
                         )
-                        logger.info(f"💾 [Account Auth] Đã lưu tạm session 'school_{s_id}' lên Supabase cho Cronjob dùng ngầm!")
+                        logger.info(f"💾 [Account Auth] Đã lưu Session chuẩn '{session_key}' lên Supabase (TTL: 60p)!")
                     except Exception as s_err:
                         logger.warning(f"⚠️ Lỗi lưu session school: {s_err}")
 
                     return cookies_dict, wp_identity
                 finally:
                     await browser.close()
+                    gc.collect()
 
     @staticmethod
     def _parse_excel_accounts(file_path: str) -> List[Dict[str, str]]:
@@ -301,6 +321,7 @@ class WorkspaceAccountService(WorkspaceBaseService):
     # =========================================================================
     # 🚀 NỘP BATCH TẠO TÀI KHOẢN (NGẮT LUỒNG THEO CHU KỲ 20S/TÀI KHOẢN)
     # =========================================================================
+
     async def submit_account_creation_batch(
         self,
         credentials: Dict[str, str],
@@ -309,10 +330,7 @@ class WorkspaceAccountService(WorkspaceBaseService):
         download_dir: str = "/tmp/ptv_results",
         checkpoint: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """
-        Nộp batch tạo tài khoản qua Direct API.
-        Sau khi nộp thành công, ngắt luồng ngay và thiết lập next_check_at = now() + (số tài khoản * 20s).
-        """
+        """Nộp batch tạo tài khoản qua Direct API có chốt chặn chống lỗi 302."""
         os.makedirs(download_dir, exist_ok=True)
         checkpoint = checkpoint or {}
 
@@ -322,16 +340,19 @@ class WorkspaceAccountService(WorkspaceBaseService):
             return await self.check_and_export_batch_result(credentials, existing_req_id, download_dir)
 
         try:
-            # 1. Bốc session School (Ưu tiên Supabase Cache, không mở Playwright thừa)
+            school_user = credentials.get("username", "")
+            school_pwd = credentials.get("password", "")
+            
+            # 1. Bốc session School
             cookies, identity = await self.get_or_steal_school_session(
-                credentials.get("username", ""), 
-                credentials.get("password", ""),
+                school_user, 
+                school_pwd,
                 credentials.get("school_id")
             )
-            school_id = identity.get("school_id") or credentials.get("school_id")
-            partner_id = identity.get("partner_id") or credentials.get("partner_id")
+            school_id = identity.get("school_id") or credentials.get("school_id") or ""
+            partner_id = identity.get("partner_id") or credentials.get("partner_id") or ""
 
-            # 2. Parse file Excel trực tiếp bằng Python
+            # 2. Parse file Excel
             accounts = self._parse_excel_accounts(upload_file_path)
             if not accounts:
                 return {"status": "failed", "error": "Không trích xuất được tài khoản nào từ file Excel tải lên."}
@@ -353,15 +374,22 @@ class WorkspaceAccountService(WorkspaceBaseService):
                 payload[f"accounts[{idx}][role]"] = acc["role"]
                 payload[f"accounts[{idx}][note]"] = acc["note"]
 
+            upload_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/request_approval/uploadFileAccount.php"
+
+            # 🎯 GỬI REQUEST VÀ TỰ ĐỘNG LÀM MỚI NẾU BỊ 302 REDIRECT DO COOKIE HẾT HẠN
             async with httpx.AsyncClient(base_url=BASE_WORKSPACE_URL, cookies=cookies, timeout=40.0) as client:
-                # Bước 1: Gửi danh sách lên uploadFileAccount.php
-                upload_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/request_approval/uploadFileAccount.php"
-                t0 = asyncio.get_event_loop().time()
                 up_res = await client.post(upload_url, files=self._to_multipart(payload))
-                elapsed = round((asyncio.get_event_loop().time() - t0) * 1000, 1)
+
+                # NẾU GẶP 302 FOUND: Bắt tận tay Session chết, làm mới và thử lại ngay lập tức!
+                if up_res.status_code == 302:
+                    logger.warning("🔄 Phát hiện HTTP 302 Found (Session cũ đã hết hạn)! Đang tự động mở Playwright đăng nhập mới để thử lại...")
+                    cookies, identity = await self.get_or_steal_school_session(school_user, school_pwd, credentials.get("school_id"), force_fresh=True)
+                    # Tạo client mới với cookies mới
+                    async with httpx.AsyncClient(base_url=BASE_WORKSPACE_URL, cookies=cookies, timeout=40.0) as fresh_client:
+                        up_res = await fresh_client.post(upload_url, files=self._to_multipart(payload))
 
                 if up_res.status_code != 200:
-                    return {"status": "failed", "error": f"Lỗi uploadFileAccount: {up_res.text}"}
+                    return {"status": "failed", "error": f"Lỗi uploadFileAccount (HTTP {up_res.status_code}): {up_res.text[:200]}"}
 
                 up_json = up_res.json()
                 request_id = str(up_json.get("request_id") or up_json.get("id", "")).strip()
@@ -369,30 +397,23 @@ class WorkspaceAccountService(WorkspaceBaseService):
                 if not request_id:
                     return {"status": "failed", "error": "Không lấy được request_id từ phản hồi upload."}
 
-                logger.info(f"🎉 NỘP DANH SÁCH THÀNH CÔNG TRONG {elapsed}ms! Request ID: [ #{request_id} ]")
+                logger.info(f"🎉 NỘP DANH SÁCH THÀNH CÔNG! Request ID: [ #{request_id} ]")
 
-                # Bước 2: Kích hoạt Background Processing qua createMultipleUser.php
+                # Kích hoạt createMultipleUser.php
                 trigger_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/request_approval/createMultipleUser.php"
                 trig_payload = {"request_id": request_id, "status": "1"}
                 await client.post(trigger_url, files=self._to_multipart(trig_payload))
                 logger.info(f"🚀 Đã kích hoạt lệnh tạo tài khoản ngầm cho Request #{request_id}!")
 
-                # 🎯 TÍNH TOÁN CHUẨN XÁC: 20 GIÂY / 1 TÀI KHOẢN (TỐI THIỂU 60 GIÂY)
                 account_count = len(accounts)
                 wait_seconds = max(account_count * 20, 60)
                 next_check_dt = datetime.now(timezone.utc) + timedelta(seconds=wait_seconds)
                 next_check_iso = next_check_dt.isoformat()
 
-                logger.info(
-                    f"⏱️ [Smart Poll Schedule] {account_count} tài khoản x 20s = {wait_seconds}s. "
-                    f"Ngắt luồng an toàn, lần thăm dò đầu tiên sẽ vào lúc: {next_check_iso} (UTC)"
-                )
-
                 checkpoint["account_batch_request_id"] = request_id
                 checkpoint["next_check_at"] = next_check_iso
                 checkpoint["total_accounts"] = account_count
 
-                # Tự động cập nhật bảng bot_automation_tasks nếu có task_id
                 task_id = checkpoint.get("task_id")
                 if task_id:
                     try:
@@ -409,7 +430,6 @@ class WorkspaceAccountService(WorkspaceBaseService):
                             "execution_status": "waiting_poll",
                             "payload_data": task_update_payload
                         }).eq("id", task_id).execute()
-                        logger.info(f"💾 Đã lưu trạng thái 'waiting_poll' (next_check_at: {next_check_iso}) cho Task #{task_id}!")
                     except Exception as t_err:
                         logger.warning(f"⚠️ Không thể cập nhật trạng thái bot task: {t_err}")
 
