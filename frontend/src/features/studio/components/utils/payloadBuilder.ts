@@ -58,7 +58,7 @@ export interface BuildPayloadParams {
     editSchoolName: string;
     editPartnerCode: string;
     editPartnerName: string;
-    gitActionType?: 'add' | 'remove'; // 🎯 HỖ TRỢ CẢ THÊM LẪN GỠ
+    gitActionType?: 'add' | 'remove' | 'jit'; // 🎯 HỖ TRỢ THÊM, GỠ VÀ KÍCH HOẠT JIT HÀNG LOẠT
     gitSelectedRepos: string[];
     gitUsersList: string;
     gitTargetRole: 'GUEST' | 'DEVELOPER' | 'ADMIN';
@@ -105,7 +105,7 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                 return null;
             }
 
-            // 1. Partner duyệt School Order (KHÔNG CÓ NOTE / CONTACT)
+            // 1. Partner duyệt School Order
             if (params.approveSubFlow === 'approve_school_order') {
                 const resolvedSchoolName = params.selectedCachedItem?.school_name || 'Tự động truy vết theo Order';
                 const resolvedPartnerName = params.selectedCachedItem?.partner_name || 'Tự động truy vết';
@@ -127,7 +127,7 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                     `Số lượng môn học: ${params.parsedOrderCourses.length} môn`,
                 ];
 
-                // 2. Distributor duyệt PRT Contract (KHÔNG CÓ NOTE / CONTACT)
+                // 2. Distributor duyệt PRT Contract
             } else if (params.approveSubFlow === 'approve_partner_contract') {
                 const resolvedPartnerName = params.selectedCachedItem?.partner_name || params.selectedCachedItem?.sender_name || undefined;
                 const resolvedDistName = params.selectedCachedItem?.distributor_name || params.selectedCachedItem?.receiver_name || undefined;
@@ -150,7 +150,7 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                     `Nhà phân phối nhận: ${resolvedDistName || 'Tự động truy vết từ Két sắt'}`,
                 ];
 
-                // 3. Sales Admin duyệt DST Contract (BẮT BUỘC CONFIRMATION NOTE / JUSTIFICATION)
+                // 3. Sales Admin duyệt DST Contract
             } else if (params.approveSubFlow === 'admin_approve_contract') {
                 if (!params.adminJustification || params.adminJustification.trim().length < 15) {
                     toast.error('Confirmation Note của Sales Admin bắt buộc phải có ít nhất 15 ký tự!');
@@ -166,7 +166,7 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                     contract_code: params.selectedItemCode,
                     distributor_name: resolvedDistName,
                     distributor_code: resolvedDistCode,
-                    justification: params.adminJustification.trim(), // 🎯 Confirmation Note
+                    justification: params.adminJustification.trim(),
                     courses: params.parsedOrderCourses.length > 0 ? params.parsedOrderCourses : params.selectedCachedItem?.courses_data,
                 };
 
@@ -182,7 +182,6 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
             // NHÁNH 2: CREATE AND APPROVE FLOW (TẠO MỚI ORDER / CONTRACT)
             // =====================================================================
         } else if (params.workspaceMainCategory === 'create_and_approve') {
-            // 🎯 1. TỰ ĐỘNG TÍNH TOÁN TỔNG GIÁ TRỊ TOÀN BỘ ĐƠN HÀNG / HỢP ĐỒNG (TOTAL AMOUNT)
             const calculatedTotalAmount = params.selectedCourses.reduce((sum, c) => {
                 const uPrice = Number((c as any).unit_price) || 0;
                 const qty = Number(c.licenses) || 0;
@@ -249,7 +248,7 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                     contract_data: {
                         contact_info: params.contactInfo,
                         notes: params.additionalNotes,
-                        total_amount: String(calculatedTotalAmount), // 🎯 Gửi số tiền thực
+                        total_amount: String(calculatedTotalAmount),
                         courses: params.selectedCourses.map((c) => {
                             const uPrice = Number((c as any).unit_price) || 0;
                             const qty = Number(c.licenses) || 1;
@@ -260,7 +259,6 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                                 licenses: qty,
                                 unit_price: String(uPrice),
                                 total_amount: String(uPrice * qty),
-                                // 🎯 Không đính kèm start_date & end_date vì Hạn ngạch vĩnh viễn
                             };
                         }),
                     },
@@ -524,58 +522,144 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                 `Moodle User ID: ${params.loadedUserProfile.idUserMD || 'Chưa liên kết'}`,
             ];
         }
+
+        // =========================================================================
+        // 🐙 CỖ MÁY PYTHAVERSE GIT COLLABORATOR BOT (GITBUCKET HYBRID ENGINE)
+        // =========================================================================
     } else if (params.selectedBotType === 'git_collaborator') {
-        const validRepos = params.gitSelectedRepos.map((r) => r.trim()).filter((r) => r.length > 0);
-        if (validRepos.length === 0) {
-            toast.error('Vui lòng chọn ít nhất 1 Repository trên git.pythaverse.space!');
-            return null;
-        }
 
-        const usersArr = params.gitUsersList
-            .split(/[\n,;]+/)
-            .map((u) => u.trim())
-            .filter((u) => u.length > 0);
+        // 🎯 1. NHÁNH KÍCH HOẠT JIT HÀNG LOẠT (OIDC SEEDING TỪ GOOGLE SHEET)
+        if (params.gitActionType === 'jit') {
+            if (!params.gitUsersList.trim()) {
+                toast.error('Vui lòng dán danh sách Tài khoản & Mật khẩu từ Google Sheet vào ô!');
+                return null;
+            }
 
-        if (usersArr.length === 0) {
-            toast.error('Vui lòng nhập ít nhất 1 username hoặc email!');
-            return null;
-        }
+            const lines = params.gitUsersList.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+            const parsedAccounts: { username: string; password: string }[] = [];
 
-        // 🎯 PHÂN LUỒNG: GỠ BỎ (REMOVE) vs THÊM MỚI (ADD)
-        if (params.gitActionType === 'remove') {
+            lines.forEach((line, index) => {
+                const lower = line.toLowerCase();
+                // Bỏ qua header
+                if (
+                    index === 0 &&
+                    (lower.includes('username') || lower.includes('tài khoản') || lower.includes('email')) &&
+                    (lower.includes('password') || lower.includes('mật khẩu') || lower.includes('pass'))
+                ) {
+                    return;
+                }
+
+                let u = '';
+                let p = '';
+
+                if (line.includes('\t')) {
+                    const parts = line.split('\t').map((s) => s.trim());
+                    u = parts[0] || '';
+                    p = parts[1] || '';
+                } else if (line.includes(',')) {
+                    const parts = line.split(',').map((s) => s.trim());
+                    u = parts[0] || '';
+                    p = parts.slice(1).join(',').trim();
+                } else if (line.includes(';')) {
+                    const parts = line.split(';').map((s) => s.trim());
+                    u = parts[0] || '';
+                    p = parts.slice(1).join(';').trim();
+                } else {
+                    const parts = line.split(/\s+/).map((s) => s.trim());
+                    u = parts[0] || '';
+                    p = parts.slice(1).join(' ').trim();
+                }
+
+                if (u && p) {
+                    parsedAccounts.push({ username: u, password: p });
+                }
+            });
+
+            if (parsedAccounts.length === 0) {
+                toast.error('Không bóc tách được cặp Tài khoản & Mật khẩu hợp lệ nào. Vui lòng kiểm tra lại!');
+                return null;
+            }
+
             payload = {
-                action: 'remove_repo_collaborators',
-                git_action: 'remove',
-                repo_urls: validRepos,
-                users: usersArr,
+                ...payload,
+                action: 'activate_jit',
+                git_action: 'jit',
+                accounts: parsedAccounts,
+                raw_text: params.gitUsersList,
+                concurrency: 3,
             };
 
-            summary.engineName = '🐙 Pythaverse Git (Single-Session Multi-Repo RPA)';
-            summary.actionTitle = `Gỡ Bỏ ${usersArr.length} Thành Viên Khỏi ${validRepos.length} Repositories`;
-            summary.targetEntity = `${validRepos.length} Repos (${validRepos.map((r) => r.split('/').pop()).join(', ')})`;
+            const estSeconds = Math.max(1, Math.ceil((parsedAccounts.length * 0.4) / 3));
+
+            summary.engineName = '⚡ Pythaverse Git JIT Engine (Headless OIDC Handshake)';
+            summary.actionTitle = `Kích Hoạt JIT Cấp Tốc Cho ${parsedAccounts.length} Tài Khoản`;
+            summary.targetEntity = `GitBucket (git.pythaverse.space) - ${parsedAccounts.length} Tài khoản`;
             summary.detailsList = [
-                `Danh sách kho: ${validRepos.map((r) => r.split('/').pop()).join(', ')}`,
-                `Hành động: GỠ BỎ QUYỀN (Remove Collaborators 🗑️)`,
-                `Số lượng tài khoản cần gỡ: ${usersArr.length} người dùng`,
+                `Tổng số tài khoản nhận diện: ${parsedAccounts.length} người dùng`,
+                `Cơ chế: Headless OIDC Handshake qua Keycloak SSO (Zero Playwright, RAM < 5MB)`,
+                `Thời gian xử lý dự kiến: ~${estSeconds} giây (Chạy song song 3 luồng)`,
+                `Mục tiêu: Gieo mầm tài khoản vào GitBucket trước khi gán quyền Collaborator`,
             ];
+
+            // 🎯 2. NHÁNH THÊM / GỠ COLLABORATORS TRUYỀN THỐNG (BẮT BUỘC CHỌN REPOS)
         } else {
-            payload = {
-                action: 'add_repo_collaborators',
-                git_action: 'add',
-                repo_urls: validRepos,
-                role: params.gitTargetRole,
-                users: usersArr,
-            };
+            const validRepos = params.gitSelectedRepos.map((r) => r.trim()).filter((r) => r.length > 0);
+            if (validRepos.length === 0) {
+                toast.error('Vui lòng chọn ít nhất 1 Repository trên git.pythaverse.space!');
+                return null;
+            }
 
-            summary.engineName = '🐙 Pythaverse Git (Single-Session Multi-Repo RPA)';
-            summary.actionTitle = `Thêm ${usersArr.length} Thành Viên Vào ${validRepos.length} Repositories`;
-            summary.targetEntity = `${validRepos.length} Repos (${validRepos.map((r) => r.split('/').pop()).join(', ')})`;
-            summary.detailsList = [
-                `Danh sách kho: ${validRepos.map((r) => r.split('/').pop()).join(', ')}`,
-                `Vai trò gán: ${params.gitTargetRole} (Single login session)`,
-                `Số lượng tài khoản: ${usersArr.length} người dùng`,
-            ];
+            const usersArr = params.gitUsersList
+                .split(/[\n,;]+/)
+                .map((u) => u.trim())
+                .filter((u) => u.length > 0);
+
+            if (usersArr.length === 0) {
+                toast.error('Vui lòng nhập ít nhất 1 username hoặc email!');
+                return null;
+            }
+
+            if (params.gitActionType === 'remove') {
+                payload = {
+                    ...payload,
+                    action: 'remove_repo_collaborators',
+                    git_action: 'remove',
+                    repo_urls: validRepos,
+                    users: usersArr,
+                };
+
+                summary.engineName = '🐙 Pythaverse Git (Single-Session Multi-Repo RPA)';
+                summary.actionTitle = `Gỡ Bỏ ${usersArr.length} Thành Viên Khỏi ${validRepos.length} Repositories`;
+                summary.targetEntity = `${validRepos.length} Repos (${validRepos.map((r) => r.split('/').pop()).join(', ')})`;
+                summary.detailsList = [
+                    `Danh sách kho: ${validRepos.map((r) => r.split('/').pop()).join(', ')}`,
+                    `Hành động: GỠ BỎ QUYỀN (Remove Collaborators 🗑️)`,
+                    `Số lượng tài khoản cần gỡ: ${usersArr.length} người dùng`,
+                ];
+            } else {
+                payload = {
+                    ...payload,
+                    action: 'add_repo_collaborators',
+                    git_action: 'add',
+                    repo_urls: validRepos,
+                    role: params.gitTargetRole,
+                    users: usersArr,
+                };
+
+                summary.engineName = '🐙 Pythaverse Git (Single-Session Multi-Repo RPA)';
+                summary.actionTitle = `Thêm ${usersArr.length} Thành Viên Vào ${validRepos.length} Repositories`;
+                summary.targetEntity = `${validRepos.length} Repos (${validRepos.map((r) => r.split('/').pop()).join(', ')})`;
+                summary.detailsList = [
+                    `Danh sách kho: ${validRepos.map((r) => r.split('/').pop()).join(', ')}`,
+                    `Vai trò gán: ${params.gitTargetRole} (Single login session)`,
+                    `Số lượng tài khoản: ${usersArr.length} người dùng`,
+                ];
+            }
         }
+
+        // =========================================================================
+        // 🔑 CỖ MÁY KEYCLOAK IDENTITY BOT
+        // =========================================================================
     } else if (params.selectedBotType === 'keycloak_api') {
         const rawEmails = params.kcTargetEmail
             .split(/[\n,;]+/)
@@ -625,6 +709,10 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
         summary.targetEntity =
             rawEmails.length === 1 ? rawEmails[0] : `${rawEmails[0]} (+${rawEmails.length - 1} tài khoản khác)`;
         summary.detailsList = details.length > 0 ? details : ['Chưa chọn hành động can thiệp nào'];
+
+        // =========================================================================
+        // 📝 CỖ MÁY FEEDBACK DOC TRIAGE
+        // =========================================================================
     } else if (params.selectedBotType === 'feedback_doc_triage') {
         if (!params.docUrl) {
             toast.error('Vui lòng nhập đường dẫn Google Doc cần xử lý!');
