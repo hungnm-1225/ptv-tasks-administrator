@@ -164,19 +164,80 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
                 "username": payload.get("school_user") or payload.get("username", ""),
                 "password": payload.get("school_password") or payload.get("password", "")
             }
-            account_file = payload.get("account_file_path") or payload.get("uploaded_file_path") or payload.get("cof_file_path")
             
+            # 🎯 1. TÌM ĐƯỜNG DẪN FILE CỤC BỘ HOẶC URL TỪ SUPABASE STORAGE
+            account_file = (
+                payload.get("account_file_path") 
+                or payload.get("uploaded_file_path") 
+                or payload.get("cof_file_path")
+                or payload.get("file_path")
+            )
+            file_url = (
+                payload.get("file_url") 
+                or payload.get("uploaded_file_url") 
+                or payload.get("attachment_url")
+            )
+
+            # 🎯 2. [CƠ CHẾ AUTO-HEAL RETRY]: NẾU FILE CỤC BỘ /tmp BỊ RENDER XÓA MẤT ➔ TỰ TẢI LẠI TỪ SUPABASE STORAGE!
             if not account_file or not os.path.exists(account_file):
-                return {
-                    "status": "failed",
-                    "error": f"Không tìm thấy file tài khoản để nộp batch: {account_file}"
-                }
+                logger.warning(f"⚠️ File cục bộ '{account_file}' không còn trên ổ đĩa (do Render spin-down). Đang kích hoạt Auto-Heal tải lại...")
+                
+                # Nếu không có URL trực tiếp, thử tìm trong Supabase Storage bucket ticket-attachments
+                downloaded_file = None
+                filename = payload.get("filename") or "accounts.xlsx"
+
+                try:
+                    import tempfile
+                    from app.core.supabase import get_supabase_client
+                    supabase = get_supabase_client()
+
+                    # Trường hợp có file_url trực tiếp
+                    if file_url and file_url.startswith("http"):
+                        logger.info(f"📥 Đang tải lại file từ URL: {file_url}...")
+                        import httpx
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+                            with httpx.Client(timeout=30.0) as client:
+                                r = client.get(file_url)
+                                if r.status_code == 200:
+                                    tmp.write(r.content)
+                                    downloaded_file = tmp.name
+
+                    # Trường hợp tìm file trong bucket ticket-attachments theo filename
+                    if not downloaded_file and filename:
+                        logger.info(f"🔍 Đang tìm kiếm file '{filename}' trong Supabase Storage bucket 'ticket-attachments'...")
+                        try:
+                            # Tìm trong thư mục studio_accounts
+                            files_list = supabase.storage.from_("ticket-attachments").list("studio_accounts")
+                            matched = next((f for f in files_list if filename in f.get("name", "")), None)
+                            
+                            if matched:
+                                target_path = f"studio_accounts/{matched['name']}"
+                                logger.info(f"☁️ Tìm thấy file trên cloud: {target_path}. Bắt đầu tải về...")
+                                file_bytes = supabase.storage.from_("ticket-attachments").download(target_path)
+                                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+                                    tmp.write(file_bytes)
+                                    downloaded_file = tmp.name
+                        except Exception as list_err:
+                            logger.warning(f"⚠️ Không thể quét Supabase Storage: {list_err}")
+
+                except Exception as dl_err:
+                    logger.error(f"❌ Lỗi Auto-Heal tải lại file từ Supabase Storage: {dl_err}")
+
+                if downloaded_file and os.path.exists(downloaded_file):
+                    account_file = downloaded_file
+                    payload["account_file_path"] = downloaded_file
+                    logger.info(f"✅ Auto-Heal thành công! File đã được hồi phục tại: {account_file}")
+                else:
+                    return {
+                        "status": "failed",
+                        "error": f"Không tìm thấy file tài khoản để nộp batch (File tạm cục bộ bị xóa và không tìm thấy bản sao trên Supabase Storage): {filename}"
+                    }
 
             logger.info(f"🚀 [Bulk Accounts] Đang nộp batch tạo tài khoản cho trường: {school_creds.get('name', school_ident)}")
             return await workspace_account_service.submit_account_creation_batch(
                 credentials=school_creds,
                 upload_file_path=account_file,
-                record_count=int(payload.get("record_count") or 50),
+                record_count=int(payload.get("record_count") or payload.get("total_count") or 50),
                 download_dir=os.path.join(os.getcwd(), "backend", "data", "results_download"),
                 checkpoint=payload.get("checkpoint")
             )
