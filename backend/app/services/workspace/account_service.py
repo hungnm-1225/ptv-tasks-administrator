@@ -208,21 +208,21 @@ class WorkspaceAccountService(WorkspaceBaseService):
 
     @staticmethod
     def _parse_excel_accounts(file_path: str) -> List[Dict[str, str]]:
-        """Bóc tách thông minh danh sách tài khoản: Tự động quét Header chống lệch cột."""
+        """Bóc tách thông minh: Khử sạch dòng rỗng/dòng vàng ngăn cách, chỉ lấy đúng tài khoản hợp lệ."""
         accounts = []
         wb = openpyxl.load_workbook(file_path, data_only=True)
         try:
             ws = wb.active
             
-            # 🎯 1. TỰ ĐỘNG QUÉT DÒNG HEADER (DÒNG 1 ĐẾN 6) ĐỂ ĐỊNH VỊ CHÍNH XÁC TỌA ĐỘ TỪNG CỘT
+            # 🎯 1. TỰ ĐỘNG DÒ TỌA ĐỘ CỘT TỪ DÒNG HEADER (DÒNG 1 ĐẾN 6)
             header_row_idx = 5
             col_map = {
-                "first_name": 3,  # Mặc định Cột C
-                "last_name": 4,   # Mặc định Cột D
-                "mobile": 5,      # Mặc định Cột E
-                "email": 6,       # Mặc định Cột F
-                "dob": 7,         # Mặc định Cột G
-                "role": 8,        # Mặc định Cột H
+                "first_name": 3,  # Cột C: First Name
+                "last_name": 4,   # Cột D: Last Name
+                "mobile": 5,      # Cột E: Mobile number
+                "email": 6,       # Cột F: Email
+                "dob": 7,         # Cột G: Date of Birth
+                "role": 8,        # Cột H: Role
                 "note": 9
             }
 
@@ -248,20 +248,27 @@ class WorkspaceAccountService(WorkspaceBaseService):
                             col_map["note"] = col_idx
                     break
 
-            logger.info(f"📊 [Excel Dynamic Parser] Bản đồ cột tại dòng {header_row_idx}: {col_map}")
+            logger.info(f"📊 [Excel Dynamic Parser] Định vị Header tại dòng {header_row_idx}: {col_map}")
 
-            # 🎯 2. ĐỌC DỮ LIỆU CHUẨN XÁC TỪ DÒNG SAU HEADER
+            # 🎯 2. ĐỌC DỮ LIỆU & LỌC CHẶT CHẼ (CHỐNG DÒNG RỖNG, DÒNG VÀNG NGĂN CÁCH)
             start_row = header_row_idx + 1
             for r in range(start_row, ws.max_row + 1):
-                first_name = str(ws.cell(row=r, column=col_map["first_name"]).value or "").strip()
-                last_name = str(ws.cell(row=r, column=col_map["last_name"]).value or "").strip()
-                email = str(ws.cell(row=r, column=col_map["email"]).value or "").strip().lower()
-                
-                # Bỏ qua dòng trống hoặc không có email hợp lệ
-                if not email or "@" not in email:
+                raw_email = str(ws.cell(row=r, column=col_map["email"]).value or "").strip()
+                raw_fn = str(ws.cell(row=r, column=col_map["first_name"]).value or "").strip()
+                raw_ln = str(ws.cell(row=r, column=col_map["last_name"]).value or "").strip()
+
+                # 🛑 CHỐT CHẶN: Dòng rỗng, dòng vàng ngăn cách (như dòng 30), hoặc dòng header bị lặp sẽ bị BỎ QUA NGAY!
+                if not raw_email or "@" not in raw_email or "." not in raw_email:
+                    continue
+                if not raw_fn or not raw_ln or "first name" in raw_fn.lower():
                     continue
 
+                clean_email = raw_email.lower().strip()
                 mobile = str(ws.cell(row=r, column=col_map["mobile"]).value or "").strip()
+                if mobile.lower() in ("none", "null"):
+                    mobile = ""
+
+                # Chuẩn hóa ngày sinh sang DD/MM/YYYY chuẩn xác
                 dob_raw = ws.cell(row=r, column=col_map["dob"]).value
                 dob = "01/01/2016"
                 if dob_raw:
@@ -269,31 +276,225 @@ class WorkspaceAccountService(WorkspaceBaseService):
                         dob = dob_raw.strftime("%d/%m/%Y")
                     else:
                         clean_dob = str(dob_raw).strip()
-                        # Chuẩn hóa nếu là định dạng YYYY-MM-DD sang DD/MM/YYYY
                         if re.match(r"^\d{4}-\d{2}-\d{2}", clean_dob):
                             parts = clean_dob.split("-")
                             dob = f"{parts[2]}/{parts[1]}/{parts[0]}"
+                        elif re.match(r"^\d{1,2}/\d{1,2}/\d{4}", clean_dob):
+                            dob = clean_dob
                         else:
                             dob = clean_dob
 
+                # Chuẩn hóa vai trò: Student hoặc Teacher
                 role_raw = str(ws.cell(row=r, column=col_map["role"]).value or "student").strip().lower()
-                role = "teacher" if any(k in role_raw for k in ["teach", "gv", "giáo viên"]) else "student"
-                note = str(ws.cell(row=r, column=col_map["note"]).value or "").strip()
+                role = "Teacher" if any(k in role_raw for k in ["teach", "gv", "giáo viên"]) else "Student"
+
+                note_val = str(ws.cell(row=r, column=col_map["note"]).value or "").strip()
+                if note_val.lower() in ("none", "null"):
+                    note_val = ""
 
                 accounts.append({
-                    "firstName": first_name,
-                    "lastName": last_name,
+                    "firstName": raw_fn,
+                    "lastName": raw_ln,
                     "mobileNumber": mobile,
-                    "email": email,
+                    "email": clean_email,
                     "dob": dob,
                     "role": role,
-                    "note": note
+                    "note": note_val
                 })
 
-            logger.info(f"✅ Đã trích xuất chính xác {len(accounts)} tài khoản (Tài khoản đầu tiên: {accounts[0]['email']} - Role: {accounts[0]['role']})")
+            logger.info(f"✅ Đã trích xuất CHÍNH XÁC {len(accounts)} tài khoản (Không thừa, không thiếu)!")
         finally:
             wb.close()
         return accounts
+
+
+    # =========================================================================
+    # 🚀 NỘP BATCH TẠO TÀI KHOẢN (ĐÚNG 100% CẤU TRÚC DEVTOOLS THỰC TẾ)
+    # =========================================================================
+    async def submit_account_creation_batch(
+        self,
+        credentials: Dict[str, str],
+        upload_file_path: str,
+        record_count: int,
+        download_dir: str = "/tmp/ptv_results",
+        checkpoint: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Nộp batch tạo tài khoản qua Direct API chuẩn xác từng trường dữ liệu."""
+        os.makedirs(download_dir, exist_ok=True)
+        checkpoint = checkpoint or {}
+
+        existing_req_id = checkpoint.get("account_batch_request_id")
+        if existing_req_id and str(existing_req_id).strip() not in ["None", "null", ""]:
+            logger.info(f"⏩ [CHECKPOINT] Đã có Request ID #{existing_req_id}. Đi lấy file kết quả...")
+            return await self.check_and_export_batch_result(credentials, existing_req_id, download_dir)
+
+        try:
+            school_user = credentials.get("username", "")
+            school_pwd = credentials.get("password", "")
+            
+            # 1. Bốc session School
+            cookies, identity = await self.get_or_steal_school_session(
+                school_user, 
+                school_pwd,
+                credentials.get("school_id")
+            )
+
+            # 2. Giải mã Integer School ID & Partner ID
+            clean_school_id = ""
+            clean_partner_id = ""
+
+            for cand in [identity.get("school_id"), credentials.get("school_id"), credentials.get("code"), credentials.get("school_code")]:
+                if cand:
+                    m = re.search(r"\d+", str(cand))
+                    if m:
+                        clean_school_id = m.group(0)
+                        break
+
+            for cand in [identity.get("partner_id"), credentials.get("partner_id"), credentials.get("partner_code")]:
+                if cand:
+                    m = re.search(r"\d+", str(cand))
+                    if m:
+                        clean_partner_id = m.group(0)
+                        break
+
+            if not clean_school_id or not clean_partner_id:
+                try:
+                    from app.core.supabase import get_supabase_client
+                    supabase = get_supabase_client()
+                    
+                    vault_res = supabase.table("workspace_credentials_vault") \
+                        .select("org_id") \
+                        .ilike("username", school_user) \
+                        .execute()
+                    
+                    org_id = vault_res.data[0].get("org_id") if vault_res.data else None
+                    if org_id:
+                        school_org = supabase.table("workspace_organizations") \
+                            .select("code, parent_id") \
+                            .eq("id", org_id) \
+                            .execute()
+                        if school_org.data:
+                            s_data = school_org.data[0]
+                            if not clean_school_id and s_data.get("code"):
+                                m = re.search(r"\d+", str(s_data["code"]))
+                                if m:
+                                    clean_school_id = m.group(0)
+                            
+                            parent_id = s_data.get("parent_id")
+                            if parent_id and not clean_partner_id:
+                                partner_org = supabase.table("workspace_organizations") \
+                                    .select("code") \
+                                    .eq("id", parent_id) \
+                                    .execute()
+                                if partner_org.data and partner_org.data[0].get("code"):
+                                    pm = re.search(r"\d+", str(partner_org.data[0]["code"]))
+                                    if pm:
+                                        clean_partner_id = pm.group(0)
+                except Exception as db_err:
+                    logger.warning(f"⚠️ Lỗi resolve School/Partner ID: {db_err}")
+
+            if not clean_partner_id:
+                clean_partner_id = "60"
+
+            logger.info(f"🏫 [Bulk Accounts] Gửi batch: School ID = [{clean_school_id}] | Partner ID = [{clean_partner_id}]")
+
+            # 3. Parse file Excel chuẩn xác
+            accounts = self._parse_excel_accounts(upload_file_path)
+            if not accounts:
+                return {"status": "failed", "error": "Không trích xuất được tài khoản nào từ file Excel tải lên."}
+
+            logger.info(f"📄 Đã bóc tách thành công {len(accounts)} tài khoản. Chuẩn bị nộp batch...")
+
+            # 🎯 4. ĐÓNG GÓI PAYLOAD 100% CHUẨN XÁC THEO DEVTOOLS CỦA ANH
+            payload: Dict[str, str] = {
+                "schoolId": str(clean_school_id),
+                "partnerId": str(clean_partner_id),
+                "fileName": os.path.basename(upload_file_path)
+            }
+            for idx, acc in enumerate(accounts):
+                payload[f"accounts[{idx}][firstName]"] = acc["firstName"]
+                payload[f"accounts[{idx}][lastName]"] = acc["lastName"]
+                payload[f"accounts[{idx}][mobileNumber]"] = acc["mobileNumber"]
+                payload[f"accounts[{idx}][email]"] = acc["email"]
+                payload[f"accounts[{idx}][dob]"] = acc["dob"]
+                payload[f"accounts[{idx}][role]"] = acc["role"]
+                payload[f"accounts[{idx}][note]"] = acc["note"]
+
+            upload_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/request_approval/uploadFileAccount.php"
+
+            # 5. Gửi Request Direct HTTPX
+            async with httpx.AsyncClient(base_url=BASE_WORKSPACE_URL, cookies=cookies, timeout=40.0) as client:
+                up_res = await client.post(upload_url, files=self._to_multipart(payload))
+
+                # Tự động re-login nếu 302
+                if up_res.status_code == 302:
+                    logger.warning("🔄 Phát hiện 302 Redirect! Mở Chromium làm mới session và gửi lại...")
+                    cookies, identity = await self.get_or_steal_school_session(school_user, school_pwd, credentials.get("school_id"), force_fresh=True)
+                    async with httpx.AsyncClient(base_url=BASE_WORKSPACE_URL, cookies=cookies, timeout=40.0) as fresh_client:
+                        up_res = await fresh_client.post(upload_url, files=self._to_multipart(payload))
+
+                if up_res.status_code != 200:
+                    err_msg = f"Lỗi uploadFileAccount (HTTP {up_res.status_code}): {up_res.text[:300]}"
+                    logger.error(f"❌ {err_msg}")
+                    return {"status": "failed", "error": err_msg}
+
+                up_json = up_res.json()
+                request_id = str(up_json.get("request_id") or up_json.get("id") or "").strip()
+
+                if not request_id or request_id.lower() in ("none", "null", ""):
+                    err_msg = f"API uploadFileAccount không trả về request_id: {up_res.text}"
+                    logger.error(f"❌ {err_msg}")
+                    return {"status": "failed", "error": err_msg}
+
+                logger.info(f"🎉 NỘP DANH SÁCH THÀNH CÔNG! Request ID: [ #{request_id} ] ({len(accounts)} tài khoản)")
+
+                # Bước 2: Kích hoạt createMultipleUser.php ngầm
+                trigger_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/request_approval/createMultipleUser.php"
+                trig_payload = {"request_id": request_id, "status": "1"}
+                await client.post(trigger_url, files=self._to_multipart(trig_payload))
+                logger.info(f"🚀 Đã kích hoạt lệnh tạo tài khoản ngầm cho Request #{request_id}!")
+
+                account_count = len(accounts)
+                wait_seconds = max(account_count * 20, 60)
+                next_check_dt = datetime.now(timezone.utc) + timedelta(seconds=wait_seconds)
+                next_check_iso = next_check_dt.isoformat()
+
+                checkpoint["account_batch_request_id"] = request_id
+                checkpoint["next_check_at"] = next_check_iso
+                checkpoint["total_accounts"] = account_count
+
+                task_id = checkpoint.get("task_id")
+                if task_id:
+                    try:
+                        supabase = get_supabase_client()
+                        task_update_payload = {
+                            "request_id": request_id,
+                            "school_credentials": credentials,
+                            "next_check_at": next_check_iso,
+                            "total_count": account_count,
+                            "upload_file_path": upload_file_path,
+                            "checkpoint": checkpoint
+                        }
+                        supabase.table("bot_automation_tasks").update({
+                            "execution_status": "waiting_poll",
+                            "payload_data": task_update_payload
+                        }).eq("id", task_id).execute()
+                    except Exception as t_err:
+                        logger.warning(f"⚠️ Không thể cập nhật trạng thái bot task: {t_err}")
+
+                return {
+                    "status": "waiting_poll",
+                    "request_id": request_id,
+                    "record_count": account_count,
+                    "estimated_wait_seconds": wait_seconds,
+                    "next_check_at": next_check_iso,
+                    "school_credentials": credentials,
+                    "checkpoint": checkpoint
+                }
+
+        except Exception as e:
+            logger.error(f"❌ Lỗi submit_account_creation_batch: {e}", exc_info=True)
+            return {"status": "failed", "error": str(e), "checkpoint": checkpoint}
 
     @staticmethod
     def _to_multipart(data_dict: Dict[str, Any]) -> Dict[str, Tuple[None, str]]:
@@ -365,204 +566,6 @@ class WorkspaceAccountService(WorkspaceBaseService):
             logger.error(f"❌ Lỗi exportData.php qua HTTPX: {e}")
 
         return result_excel_path
-
-    # =========================================================================
-    # 🚀 NỘP BATCH TẠO TÀI KHOẢN (NGẮT LUỒNG THEO CHU KỲ 20S/TÀI KHOẢN)
-    # =========================================================================
-
-    async def submit_account_creation_batch(
-        self,
-        credentials: Dict[str, str],
-        upload_file_path: str,
-        record_count: int,
-        download_dir: str = "/tmp/ptv_results",
-        checkpoint: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """Nộp batch tạo tài khoản qua Direct API có chốt chặn chống lỗi 302 và thiếu ID."""
-        os.makedirs(download_dir, exist_ok=True)
-        checkpoint = checkpoint or {}
-
-        existing_req_id = checkpoint.get("account_batch_request_id")
-        if existing_req_id and str(existing_req_id).strip() not in ["None", "null", ""]:
-            logger.info(f"⏩ [CHECKPOINT] Đã có Request ID #{existing_req_id}. Đi lấy file kết quả...")
-            return await self.check_and_export_batch_result(credentials, existing_req_id, download_dir)
-
-        try:
-            school_user = credentials.get("username", "")
-            school_pwd = credentials.get("password", "")
-            
-            # 1. Bốc session School
-            cookies, identity = await self.get_or_steal_school_session(
-                school_user, 
-                school_pwd,
-                credentials.get("school_id")
-            )
-
-            # 🎯 2. GIẢI MÃ CHUẨN XÁC INTEGER SCHOOL_ID & PARTNER_ID (CHỐNG BỊ RỖNG)
-            clean_school_id = ""
-            clean_partner_id = ""
-
-            # Thử lấy từ identity hoặc credentials nếu là số
-            for cand in [identity.get("school_id"), credentials.get("school_id"), credentials.get("code"), credentials.get("school_code")]:
-                if cand:
-                    m = re.search(r"\d+", str(cand))
-                    if m:
-                        clean_school_id = m.group(0)
-                        break
-
-            for cand in [identity.get("partner_id"), credentials.get("partner_id"), credentials.get("partner_code")]:
-                if cand:
-                    m = re.search(r"\d+", str(cand))
-                    if m:
-                        clean_partner_id = m.group(0)
-                        break
-
-            # Nếu chưa có, truy vết Supabase Vault Bridge & phả hệ parent_id
-            if not clean_school_id or not clean_partner_id:
-                try:
-                    from app.core.supabase import get_supabase_client
-                    supabase = get_supabase_client()
-                    
-                    # Tìm trường từ username trong Vault
-                    vault_res = supabase.table("workspace_credentials_vault") \
-                        .select("org_id") \
-                        .ilike("username", school_user) \
-                        .execute()
-                    
-                    org_id = vault_res.data[0].get("org_id") if vault_res.data else None
-                    if org_id:
-                        school_org = supabase.table("workspace_organizations") \
-                            .select("code, parent_id") \
-                            .eq("id", org_id) \
-                            .execute()
-                        if school_org.data:
-                            s_data = school_org.data[0]
-                            if not clean_school_id and s_data.get("code"):
-                                m = re.search(r"\d+", str(s_data["code"]))
-                                if m:
-                                    clean_school_id = m.group(0)
-                            
-                            parent_id = s_data.get("parent_id")
-                            if parent_id and not clean_partner_id:
-                                partner_org = supabase.table("workspace_organizations") \
-                                    .select("code") \
-                                    .eq("id", parent_id) \
-                                    .execute()
-                                if partner_org.data and partner_org.data[0].get("code"):
-                                    pm = re.search(r"\d+", str(partner_org.data[0]["code"]))
-                                    if pm:
-                                        clean_partner_id = pm.group(0)
-                except Exception as db_err:
-                    logger.warning(f"⚠️ Lỗi resolve School/Partner ID từ Supabase: {db_err}")
-
-            # Fallback an toàn cho partner_id nếu không tìm thấy (60 là Partner DTTE)
-            if not clean_partner_id:
-                clean_partner_id = "60"
-
-            logger.info(f"🏫 [Bulk Accounts] Tham số nộp batch: School ID = [{clean_school_id}] | Partner ID = [{clean_partner_id}]")
-
-            # 3. Parse file Excel
-            accounts = self._parse_excel_accounts(upload_file_path)
-            if not accounts:
-                return {"status": "failed", "error": "Không trích xuất được tài khoản nào từ file Excel tải lên."}
-
-            logger.info(f"📄 Đã bóc tách {len(accounts)} tài khoản từ file. Chuẩn bị nộp batch qua Direct API...")
-
-            # 4. Dựng payload nộp batch (Gửi song song cả camelCase lẫn snake_case)
-            payload: Dict[str, str] = {
-                "schoolId": str(clean_school_id),
-                "school_id": str(clean_school_id),
-                "partnerId": str(clean_partner_id),
-                "partner_id": str(clean_partner_id),
-                "fileName": os.path.basename(upload_file_path)
-            }
-            for idx, acc in enumerate(accounts):
-                payload[f"accounts[{idx}][firstName]"] = acc["firstName"]
-                payload[f"accounts[{idx}][lastName]"] = acc["lastName"]
-                payload[f"accounts[{idx}][mobileNumber]"] = acc["mobileNumber"]
-                payload[f"accounts[{idx}][email]"] = acc["email"]
-                payload[f"accounts[{idx}][dob]"] = acc["dob"]
-                payload[f"accounts[{idx}][role]"] = acc["role"]
-                payload[f"accounts[{idx}][note]"] = acc["note"]
-
-            upload_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/request_approval/uploadFileAccount.php"
-
-            # 5. Gửi Request có chống 302 và in log phản hồi thật
-            async with httpx.AsyncClient(base_url=BASE_WORKSPACE_URL, cookies=cookies, timeout=40.0) as client:
-                up_res = await client.post(upload_url, files=self._to_multipart(payload))
-
-                # NẾU GẶP 302: Re-login và thử lại
-                if up_res.status_code == 302:
-                    logger.warning("🔄 Phát hiện HTTP 302 Found! Đang tự động mở Playwright đăng nhập mới để thử lại...")
-                    cookies, identity = await self.get_or_steal_school_session(school_user, school_pwd, credentials.get("school_id"), force_fresh=True)
-                    async with httpx.AsyncClient(base_url=BASE_WORKSPACE_URL, cookies=cookies, timeout=40.0) as fresh_client:
-                        up_res = await fresh_client.post(upload_url, files=self._to_multipart(payload))
-
-                if up_res.status_code != 200:
-                    err_msg = f"Lỗi uploadFileAccount (HTTP {up_res.status_code}): {up_res.text[:300]}"
-                    logger.error(f"❌ {err_msg}")
-                    return {"status": "failed", "error": err_msg}
-
-                up_json = up_res.json()
-                request_id = str(up_json.get("request_id") or up_json.get("id") or "").strip()
-
-                # 🎯 CHỐT CHẶN: NẾU THIẾU REQUEST_ID, IN THẲNG PHẢN HỒI THỰC TẾ ĐỂ KHÔNG BỊ "MÙ" LOG
-                if not request_id or request_id.lower() in ("none", "null", ""):
-                    err_msg = f"API uploadFileAccount phản hồi không có request_id: {up_res.text}"
-                    logger.error(f"❌ {err_msg}")
-                    return {"status": "failed", "error": err_msg}
-
-                logger.info(f"🎉 NỘP DANH SÁCH THÀNH CÔNG! Request ID: [ #{request_id} ]")
-
-                # Kích hoạt createMultipleUser.php
-                trigger_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/school_workspace_v3/api/request_approval/createMultipleUser.php"
-                trig_payload = {"request_id": request_id, "status": "1"}
-                await client.post(trigger_url, files=self._to_multipart(trig_payload))
-                logger.info(f"🚀 Đã kích hoạt lệnh tạo tài khoản ngầm cho Request #{request_id}!")
-
-                account_count = len(accounts)
-                wait_seconds = max(account_count * 20, 60)
-                next_check_dt = datetime.now(timezone.utc) + timedelta(seconds=wait_seconds)
-                next_check_iso = next_check_dt.isoformat()
-
-                checkpoint["account_batch_request_id"] = request_id
-                checkpoint["next_check_at"] = next_check_iso
-                checkpoint["total_accounts"] = account_count
-
-                task_id = checkpoint.get("task_id")
-                if task_id:
-                    try:
-                        supabase = get_supabase_client()
-                        task_update_payload = {
-                            "request_id": request_id,
-                            "school_credentials": credentials,
-                            "next_check_at": next_check_iso,
-                            "total_count": account_count,
-                            "upload_file_path": upload_file_path,
-                            "checkpoint": checkpoint
-                        }
-                        supabase.table("bot_automation_tasks").update({
-                            "execution_status": "waiting_poll",
-                            "payload_data": task_update_payload
-                        }).eq("id", task_id).execute()
-                    except Exception as t_err:
-                        logger.warning(f"⚠️ Không thể cập nhật trạng thái bot task: {t_err}")
-
-                return {
-                    "status": "waiting_poll",
-                    "request_id": request_id,
-                    "record_count": account_count,
-                    "estimated_wait_seconds": wait_seconds,
-                    "next_check_at": next_check_iso,
-                    "school_credentials": credentials,
-                    "checkpoint": checkpoint
-                }
-
-        except Exception as e:
-            logger.error(f"❌ Lỗi submit_account_creation_batch: {e}", exc_info=True)
-            return {"status": "failed", "error": str(e), "checkpoint": checkpoint}
-
-
     # =========================================================================
     # ⏳ CRONJOB POLL KẾT QUẢ ĐỊNH KỲ (100% PURE HTTPX - KHÔNG CẦN PLAYWRIGHT)
     # =========================================================================
