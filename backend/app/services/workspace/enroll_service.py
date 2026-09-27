@@ -237,15 +237,36 @@ class WorkspaceEnrollService(WorkspaceBaseService):
         logger.info(f"\n🚀 [Workspace Enroll Engine] Bắt đầu xử lý cho trường: '{school_name}'...")
         t0 = time.time()
 
-        # 1. Tra cứu Két Sắt Fernet
-        resolved_school = workspace_lineage_service.resolve_by_school(school_name)
-        if not resolved_school or not resolved_school.get("school_user") or not resolved_school.get("school_pass"):
-            err_msg = f"Không tìm thấy thông tin đăng nhập của trường '{school_name}' trong Két Sắt Vault!"
+        # 1. THU THẬP CREDENTIALS (Ưu tiên Payload -> Fallback tra cứu Vault)
+        creds = payload.get("credentials") or {}
+        school_user = (
+            creds.get("username") or creds.get("school_user") or creds.get("user")
+            or payload.get("school_user") or payload.get("username")
+        )
+        school_pass = (
+            creds.get("password") or creds.get("school_pass") or creds.get("pass")
+            or payload.get("school_password") or payload.get("password")
+        )
+
+        # Nếu trong payload chưa có thì mới fallback tra cứu Két Sắt qua Lineage
+        if not school_user or not school_pass:
+            resolved_lineage = workspace_lineage_service.resolve_by_school(school_name)
+            if resolved_lineage:
+                # Xử lý an toàn: lineage có thể là dict bọc key 'school' hoặc dict phẳng
+                school_dict = resolved_lineage.get("school") if isinstance(resolved_lineage.get("school"), dict) else resolved_lineage
+                school_user = school_user or school_dict.get("username") or school_dict.get("school_user") or school_dict.get("user")
+                school_pass = school_pass or school_dict.get("password") or school_dict.get("school_pass") or school_dict.get("pass")
+
+        # Sanitize credentials (lột sạch khoảng trắng thừa hoặc dấu ngoặc kép do Render env)
+        if school_user:
+            school_user = str(school_user).strip().strip('"').strip("'")
+        if school_pass:
+            school_pass = str(school_pass).strip().strip('"').strip("'")
+
+        if not school_user or not school_pass:
+            err_msg = f"Không tìm thấy thông tin đăng nhập của trường '{school_name}' trong Két Sắt Vault hoặc Payload!"
             logger.error(f"❌ {err_msg}")
             return {"status": "failed", "error": err_msg}
-
-        school_user = resolved_school["school_user"]
-        school_pass = resolved_school["school_pass"]
 
         courses_plan = payload.get("courses") or payload.get("courses_plan") or []
         class_assignments = payload.get("class_assignments") or {}

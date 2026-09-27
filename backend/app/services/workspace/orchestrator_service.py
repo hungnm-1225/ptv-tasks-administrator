@@ -469,6 +469,8 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
                 "school_id": school_creds.get("id") or school_creds.get("school_id") or school_creds.get("code"),
                 "school_code": school_creds.get("code"),
                 "credentials": school_creds,
+                "school_user": school_creds.get("username") or school_creds.get("school_user") or school_creds.get("user"),
+                "school_pass": school_creds.get("password") or school_creds.get("school_pass") or school_creds.get("pass"),
                 "courses_plan": courses_plan,
                 "class_assignments": class_assignments or order_details.get("class_assignments", {}),
                 "teachers_allocation": teachers_allocation or order_details.get("teachers_allocation", []),
