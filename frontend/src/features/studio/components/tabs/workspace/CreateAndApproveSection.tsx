@@ -152,6 +152,51 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
         return Array.from(map.values());
     }, [schoolsList]);
 
+    // -------------------------------------------------------------------------
+    // 🎯 STATE & EFFECT: CUSTOM EDIT TÊN GROUP & TỰ ĐỘNG ĐỒNG BỘ THEO TRƯỜNG
+    // -------------------------------------------------------------------------
+    const [editingGroupClassKey, setEditingGroupClassKey] = useState<string | null>(null);
+    const [editingGroupNameVal, setEditingGroupNameVal] = useState<string>('');
+
+    // Tự động cập nhật tên Group theo trường học nếu chưa bị sửa tay
+    useEffect(() => {
+        if (!selectedSchool) return;
+        const cleanSchool = selectedSchool.school_name.replace(/[^\w\s]/gi, '').trim();
+
+        const updateName = (c: ClassGroupItem): ClassGroupItem => {
+            if ((c as any).isCustomGroup) return c;
+            // Nếu tên group đang dùng chữ "School " chung chung hoặc chưa có tên trường
+            if (c.lmsGroupName.startsWith('School ') || !c.lmsGroupName.includes(cleanSchool)) {
+                const monthYear = new Date().toLocaleString('en-US', { month: 'short', year: 'numeric' }).replace(' ', '');
+                return { ...c, lmsGroupName: `${cleanSchool} ${c.rawClassName} ${monthYear}` };
+            }
+            return c;
+        };
+
+        setCofClassAssignments(prev => {
+            const next: Record<string, ClassGroupItem[]> = {};
+            let changed = false;
+            for (const [tId, clsList] of Object.entries(prev)) {
+                next[tId] = clsList.map(c => {
+                    const u = updateName(c);
+                    if (u.lmsGroupName !== c.lmsGroupName) changed = true;
+                    return u;
+                });
+            }
+            return changed ? next : prev;
+        });
+
+        setCofUnassignedClasses(prev => {
+            let changed = false;
+            const next = prev.map(c => {
+                const u = updateName(c);
+                if (u.lmsGroupName !== c.lmsGroupName) changed = true;
+                return u;
+            });
+            return changed ? next : prev;
+        });
+    }, [selectedSchool]);
+
     // Đồng bộ input hiển thị trường học
     useEffect(() => {
         if (createApproveSubFlow === 'end_to_end') {
@@ -303,7 +348,7 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                     {/* BÁO CÁO KẾT QUẢ ĐỐI SOÁT TRƯỜNG & LOẠI PHÔI */}
                     {cofExtractionResult && (
                         <div
-                            className={`p-3.5 rounded-xl border text-xs space-y-2 ${cofExtractionResult.confidence === 'high'
+                            className={`p-3.5 rounded-xl border text-xs space-y-2 ${cofExtractionResult.matchedSchool || selectedSchool
                                 ? 'bg-emerald-50/80 dark:bg-emerald-950/40 border-emerald-300 text-emerald-950 dark:text-emerald-100'
                                 : cofExtractionResult.confidence === 'medium'
                                     ? 'bg-amber-50/80 dark:bg-amber-950/40 border-amber-300 text-amber-950 dark:text-amber-100'
@@ -312,13 +357,19 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                         >
                             <div className="flex items-center justify-between font-bold">
                                 <span className="flex items-center gap-1.5">
-                                    {cofExtractionResult.confidence === 'high' && <CheckCircle2 className="w-4 h-4 text-emerald-600" />}
-                                    {cofExtractionResult.confidence === 'medium' && <AlertTriangle className="w-4 h-4 text-amber-600" />}
-                                    {cofExtractionResult.confidence === 'none' && <XCircle className="w-4 h-4 text-rose-600" />}
+                                    {(cofExtractionResult.matchedSchool || selectedSchool) ? (
+                                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                                    ) : cofExtractionResult.confidence === 'medium' ? (
+                                        <AlertTriangle className="w-4 h-4 text-amber-600" />
+                                    ) : (
+                                        <XCircle className="w-4 h-4 text-rose-600" />
+                                    )}
                                     <span>
-                                        {cofExtractionResult.confidence === 'high' && 'ĐÃ KHỚP TRƯỜNG HỌC THÀNH CÔNG'}
-                                        {cofExtractionResult.confidence === 'medium' && 'CẢNH BÁO: KHỚP TRƯỜNG GẦN ĐÚNG'}
-                                        {cofExtractionResult.confidence === 'none' && 'LỖI: KHÔNG TÌM THẤY TRƯỜNG TRONG 480 TRƯỜNG'}
+                                        {cofExtractionResult.matchedSchool
+                                            ? 'ĐÃ KHỚP TRƯỜNG HỌC TỰ ĐỘNG'
+                                            : selectedSchool
+                                                ? `ĐÃ GÁN TRƯỜNG THỦ CÔNG: ${selectedSchool.school_name.toUpperCase()}`
+                                                : 'LỖI: KHÔNG TÌM THẤY TRƯỜNG TRONG FILE'}
                                     </span>
                                 </span>
                                 <div className="flex items-center gap-2">
@@ -326,7 +377,7 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                         Phôi: {cofExtractionResult.fileType === 'BULK_ACCOUNTS' ? 'Bulk Accounts Form' : 'Curriculum Order Form (COF)'}
                                     </span>
                                     <span className="font-mono text-[11px] font-extrabold">
-                                        {Math.round(cofExtractionResult.score * 100)}% Match
+                                        {selectedSchool && !cofExtractionResult.matchedSchool ? '100% (Manual)' : `${Math.round(cofExtractionResult.score * 100)}% Match`}
                                     </span>
                                 </div>
                             </div>
@@ -334,9 +385,9 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                             <div className="text-[11px] space-y-1">
                                 <p>• Tên nhận diện: <b>"{cofExtractionResult.rawSchoolName || 'Chưa xác định từ file'}"</b></p>
                                 {cofExtractionResult.matchedSchool ? (
-                                    <p>
-                                        • Trường xác định: <b>{cofExtractionResult.matchedSchool.school_name}</b> (Mã: {cofExtractionResult.matchedSchool.school_code})
-                                    </p>
+                                    <p>• Trường tự động: <b>{cofExtractionResult.matchedSchool.school_name}</b> (Mã: {cofExtractionResult.matchedSchool.school_code})</p>
+                                ) : selectedSchool ? (
+                                    <p className="text-emerald-700 dark:text-emerald-300 font-bold">• Trường áp dụng: <b>{selectedSchool.school_name}</b> (Mã: {selectedSchool.school_code})</p>
                                 ) : (
                                     <p className="text-rose-600 font-bold">• Vui lòng tự tìm và chọn trường ở danh sách bên dưới!</p>
                                 )}
@@ -513,16 +564,70 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                                                 }}
                                                                 className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/60 dark:border-slate-700 text-xs cursor-grab active:cursor-grabbing hover:border-indigo-400 hover:shadow-2xs transition space-y-1.5"
                                                             >
-                                                                {/* Tên Lớp & Nút Thao Tác */}
+                                                                {/* Tên Lớp & Custom Edit Group Name */}
                                                                 <div className="flex items-center justify-between">
-                                                                    <div className="min-w-0 pr-2">
+                                                                    <div className="min-w-0 pr-2 flex-1">
                                                                         <p className="font-bold text-slate-800 dark:text-slate-200 truncate flex items-center gap-1.5">
                                                                             <span className="text-slate-400">⠿</span>
                                                                             <span>{clsItem.rawClassName}</span>
                                                                         </p>
-                                                                        <p className="text-[10px] text-slate-400 font-mono truncate pl-3" title={clsItem.lmsGroupName}>
-                                                                            Group: {clsItem.lmsGroupName}
-                                                                        </p>
+
+                                                                        {/* Inline Edit Group Name */}
+                                                                        {editingGroupClassKey === clsItem.rawClassName ? (
+                                                                            <div className="flex items-center gap-1 mt-1 pl-3">
+                                                                                <input
+                                                                                    type="text"
+                                                                                    value={editingGroupNameVal}
+                                                                                    onChange={(e) => setEditingGroupNameVal(e.target.value)}
+                                                                                    onKeyDown={(e) => {
+                                                                                        if (e.key === 'Enter') {
+                                                                                            const finalName = editingGroupNameVal.trim() || clsItem.lmsGroupName;
+                                                                                            setCofClassAssignments(prev => ({
+                                                                                                ...prev,
+                                                                                                [tray.courseId]: prev[tray.courseId].map(c =>
+                                                                                                    c.rawClassName === clsItem.rawClassName ? { ...c, lmsGroupName: finalName, isCustomGroup: true } : c
+                                                                                                )
+                                                                                            }));
+                                                                                            setEditingGroupClassKey(null);
+                                                                                            toast.success(`Đã đổi tên group thành '${finalName}'`);
+                                                                                        } else if (e.key === 'Escape') {
+                                                                                            setEditingGroupClassKey(null);
+                                                                                        }
+                                                                                    }}
+                                                                                    className="px-2 py-0.5 rounded border border-indigo-400 bg-white dark:bg-slate-900 text-[10px] font-mono w-full focus:outline-hidden"
+                                                                                    autoFocus
+                                                                                />
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => {
+                                                                                        const finalName = editingGroupNameVal.trim() || clsItem.lmsGroupName;
+                                                                                        setCofClassAssignments(prev => ({
+                                                                                            ...prev,
+                                                                                            [tray.courseId]: prev[tray.courseId].map(c =>
+                                                                                                c.rawClassName === clsItem.rawClassName ? { ...c, lmsGroupName: finalName, isCustomGroup: true } : c
+                                                                                            )
+                                                                                        }));
+                                                                                        setEditingGroupClassKey(null);
+                                                                                        toast.success(`Đã đổi tên group thành '${finalName}'`);
+                                                                                    }}
+                                                                                    className="p-1 text-emerald-600 hover:text-emerald-700"
+                                                                                >
+                                                                                    <Check className="w-3 h-3" />
+                                                                                </button>
+                                                                            </div>
+                                                                        ) : (
+                                                                            <div
+                                                                                onClick={() => {
+                                                                                    setEditingGroupClassKey(clsItem.rawClassName);
+                                                                                    setEditingGroupNameVal(clsItem.lmsGroupName);
+                                                                                }}
+                                                                                className="text-[10px] text-slate-400 font-mono truncate pl-3 flex items-center gap-1 group/edit cursor-pointer hover:text-indigo-600 transition"
+                                                                                title="Nhấp để đổi tên Group"
+                                                                            >
+                                                                                <span className="truncate">Group: {clsItem.lmsGroupName}</span>
+                                                                                <span className="opacity-0 group-hover/edit:opacity-100 text-[9px] text-indigo-500 font-sans font-bold">✎ Sửa</span>
+                                                                            </div>
+                                                                        )}
                                                                     </div>
 
                                                                     <div className="flex items-center gap-1.5 shrink-0">
@@ -701,10 +806,7 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                         </div>
 
                         {cofUnassignedClasses.length === 0 ? (
-                            <div className="p-6 rounded-xl border border-dashed border-emerald-300 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/30 text-center text-xs text-emerald-700 dark:text-emerald-300 font-bold flex items-center justify-center gap-2">
-                                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                                <span>Tuyệt vời! Tất cả các khối lớp đã được xếp gọn gàng vào các khay môn học!</span>
-                            </div>
+                            <></>
                         ) : (
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                                 {cofUnassignedClasses.map((uCls) => (

@@ -13,6 +13,7 @@ import {
     ParsedUserRow,
     AccountValidationStats,
     LoadedUserProfile,
+    CofExtractionResult,
 } from '../../types';
 
 export interface BuildPayloadParams {
@@ -58,7 +59,7 @@ export interface BuildPayloadParams {
     editSchoolName: string;
     editPartnerCode: string;
     editPartnerName: string;
-    gitActionType?: 'add' | 'remove' | 'jit'; // 🎯 HỖ TRỢ THÊM, GỠ VÀ KÍCH HOẠT JIT HÀNG LOẠT
+    gitActionType?: 'add' | 'remove' | 'jit';
     gitSelectedRepos: string[];
     gitUsersList: string;
     gitTargetRole: 'GUEST' | 'DEVELOPER' | 'ADMIN';
@@ -74,6 +75,8 @@ export interface BuildPayloadParams {
     docUrl: string;
     assigneeEmail: string;
     feedbackCommentContent: string;
+    uploadedCofFile?: File | null;
+    cofExtractionResult?: CofExtractionResult | null;
 }
 
 export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPayload | null => {
@@ -193,10 +196,18 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                     toast.error('Vui lòng chọn trường học áp dụng từ danh sách!');
                     return null;
                 }
+
+                const isBulkAccounts = params.cofExtractionResult?.fileType === 'BULK_ACCOUNTS';
+                const sourceFilename = params.uploadedCofFile?.name || (params.uploadedAccountsFile ? params.uploadedAccountsFile.name : undefined);
+                const totalAccCount = (params.cofExtractionResult?.studentsCount || 0) + (params.cofExtractionResult?.teachersCount || 0);
+
                 payload = {
                     ...payload,
                     action: 'pipeline_end_to_end',
                     school_name: params.selectedSchool.school_name,
+                    file_type: params.cofExtractionResult?.fileType || 'COF',
+                    filename: sourceFilename,
+                    auto_create_accounts: isBulkAccounts,
                     hierarchy: {
                         school_name: params.selectedSchool.school_name,
                         school_code: params.selectedSchool.school_code,
@@ -207,6 +218,10 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                         contact_info: params.contactInfo,
                         additional_notes: params.additionalNotes,
                         total_amount: String(calculatedTotalAmount),
+                        filename: sourceFilename,
+                        file_type: params.cofExtractionResult?.fileType || 'COF',
+                        auto_create_accounts: isBulkAccounts,
+                        record_count: totalAccCount > 0 ? totalAccCount : 50,
                         courses: params.selectedCourses.map((c) => {
                             const uPrice = Number((c as any).unit_price) || 0;
                             const qty = Number(c.licenses) || 1;

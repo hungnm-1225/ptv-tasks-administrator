@@ -414,6 +414,59 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
         # ------------------------------------------------------------------
         cp["current_step"] = "bulk_account_creation"
         account_file = cof_file_path or order_details.get("account_file_path") or order_details.get("uploaded_file_path")
+        is_bulk_accounts = bool(
+            order_details.get("auto_create_accounts") or
+            order_details.get("file_type") == "BULK_ACCOUNTS" or
+            order_details.get("filename", "").lower().startswith("temp-account")
+        )
+
+        # 🎯 NẾU LÀ PHÔI BULK ACCOUNTS MÀ CHƯA CÓ FILE LOCAL: TỰ SINH PHÔI CHUẨN TỪ USERS
+        if is_bulk_accounts and (not account_file or not os.path.exists(account_file)):
+            try:
+                from app.services.excel.bulk_template_service import bulk_template_service
+                import tempfile
+
+                # Thu thập tất cả email từ class_assignments & teachers_allocation
+                users_to_create = []
+                seen_emails = set()
+
+                # Học sinh từ các lớp
+                ca = class_assignments or order_details.get("class_assignments") or {}
+                for cid, classes in ca.items():
+                    for cls in classes:
+                        for st in cls.get("students", []):
+                            st_email = str(st).strip().lower()
+                            if st_email and st_email not in seen_emails:
+                                seen_emails.add(st_email)
+                                users_to_create.append({
+                                    "first_name": "Student",
+                                    "last_name": st_email.split("@")[0],
+                                    "email": st_email,
+                                    "role": "student"
+                                })
+
+                # Giáo viên
+                ta = teachers_allocation or order_details.get("teachers_allocation") or []
+                for tc in ta:
+                    tc_email = str(tc.get("email") or "").strip().lower()
+                    if tc_email and tc_email not in seen_emails:
+                        seen_emails.add(tc_email)
+                        users_to_create.append({
+                            "first_name": "Teacher",
+                            "last_name": str(tc.get("teacherName") or tc_email.split("@")[0]),
+                            "email": tc_email,
+                            "role": "teacher"
+                        })
+
+                if users_to_create:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix="_bulk_accounts.xlsx") as tmp_acc:
+                        account_file = bulk_template_service.generate_accounts_excel_from_users(
+                            users_list=users_to_create,
+                            output_file_path=tmp_acc.name
+                        )
+                    log_step(f"[4/5] Tài khoản: Đã tự động tạo phôi nộp batch cho {len(users_to_create)} tài khoản")
+            except Exception as gen_err:
+                logger.warning(f"⚠️ [Bulk Accounts] Không thể tự tạo phôi Excel: {gen_err}")
 
         if "bulk_account_creation" in completed:
             log_step("[4/5] Tài khoản: Đã hoàn tất ở phiên trước")
@@ -421,7 +474,7 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
             acc_res = await workspace_account_service.submit_account_creation_batch(
                 credentials=school_creds,
                 upload_file_path=account_file,
-                record_count=int(order_details.get("record_count") or 50),
+                record_count=int(order_details.get("record_count") or len(seen_emails if 'seen_emails' in locals() else []) or 50),
                 download_dir=os.path.join(os.getcwd(), "backend", "data", "results_download"),
                 checkpoint=cp
             )
