@@ -177,7 +177,7 @@ Hệ sinh thái Pythaverse vận hành trên 7 phân hệ độc lập. Nhằm t
 - **Render.com**: Máy chủ khởi chạy Backend FastAPI trên môi trường tài nguyên nghiêm ngặt (**512MB RAM Free/Starter Tier**). Cấu hình qua [`render.yaml`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/render.yaml) và [`backend/Dockerfile`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/Dockerfile). Áp dụng **Kiến Trúc Hybrid RPA-API kết hợp Ephemeral Session Caching**, khóa cứng Semaphore 1 slot, thu hồi bộ nhớ `gc.collect()` và tiêu diệt Chromium zombie.
 - **Supabase**: Cơ sở dữ liệu PostgreSQL 16 (**23 bảng chuyên biệt** bao gồm 21 bảng nghiệp vụ + 2 bảng session/telemetry persistence, RLS `@dtt.vn`, Storage Bucket `ticket-attachments`, Két sắt mã hóa Fernet, và 2 PostgreSQL Stored Procedures nguyên tử: `create_or_get_inbox_ticket_revision` và `approve_workflow_proposal`).
 - **Google Cloud Console**: Quản trị tài khoản dịch vụ (Service Account) tích hợp bộ ba Gmail Workspace API, Google Sheets API, Google Docs API và Google Drive API.
-- **UptimeRobot**: Giám sát ngoại vi Synthetic Ping Uptime (chu kỳ 5 phút) kiêm nhiệm vụ giữ ấm (keep-warm ping) cho Render chống ngủ đông.
+- **UptimeRobot (Anti-Idling Keep-Warm Engine)**: Dịch vụ giám sát ngoại vi Synthetic Ping Uptime (chu kỳ **5 phút / 300 giây**) gửi request `GET /health` liên tục 24/7 kiêm nhiệm vụ giữ ấm tuyệt đối cho máy chủ Render. Vì chu kỳ ping là 5 phút, nó **chặn đứng hoàn toàn** ngưỡng 15 phút không hoạt động của Render, đảm bảo backend **KHÔNG BAO GIỜ bị rơi vào trạng thái ngủ đông (Never Sleeps)**.
 - **GitHub**: Quản lý mã nguồn Monorepo, GitHub Actions CI/CD và Dispatcher Issue tự động vào Private Repositories qua Personal Access Token (`GITHUB_PAT`).
 
 ### 2. Chi Tiết Backend Stack
@@ -1382,6 +1382,19 @@ Bảng tra cứu trực tiếp giúp AI Coder tìm kiếm tức thì vị trí �
 - **Cách khắc phục:**
   1. **Tự động ngầm:** Khi Quản trị viên nộp batch tạo tài khoản hoặc đổi mật khẩu qua `account_service.py`, cỗ máy `Auto-Trigger JIT Seeding` tự động kích hoạt `batch_activate_jit` ngầm dưới 400ms/user.
   2. **Thủ công trên giao diện:** Vào **Automation Studio ➔ Tab Git Repositories ➔ Chuyển Mode sang `Kích hoạt JIT (OIDC Handshake)`**, dán danh sách tài khoản hoặc tải file Excel và bấm Kích Hoạt. Hệ thống sẽ tự động verify email trên Keycloak và thực hiện bắt tay OIDC ngầm siêu tốc mà không cần người dùng tự đăng nhập thủ công!
+
+### 10. Nguyên Tắc Cốt Tử: "Nghiêm Cấm Đổ Lỗi Cho 'Render Ngủ Đông Sau 15 Phút' (The Anti-Idling & Keep-Warm Truth)"
+- **Thực tế kỹ thuật:** Nhiều AI Coder khi phân tích lỗi hệ thống thường đưa ra phỏng đoán chung chung rằng *"khả năng Render ngủ đông sau 15 phút không hoạt động"*. Đây là **KẾT LUẬN SAI HOÀN TOÀN** trong dự án này vì:
+  1. **Chốt chặn ngoại vi (External):** Dịch vụ UptimeRobot gửi HTTP GET ping tới endpoint `GET /health` đều đặn mỗi **5 phút (300 giây)** 24/7. Vì 5 phút nhỏ hơn rất nhiều so với ngưỡng 15 phút (900 giây) của Render, máy chủ Render **KHÔNG BAO GIỜ bị rơi vào trạng thái ngủ đông (Never Sleeps)**.
+  2. **Chốt chặn nội tại (Internal):** Bên trong tiến trình FastAPI, `AsyncIOScheduler` kích hoạt liên tục **7 background cronjobs** lệch pha (+15s, +30s, +45s, +75s, +150s, +240s, +900s) và `session_keepalive_service.py` ping giữ ấm 7 phân hệ định kỳ.
+- **Quy tắc chẩn đoán lỗi bắt buộc (Strict Diagnostic Protocol):**
+  - Tuyệt đối **NGHIÊM CẤM** AI đưa ra kết luận hoặc viện cớ Render ngủ đông.
+  - Mọi sự cố phải được điều tra chính xác theo nguyên nhân gốc rễ (Root Cause):
+    1. *Hết Quota AI (HTTP 429)*: Kiểm tra Dual-Key Gemini, chuỗi 10 model fallback hoặc Fast-Path Triage v1.2.0.
+    2. *Phiên Đăng Nhập (Session)*: Kiểm tra Cookie Sales Admin, Moodle sesskey, hoặc gọi `POST /api/v1/workspace/prewarm-all-sessions`.
+    3. *Tài Khoản Git Chưa JIT*: Kích hoạt qua Tab Git JIT OIDC Handshake (< 400ms) trên Automation Studio.
+    4. *Thiếu Dữ Liệu Thực Thể*: Kiểm tra danh sách `missing_requirements` trong Proposal DAG.
+    5. *Tài Nguyên Bộ Nhớ (512MB RAM)*: Kiểm tra Chromium zombie sót lại hoặc deadlock Semaphore Playwright.
 
 ---
 
