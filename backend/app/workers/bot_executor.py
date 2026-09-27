@@ -145,7 +145,7 @@ async def execute_approved_bot_task(
                 logger.info(f"⚡ {task_tag} Kích hoạt Pythaverse Git JIT Engine (KÍCH HOẠT JIT HÀNG LOẠT)...")
                 accounts = payload_data.get("accounts", [])
                 
-                # Bọc lót an toàn: Nếu chưa bóc tách mảng accounts thì tự bóc từ text thô copy từ Sheet
+                # Bóc tách nếu là text thô
                 if not accounts:
                     raw_text = payload_data.get("raw_text") or payload_data.get("gitUsersList") or payload_data.get("users") or ""
                     if isinstance(raw_text, str):
@@ -166,6 +166,20 @@ async def execute_approved_bot_task(
                 if not accounts:
                     return {"status": "failed", "error": "Không tìm thấy danh sách tài khoản & mật khẩu hợp lệ để kích hoạt JIT."}
 
+                # TỰ ĐỘNG VERIFY EMAIL TRÊN KEYCLOAK TRƯỚC KHI JIT
+                user_ids_to_verify = [a["username"] for a in accounts if a.get("username")]
+                if user_ids_to_verify:
+                    try:
+                        logger.info(f"📧 {task_tag} Đang kích hoạt emailVerified trên Keycloak cho {len(user_ids_to_verify)} tài khoản...")
+                        await keycloak_service.execute_account_action({
+                            "identifiers": user_ids_to_verify,
+                            "actions": ["mark_email_verified"]
+                        })
+                        logger.info(f"✔ {task_tag} Đã đảm bảo toàn bộ tài khoản được Verify Email trên Keycloak!")
+                    except Exception as kc_v_err:
+                        logger.warning(f"⚠️ {task_tag} Không thể auto-verify email trước JIT: {kc_v_err}")
+
+                # Tiến hành bắt tay OIDC
                 concurrency = int(payload_data.get("concurrency", 3))
                 res = await git_playwright_service.batch_activate_jit(accounts, concurrency=concurrency)
                 
