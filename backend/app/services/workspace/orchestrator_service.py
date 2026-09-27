@@ -450,11 +450,12 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
             try:
                 from app.services.excel.bulk_template_service import bulk_template_service
                 import tempfile
-                with tempfile.NamedTemporaryFile(delete=False, suffix="_bulk_accounts.xlsx") as tmp_acc:
-                    account_file = bulk_template_service.generate_accounts_excel_from_users(
-                        users_list=users_to_create,
-                        output_file_path=tmp_acc.name
-                    )
+                
+                tmp_excel_path = os.path.join(tempfile.gettempdir(), f"bulk_accounts_{int(time.time())}.xlsx")
+                account_file = bulk_template_service.generate_accounts_excel_from_users(
+                    users=users_to_create,
+                    output_file_path=tmp_excel_path
+                )
                 log_step(f"[4/5] Tài khoản: Đã tự động tạo phôi nộp batch cho {len(users_to_create)} tài khoản ({len(seen_emails)} users)")
             except Exception as gen_err:
                 logger.warning(f"⚠️ [Bulk Accounts] Lỗi tự tạo phôi Excel: {gen_err}")
