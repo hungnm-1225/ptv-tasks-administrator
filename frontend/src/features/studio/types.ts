@@ -75,14 +75,16 @@ export interface ClassGroupItem {
     lmsGroupName: string;
     studentsCount: number;
     gradeDetected: number | null;
+    students?: string[];
+    [key: string]: any;
 }
 
 export interface TeacherAllocationItem {
     teacherName: string;
     email: string;
-    assignedCourses: string[]; // Danh sách các Course ID giáo viên phụ trách (VD: ['679', '654'])
-    courseAssign?: string;     // Text tóm tắt hiển thị
-    assignedLmsGroups: string[]; // Danh sách Group LMS được tham gia
+    assignedCourses: string[];
+    courseAssign?: string;
+    assignedLmsGroups: string[];
 }
 
 export interface LicenseTrayItem {

@@ -201,19 +201,18 @@ export const parseCofExcelFile = async (
             extractedSchoolName = matchedFromFileName.matched.school_name;
         }
 
-        const cleanSchool = cleanLmsText(extractedSchoolName) || 'School';
-        const classesMap: Record<string, { count: number; grade: number | null }> = {};
+        const cleanSchool = cleanLmsText(extractedSchoolName) || '';
+        const classesMap: Record<string, { count: number; grade: number | null; students: string[] }> = {};
         const teacherMap: Record<string, { name: string; email: string; classes: Set<string> }> = {};
         let totalStudents = 0;
         let totalTeachers = 0;
 
-        // Quét từng Sheet Tab (Mỗi tab thường là 1 lớp: Class 7s, Class 8a...)
+        // Quét từng Sheet Tab (Class 7s, Class 8a...)
         sheetNames.forEach((sheetName) => {
             const ws = workbook.Sheets[sheetName];
             const rawJson: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
             if (rawJson.length < 5) return;
 
-            // Dò dòng Header chứa: First Name, Last Name, Email, Role (Hàng 5 trong ảnh 2)
             let headerRowIndex = -1;
             for (let i = 0; i < Math.min(rawJson.length, 10); i++) {
                 const rowStr = rawJson[i].map((c) => String(c).toLowerCase()).join(' ');
@@ -222,7 +221,7 @@ export const parseCofExcelFile = async (
                     break;
                 }
             }
-            if (headerRowIndex === -1) headerRowIndex = 4; // Mặc định hàng 5 (index 4)
+            if (headerRowIndex === -1) headerRowIndex = 4;
 
             const headers = rawJson[headerRowIndex].map((h) => String(h).trim().toLowerCase());
             const fnIdx = headers.findIndex((h) => h.includes('first name') || h.includes('tên'));
@@ -232,7 +231,14 @@ export const parseCofExcelFile = async (
 
             const className = sheetName.trim();
             const gradeNum = extractGradeNumberClient(className);
-            let sheetStudentCount = 0;
+
+            if (!classesMap[className]) {
+                classesMap[className] = {
+                    count: 0,
+                    grade: gradeNum,
+                    students: [],
+                };
+            }
 
             const dataRows = rawJson.slice(headerRowIndex + 1);
             dataRows.forEach((row) => {
@@ -259,35 +265,35 @@ export const parseCofExcelFile = async (
                     }
                 } else {
                     totalStudents++;
-                    sheetStudentCount++;
+                    classesMap[className].count++;
+                    // 🎯 ĐÃ BỔ SUNG: BẢO TOÀN EMAIL HỌC SINH, KHÔNG ĐỂ RƠI MẤT NỮA!
+                    if (email) {
+                        classesMap[className].students.push(email);
+                    }
                 }
             });
-
-            if (sheetStudentCount > 0) {
-                classesMap[className] = {
-                    count: sheetStudentCount,
-                    grade: gradeNum,
-                };
-            }
         });
 
-        // Tự động tìm Môn học tương ứng theo Khối lớp (Grade) từ danh mục môn học
+        // Tự động tìm Môn học tương ứng theo Khối lớp (Grade)
         const traysMap: Record<string, LicenseTrayItem> = {};
         const parsedCoursesForForm: OrderCourseSelection[] = [];
         const newClassAssignments: Record<string, ClassGroupItem[]> = {};
         const unassigned: ClassGroupItem[] = [];
 
         Object.entries(classesMap).forEach(([className, info]) => {
+            if (info.count === 0) return;
             const cleanClass = cleanLmsText(className);
             const lmsGroupName = `${cleanSchool} ${cleanClass} ${dateSuffix}`.replace(/\s+/g, ' ').trim();
+
+            // 🎯 GẮN DANH SÁCH STUDENTS VÀO CLASS ITEM
             const classItem: ClassGroupItem = {
                 rawClassName: className,
                 lmsGroupName,
                 studentsCount: info.count,
                 gradeDetected: info.grade,
+                students: info.students,
             };
 
-            // Tìm môn học khớp với Khối lớp trong danh mục môn học (VD: Khối 7 -> SWRP 7)
             let matchedCourse: CourseItem | undefined;
             if (info.grade !== null) {
                 matchedCourse = context.workspaceCoursesList.find((c) => {

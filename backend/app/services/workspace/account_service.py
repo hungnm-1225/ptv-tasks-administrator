@@ -463,17 +463,52 @@ class WorkspaceAccountService(WorkspaceBaseService):
                 logger.info(f"🚀 Đã kích hoạt lệnh tạo tài khoản ngầm cho Request #{request_id}!")
 
                 account_count = len(accounts)
-                wait_seconds = max(account_count * 15, 30)
+
+                # Tối thiểu 10s / tài khoản, tối đa 20s / tài khoản
+                min_wait = max(account_count * 10, 10)
+                max_wait = max(account_count * 20, 20)
+
+                # ⚡ FAST-PATH POLLING: ĐỢI ĐỦ THỜI GIAN RỒI CHECK TRỰC TIẾP TẠI CHỖ
+                # Với batch nhỏ (<= 20 tài khoản), bot tự động đợi đúng thời gian anh tính và check để ăn kết quả ngay!
+                if account_count <= 20:
+                    logger.info(f"⏱️ Đang chờ {min_wait}s (tối thiểu 10s/acc) để Server Pythaverse xử lý xong Request #{request_id}...")
+                    await asyncio.sleep(float(min_wait))
+
+                    # Bắt đầu thăm dò trạng thái getListRequest.php
+                    max_attempts = max(1, (max_wait - min_wait) // 3 + 3)
+                    for attempt in range(max_attempts):
+                        try:
+                            chk_res = await self.check_and_export_batch_result(
+                                credentials=credentials,
+                                request_id=request_id,
+                                download_dir=download_dir
+                            )
+                            if chk_res.get("status") == "completed":
+                                logger.info(f"🎉 [Hoàn Tất Trực Tiếp] Batch #{request_id} đã xong! Tải file kết quả và chuyển bước tiếp theo.")
+                                checkpoint["account_batch_request_id"] = request_id
+                                checkpoint["result_file_path"] = chk_res.get("result_file_path")
+                                checkpoint["cof_result_path"] = chk_res.get("result_file_path")
+                                return {
+                                    "status": "completed",
+                                    "request_id": request_id,
+                                    "result_file_path": chk_res.get("result_file_path"),
+                                    "result_file_url": chk_res.get("result_file_url"),
+                                    "checkpoint": checkpoint,
+                                    "message": f"Tạo thành công {account_count} tài khoản"
+                                }
+                        except Exception as poll_err:
+                            logger.warning(f"⚠️ Thăm dò nhịp #{attempt + 1} chưa xong: {poll_err}")
+                        await asyncio.sleep(3.0)
+
+                # Nếu là batch rất lớn (> 20 tài khoản) thì mới chuyển giao sang waiting_poll
+                wait_seconds = max_wait
                 next_check_dt = datetime.now(timezone.utc) + timedelta(seconds=wait_seconds)
                 next_check_iso = next_check_dt.isoformat()
                 next_check_vn = to_vn_time_str(next_check_dt)
-
-                eta_mins = wait_seconds // 60
-                eta_secs = wait_seconds % 60
-                eta_text = f"{eta_mins} phút {eta_secs} giây" if eta_mins > 0 else f"{eta_secs} giây"
+                eta_text = f"{wait_seconds} giây"
 
                 eta_summary_msg = (
-                    f"⏱️ [TIẾN ĐỘ ƯỚC TÍNH] Nộp batch thành công {account_count} tài khoản (Request #{request_id})! "
+                    f"⏱️ [TIẾN ĐỘ ƯỚC TÍNH] Nộp batch {account_count} tài khoản (Request #{request_id})! "
                     f"Thời gian xử lý dự kiến: ~{eta_text} (Hoàn tất vào khoảng: {next_check_vn} GMT+7)."
                 )
                 logger.info(eta_summary_msg)
@@ -483,37 +518,6 @@ class WorkspaceAccountService(WorkspaceBaseService):
                 checkpoint["next_check_vn"] = next_check_vn
                 checkpoint["estimated_duration_text"] = eta_text
                 checkpoint["total_accounts"] = account_count
-
-                task_id = checkpoint.get("task_id")
-                if task_id:
-                    try:
-                        supabase = get_supabase_client()
-                        
-                        # Đọc log cũ để append thêm log ước tính lên đầu
-                        existing_task = supabase.table("bot_automation_tasks").select("execution_logs").eq("id", task_id).execute()
-                        old_logs = existing_task.data[0].get("execution_logs") or "" if existing_task.data else ""
-                        new_logs = f"{eta_summary_msg}\n{old_logs}".strip()
-
-                        task_update_payload = {
-                            "request_id": request_id,
-                            "school_credentials": credentials,
-                            "next_check_at": next_check_iso,
-                            "next_check_vn": next_check_vn,
-                            "estimated_wait_seconds": wait_seconds,
-                            "estimated_duration_text": eta_text,
-                            "total_count": account_count,
-                            "upload_file_path": upload_file_path,
-                            "checkpoint": checkpoint
-                        }
-                        supabase.table("bot_automation_tasks").update({
-                            "execution_status": "waiting_poll",
-                            "execution_logs": new_logs,
-                            "current_step": f"Đang tạo ngầm ({eta_text})",
-                            "payload_data": task_update_payload
-                        }).eq("id", task_id).execute()
-                        logger.info(f"💾 Đã cập nhật ETA ({eta_text}) vào bot_automation_tasks #{task_id}!")
-                    except Exception as t_err:
-                        logger.warning(f"⚠️ Không thể cập nhật trạng thái bot task: {t_err}")
 
                 return {
                     "status": "waiting_poll",
