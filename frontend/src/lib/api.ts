@@ -2,7 +2,7 @@
 import { supabase } from './supabase';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
-const DEFAULT_TIMEOUT_MS = 30000; // 30s timeout để phòng chống treo mạng trên Render
+const DEFAULT_TIMEOUT_MS = 90000; // 90s timeout để phòng chống treo mạng trên Render
 
 export interface ApiErrorDetail {
   message: string;
