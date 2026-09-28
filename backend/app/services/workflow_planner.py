@@ -645,13 +645,24 @@ class WorkflowPlannerService:
             plan=[s.model_dump() for s in steps]
         )
 
+        detected_course_names: List[str] = []
+        for s in steps:
+            if s.inputs and isinstance(s.inputs.get("courses"), list):
+                for c in s.inputs["courses"]:
+                    if c and str(c) not in detected_course_names:
+                        detected_course_names.append(str(c))
+
+        if not detected_course_names and assessment.entities:
+            raw_c = assessment.entities.get("courses") or []
+            detected_course_names = [str(c) for c in raw_c if c]
+
         ai_analysis_dict = {
             "summary": ticket.get("ai_summary"),
             "reason_summary_vi": f"Đã tự động lập kế hoạch {len(steps)} bước thực thi dựa trên phân tích yêu cầu.",
             "overall_confidence": 0.95 if status == "ready" else 0.85,
             "workflow_outcome": "ACTIONABLE" if status == "ready" else "NEEDS_INFORMATION",
             "missing_requirements": missing_reqs,
-            "detected_courses": [c["course_name"] for c in canonical_courses],  # 🎯 SỬA LẠI: HIỂN THỊ ĐÚNG TÊN KHÓA HỌC THẬT!
+            "detected_courses": detected_course_names,
             "planned_steps": [s.name for s in steps],
             "evidence_quotes": assessment.raw_evidence_quotes,
             "entities": assessment.entities,
