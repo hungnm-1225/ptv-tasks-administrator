@@ -272,6 +272,21 @@ class WorkflowPlannerService:
         if not user_emails and entities.get("target_email"):
             user_emails = [entities["target_email"].strip()]
 
+        # 🛑 CHỐT CHẶN VÀNG: THANH LỌC NGƯỜI GỬI (PURGE SENDER FROM TARGET USERS)
+        # Nếu người gửi gửi email thay cho học sinh/giáo viên khác, TUYỆT ĐỐI không để người gửi bị xử lý nhầm!
+        clean_sender = str(sender_email or "").strip().lower()
+        if clean_sender and len(user_emails) > 1:
+            # Kiểm tra xem có bằng chứng người gửi tự xin cho chính mình không
+            self_action_keywords = ["cho tôi", "tài khoản của tôi", "giúp tôi", "my account", "for me", "myself"]
+            is_self_action = any(k in str(ai_summary or "").lower() for k in self_action_keywords)
+            
+            if not is_self_action:
+                # Loại bỏ người gửi ra khỏi danh sách học sinh/đối tượng can thiệp
+                purged_users = [em for em in user_emails if em.lower() != clean_sender]
+                if purged_users:
+                    logger.info(f"🛡️ [Sender Guard] Đã thanh lọc người gửi [{clean_sender}] ra khỏi danh sách đối tượng thực thi: {purged_users}")
+                    user_emails = purged_users
+
         if not is_teacher and any(k in str(ai_summary or "").lower() for k in ["giáo viên", "teacher"]):
             is_teacher = True
 

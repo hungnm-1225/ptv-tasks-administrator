@@ -1,3 +1,4 @@
+# backend/app/workers/ticket_processor.py
 """
 Ticket Processor Worker (Master Canonical Intake with Attachment Provenance & Multimodal Vision)
 Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI

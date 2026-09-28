@@ -1,3 +1,4 @@
+# backend/app/core/gemini.py
 """
 Dual-Key Gemini Cognition Engine (Master Enterprise v4.0 - Multimodal Vision & Attachment Ledger)
 Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI
@@ -168,6 +169,9 @@ class AIEngine:
 
         return None, None
 
+    # =========================================================================
+    # 🌟 NÂNG CẤP KEY 1: HỒ SƠ GIÁM ĐỊNH CHI TIẾT (OPERATIONAL DOSSIER)
+    # =========================================================================
     def summarize_ticket(
         self,
         subject: str,
@@ -175,6 +179,11 @@ class AIEngine:
         source: str,
         sender_email: Optional[str] = None
     ) -> TicketSummary:
+        """
+        Nâng cấp Tóm Tắt thành Hồ Sơ Giám Định Chi Tiết (Detailed Operational Dossier).
+        Phân định rạch ròi Người Gửi (Requester) vs Người Thụ Hưởng (Target Subjects)
+        để chống tuyệt đối lỗi kẹp người gửi vào danh sách thực thi.
+        """
         sender_clean = (sender_email or "").lower().strip()
         is_automated = any(sender_clean.startswith(prefix) or prefix in sender_clean for prefix in AUTOMATED_SENDER_PREFIXES)
         if is_automated:
@@ -182,7 +191,7 @@ class AIEngine:
                 category="other",
                 priority="low",
                 goal=f"Thông báo tự động: {subject[:60]}",
-                summary_vi=f"📨 Thông báo tự động từ [{sender_clean}]: {subject}.",
+                summary_vi=f"📨 Thông báo tự động từ hệ thống [{sender_clean}]: {subject}.",
                 assigned_name="Hệ Thống",
                 assigned_email=None,
                 model_name="fast_path_system_filter",
@@ -192,25 +201,32 @@ class AIEngine:
         parsed_thread = thread_service.parse_thread(raw_content, sender_email)
         prompt_content = parsed_thread.compact_prompt_context if parsed_thread.is_thread else (raw_content[:20000] if raw_content else "(Trống)")
 
-        if self.summary_prompt_tpl:
-            prompt = self.summary_prompt_tpl
-            for ph, val in {
-                "{source}": str(source or ""),
-                "{subject}": str(subject or ""),
-                "{full_content}": str(prompt_content or "")
-            }.items():
-                prompt = prompt.replace(ph, val)
-        else:
-            prompt = f"Tóm tắt: {subject}\n{prompt_content}"
+        # XÂY DỰNG PROMPT GIÁM ĐỊNH CHI TIẾT
+        detailed_dossier_instruction = (
+            f"Bạn là Chuyên gia Giám định Vận hành Hệ thống.\n"
+            f"Hãy lập HỒ SƠ GIÁM ĐỊNH CHI TIẾT cho yêu cầu sau:\n"
+            f"- Tiêu đề: {subject}\n"
+            f"- Người gửi (Requester): {sender_clean}\n"
+            f"- Kênh tiếp nhận: {source}\n"
+            f"- Nội dung:\n{prompt_content}\n\n"
+            f"YÊU CẦU PHÂN TÍCH:\n"
+            f"1. Xác định rõ: Người gửi là ai? Họ đang yêu cầu cho chính họ hay yêu cầu cho người khác (học sinh/giáo viên khác)?\n"
+            f"2. Liệt kê các đối tượng thụ hưởng thực sự (target subjects) nếu có trong văn bản.\n"
+            f"3. Xác định rõ phân hệ cần can thiệp: Git, LMS Moodle, Keycloak, hay School Workspace?\n"
+            f"4. Trả về JSON gồm: category ('license'|'lms_enroll'|'account_keycloak'|'bug'|'other'), "
+            f"priority ('urgent'|'high'|'normal'|'low'), goal, và summary_vi.\n"
+            f"Trong đó summary_vi PHẢI LÀ BẢN GIÁM ĐỊNH ĐẦY ĐỦ theo cấu trúc:\n"
+            f"'[Người yêu cầu: {sender_clean}] [Hành động: ...] [Đối tượng đích: ...] [Phân hệ: ...] [Chi tiết: ...]'"
+        )
 
-        parsed_data, used_model = self._call_gemini_with_fallback(prompt, primary_key=self.api_key_summary)
+        parsed_data, used_model = self._call_gemini_with_fallback(detailed_dossier_instruction, primary_key=self.api_key_summary)
 
         if not parsed_data:
             return TicketSummary(
                 category="other",
                 priority="normal",
                 goal=subject or "Không thể phân tích",
-                summary_vi="⚠️ Lỗi: Không thể phân tích nội dung do sự cố kết nối AI hoặc hết hạn ngạch API.",
+                summary_vi=f"⚠️ [Yêu cầu từ: {sender_clean}] Không thể phân tích nội dung do sự cố kết nối AI hoặc hết hạn ngạch API.",
                 assigned_name="Chưa phân công",
                 assigned_email=None,
                 model_name="ai_analysis_failed",
@@ -226,11 +242,11 @@ class AIEngine:
             category=final_cat,
             priority=final_pri,
             goal=parsed_data.get("goal", subject),
-            summary_vi=parsed_data.get("summary_vi", f"Tóm tắt: {subject}"),
+            summary_vi=parsed_data.get("summary_vi", f"[Yêu cầu từ: {sender_clean}] {subject}"),
             assigned_name=parsed_data.get("assigned_name", "Hung Nguyen"),
             assigned_email=parsed_data.get("assigned_email", "hung.nguyenmanh@dtt.vn"),
             model_name=used_model,
-            prompt_version="v2.0"
+            prompt_version="v5.0_detailed_dossier"
         )
 
     def extract_operational_facts(
