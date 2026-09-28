@@ -92,19 +92,20 @@ def create_or_get_ticket_revision(
 
 
 def get_catalog_context(supabase) -> List[Dict[str, Any]]:
-    """Lấy danh mục các khóa học LMS kèm Git Repos liên kết chuẩn xác."""
+    """Lấy danh mục TOÀN BỘ các khóa học LMS kèm Git Repos liên kết chuẩn xác (Không giới hạn 80)."""
     try:
         res = supabase.table("lms_courses")\
-            .select("id, course_id, course_name, sku, git_repos, git_repo_url")\
-            .limit(80)\
+            .select("id, course_id, course_name, git_repos")\
+            .order("course_id", desc=False)\
             .execute()
         if res.data:
             catalog = []
             for c in res.data:
+                # Chuẩn hóa tên khóa học khử sạch &amp;
+                c_name = str(c.get("course_name") or "").replace("&amp;", "&").strip()
                 catalog.append({
                     "id": c.get("course_id") or c.get("id"),
-                    "code": c.get("sku") or "",
-                    "name": c.get("course_name") or "",
+                    "name": c_name,
                     "git_repos": c.get("git_repos") or []
                 })
             logger.info(f"📚 [LMS Catalog] Đã nạp thành công {len(catalog)} khóa học kèm Git Repos vào AI context!")

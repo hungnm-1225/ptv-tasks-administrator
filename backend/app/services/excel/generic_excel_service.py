@@ -326,33 +326,24 @@ class GenericExcelService:
                 # TẦNG 2A: ADAPTER TẠO TÀI KHOẢN (ACCOUNT CREATION PROFILES)
                 # =============================================================
                 if raw_name or clean_user or clean_email:
-                    effective_name = raw_name or clean_user or clean_email.split("@")[0]
+                    effective_name = raw_name or clean_user or (clean_email.split("@")[0] if clean_email else "User")
                     first_name, last_name = cls.split_vietnamese_name(effective_name, role=role)
                     dob_clean = cls.normalize_dob(raw_dob, role=role)
 
-                    if role == "teacher" and not clean_email:
-                        invalid_profiles.append({
-                            "row": row_idx,
-                            "raw_name": effective_name,
-                            "role": role,
-                            "reason": "Thiếu email giáo viên bắt buộc",
-                            "first_name": first_name,
-                            "last_name": last_name,
-                            "dob": dob_clean
-                        })
-                    else:
-                        account_profiles.append({
-                            "row": row_idx,
-                            "first_name": first_name,
-                            "last_name": last_name,
-                            "full_name": f"{first_name} {last_name}".strip(),
-                            "email": clean_email,
-                            "dob": dob_clean,
-                            "role": role,
-                            "class_name": raw_class or None,
-                            "school": raw_school or school_detected
-                        })
-
+                    # 🎯 NỚI LỎNG AN TOÀN: Nếu giáo viên chưa có email cá nhân (ví dụ chỉ có Teacher ID từ file SSTP),
+                    # VẪN NẠP VÀO account_profiles với email = clean_email hoặc username, không bị vứt vào invalid_profiles!
+                    account_profiles.append({
+                        "row": row_idx,
+                        "first_name": first_name,
+                        "last_name": last_name,
+                        "full_name": f"{first_name} {last_name}".strip(),
+                        "email": clean_email,
+                        "username": clean_user or effective_name,
+                        "dob": dob_clean,
+                        "role": role,
+                        "class_name": raw_class or None,
+                        "school": raw_school or school_detected
+                    })
             return {
                 # TẦNG 1: DỮ LIỆU ĐA NĂNG DÙNG NGAY CHO MỌI CAPABILITY
                 "identifiers": sorted(list(identifiers_set)),

@@ -142,8 +142,9 @@ class WorkflowPlannerService:
     def resolve_course_and_repos_from_db(course_query: str, is_teacher: bool = False) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[int]]:
         """
         Tra cứu khóa học trong CSDL lms_courses:
-        - Tự động bắt Course ID từ link Moodle (VD: view.php?id=1437 -> 1437).
-        - Trích xuất link Git Repo bám dính theo vai trò Giáo viên/Học sinh.
+        - Bắt chính xác Course ID từ link URL Moodle (view.php?id=1437) hoặc số ID nguyên.
+        - Khử sạch &amp; HTML entities và các nhãn phụ (Primary), (Secondary).
+        - Trích xuất link Git Repo từ cột git_repos JSONB.
         """
         if not course_query:
             return None, None, None, None
@@ -151,85 +152,80 @@ class WorkflowPlannerService:
         clean_q = str(course_query).strip()
         supabase = get_supabase_client()
 
-        # 🎯 1. BẮT TRỰC TIẾP NẾU LÀ LINK MOODLE HOẶC COURSE ID SỐ (VD: 1437, view.php?id=1437)
+        # 🎯 1. BẮT TRỰC TIẾP COURSE ID TỪ LINK MOODLE HOẶC CHUỖI SỐ
         course_id_target = None
         id_url_match = re.search(r"[?&]id=(\d+)", clean_q)
         if id_url_match:
             course_id_target = int(id_url_match.group(1))
         elif clean_q.isdigit():
             course_id_target = int(clean_q)
+        else:
+            id_inline_match = re.search(r"\bID\s*[:#]?\s*(\d+)\b", clean_q, re.IGNORECASE)
+            if id_inline_match:
+                course_id_target = int(id_inline_match.group(1))
 
+        # NẾU CÓ COURSE ID -> TRA CỨU THẲNG VÀO SUPABASE (CHÍNH XÁC 100%)
         if course_id_target:
             try:
                 res_id = supabase.table("lms_courses")\
-                    .select("id, course_name, sku, git_repos, git_repo_url, course_id")\
+                    .select("id, course_id, course_name, git_repos")\
                     .or_(f"course_id.eq.{course_id_target},id.eq.{course_id_target}")\
                     .limit(1)\
                     .execute()
                 if res_id.data:
                     c_match = res_id.data[0]
-                    # Nhặt repo tương ứng
+                    c_name_clean = str(c_match.get("course_name") or "").replace("&amp;", "&").strip()
+                    
                     resolved_repo = None
                     git_repos = c_match.get("git_repos") or []
-                    if isinstance(git_repos, list):
-                        for r in git_repos:
-                            if isinstance(r, dict) and (not is_teacher or "gv" in str(r.get("target","")).lower() or "teacher" in str(r.get("target","")).lower()):
-                                resolved_repo = r.get("url")
-                                break
-                    if not resolved_repo and c_match.get("git_repo_url"):
-                        resolved_repo = c_match.get("git_repo_url")
-                    return c_match.get("course_name"), c_match.get("sku") or "", resolved_repo, c_match.get("course_id")
-            except Exception as id_err:
-                logger.warning(f"Lỗi tra cứu course theo ID {course_id_target}: {id_err}")
-
-        # 🎯 2. NẾU LÀ TÊN MÔN HỌC (SWRP 9, Robotics...) -> TRA CỨU THEO TEXT NHƯ CŨ
-        try:
-            swrp_m = re.search(r"([A-Za-z]+)[\s_\-]*(\d+)", clean_q)
-            courses = []
-            if swrp_m:
-                pfx, num = swrp_m.group(1), swrp_m.group(2)
-                res = supabase.table("lms_courses").select("id, course_name, sku, git_repos, git_repo_url, course_id")\
-                    .ilike("course_name", f"%{pfx}%{num}%").limit(5).execute()
-                courses = res.data or []
-            else:
-                res = supabase.table("lms_courses").select("id, course_name, sku, git_repos, git_repo_url, course_id")\
-                    .ilike("course_name", f"%{clean_q}%").limit(5).execute()
-                courses = res.data or []
-
-            if courses:
-                best = courses[0]
-                if swrp_m:
-                    num_target = swrp_m.group(2)
-                    for c in courses:
-                        if re.search(rf"\b{num_target}\b", c.get("course_name", "")):
-                            best = c
-                            break
-
-                resolved_repo = None
-                git_repos = best.get("git_repos") or []
-                if isinstance(git_repos, list) and git_repos:
-                    if is_teacher:
+                    if isinstance(git_repos, list) and git_repos:
                         for r in git_repos:
                             if isinstance(r, dict):
-                                target_str = str(r.get("target") or "").lower()
-                                if any(k in target_str for k in ["teacher", "giáo viên", "gv"]):
-                                    resolved_repo = r.get("url")
+                                r_url = r.get("url") or r.get("repo_url")
+                                r_target = str(r.get("target") or "").lower()
+                                if is_teacher and any(k in r_target for k in ["gv", "teacher", "giáo viên"]):
+                                    resolved_repo = r_url
                                     break
-                    if not resolved_repo:
-                        for r in git_repos:
-                            if isinstance(r, dict) and r.get("url"):
-                                resolved_repo = r.get("url")
-                                break
+                                elif not resolved_repo:
+                                    resolved_repo = r_url
                             elif isinstance(r, str) and r.startswith("http"):
                                 resolved_repo = r
                                 break
 
-                if not resolved_repo and best.get("git_repo_url"):
-                    resolved_repo = best.get("git_repo_url")
+                    return c_name_clean, "", resolved_repo, c_match.get("course_id")
+            except Exception as id_err:
+                logger.warning(f"Lỗi tra cứu course theo ID {course_id_target}: {id_err}")
 
-                return best.get("course_name"), best.get("sku") or "", resolved_repo, best.get("course_id")
+        # 🎯 2. NẾU LÀ TÊN MÔN: LÀM SẠCH NHÃN (PRIMARY), (SECONDARY), &AMP;
+        clean_name_query = re.sub(r"\((Primary|Secondary|HighSchool|Cả GV & HS|GV|HS)\)", "", clean_q, flags=re.IGNORECASE).strip()
+        clean_name_query = clean_name_query.replace("&amp;", "&").strip()
+
+        try:
+            res = supabase.table("lms_courses").select("id, course_name, git_repos, course_id")\
+                .ilike("course_name", f"%{clean_name_query[:25]}%").limit(5).execute()
+            courses = res.data or []
+
+            if courses:
+                best = courses[0]
+                best_name = str(best.get("course_name") or "").replace("&amp;", "&").strip()
+                resolved_repo = None
+                git_repos = best.get("git_repos") or []
+                if isinstance(git_repos, list) and git_repos:
+                    for r in git_repos:
+                        if isinstance(r, dict):
+                            r_url = r.get("url") or r.get("repo_url")
+                            if is_teacher and any(k in str(r.get("target","")).lower() for k in ["teacher", "gv"]):
+                                resolved_repo = r_url
+                                break
+                            elif not resolved_repo:
+                                resolved_repo = r_url
+                        elif isinstance(r, str) and r.startswith("http"):
+                            resolved_repo = r
+                            break
+
+                return best_name, "", resolved_repo, best.get("course_id")
         except Exception as e:
-            logger.warning(f"Lỗi tra cứu course '{clean_q}': {e}")
+            logger.warning(f"Lỗi tra cứu course theo text '{clean_q}': {e}")
 
         return clean_q, "", None, None
 
@@ -416,16 +412,26 @@ class WorkflowPlannerService:
                 elif cap_id == "lms.direct_enroll":
                     c_names = [c["course_name"] for c in canonical_courses]
                     c_ids = [c["course_id"] for c in canonical_courses if c.get("course_id")]
+                    
+                    # Nếu user_emails rỗng, để rỗng để Safety Gate yêu cầu bổ sung danh sách giáo viên từ file
+                    enrol_users = [u for u in user_emails if u.lower() != str(sender_email or "").lower()]
+
                     step_inputs = {
                         "courses": c_names,
                         "course_id": c_ids[0] if c_ids else None,
-                        "student_emails": user_emails,
+                        "student_emails": enrol_users,
                         "role": "teacher" if is_teacher else "student"
                     }
                     if c_names:
-                        step_name = f"Ghi danh Moodle ({', '.join(c_names[:3])})"
+                        step_name = f"Ghi danh Moodle ({', '.join(c_names[:2])})"
                     else:
                         missing_requirements.append({"field": "courses", "message": "Yêu cầu ghi danh thiếu thông tin khóa học."})
+
+                    if not enrol_users:
+                        missing_requirements.append({
+                            "field": "teacher_accounts",
+                            "message": "Chưa bóc tách được danh sách email giáo viên từ file đính kèm để ghi danh."
+                        })
 
                 # --- 3. NHÓM HỦY GHI DANH (GỠ MÔN) LMS ---
                 elif cap_id == "lms.unenrol_users":
