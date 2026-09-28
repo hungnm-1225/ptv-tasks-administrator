@@ -259,8 +259,18 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                                 "courses_detected": parsed_tof.get("courses_detected", [])
                             })
                         elif excel_type == "BULK_ACCOUNTS":
-                            # Bóc tách và uốn nắn 100% email và role
-                            normalized_users = bulk_template_service.normalize_input_accounts_excel(temp_path)
+                            # 🎯 VÁ LỖI: normalize_input_accounts_excel trả về Tuple (path, count, users_list) hoặc List
+                            norm_res = bulk_template_service.normalize_input_accounts_excel(temp_path)
+                            if isinstance(norm_res, tuple) and len(norm_res) >= 3:
+                                normalized_users = norm_res[2] # Lấy danh sách users từ phần tử thứ 3
+                            elif isinstance(norm_res, list):
+                                normalized_users = norm_res
+                            else:
+                                # Fallback sang GenericExcelService bóc tách trực tiếp cực kỳ an toàn
+                                gen_data = GenericExcelService.extract_universal_data(file_bytes)
+                                normalized_users = gen_data.get("account_profiles", [])
+
+                            clean_emails = [u["email"] for u in normalized_users if isinstance(u, dict) and u.get("email")]
                             parsed_excel_files.append({
                                 "is_bulk_accounts": True,
                                 "excel_type": "BULK_ACCOUNTS",
@@ -269,9 +279,10 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                                 "turn_index": turn_idx,
                                 "is_initial": is_initial,
                                 "account_profiles": normalized_users[:50],
-                                "identifiers": [u["email"] for u in normalized_users if u.get("email")],
+                                "identifiers": clean_emails,
                                 "total_users": len(normalized_users)
                             })
+                            logger.info(f"📄 [BULK_ACCOUNTS] Bóc tách thành công {len(normalized_users)} tài khoản từ [{fname}]!")
                         else:
                             # Phôi tự do (GENERIC)
                             parsed_universal = GenericExcelService.extract_universal_data(file_bytes)

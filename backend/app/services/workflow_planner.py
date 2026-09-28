@@ -302,20 +302,17 @@ class WorkflowPlannerService:
         if not user_emails and entities.get("target_email"):
             user_emails = [entities["target_email"].strip()]
 
-        # 🛑 CHỐT CHẶN VÀNG: THANH LỌC NGƯỜI GỬI (PURGE SENDER FROM TARGET USERS)
-        # Nếu người gửi gửi email thay cho học sinh/giáo viên khác, TUYỆT ĐỐI không để người gửi bị xử lý nhầm!
+        # 🛑 CHỐT CHẶN VÀNG: THANH LỌC NGƯỜI GỬI (PURGE SENDER)
+        # Bất kể danh sách có bao nhiêu người, nếu không phải tự xin cho bản thân thì LOẠI BỎ NGƯỜI GỬI!
         clean_sender = str(sender_email or "").strip().lower()
-        if clean_sender and len(user_emails) > 1:
-            # Kiểm tra xem có bằng chứng người gửi tự xin cho chính mình không
+        if clean_sender:
             self_action_keywords = ["cho tôi", "tài khoản của tôi", "giúp tôi", "my account", "for me", "myself"]
             is_self_action = any(k in str(ai_summary or "").lower() for k in self_action_keywords)
             
             if not is_self_action:
-                # Loại bỏ người gửi ra khỏi danh sách học sinh/đối tượng can thiệp
                 purged_users = [em for em in user_emails if em.lower() != clean_sender]
-                if purged_users:
-                    logger.info(f"🛡️ [Sender Guard] Đã thanh lọc người gửi [{clean_sender}] ra khỏi danh sách đối tượng thực thi: {purged_users}")
-                    user_emails = purged_users
+                logger.info(f"🛡️ [Sender Guard] Đã thanh lọc người gửi [{clean_sender}] ra khỏi danh sách đối tượng: {purged_users}")
+                user_emails = purged_users
 
         if not is_teacher and any(k in str(ai_summary or "").lower() for k in ["giáo viên", "teacher"]):
             is_teacher = True
@@ -345,11 +342,14 @@ class WorkflowPlannerService:
         canonical_courses: List[Dict[str, Any]] = []
         collected_repos: List[str] = []
 
-        # Giữ lại các link Git Repo trực tiếp nếu người dùng đã cung cấp
+        # 🛑 CHỈ LẤY REPO HỢP LỆ (Bắt đầu bằng http VÀ thuộc git.pythaverse.space hoặc github.com)
+        # TUYỆT ĐỐI KHÔNG LẤY LINK MOODLE (learn.pythaverse.space) LÀM GIT REPO!
         for r_item in raw_repos_or_shorthands:
             r_str = str(r_item).strip()
-            if r_str.startswith("http://") or r_str.startswith("https://"):
-                collected_repos.append(r_str)
+            if (r_str.startswith("http://") or r_str.startswith("https://")):
+                if ("git." in r_str or "github.com" in r_str) and "learn.pythaverse.space" not in r_str:
+                    if r_str not in collected_repos:
+                        collected_repos.append(r_str)
 
         # Tra cứu CSDL lms_courses để bốc link Git Repos tương ứng theo Role Giáo viên
         for c_query in courses_to_query:
@@ -360,9 +360,8 @@ class WorkflowPlannerService:
                     "course_id": c_id,
                     "git_repo": c_repo
                 })
-                if c_repo and c_repo not in collected_repos:
+                if c_repo and c_repo not in collected_repos and "learn.pythaverse.space" not in c_repo:
                     collected_repos.append(c_repo)
-
         # 🎯 4. XÁC ĐỊNH CHÍNH XÁC INTENTS ĐƯỢC PHÉP CHẠY
         active_intent_types = [i.type for i in assessment.intents if i.type in self.policy_registry]
 
@@ -412,15 +411,15 @@ class WorkflowPlannerService:
                 elif cap_id == "lms.direct_enroll":
                     c_names = [c["course_name"] for c in canonical_courses]
                     c_ids = [c["course_id"] for c in canonical_courses if c.get("course_id")]
-                    
-                    # Nếu user_emails rỗng, để rỗng để Safety Gate yêu cầu bổ sung danh sách giáo viên từ file
                     enrol_users = [u for u in user_emails if u.lower() != str(sender_email or "").lower()]
 
                     step_inputs = {
                         "courses": c_names,
                         "course_id": c_ids[0] if c_ids else None,
                         "student_emails": enrol_users,
-                        "role": "teacher" if is_teacher else "student"
+                        "role": "teacher" if is_teacher else "student",
+                        "git_repos": collected_repos,  # 🎯 TRUYỀN REPOS VÀO ĐÂY ĐỂ UI BIẾT ĐÃ CẤU HÌNH REPO!
+                        "auto_sync_git": True
                     }
                     if c_names:
                         step_name = f"Ghi danh Moodle ({', '.join(c_names[:2])})"
