@@ -22,13 +22,16 @@ import urllib.request
 from typing import Dict, Any, Optional, List, Tuple, Set
 from datetime import datetime, timezone
 import re
-from app.core.cache_policy import courses_cache
 from app.core.supabase import get_supabase_client
 from app.core.gemini import gemini_engine
 from app.services.workflow_planner import workflow_planner_service
 from app.services.cof_excel_service import COFExcelService
 from app.services.excel.generic_excel_service import GenericExcelService
 
+_LOCAL_COURSES_CACHE: Dict[str, Any] = {
+    "courses": [],
+    "expires_at": 0.0
+}
 
 logger = logging.getLogger(__name__)
 
@@ -94,13 +97,16 @@ def create_or_get_ticket_revision(
 
 def get_all_courses_cached(supabase) -> List[Dict[str, Any]]:
     """
-    Lấy toàn bộ khóa học LMS từ BoundedMemoryCache RAM (TTL 10 phút).
-    - Tốc độ: 0ms (In-Memory), tiết kiệm kết nối tới Supabase.
-    - An toàn trần bộ nhớ Render 512MB RAM.
+    Lấy toàn bộ khóa học LMS từ In-Memory Cache (TTL 10 phút).
+    - Tốc độ: 0ms, không phụ thuộc import ngoài, an toàn tuyệt đối khi deploy.
+    - Cắt đứt hoàn toàn việc spam query Supabase ở mỗi request.
     """
-    cached = courses_cache.get("all_lms_courses")
-    if cached:
-        return cached
+    global _LOCAL_COURSES_CACHE
+    now = time.time()
+    
+    # Nếu cache còn hạn và có dữ liệu thì trả về ngay (0ms)
+    if _LOCAL_COURSES_CACHE["courses"] and _LOCAL_COURSES_CACHE["expires_at"] > now:
+        return _LOCAL_COURSES_CACHE["courses"]
 
     try:
         res = supabase.table("lms_courses")\
@@ -116,13 +122,15 @@ def get_all_courses_cached(supabase) -> List[Dict[str, Any]]:
                 c_name = str(c.get("course_name") or "").replace("&amp;", "&").strip()
                 catalog.append({"id": cid, "name": c_name})
             
-            # Lưu vào RAM Cache 10 phút (600 giây)
-            courses_cache.set("all_lms_courses", catalog, ttl=600)
-            logger.info(f"💾 [LMS Courses Cache] Đã nạp mới {len(catalog)} khóa học vào RAM Cache (TTL: 10m)!")
+            # Cập nhật cache 10 phút (600 giây)
+            _LOCAL_COURSES_CACHE["courses"] = catalog
+            _LOCAL_COURSES_CACHE["expires_at"] = now + 600.0
+            logger.info(f"💾 [LMS Courses Cache] Đã nạp mới {len(catalog)} khóa học vào In-Memory Cache (TTL: 10m)!")
             return catalog
     except Exception as err:
         logger.warning(f"⚠️ Lỗi nạp LMS catalog từ Supabase: {err}")
-    return []
+        
+    return _LOCAL_COURSES_CACHE.get("courses", [])
 
 
 def get_smart_catalog_context(
