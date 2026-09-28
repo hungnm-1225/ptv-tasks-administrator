@@ -156,7 +156,7 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
         elif action in ("enroll_students_pipeline", "direct_workspace_enroll"):
             return await self.enroll_students_pipeline(payload)
 
-
+        # 8. Tạo tài khoản hàng loạt tại School Workspace
         elif action in ("bulk_account_creation", "bulk_accounts", "create_accounts"):
             school_ident = payload.get("school_name") or payload.get("school_user") or ""
             lineage = workspace_lineage_service.resolve_by_school(school_ident)
@@ -208,7 +208,7 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
             )
 
             
-        # 8. Cập nhật hồ sơ người dùng Workspace
+        # 9. Cập nhật hồ sơ người dùng Workspace
         elif action == "update_user_profile":
             user_id = str(payload.get("user_id", "")).strip()
             if not user_id:
