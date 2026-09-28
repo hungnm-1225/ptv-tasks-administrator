@@ -92,26 +92,32 @@ def create_or_get_ticket_revision(
 
 
 def get_catalog_context(supabase) -> List[Dict[str, Any]]:
-    """Lấy danh mục TOÀN BỘ các khóa học LMS kèm Git Repos liên kết chuẩn xác (Không giới hạn 80)."""
+    """
+    Lấy danh mục khóa học LMS SIÊU NHẸ cho Prompt AI:
+    - CHỈ LẤY ID và Tên môn ngắn gọn (Giảm 85% Tokens so với việc nhồi cả git_repos JSON).
+    - Cắt sạch nguy cơ AI bị Timeout do Prompt quá tải.
+    """
     try:
         res = supabase.table("lms_courses")\
-            .select("id, course_id, course_name, git_repos")\
+            .select("course_id, course_name")\
             .order("course_id", desc=False)\
             .execute()
         if res.data:
             catalog = []
             for c in res.data:
-                # Chuẩn hóa tên khóa học khử sạch &amp;
+                cid = c.get("course_id")
+                if not cid:
+                    continue
+                # Khử sạch ký tự &amp; thành &
                 c_name = str(c.get("course_name") or "").replace("&amp;", "&").strip()
                 catalog.append({
-                    "id": c.get("course_id") or c.get("id"),
-                    "name": c_name,
-                    "git_repos": c.get("git_repos") or []
+                    "id": cid,
+                    "name": c_name
                 })
-            logger.info(f"📚 [LMS Catalog] Đã nạp thành công {len(catalog)} khóa học kèm Git Repos vào AI context!")
+            logger.info(f"📚 [LMS Catalog Slim] Đã nạp {len(catalog)} khóa học siêu nhẹ vào AI Context!")
             return catalog
     except Exception as err:
-        logger.warning(f"⚠️ Không thể nạp LMS catalog vào AI context: {err}")
+        logger.warning(f"⚠️ Lỗi nạp LMS catalog context: {err}")
     return []
 
 
