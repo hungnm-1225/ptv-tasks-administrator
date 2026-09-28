@@ -406,16 +406,48 @@ class WorkflowPlannerService:
                 elif cap_id == "lms.direct_enroll":
                     c_names = [c["course_name"] for c in canonical_courses]
                     c_ids = [c["course_id"] for c in canonical_courses if c.get("course_id")]
-                    enrol_users = [u for u in user_emails if u.lower() != str(sender_email or "").lower()]
+
+                    # 🎯 PHÂN TÁCH RẠCH RÒI DANH SÁCH HỌC SINH VS GIÁO VIÊN
+                    student_emails = [u["email"] for u in users_list if isinstance(u, dict) and u.get("role") == "student" and u.get("email")]
+                    teacher_emails = [u["email"] for u in users_list if isinstance(u, dict) and u.get("role") == "teacher" and u.get("email")]
+
+                    # Nếu không phân tách được role trong users_list thì lấy theo user_emails
+                    if not student_emails and not teacher_emails:
+                        if is_teacher:
+                            teacher_emails = user_emails
+                        else:
+                            student_emails = user_emails
+
+                    # Phân bổ môn học: Môn Primary/Explorer cho HS, toàn bộ cho GV
+                    student_courses = [c for c in c_names if any(k in c.lower() for k in ["primary", "explorer", "synapse"])]
+                    if not student_courses and c_names:
+                        student_courses = [c_names[0]]
 
                     step_inputs = {
                         "courses": c_names,
                         "course_id": c_ids[0] if c_ids else None,
-                        "student_emails": enrol_users,
+                        "course_ids": c_ids,
+                        "student_emails": student_emails,
+                        "teacher_emails": teacher_emails,
+                        "student_courses": student_courses,
+                        "teacher_courses": c_names,
                         "role": "teacher" if is_teacher else "student",
                         "git_repos": collected_repos,
                         "auto_sync_git": True
                     }
+                    
+                    step_name = f"Ghi danh Moodle ({len(c_names)} khóa cho {len(student_emails)} HS & {len(teacher_emails)} GV)"
+
+                    # Đưa vào danh sách bước thực thi (Bảo vệ không bị rớt!)
+                    steps.append(WorkflowStepDraft(
+                        step_id=curr_step_id,
+                        capability_id=cap_id,
+                        name=step_name,
+                        status="ready",
+                        inputs=step_inputs,
+                        depends_on=[]
+                    ))
+                    continue
                     if c_names:
                         step_name = f"Ghi danh Moodle ({', '.join(c_names[:2])})"
                     else:
@@ -517,8 +549,12 @@ class WorkflowPlannerService:
                 # Nếu bản thân intent không có bằng chứng, không sinh bước thực thi
                 parent_intent = next((it for it in assessment.intents if it.type == itype), None)
                 if parent_intent and not parent_intent.evidence:
-                    # NGOẠI LỆ: Nếu là create_accounts mà đã có danh sách tài khoản từ file thì VẪN CHO CHẠY!
+                    # 🎯 NGOẠI LỆ AN TOÀN:
+                    # 1. create_accounts: Cho chạy nếu đã bóc tách được user từ file
+                    # 2. course_access: Cho chạy nếu đã tìm thấy khóa học hợp lệ từ CSDL
                     if itype == "create_accounts" and len(users_list) > 0:
+                        has_critical_missing = False
+                    elif itype == "course_access" and len(canonical_courses) > 0:
                         has_critical_missing = False
                     else:
                         has_critical_missing = True
@@ -615,13 +651,14 @@ class WorkflowPlannerService:
             "overall_confidence": 0.95 if status == "ready" else 0.85,
             "workflow_outcome": "ACTIONABLE" if status == "ready" else "NEEDS_INFORMATION",
             "missing_requirements": missing_reqs,
-            "detected_courses": [s.name for s in steps],
+            "detected_courses": [c["course_name"] for c in canonical_courses],  # 🎯 SỬA LẠI: HIỂN THỊ ĐÚNG TÊN KHÓA HỌC THẬT!
+            "planned_steps": [s.name for s in steps],
             "evidence_quotes": assessment.raw_evidence_quotes,
             "entities": assessment.entities,
-            "school_required": is_school_required,  # 🎯 TRUYỀN RÕ RÀNG ĐỂ FRONTEND KHÔNG HIỆN CẢNH BÁO VÀNG OAN
+            "school_required": is_school_required,
             "detected_school": best_school.model_dump() if best_school else None
         }
-
+        
         title = f"Workflow #{ticket_id[:8]}"
         if any("git" in s.capability_id for s in steps):
             title = f"Quyền Git Repository #{ticket_id[:8]}"
