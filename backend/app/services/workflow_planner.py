@@ -10,6 +10,7 @@ Cải tiến đột phá:
 - Mặc định vai trò Git là GUEST an toàn.
 """
 
+import html
 import os
 import json
 import re
@@ -441,24 +442,34 @@ class WorkflowPlannerService:
                     c_names = [c["course_name"] for c in canonical_courses]
                     c_ids = [c["course_id"] for c in canonical_courses if c.get("course_id")]
 
-                    # 🎯 PHÂN TÁCH RẠCH RÒI DANH SÁCH HỌC SINH VS GIÁO VIÊN
+                    # Phân tách rạch ròi danh sách học sinh vs giáo viên
                     student_emails = [u["email"] for u in users_list if isinstance(u, dict) and u.get("role") == "student" and u.get("email")]
                     teacher_emails = [u["email"] for u in users_list if isinstance(u, dict) and u.get("role") == "teacher" and u.get("email")]
 
-                    # Nếu không phân tách được role trong users_list thì lấy theo user_emails
                     if not student_emails and not teacher_emails:
                         if is_teacher:
                             teacher_emails = user_emails
                         else:
                             student_emails = user_emails
 
-                    # Phân bổ môn học: Môn Primary/Explorer cho HS, toàn bộ cho GV
+                    # Phân bổ khóa học: Học sinh vào môn Explorer/Primary, Giáo viên vào đủ các môn
                     student_courses = [c for c in c_names if any(k in c.lower() for k in ["primary", "explorer", "synapse"])]
                     if not student_courses and c_names:
                         student_courses = [c_names[0]]
 
+                    # 🎯 ĐÓNG GÓI CHI TIẾT TỪNG MÔN KÈM GIT REPO ĐỂ FRONTEND KHÔNG BỊ BÁO LỖI VÀNG
+                    courses_detailed = []
+                    for c in canonical_courses:
+                        courses_detailed.append({
+                            "course_name": c["course_name"],
+                            "course_id": c.get("course_id"),
+                            "git_repo": c.get("git_repo"),
+                            "has_git_repo": bool(c.get("git_repo"))
+                        })
+
                     step_inputs = {
                         "courses": c_names,
+                        "courses_detailed": courses_detailed, # 🎯 TRUYỀN CHI TIẾT REPO ĐỂ UI HIỆN BADGE TÍM!
                         "course_id": c_ids[0] if c_ids else None,
                         "course_ids": c_ids,
                         "student_emails": student_emails,
@@ -472,7 +483,6 @@ class WorkflowPlannerService:
                     
                     step_name = f"Ghi danh Moodle ({len(c_names)} khóa cho {len(student_emails)} HS & {len(teacher_emails)} GV)"
 
-                    # Đưa vào danh sách bước thực thi (Bảo vệ không bị rớt!)
                     steps.append(WorkflowStepDraft(
                         step_id=curr_step_id,
                         capability_id=cap_id,
@@ -482,6 +492,7 @@ class WorkflowPlannerService:
                         depends_on=[]
                     ))
                     continue
+
                     if c_names:
                         step_name = f"Ghi danh Moodle ({', '.join(c_names[:2])})"
                     else:

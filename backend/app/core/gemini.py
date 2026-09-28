@@ -277,55 +277,15 @@ class AIEngine:
 
         # 1. Định dạng danh mục khóa học LMS
         excel_data = excel_summary or {}
-        catalog_list = excel_data.get("catalog_reference", [])
-        if catalog_list:
-            catalog_lines = []
-            for item in catalog_list[:50]:
-                cid = item.get("id")
-                code = item.get("code") or "N/A"
-                name = item.get("name") or "N/A"
-                repos = item.get("git_repos") or []
-                repo_str = json.dumps(repos, ensure_ascii=False) if repos else "Chưa có repo"
-                catalog_lines.append(f"- Course ID: {cid} | Mã tắt: {code} | Tên: {name} | Repos: {repo_str}")
-            catalog_context_str = "\n".join(catalog_lines)
-        else:
-            catalog_context_str = "(Không có danh mục khóa học LMS trong bộ nhớ)"
-
-        # 🌟 2. XÂY DỰNG SỔ CÁI TỆP ĐÍNH KÈM (ATTACHMENT PROVENANCE LEDGER STR)
         provenance = excel_data.get("provenance_ledger") or {}
         active_files = provenance.get("active_new_files") or []
-        archived_files = provenance.get("archived_completed_files") or []
 
-        ledger_lines = []
-        ledger_lines.append("=== SỔ CÁI VÒNG ĐỜI TỆP ĐÍNH KÈM (ATTACHMENT PROVENANCE LEDGER) ===")
-        if active_files:
-            ledger_lines.append(f"🟢 [TỆP MỚI CẦN PHÂN TÍCH - ACTIVE]: {', '.join(active_files)}")
-        else:
-            ledger_lines.append("🟢 [TỆP MỚI CẦN PHÂN TÍCH - ACTIVE]: (Không có tệp mới ở lượt này)")
+        # Chỉ tóm tắt cực ngắn file đính kèm nếu có
+        excel_info_str = f"Tệp đính kèm: {', '.join(active_files)}" if active_files else "(Không có tệp mới)"
+        if excel_data.get("account_profiles"):
+            excel_info_str += f"\n- Bóc tách được {len(excel_data['account_profiles'])} tài khoản từ file."
 
-        if archived_files:
-            ledger_lines.append(f"⚪ [TỆP ĐÃ HOÀN TẤT TRƯỚC ĐÓ - ARCHIVED/BỎ QUA]: {', '.join(archived_files)}")
-        else:
-            ledger_lines.append("⚪ [TỆP ĐÃ HOÀN TẤT TRƯỚC ĐÓ - ARCHIVED/BỎ QUA]: (Chưa có tệp nào hoàn tất)")
-
-        # Chi tiết dữ liệu của tệp mới (ACTIVE)
-        if excel_data and any(k not in ["catalog_reference", "provenance_ledger"] for k in excel_data.keys()):
-            slim_excel = {
-                "active_filename": excel_data.get("filename"),
-                "is_cof": excel_data.get("is_cof", False),
-                "lifecycle_status": excel_data.get("lifecycle_status", "new_pending"),
-                "school_detected": excel_data.get("school_detected"),
-                "courses_detected": excel_data.get("courses_detected", []),
-                "repo_urls": excel_data.get("repo_urls", []),
-                "identifiers_sample": excel_data.get("identifiers", [])[:15],
-                "account_profiles_sample": excel_data.get("account_profiles", [])[:15]
-            }
-            ledger_lines.append("\n[CHI TIẾT DỮ LIỆU TỆP MỚI ACTIVE]:")
-            ledger_lines.append(json.dumps(slim_excel, ensure_ascii=False, indent=2))
-        
-        excel_info_str = "\n".join(ledger_lines)
-
-        # 3. Nạp Prompt Template
+        # Nạp Prompt rút gọn
         ai_summary_clean = str(ai_summary or "Chưa có bản tóm tắt").strip()
 
         if self.intent_prompt_tpl:
@@ -333,8 +293,8 @@ class AIEngine:
             replacements = {
                 "{subject}": str(subject or ""),
                 "{sender_email}": str(sender_email or "Không rõ"),
-                "{catalog_context_str}": str(catalog_context_str or ""),
-                "{excel_info_str}": str(excel_info_str or ""),
+                "{catalog_context_str}": "(Đã chuyển sang Local Resolution)",
+                "{excel_info_str}": str(excel_info_str),
                 "{ai_summary}": ai_summary_clean,
                 "{full_content}": str(full_content or "")
             }
@@ -345,8 +305,6 @@ class AIEngine:
                 f"Bóc tách sự thật vận hành:\n"
                 f"Tiêu đề: {subject}\n"
                 f"Tóm tắt: {ai_summary_clean}\n"
-                f"Catalog: {catalog_context_str}\n"
-                f"Ledger: {excel_info_str}\n"
                 f"Nội dung: {full_content}"
             )
 
