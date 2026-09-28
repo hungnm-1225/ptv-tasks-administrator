@@ -245,9 +245,9 @@ class WorkflowPlannerService:
         missing_requirements: List[Dict[str, str]] = []
         warnings: List[str] = list(assessment.warnings)
         step_counter = 1
-        # 🎯 BÓC TÁCH ENTITIES & AUTO-HYDRATE TYPEDENTITIES (TRIỆT TIÊU LỖI VERIFIED_ENTITIES)
-        from app.models.intent import TypedEntities
 
+        # 🎯 1. BÓC TÁCH ENTITIES & AUTO-HYDRATE TYPEDENTITIES ĐẦU TIÊN
+        from app.models.intent import TypedEntities
         entities: Dict[str, Any] = {}
         if assessment.typed_entities:
             entities = assessment.typed_entities.model_dump(exclude_none=True)
@@ -256,7 +256,6 @@ class WorkflowPlannerService:
                     if k not in entities and v is not None:
                         entities[k] = v
         elif assessment.entities and isinstance(assessment.entities, dict):
-            # ✨ AUTO-HYDRATE: Tự động chuyển đổi Dict entities sang TypedEntities chuẩn mực!
             entities = assessment.entities
             try:
                 assessment.typed_entities = TypedEntities(
@@ -269,25 +268,10 @@ class WorkflowPlannerService:
                     order_code=entities.get("order_code"),
                     contract_code=entities.get("contract_code")
                 )
-                logger.info(f"✨ [Auto-Hydrate] Đã tự động chuyển đổi entities sang TypedEntities hợp lệ!")
             except Exception as hyd_err:
                 logger.warning(f"⚠️ Không thể auto-hydrate TypedEntities: {hyd_err}")
-        elif isinstance(assessment.entities, dict):
-            entities = assessment.entities
 
-        # 🎯 KIỂM TRA BẰNG CHỨNG (CÔNG NHẬN KHI CÓ FILE TÀI KHOẢN HỢP LỆ)
-        for it in assessment.intents:
-            if it.type in self.policy_registry:
-                # Nếu là create_accounts mà đã bóc tách được users từ file thì KHÔNG báo thiếu bằng chứng
-                if it.type == "create_accounts" and len(users_list) > 0:
-                    continue
-                if not it.evidence:
-                    missing_requirements.append({
-                        "field": "evidence",
-                        "message": f"Ý định '{it.type}' không có bằng chứng trích dẫn xác thực."
-                    })
-
-        # 🎯 1. BÓC TÁCH NGƯỜI DÙNG & VAI TRÒ
+        # 🎯 2. KHAI BÁO NGAY USERS_LIST & USER_EMAILS ĐỂ TRÁNH LỖI UNBOUNDLOCALERROR!
         users_list = entities.get("users") or []
         user_emails: List[str] = []
         is_teacher = False
@@ -308,38 +292,45 @@ class WorkflowPlannerService:
         if not user_emails and entities.get("target_email"):
             user_emails = [entities["target_email"].strip()]
 
-        # 🛑 CHỐT CHẶN VÀNG: THANH LỌC NGƯỜI GỬI (PURGE SENDER)
-        # Bất kể danh sách có bao nhiêu người, nếu không phải tự xin cho bản thân thì LOẠI BỎ NGƯỜI GỬI!
+        # 🛑 THANH LỌC NGƯỜI GỬI (PURGE SENDER)
         clean_sender = str(sender_email or "").strip().lower()
         if clean_sender:
             self_action_keywords = ["cho tôi", "tài khoản của tôi", "giúp tôi", "my account", "for me", "myself"]
             is_self_action = any(k in str(ai_summary or "").lower() for k in self_action_keywords)
-            
             if not is_self_action:
                 purged_users = [em for em in user_emails if em.lower() != clean_sender]
-                logger.info(f"🛡️ [Sender Guard] Đã thanh lọc người gửi [{clean_sender}] ra khỏi danh sách đối tượng: {purged_users}")
+                logger.info(f"🛡️ [Sender Guard] Đã lọc người gửi [{clean_sender}], còn lại: {purged_users}")
                 user_emails = purged_users
 
         if not is_teacher and any(k in str(ai_summary or "").lower() for k in ["giáo viên", "teacher"]):
             is_teacher = True
 
-        # 🎯 2. VAI TRÒ GIT MẶC ĐỊNH LÀ GUEST THEO LỆNH ANH
+        # 🎯 3. KIỂM TRA BẰNG CHỨNG (LÚC NÀY USERS_LIST ĐÃ CÓ NÊN AN TOÀN TUYỆT ĐỐI!)
+        for it in assessment.intents:
+            if it.type in self.policy_registry:
+                # Nếu là create_accounts mà đã bóc tách được tài khoản từ file thì coi như có bằng chứng
+                if it.type == "create_accounts" and len(users_list) > 0:
+                    continue
+                if not it.evidence:
+                    missing_requirements.append({
+                        "field": "evidence",
+                        "message": f"Ý định '{it.type}' không có bằng chứng trích dẫn xác thực."
+                    })
+
+        # 🎯 4. VAI TRÒ GIT MẶC ĐỊNH
         git_role = str(entities.get("git_role") or "GUEST").upper().strip()
         if git_role not in ["ADMIN", "DEVELOPER", "GUEST"]:
             git_role = "GUEST"
 
-        # 🎯 3. BÓC TÁCH & MỞ RỘNG MÔN HỌC + TỰ ĐỘNG ĐÀO SÂU NHẶT GIT REPOS TỪ CSDL
+        # 🎯 5. BÓC TÁCH MÔN HỌC & TRA CỨU CSDL
         ai_courses = entities.get("courses") or []
         raw_repos_or_shorthands = entities.get("repositories") or []
 
-        # Tự động mở rộng dải môn từ văn bản tóm tắt nếu có (VD: SWRP 5 to 10)
         summary_text = str(ai_summary or "")
         combined_text = f"{summary_text} {' '.join(str(c) for c in ai_courses)} {' '.join(str(r) for r in raw_repos_or_shorthands)}"
         expanded_courses = expand_course_range_text(combined_text)
-
         courses_to_query = list(dict.fromkeys(expanded_courses if expanded_courses else ai_courses))
-        
-        # Nếu ai_courses rỗng nhưng trong repositories có tên môn (không phải URL http)
+
         for r_item in raw_repos_or_shorthands:
             r_str = str(r_item).strip()
             if not r_str.startswith("http") and not r_str.isdigit() and r_str not in courses_to_query:
@@ -348,8 +339,7 @@ class WorkflowPlannerService:
         canonical_courses: List[Dict[str, Any]] = []
         collected_repos: List[str] = []
 
-        # 🛑 CHỈ LẤY REPO HỢP LỆ (Bắt đầu bằng http VÀ thuộc git.pythaverse.space hoặc github.com)
-        # TUYỆT ĐỐI KHÔNG LẤY LINK MOODLE (learn.pythaverse.space) LÀM GIT REPO!
+        # Chỉ nhận link Git thật (loại bỏ link Moodle learn.pythaverse.space)
         for r_item in raw_repos_or_shorthands:
             r_str = str(r_item).strip()
             if (r_str.startswith("http://") or r_str.startswith("https://")):
@@ -357,7 +347,6 @@ class WorkflowPlannerService:
                     if r_str not in collected_repos:
                         collected_repos.append(r_str)
 
-        # Tra cứu CSDL lms_courses để bốc link Git Repos tương ứng theo Role Giáo viên
         for c_query in courses_to_query:
             c_name, c_sku, c_repo, c_id = self.resolve_course_and_repos_from_db(str(c_query), is_teacher=is_teacher)
             if c_name:
@@ -533,7 +522,7 @@ class WorkflowPlannerService:
                         has_critical_missing = False
                     else:
                         has_critical_missing = True
-                        
+
                 if not has_critical_missing:
                     steps.append(WorkflowStepDraft(
                         step_id=curr_step_id,
