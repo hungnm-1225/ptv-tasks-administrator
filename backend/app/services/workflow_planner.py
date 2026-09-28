@@ -142,19 +142,48 @@ class WorkflowPlannerService:
     def resolve_course_and_repos_from_db(course_query: str, is_teacher: bool = False) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[int]]:
         """
         Tra cứu khóa học trong CSDL lms_courses:
-        - So khớp token thông minh (tránh nhầm số vé).
-        - Trích xuất link Git Repo bám dính theo vai trò: Ưu tiên repo Giáo viên nếu is_teacher=True.
+        - Tự động bắt Course ID từ link Moodle (VD: view.php?id=1437 -> 1437).
+        - Trích xuất link Git Repo bám dính theo vai trò Giáo viên/Học sinh.
         """
         if not course_query:
             return None, None, None, None
 
         clean_q = str(course_query).strip()
-        if clean_q.isdigit():
-            return None, None, None, None
-
         supabase = get_supabase_client()
+
+        # 🎯 1. BẮT TRỰC TIẾP NẾU LÀ LINK MOODLE HOẶC COURSE ID SỐ (VD: 1437, view.php?id=1437)
+        course_id_target = None
+        id_url_match = re.search(r"[?&]id=(\d+)", clean_q)
+        if id_url_match:
+            course_id_target = int(id_url_match.group(1))
+        elif clean_q.isdigit():
+            course_id_target = int(clean_q)
+
+        if course_id_target:
+            try:
+                res_id = supabase.table("lms_courses")\
+                    .select("id, course_name, sku, git_repos, git_repo_url, course_id")\
+                    .or_(f"course_id.eq.{course_id_target},id.eq.{course_id_target}")\
+                    .limit(1)\
+                    .execute()
+                if res_id.data:
+                    c_match = res_id.data[0]
+                    # Nhặt repo tương ứng
+                    resolved_repo = None
+                    git_repos = c_match.get("git_repos") or []
+                    if isinstance(git_repos, list):
+                        for r in git_repos:
+                            if isinstance(r, dict) and (not is_teacher or "gv" in str(r.get("target","")).lower() or "teacher" in str(r.get("target","")).lower()):
+                                resolved_repo = r.get("url")
+                                break
+                    if not resolved_repo and c_match.get("git_repo_url"):
+                        resolved_repo = c_match.get("git_repo_url")
+                    return c_match.get("course_name"), c_match.get("sku") or "", resolved_repo, c_match.get("course_id")
+            except Exception as id_err:
+                logger.warning(f"Lỗi tra cứu course theo ID {course_id_target}: {id_err}")
+
+        # 🎯 2. NẾU LÀ TÊN MÔN HỌC (SWRP 9, Robotics...) -> TRA CỨU THEO TEXT NHƯ CŨ
         try:
-            # Tách tiền tố và số lớp (VD: SWRP 9 -> prefix=SWRP, num=9)
             swrp_m = re.search(r"([A-Za-z]+)[\s_\-]*(\d+)", clean_q)
             courses = []
             if swrp_m:
@@ -168,31 +197,24 @@ class WorkflowPlannerService:
                 courses = res.data or []
 
             if courses:
-                # Tìm khóa học khớp chính xác số khối lớp nhất
                 best = courses[0]
                 if swrp_m:
                     num_target = swrp_m.group(2)
                     for c in courses:
-                        # Kiểm tra xem tên có đúng chứa số đó không (VD: SWRP 9: chứ không phải 19)
                         if re.search(rf"\b{num_target}\b", c.get("course_name", "")):
                             best = c
                             break
 
                 resolved_repo = None
                 git_repos = best.get("git_repos") or []
-
                 if isinstance(git_repos, list) and git_repos:
-                    # 🎯 CHIẾN THUẬT NHẶT REPO THEO VAI TRÒ GIÁO VIÊN / HỌC SINH
                     if is_teacher:
-                        # 1. Tìm repo dành riêng cho Giáo viên
                         for r in git_repos:
                             if isinstance(r, dict):
                                 target_str = str(r.get("target") or "").lower()
                                 if any(k in target_str for k in ["teacher", "giáo viên", "gv"]):
                                     resolved_repo = r.get("url")
                                     break
-                    
-                    # 2. Nếu không tìm thấy hoặc là học sinh: Lấy repo dùng chung cho cả GV & HS
                     if not resolved_repo:
                         for r in git_repos:
                             if isinstance(r, dict) and r.get("url"):
@@ -202,7 +224,6 @@ class WorkflowPlannerService:
                                 resolved_repo = r
                                 break
 
-                # Fallback cột git_repo_url đơn lẻ nếu có
                 if not resolved_repo and best.get("git_repo_url"):
                     resolved_repo = best.get("git_repo_url")
 
@@ -225,6 +246,9 @@ class WorkflowPlannerService:
         missing_requirements: List[Dict[str, str]] = []
         warnings: List[str] = list(assessment.warnings)
         step_counter = 1
+        # 🎯 BÓC TÁCH ENTITIES & AUTO-HYDRATE TYPEDENTITIES (TRIỆT TIÊU LỖI VERIFIED_ENTITIES)
+        from app.models.intent import TypedEntities
+
         entities: Dict[str, Any] = {}
         if assessment.typed_entities:
             entities = assessment.typed_entities.model_dump(exclude_none=True)
@@ -233,12 +257,22 @@ class WorkflowPlannerService:
                     if k not in entities and v is not None:
                         entities[k] = v
         elif assessment.entities and isinstance(assessment.entities, dict):
-            # 🛡️ KIỂM ĐỊNH AN TOÀN: Legacy entities thuần túy không được tự ý kích hoạt action nếu không có TypedEntities
-            missing_requirements.append({
-                "field": "verified_entities",
-                "message": "Thiếu thực thể có kiểu dữ liệu chuẩn (TypedEntities) đã qua kiểm chứng."
-            })
-            return "needs_information", [], missing_requirements, warnings, False
+            # ✨ AUTO-HYDRATE: Tự động chuyển đổi Dict entities sang TypedEntities chuẩn mực!
+            entities = assessment.entities
+            try:
+                assessment.typed_entities = TypedEntities(
+                    school_name=entities.get("school_name"),
+                    courses=entities.get("courses") or [],
+                    repositories=entities.get("repositories") or [],
+                    users=entities.get("users") or [],
+                    identifiers=entities.get("identifiers") or [],
+                    git_role=entities.get("git_role") or "GUEST",
+                    order_code=entities.get("order_code"),
+                    contract_code=entities.get("contract_code")
+                )
+                logger.info(f"✨ [Auto-Hydrate] Đã tự động chuyển đổi entities sang TypedEntities hợp lệ!")
+            except Exception as hyd_err:
+                logger.warning(f"⚠️ Không thể auto-hydrate TypedEntities: {hyd_err}")
         elif isinstance(assessment.entities, dict):
             entities = assessment.entities
 

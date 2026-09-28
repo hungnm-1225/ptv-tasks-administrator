@@ -216,7 +216,7 @@ class AIEngine:
             f"4. Trả về JSON gồm: category ('license'|'lms_enroll'|'account_keycloak'|'bug'|'other'), "
             f"priority ('urgent'|'high'|'normal'|'low'), goal, và summary_vi.\n"
             f"Trong đó summary_vi PHẢI LÀ BẢN GIÁM ĐỊNH ĐẦY ĐỦ theo cấu trúc:\n"
-            f"'[Người yêu cầu: {sender_clean}] [Hành động: ...] [Đối tượng đích: ...] [Phân hệ: ...] [Chi tiết: ...]'"
+            f"'[Người yêu cầu: {sender_clean}]\n [Hành động: ...]\n [Đối tượng đích: ...]\n [Phân hệ: ...]\n [Chi tiết: ...]'"
         )
 
         parsed_data, used_model = self._call_gemini_with_fallback(detailed_dossier_instruction, primary_key=self.api_key_summary)
@@ -447,12 +447,30 @@ class AIEngine:
         elif isinstance(raw_missing, str) and raw_missing.strip():
             clean_missing.append({"field": "general", "message": raw_missing.strip()})
 
+        # 🎯 TỰ ĐỘNG KHỞI TẠO TYPED_ENTITIES ĐỂ KHÔNG BAO GIỜ BỊ THIẾU
+        from app.models.intent import TypedEntities
+        typed_entities_obj = None
+        try:
+            typed_entities_obj = TypedEntities(
+                school_name=entities_payload.get("school_name"),
+                courses=entities_payload.get("courses") or [],
+                repositories=entities_payload.get("repositories") or [],
+                users=entities_payload.get("users") or [],
+                identifiers=entities_payload.get("identifiers") or [],
+                git_role=entities_payload.get("git_role") or "GUEST",
+                order_code=entities_payload.get("order_code"),
+                contract_code=entities_payload.get("contract_code")
+            )
+        except Exception as te_err:
+            logger.warning(f"⚠️ Lỗi khởi tạo TypedEntities trong Gemini: {te_err}")
+
         raw_assessment = IntentAssessment(
             outcome=final_outcome,
             model_name=used_model,
-            prompt_version="v4.7_provenance_ledger",
+            prompt_version="v5.0_provenance_ledger",
             intents=structured_intents,
             entities=entities_payload,
+            typed_entities=typed_entities_obj, 
             extracted_entities=[],
             missing_requirements=clean_missing,
             warnings=parsed_data.get("warnings") or [],
