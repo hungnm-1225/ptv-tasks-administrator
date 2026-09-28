@@ -142,9 +142,9 @@ class WorkflowPlannerService:
     def resolve_course_and_repos_from_db(course_query: str, is_teacher: bool = False) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[int]]:
         """
         Tra cứu khóa học trong CSDL lms_courses:
-        - Bắt chính xác Course ID từ link URL Moodle (view.php?id=1437) hoặc số ID nguyên.
-        - Khử sạch &amp; HTML entities và các nhãn phụ (Primary), (Secondary).
-        - Trích xuất link Git Repo từ cột git_repos JSONB.
+        - Bắt Course ID từ URL Moodle hoặc số nguyên (CHỈ query course_id, không query id UUID).
+        - Khử sạch &amp; và nhãn phụ (Primary), (Secondary).
+        - Trích xuất repo_url từ cột git_repos JSONB (hỗ trợ target 'teacher_only').
         """
         if not course_query:
             return None, None, None, None
@@ -152,7 +152,7 @@ class WorkflowPlannerService:
         clean_q = str(course_query).strip()
         supabase = get_supabase_client()
 
-        # 🎯 1. BẮT TRỰC TIẾP COURSE ID TỪ LINK MOODLE HOẶC CHUỖI SỐ
+        # 🎯 1. BẮT TRỰC TIẾP COURSE ID SỐ TỪ URL HOẶC CHUỖI
         course_id_target = None
         id_url_match = re.search(r"[?&]id=(\d+)", clean_q)
         if id_url_match:
@@ -164,26 +164,27 @@ class WorkflowPlannerService:
             if id_inline_match:
                 course_id_target = int(id_inline_match.group(1))
 
-        # NẾU CÓ COURSE ID -> TRA CỨU THẲNG VÀO SUPABASE (CHÍNH XÁC 100%)
+        # 🎯 CHỈ QUERY THEO course_id (int4), TUYỆT ĐỐI KHÔNG QUERY VÀO CỘT id (UUID)!
         if course_id_target:
             try:
                 res_id = supabase.table("lms_courses")\
                     .select("id, course_id, course_name, git_repos")\
-                    .or_(f"course_id.eq.{course_id_target},id.eq.{course_id_target}")\
+                    .eq("course_id", course_id_target)\
                     .limit(1)\
                     .execute()
                 if res_id.data:
                     c_match = res_id.data[0]
                     c_name_clean = str(c_match.get("course_name") or "").replace("&amp;", "&").strip()
                     
+                    # Trích xuất Git Repo: Ưu tiên repo_url và target teacher_only
                     resolved_repo = None
                     git_repos = c_match.get("git_repos") or []
                     if isinstance(git_repos, list) and git_repos:
                         for r in git_repos:
                             if isinstance(r, dict):
-                                r_url = r.get("url") or r.get("repo_url")
+                                r_url = r.get("repo_url") or r.get("url")
                                 r_target = str(r.get("target") or "").lower()
-                                if is_teacher and any(k in r_target for k in ["gv", "teacher", "giáo viên"]):
+                                if is_teacher and any(k in r_target for k in ["gv", "teacher", "teacher_only"]):
                                     resolved_repo = r_url
                                     break
                                 elif not resolved_repo:
@@ -196,7 +197,7 @@ class WorkflowPlannerService:
             except Exception as id_err:
                 logger.warning(f"Lỗi tra cứu course theo ID {course_id_target}: {id_err}")
 
-        # 🎯 2. NẾU LÀ TÊN MÔN: LÀM SẠCH NHÃN (PRIMARY), (SECONDARY), &AMP;
+        # 🎯 2. NẾU LÀ TÊN MÔN HỌC THUẦN TÚY: LÀM SẠCH NHÃN PHỤ
         clean_name_query = re.sub(r"\((Primary|Secondary|HighSchool|Cả GV & HS|GV|HS)\)", "", clean_q, flags=re.IGNORECASE).strip()
         clean_name_query = clean_name_query.replace("&amp;", "&").strip()
 
@@ -213,8 +214,9 @@ class WorkflowPlannerService:
                 if isinstance(git_repos, list) and git_repos:
                     for r in git_repos:
                         if isinstance(r, dict):
-                            r_url = r.get("url") or r.get("repo_url")
-                            if is_teacher and any(k in str(r.get("target","")).lower() for k in ["teacher", "gv"]):
+                            r_url = r.get("repo_url") or r.get("url")
+                            r_target = str(r.get("target") or "").lower()
+                            if is_teacher and any(k in r_target for k in ["teacher", "teacher_only", "gv"]):
                                 resolved_repo = r_url
                                 break
                             elif not resolved_repo:
@@ -228,6 +230,7 @@ class WorkflowPlannerService:
             logger.warning(f"Lỗi tra cứu course theo text '{clean_q}': {e}")
 
         return clean_q, "", None, None
+
 
     def build_workflow_proposal(
         self,
@@ -272,9 +275,12 @@ class WorkflowPlannerService:
         elif isinstance(assessment.entities, dict):
             entities = assessment.entities
 
-        # 🎯 KIỂM TRA BẰNG CHỨNG CHO TỪNG INTENT
+        # 🎯 KIỂM TRA BẰNG CHỨNG (CÔNG NHẬN KHI CÓ FILE TÀI KHOẢN HỢP LỆ)
         for it in assessment.intents:
             if it.type in self.policy_registry:
+                # Nếu là create_accounts mà đã bóc tách được users từ file thì KHÔNG báo thiếu bằng chứng
+                if it.type == "create_accounts" and len(users_list) > 0:
+                    continue
                 if not it.evidence:
                     missing_requirements.append({
                         "field": "evidence",
@@ -418,7 +424,7 @@ class WorkflowPlannerService:
                         "course_id": c_ids[0] if c_ids else None,
                         "student_emails": enrol_users,
                         "role": "teacher" if is_teacher else "student",
-                        "git_repos": collected_repos,  # 🎯 TRUYỀN REPOS VÀO ĐÂY ĐỂ UI BIẾT ĐÃ CẤU HÌNH REPO!
+                        "git_repos": collected_repos,
                         "auto_sync_git": True
                     }
                     if c_names:
@@ -522,8 +528,12 @@ class WorkflowPlannerService:
                 # Nếu bản thân intent không có bằng chứng, không sinh bước thực thi
                 parent_intent = next((it for it in assessment.intents if it.type == itype), None)
                 if parent_intent and not parent_intent.evidence:
-                    has_critical_missing = True
-
+                    # NGOẠI LỆ: Nếu là create_accounts mà đã có danh sách tài khoản từ file thì VẪN CHO CHẠY!
+                    if itype == "create_accounts" and len(users_list) > 0:
+                        has_critical_missing = False
+                    else:
+                        has_critical_missing = True
+                        
                 if not has_critical_missing:
                     steps.append(WorkflowStepDraft(
                         step_id=curr_step_id,
