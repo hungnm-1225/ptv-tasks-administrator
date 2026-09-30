@@ -1,7 +1,6 @@
 # backend/app/services/workspace_lineage_service.py
-# backend/app/services/workspace_lineage_service.py
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 from cryptography.fernet import Fernet
 from app.core.supabase import get_supabase_client
 from app.core.config import settings
