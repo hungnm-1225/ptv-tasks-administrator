@@ -29,13 +29,6 @@ export const LoginPage: React.FC = () => {
       {/* Top controls */}
       <div className="absolute top-6 right-6 flex items-center gap-3">
         <ThemeToggle scale={0.82} />
-
-        <Link
-          to="/"
-          className="text-xs text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white font-medium transition"
-        >
-          ← Về Trang Chủ
-        </Link>
       </div>
 
       {/* Auth Bento Card — Glassmorphism & Enterprise Pastel */}

@@ -795,143 +795,100 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                             );
                         })}
                     </div>
+                    {/* 2.2. HÀNG ĐỢI LỚP CHƯA XẾP VÀO KHAY (TỰ ĐỘNG ẨN KHI HẾT LỚP LẺ BÓNG) */}
+                    {cofUnassignedClasses.length > 0 && (
+                        <div
+                            onDragOver={(e) => {
+                                e.preventDefault();
+                                setIsDropToUnassignedActive(true);
+                            }}
+                            onDragLeave={() => setIsDropToUnassignedActive(false)}
+                            onDrop={(e) => {
+                                e.preventDefault();
+                                setIsDropToUnassignedActive(false);
+                                if (!draggedClassInfo || !draggedClassInfo.sourceTrayId) return;
 
-                    {/* 2.2. HÀNG ĐỢI LỚP CHƯA XẾP VÀO KHAY (CÓ DROPDOWN CHỌN NHANH) */}
-                    <div
-                        onDragOver={(e) => {
-                            e.preventDefault();
-                            setIsDropToUnassignedActive(true);
-                        }}
-                        onDragLeave={() => setIsDropToUnassignedActive(false)}
-                        onDrop={(e) => {
-                            e.preventDefault();
-                            setIsDropToUnassignedActive(false);
-                            if (!draggedClassInfo || !draggedClassInfo.sourceTrayId) return;
-
-                            const { sourceTrayId, classItem } = draggedClassInfo;
-                            setCofClassAssignments((prev) => {
-                                const next = { ...prev };
-                                if (next[sourceTrayId]) {
-                                    next[sourceTrayId] = next[sourceTrayId].filter((c) => c.rawClassName !== classItem.rawClassName);
-                                }
-                                return next;
-                            });
-                            setCofUnassignedClasses((prev) => [...prev, classItem]);
-                            setDraggedClassInfo(null);
-                            toast.info(`Đã chuyển lớp '${classItem.rawClassName}' về hàng đợi.`);
-                        }}
-                        className={`p-4.5 rounded-2xl border transition-all duration-200 ${isDropToUnassignedActive
-                            ? 'border-amber-500 bg-amber-100/60 ring-2 ring-amber-400'
-                            : 'border-amber-200/80 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-950/20'
-                            } space-y-3`}
-                    >
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                                <AlertTriangle className="w-4 h-4 text-amber-600" />
-                                <h5 className="text-xs font-bold text-amber-900 dark:text-amber-200">
-                                    Các Khối Lớp Chưa Xếp Vào Khay ({cofUnassignedClasses.length} lớp - {cofUnassignedClasses.reduce((s, c) => s + c.studentsCount, 0)} học sinh):
-                                </h5>
-                            </div>
-                            <span className="text-[11px] text-amber-700 dark:text-amber-400 font-medium italic">
-                                👉 Nhấp chọn khay để đưa lớp vào, hoặc nắm kéo thả
-                            </span>
-                        </div>
-
-                        {/* 2.2. HÀNG ĐỢI LỚP CHƯA XẾP VÀO KHAY (TỰ ĐỘNG ẨN KHI HẾT LỚP LẺ BÓNG) */}
-                        {cofUnassignedClasses.length > 0 && (
-                            <div
-                                onDragOver={(e) => {
-                                    e.preventDefault();
-                                    setIsDropToUnassignedActive(true);
-                                }}
-                                onDragLeave={() => setIsDropToUnassignedActive(false)}
-                                onDrop={(e) => {
-                                    e.preventDefault();
-                                    setIsDropToUnassignedActive(false);
-                                    if (!draggedClassInfo || !draggedClassInfo.sourceTrayId) return;
-
-                                    const { sourceTrayId, classItem } = draggedClassInfo;
-                                    setCofClassAssignments((prev) => {
-                                        const next = { ...prev };
-                                        if (next[sourceTrayId]) {
-                                            next[sourceTrayId] = next[sourceTrayId].filter((c) => c.rawClassName !== classItem.rawClassName);
-                                        }
-                                        return next;
-                                    });
-                                    setCofUnassignedClasses((prev) => [...prev, classItem]);
-                                    setDraggedClassInfo(null);
-                                    toast.info(`Đã chuyển lớp '${classItem.rawClassName}' về hàng đợi.`);
-                                }}
-                                className={`p-4.5 rounded-2xl border transition-all duration-200 ${isDropToUnassignedActive
-                                    ? 'border-amber-500 bg-amber-100/60 ring-2 ring-amber-400'
-                                    : 'border-amber-200/80 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-950/20'
-                                    } space-y-3`}
-                            >
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                        <AlertTriangle className="w-4 h-4 text-amber-600" />
-                                        <h5 className="text-xs font-bold text-amber-900 dark:text-amber-200">
-                                            Các Khối Lớp Chưa Xếp Vào Khay ({cofUnassignedClasses.length} lớp - {cofUnassignedClasses.reduce((s, c) => s + c.studentsCount, 0)} học sinh):
-                                        </h5>
-                                    </div>
-                                    <span className="text-[11px] text-amber-700 dark:text-amber-400 font-medium italic">
-                                        👉 Nhấp chọn khay để đưa lớp vào, hoặc nắm kéo thả
-                                    </span>
+                                const { sourceTrayId, classItem } = draggedClassInfo;
+                                setCofClassAssignments((prev) => {
+                                    const next = { ...prev };
+                                    if (next[sourceTrayId]) {
+                                        next[sourceTrayId] = next[sourceTrayId].filter((c) => c.rawClassName !== classItem.rawClassName);
+                                    }
+                                    return next;
+                                });
+                                setCofUnassignedClasses((prev) => [...prev, classItem]);
+                                setDraggedClassInfo(null);
+                                toast.info(`Đã chuyển lớp '${classItem.rawClassName}' về hàng đợi.`);
+                            }}
+                            className={`p-4.5 rounded-2xl border transition-all duration-200 ${isDropToUnassignedActive
+                                ? 'border-amber-500 bg-amber-100/60 ring-2 ring-amber-400'
+                                : 'border-amber-200/80 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-950/20'
+                                } space-y-3`}
+                        >
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                    <AlertTriangle className="w-4 h-4 text-amber-600" />
+                                    <h5 className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                                        Các Khối Lớp Chưa Xếp Vào Khay ({cofUnassignedClasses.length} lớp - {cofUnassignedClasses.reduce((s, c) => s + c.studentsCount, 0)} học sinh):
+                                    </h5>
                                 </div>
+                                <span className="text-[11px] text-amber-700 dark:text-amber-400 font-medium italic">
+                                    👉 Nhấp chọn khay để đưa lớp vào, hoặc nắm kéo thả
+                                </span>
+                            </div>
 
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                                    {cofUnassignedClasses.map((uCls) => (
-                                        <div
-                                            key={uCls.rawClassName}
-                                            draggable
-                                            onDragStart={(e) => {
-                                                setDraggedClassInfo({ sourceTrayId: null, classItem: uCls });
-                                                e.dataTransfer.setData('text/plain', uCls.rawClassName);
-                                            }}
-                                            className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/40 flex items-center justify-between gap-2.5 text-xs shadow-2xs hover:border-amber-400 cursor-grab active:cursor-grabbing transition"
-                                        >
-                                            <div className="min-w-0 pr-2">
-                                                <p className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 truncate">
-                                                    <span className="text-slate-400">⠿</span>
-                                                    <span>{uCls.rawClassName || 'Chưa phân lớp'}</span>
-                                                </p>
-                                                <span className="text-[10px] text-slate-400 font-mono pl-3">
-                                                    {uCls.studentsCount} học sinh {uCls.gradeDetected ? `(Khối ${uCls.gradeDetected})` : ''}
-                                                </span>
-                                            </div>
-
-                                            {/* NÚT SELECT DROPDOWN XẾP NHANH VÀO KHAY */}
-                                            <div className="relative shrink-0">
-                                                <select
-                                                    defaultValue=""
-                                                    onChange={(e) => {
-                                                        const targetTrayId = e.target.value;
-                                                        if (!targetTrayId) return;
-
-                                                        setCofClassAssignments((prev) => ({
-                                                            ...prev,
-                                                            [targetTrayId]: [...(prev[targetTrayId] || []), uCls],
-                                                        }));
-                                                        setCofUnassignedClasses((prev) => prev.filter((c) => c.rawClassName !== uCls.rawClassName));
-                                                        toast.success(`Đã xếp lớp '${uCls.rawClassName}' vào Khay #${targetTrayId}!`);
-                                                    }}
-                                                    className="appearance-none px-3 py-1.5 pr-7 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/80 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-mono text-[11px] font-bold hover:bg-indigo-100 transition cursor-pointer outline-hidden"
-                                                >
-                                                    <option value="" disabled>+ Xếp vào Khay...</option>
-                                                    {cofTrays.map((t) => (
-                                                        <option key={t.courseId} value={t.courseId}>
-                                                            Khay #{t.courseId} ({t.quota - t.assignedStudentsCount} slots)
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                                <ChevronDown className="w-3.5 h-3.5 text-indigo-500 absolute right-2 top-2.5 pointer-events-none" />
-                                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                {cofUnassignedClasses.map((uCls) => (
+                                    <div
+                                        key={uCls.rawClassName}
+                                        draggable
+                                        onDragStart={(e) => {
+                                            setDraggedClassInfo({ sourceTrayId: null, classItem: uCls });
+                                            e.dataTransfer.setData('text/plain', uCls.rawClassName);
+                                        }}
+                                        className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/40 flex items-center justify-between gap-2.5 text-xs shadow-2xs hover:border-amber-400 cursor-grab active:cursor-grabbing transition"
+                                    >
+                                        <div className="min-w-0 pr-2">
+                                            <p className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 truncate">
+                                                <span className="text-slate-400">⠿</span>
+                                                <span>{uCls.rawClassName || 'Chưa phân lớp'}</span>
+                                            </p>
+                                            <span className="text-[10px] text-slate-400 font-mono pl-3">
+                                                {uCls.studentsCount} học sinh {uCls.gradeDetected ? `(Khối ${uCls.gradeDetected})` : ''}
+                                            </span>
                                         </div>
-                                    ))}
-                                </div>
+
+                                        {/* NÚT SELECT DROPDOWN XẾP NHANH VÀO KHAY */}
+                                        <div className="relative shrink-0">
+                                            <select
+                                                defaultValue=""
+                                                onChange={(e) => {
+                                                    const targetTrayId = e.target.value;
+                                                    if (!targetTrayId) return;
+
+                                                    setCofClassAssignments((prev) => ({
+                                                        ...prev,
+                                                        [targetTrayId]: [...(prev[targetTrayId] || []), uCls],
+                                                    }));
+                                                    setCofUnassignedClasses((prev) => prev.filter((c) => c.rawClassName !== uCls.rawClassName));
+                                                    toast.success(`Đã xếp lớp '${uCls.rawClassName}' vào Khay #${targetTrayId}!`);
+                                                }}
+                                                className="appearance-none px-3 py-1.5 pr-7 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/80 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-mono text-[11px] font-bold hover:bg-indigo-100 transition cursor-pointer outline-hidden"
+                                            >
+                                                <option value="" disabled>+ Xếp vào Khay...</option>
+                                                {cofTrays.map((t) => (
+                                                    <option key={t.courseId} value={t.courseId}>
+                                                        Khay #{t.courseId} ({t.quota - t.assignedStudentsCount} slots)
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <ChevronDown className="w-3.5 h-3.5 text-indigo-500 absolute right-2 top-2.5 pointer-events-none" />
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
-                        )}
-                    </div>
+                        </div>
+                    )}
 
                     {/* 2.3. TRẠM ĐIỀU PHỐI GIÁO VIÊN THÔNG MINH (INTERACTIVE TEACHER HUB) */}
                     {cofTeachersAllocation.length > 0 && (

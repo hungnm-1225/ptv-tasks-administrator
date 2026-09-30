@@ -1,14 +1,5 @@
-/**
- * ====================================================================
- * 📌 HƯỚNG DẪN TỰ ĐIỀN THÔNG TIN TÁC GIẢ ("ĐÁNH DẤU CHỦ QUYỀN DỰ ÁN CÁ NHÂN")
- * ====================================================================
- * 
- * Anh có thể tự do chỉnh sửa thông tin cá nhân dưới đây.
- * Các thông tin này sẽ hiển thị trực tiếp trên Trang Chủ (Landing Page)
- * và phần thông tin tác giả.
- * 
- * Mỗi đường dẫn trong `socials` sẽ tự động mở trang tương ứng khi click!
- */
+// frontend/src/config/authorConfig.ts
+
 
 export interface SocialLink {
   name: string;
