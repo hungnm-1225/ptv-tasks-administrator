@@ -60,8 +60,10 @@ class WorkspaceUserService(WorkspaceBaseService):
         identifier: str
     ) -> Dict[str, Any]:
         """
-        Dò tìm danh sách người dùng (tối đa 25 bản ghi) qua getDataUser.php
-        và cào chi tiết song song có kiểm soát tải (Semaphore 5) qua detailUser.php.
+        Dò tìm người dùng thông minh hỗ trợ 2 chế độ (Tối đa 25 bản ghi):
+        1. Tìm kiếm theo tiền tố / từ khóa đơn (Prefix Search)
+        2. Tìm kiếm theo danh sách nhiều email/username dán từ Excel (Multi-line Search)
+        Cào song song chi tiết với Semaphore(5) bảo vệ 512MB RAM Render.
         """
         cookies = await cls._get_admin_session_cookies(admin_user, admin_pass)
         
@@ -70,25 +72,73 @@ class WorkspaceUserService(WorkspaceBaseService):
             "Referer": "https://pythaverse.space/admin-workspace/users",
         }
 
+        # Bóc tách danh sách từ khóa (hỗ trợ ngắt dòng, dấu phẩy, chấm phẩy)
+        raw_terms = [t.strip() for t in re.split(r"[\r\n,;]+", identifier) if t.strip()]
+        if not raw_terms:
+            return {"success": False, "message": "Vui lòng nhập từ khóa hoặc danh sách tài khoản cần tìm!"}
+
         async with httpx.AsyncClient(timeout=45.0, verify=False) as client:
-            # Bước 1: Dò tìm danh sách người dùng gần đúng (tối đa 25 bản ghi)
             search_url = f"{cls.BASE_URL}/getDataUser.php"
-            params = {"page": 1, "per_page": 25, "search": identifier}
-            logger.info(f"🔍 [WorkspaceUser] Đang tìm kiếm user gần đúng (max 25): '{identifier}'...")
-            
-            resp_search = await client.get(search_url, params=params, cookies=cookies, headers=headers)
-            if resp_search.status_code != 200:
-                raise RuntimeError(f"Lỗi tìm kiếm user: HTTP {resp_search.status_code}")
-
-            search_data = resp_search.json()
-            users_list = (search_data.get("data") or [])[:25]
-            if not users_list:
-                return {"success": False, "message": f"Không tìm thấy người dùng phù hợp với từ khóa: '{identifier}'"}
-
-            # Bước 2: Cào song song chi tiết từng người dùng với Bounded Concurrency (Semaphore = 5)
-            sem = asyncio.Semaphore(5)
             detail_url = f"{cls.BASE_URL}/detailUser.php"
+            sem = asyncio.Semaphore(5)
 
+            found_users_summary: List[Dict[str, Any]] = []
+            seen_uids = set()
+
+            # ------------------------------------------------------------------
+            # TRƯỜNG HỢP 1: DÁN 1 TỪ KHÓA ĐƠN LẺ ➔ TÌM KIẾM GẦN ĐÚNG (PREFIX SEARCH)
+            # ------------------------------------------------------------------
+            if len(raw_terms) == 1:
+                single_kw = raw_terms[0]
+                logger.info(f"🔍 [WorkspaceUser] Tìm kiếm gần đúng theo từ khóa: '{single_kw}' (max 25)...")
+                params = {"page": 1, "per_page": 25, "search": single_kw}
+                resp_search = await client.get(search_url, params=params, cookies=cookies, headers=headers)
+                
+                if resp_search.status_code == 200:
+                    data = resp_search.json().get("data") or []
+                    for u in data[:25]:
+                        uid = str(u.get("user_id"))
+                        if uid not in seen_uids:
+                            seen_uids.add(uid)
+                            found_users_summary.append(u)
+
+            # ------------------------------------------------------------------
+            # TRƯỜNG HỢP 2: DÁN NHIỀU DÒNG TỪ EXCEL ➔ TÌM KIẾM THEO DANH SÁCH (MAX 25)
+            # ------------------------------------------------------------------
+            else:
+                target_list = raw_terms[:25]
+                logger.info(f"📋 [WorkspaceUser] Tìm kiếm danh sách {len(target_list)} tài khoản dán từ Excel...")
+
+                async def lookup_single_term(term: str):
+                    async with sem:
+                        try:
+                            params = {"page": 1, "per_page": 1, "search": term}
+                            r = await client.get(search_url, params=params, cookies=cookies, headers=headers)
+                            if r.status_code == 200:
+                                d = r.json().get("data") or []
+                                if d:
+                                    return d[0]
+                        except Exception as e:
+                            logger.warning(f"⚠️ Không tìm thấy '{term}': {e}")
+                        return None
+
+                results = await asyncio.gather(*[lookup_single_term(t) for t in target_list])
+                for u in results:
+                    if u:
+                        uid = str(u.get("user_id"))
+                        if uid not in seen_uids:
+                            seen_uids.add(uid)
+                            found_users_summary.append(u)
+
+            if not found_users_summary:
+                return {
+                    "success": False, 
+                    "message": f"Không tìm thấy người dùng phù hợp trên Admin Workspace với nội dung tìm kiếm."
+                }
+
+            # ------------------------------------------------------------------
+            # BƯỚC 2: CÀO SONG SONG CHI TIẾT QUA detailUser.php (SEMAPHORE = 5)
+            # ------------------------------------------------------------------
             async def fetch_user_detail(user_summary: Dict[str, Any]) -> Dict[str, Any]:
                 u_id = str(user_summary.get("user_id"))
                 async with sem:
@@ -124,15 +174,14 @@ class WorkspaceUserService(WorkspaceBaseService):
                         }
                     }
 
-            detailed_users = await asyncio.gather(*[fetch_user_detail(u) for u in users_list])
-            logger.info(f"✅ [WorkspaceUser] Đã bốc chi tiết thành công cho {len(detailed_users)} người dùng.")
+            detailed_users = await asyncio.gather(*[fetch_user_detail(u) for u in found_users_summary])
+            logger.info(f"✅ [WorkspaceUser] Đã nạp thành công {len(detailed_users)} hồ sơ chi tiết.")
 
             first_user = detailed_users[0]
             return {
                 "success": True,
                 "total": len(detailed_users),
                 "users": detailed_users,
-                # Giữ nguyên các trường single cũ để tương thích ngược 100%
                 "user_id": first_user["user_id"],
                 "user_login": first_user["user_login"],
                 "summary": first_user["summary"],

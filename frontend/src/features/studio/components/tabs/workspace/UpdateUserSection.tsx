@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
     UserCheck, CheckCircle2, Search, Loader2, Zap, Check, X,
-    Lock, Unlock, Users, User, AlertCircle
+    Lock, Unlock, Users, User, AlertCircle, Building2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { HierarchySchoolItem } from '../../../types';
@@ -55,7 +55,6 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
     setUserSearchQuery,
     isSearchingUser,
     onSearchUserProfile,
-    loadedUserProfile,
     editableUsers,
     setEditableUsers,
     schoolsList,
@@ -64,7 +63,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
     // Chế độ: false = Thẻ riêng lẻ, true = Cập nhật hàng loạt
     const [isBulkMode, setIsBulkMode] = useState<boolean>(false);
 
-    // Trạng thái KHÓA / MỞ KHÓA từng trường ở Master Bulk (Mặc định: KHÓA để bảo toàn dữ liệu gốc)
+    // 🔒 TRẠNG THÁI KHÓA TOÀN BỘ MẶC ĐỊNH CHO BULK SYNC
     const [lockedFields, setLockedFields] = useState<{
         firstName: boolean;
         lastName: boolean;
@@ -90,32 +89,50 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
     const [bulkPartnerName, setBulkPartnerName] = useState<string>('');
     const [bulkPartnerSearch, setBulkPartnerSearch] = useState<string>('');
 
-    // Combobox Dropdowns State cho Master Bulk
-    const [isBulkSchoolOpen, setIsBulkSchoolOpen] = useState<boolean>(false);
-    const bulkSchoolRef = useRef<HTMLDivElement | null>(null);
-    const [isBulkPartnerOpen, setIsBulkPartnerOpen] = useState<boolean>(false);
-    const bulkPartnerRef = useRef<HTMLDivElement | null>(null);
+    // Dropdown quản lý nổi duy nhất (Single Active Dropdown chống lag 24 cards)
+    const [activeDropdown, setActiveDropdown] = useState<{
+        userId: string;
+        type: 'school' | 'partner';
+        search: string;
+    } | null>(null);
 
-    // Click outside handler
+    const dropdownContainerRef = useRef<HTMLDivElement | null>(null);
+
+    // Đóng dropdown khi click ra ngoài
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
-            if (bulkSchoolRef.current && !bulkSchoolRef.current.contains(e.target as Node)) {
-                setIsBulkSchoolOpen(false);
-            }
-            if (bulkPartnerRef.current && !bulkPartnerRef.current.contains(e.target as Node)) {
-                setIsBulkPartnerOpen(false);
+            if (dropdownContainerRef.current && !dropdownContainerRef.current.contains(e.target as Node)) {
+                setActiveDropdown(null);
             }
         };
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
+    // 🔄 CHUYỂN SANG CHẾ ĐỘ BULK: ÉP TOÀN BỘ CÁC TRƯỜNG PHẢI KHÓA MẶC ĐỊNH
+    const handleSwitchToBulkMode = () => {
+        setIsBulkMode(true);
+        setLockedFields({
+            firstName: true,
+            lastName: true,
+            dob: true,
+            schoolPartner: true,
+        });
+        setBulkFirstName('');
+        setBulkLastName('');
+        setBulkSchoolCode('');
+        setBulkSchoolName('');
+        setBulkPartnerCode('');
+        setBulkPartnerName('');
+        toast.info('Chuyển sang Cập Nhật Hàng Loạt: Các trường được Khóa an toàn mặc định.');
+    };
+
     // Xóa bớt một user khỏi danh sách
     const handleDismissUser = (userId: string) => {
         setEditableUsers(prev => {
             const nextList = prev.filter(u => u.user_id !== userId);
             if (nextList.length === 0) {
-                toast.info('Đã xóa toàn bộ người dùng khỏi phiên chỉnh sửa.');
+                toast.info('Đã xóa toàn bộ người dùng khỏi danh sách.');
             } else {
                 toast.success('Đã loại bỏ 1 người dùng khỏi danh sách.');
             }
@@ -123,13 +140,13 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
         });
     };
 
-    // Toggle Khóa/Mở Khóa và đồng bộ dữ liệu vào editableUsers
+    // Toggle Khóa/Mở Khóa trong Master Bulk
     const toggleFieldLock = (field: 'firstName' | 'lastName' | 'dob' | 'schoolPartner') => {
         const nextState = !lockedFields[field];
         setLockedFields(prev => ({ ...prev, [field]: nextState }));
 
         if (nextState) {
-            // Khi KHÓA LẠI ➔ Khôi phục lại dữ liệu gốc ban đầu cho từng người
+            // Khi Khóa lại: Khôi phục dữ liệu gốc của từng người
             setEditableUsers(prev => prev.map(u => {
                 if (field === 'firstName') return { ...u, first_name: u.original.first_name };
                 if (field === 'lastName') return { ...u, last_name: u.original.last_name };
@@ -143,13 +160,13 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                 };
                 return u;
             }));
-            toast.info(`Đã khóa trường: Dữ liệu của từng người được giữ nguyên.`);
+            toast.info(`Đã khóa trường: Bảo toàn dữ liệu gốc của từng người.`);
         } else {
-            toast.success(`Đã mở khóa: Giá trị nhập bên dưới sẽ áp dụng cho tất cả.`);
+            toast.success(`Đã mở khóa: Giá trị nhập bên dưới sẽ áp dụng đồng loạt.`);
         }
     };
 
-    // Cập nhật giá trị Bulk vào toàn bộ mảng users
+    // Áp dụng giá trị Bulk vào toàn bộ mảng users
     const applyBulkValue = (field: string, val: any) => {
         setEditableUsers(prev => prev.map(u => {
             if (field === 'firstName') return { ...u, first_name: val };
@@ -168,7 +185,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
         }));
     };
 
-    // Cập nhật từng trường ở chế độ thẻ riêng lẻ
+    // Cập nhật giá trị thẻ riêng lẻ
     const updateSingleUserField = (userId: string, field: string, value: string) => {
         setEditableUsers(prev => prev.map(u => {
             if (u.user_id === userId) {
@@ -181,8 +198,8 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
     const hasUsers = editableUsers && editableUsers.length > 0;
 
     return (
-        <div className="space-y-5 pt-2 animate-in fade-in duration-150">
-            {/* 1. THANH TÌM KIẾM DÒ TÌM USER */}
+        <div className="space-y-5 pt-2 animate-in fade-in duration-150" ref={dropdownContainerRef}>
+            {/* 1. THANH TÌM KIẾM DẠNG TEXTAREA HỖ TRỢ BULK PASTE TỪ EXCEL */}
             <div className="p-4 rounded-2xl border border-indigo-200/80 dark:border-indigo-900/50 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                     <div>
@@ -193,40 +210,42 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                             </span>
                         </h3>
                         <p className="text-[11px] text-slate-500">
-                            Nhập tiền tố Email hoặc Username để tìm kiếm gần đúng (tối đa 25 bản ghi).
+                            Nhập <b>tiền tố</b> (VD: <code>stdntsabah</code>) HOẶC <b>dán danh sách nhiều tài khoản</b> từ Excel (mỗi dòng một email/username, tối đa 25).
                         </p>
                     </div>
 
                     {hasUsers && !isSearchingUser && (
-                        <div className="flex items-center gap-2">
-                            <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-[11px] font-mono font-bold flex items-center gap-1.5 shadow-xs">
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                <span>Khớp: {editableUsers.length} tài khoản</span>
-                            </span>
-                        </div>
+                        <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-[11px] font-mono font-bold flex items-center gap-1.5 shadow-xs self-start sm:self-auto">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Khớp: {editableUsers.length} tài khoản</span>
+                        </span>
                     )}
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                     <div className="relative flex-1">
-                        <input
-                            type="text"
+                        <textarea
+                            rows={3}
                             value={userSearchQuery}
                             onChange={(e) => setUserSearchQuery(e.target.value)}
                             onKeyDown={(e) => {
-                                if (e.key === 'Enter') onSearchUserProfile();
+                                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                                    onSearchUserProfile();
+                                }
                             }}
-                            placeholder="Nhập email hoặc username (VD: teachersabah, hsdttemd)..."
-                            className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-2.5 font-mono text-xs text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden shadow-xs"
+                            placeholder="Nhập 1 từ khóa (VD: stdntsabah)&#10;HOẶC dán danh sách nhiều tài khoản:&#10;teacher01@edu.my&#10;teacher02@edu.my..."
+                            className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3.5 py-2.5 font-mono text-xs text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden shadow-xs resize-y"
                         />
-                        <Search className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
+                        <span className="absolute right-3 bottom-2 text-[10px] text-slate-400 font-mono pointer-events-none">
+                            Ctrl + Enter để tìm
+                        </span>
                     </div>
 
                     <button
                         type="button"
                         onClick={onSearchUserProfile}
                         disabled={isSearchingUser}
-                        className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold transition shadow-xs flex items-center gap-2 cursor-pointer shrink-0"
+                        className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold transition shadow-xs flex items-center justify-center gap-2 cursor-pointer shrink-0 self-stretch sm:self-auto"
                     >
                         {isSearchingUser ? (
                             <>
@@ -259,8 +278,8 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                             type="button"
                             onClick={() => setIsBulkMode(false)}
                             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${!isBulkMode
-                                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                                 }`}
                         >
                             <User className="w-3.5 h-3.5" />
@@ -269,10 +288,10 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
 
                         <button
                             type="button"
-                            onClick={() => setIsBulkMode(true)}
+                            onClick={handleSwitchToBulkMode}
                             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${isBulkMode
-                                ? 'bg-indigo-600 text-white shadow-xs'
-                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                                    ? 'bg-indigo-600 text-white shadow-xs'
+                                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                                 }`}
                         >
                             <Users className="w-3.5 h-3.5" />
@@ -286,15 +305,14 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
             {isSearchingUser ? (
                 <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 text-center space-y-3">
                     <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mx-auto" />
-                    <p className="text-xs font-medium text-slate-500">Đang quét danh sách và tải chi tiết tối đa 25 hồ sơ...</p>
+                    <p className="text-xs font-medium text-slate-500">Đang quét danh sách và bốc chi tiết tối đa 25 hồ sơ song song...</p>
                 </div>
             ) : hasUsers ? (
                 isBulkMode ? (
                     // =========================================================
-                    // 🌟 CHẾ ĐỘ 1: MASTER BULK CONTROLLER (GỘP THÀNH 1 THẺ CHUNG)
+                    // 🌟 CHẾ ĐỘ 1: MASTER BULK CONTROLLER (MẶC ĐỊNH KHÓA 100%)
                     // =========================================================
                     <div className="rounded-3xl border border-indigo-200 dark:border-indigo-900/60 bg-white dark:bg-slate-900 p-6 space-y-6 shadow-xs animate-in fade-in duration-150">
-                        {/* Header Thẻ Master */}
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4 gap-2">
                             <div>
                                 <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 flex items-center gap-2">
@@ -302,12 +320,12 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                     <span>Bảng Điều Khiển Cập Nhật Hàng Loạt ({editableUsers.length} Tài Khoản)</span>
                                 </h4>
                                 <p className="text-[11px] text-slate-500 mt-0.5">
-                                    Bấm vào nút Khóa/Mở để quyết định trường nào áp dụng chung, trường nào giữ nguyên theo từng người.
+                                    Tất cả các trường đang được <b>Khóa an toàn mặc định</b>. Chỉ mở khóa những mục anh muốn ghi đè đồng bộ.
                                 </p>
                             </div>
                         </div>
 
-                        {/* Danh sách Pill Chips các tài khoản đang chọn (Cho phép click X để loại bỏ) */}
+                        {/* Danh sách Pill Chips các tài khoản đang chọn */}
                         <div className="space-y-1.5">
                             <span className="text-[10px] font-bold uppercase text-slate-400">Danh sách tài khoản áp dụng:</span>
                             <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-2 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
@@ -333,7 +351,6 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             {/* CỘT TRÁI: FIRST NAME, LAST NAME, EMAIL & NGÀY SINH */}
                             <div className="space-y-4">
-                                {/* FIRST NAME & LAST NAME */}
                                 <div className="grid grid-cols-2 gap-3">
                                     {/* FIRST NAME */}
                                     <div className="space-y-1.5">
@@ -343,8 +360,8 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                                 type="button"
                                                 onClick={() => toggleFieldLock('firstName')}
                                                 className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border transition cursor-pointer ${lockedFields.firstName
-                                                    ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
-                                                    : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800'
+                                                        ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+                                                        : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800'
                                                     }`}
                                             >
                                                 {lockedFields.firstName ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
@@ -366,8 +383,8 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                                 }}
                                                 placeholder="Nhập First Name chung..."
                                                 className={`w-full rounded-xl border px-3 py-2 text-xs font-semibold focus:outline-hidden ${!bulkFirstName.trim()
-                                                    ? 'border-rose-400 bg-rose-50/20 text-rose-900 dark:text-rose-200'
-                                                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white'
+                                                        ? 'border-rose-400 bg-rose-50/20 text-rose-900 dark:text-rose-200'
+                                                        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white'
                                                     }`}
                                             />
                                         )}
@@ -381,8 +398,8 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                                 type="button"
                                                 onClick={() => toggleFieldLock('lastName')}
                                                 className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border transition cursor-pointer ${lockedFields.lastName
-                                                    ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
-                                                    : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800'
+                                                        ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+                                                        : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800'
                                                     }`}
                                             >
                                                 {lockedFields.lastName ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
@@ -404,8 +421,8 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                                 }}
                                                 placeholder="Nhập Last Name chung..."
                                                 className={`w-full rounded-xl border px-3 py-2 text-xs font-semibold focus:outline-hidden ${!bulkLastName.trim()
-                                                    ? 'border-rose-400 bg-rose-50/20 text-rose-900 dark:text-rose-200'
-                                                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white'
+                                                        ? 'border-rose-400 bg-rose-50/20 text-rose-900 dark:text-rose-200'
+                                                        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white'
                                                     }`}
                                             />
                                         )}
@@ -435,8 +452,8 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                             type="button"
                                             onClick={() => toggleFieldLock('dob')}
                                             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border transition cursor-pointer ${lockedFields.dob
-                                                ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
-                                                : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800'
+                                                    ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+                                                    : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800'
                                                 }`}
                                         >
                                             {lockedFields.dob ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
@@ -501,8 +518,8 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                         type="button"
                                         onClick={() => toggleFieldLock('schoolPartner')}
                                         className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold border transition cursor-pointer ${lockedFields.schoolPartner
-                                            ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
-                                            : 'bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 border-purple-200 dark:border-purple-800'
+                                                ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+                                                : 'bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 border-purple-200 dark:border-purple-800'
                                             }`}
                                     >
                                         {lockedFields.schoolPartner ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
@@ -517,7 +534,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                 ) : (
                                     <div className="space-y-3.5">
                                         {/* 1. COMBOBOX CHỌN ĐỐI TÁC */}
-                                        <div className="relative" ref={bulkPartnerRef}>
+                                        <div className="relative">
                                             <label className="text-[10px] font-bold uppercase text-slate-500 flex justify-between">
                                                 <span>Đối Tác Áp Dụng:</span>
                                                 {bulkPartnerCode && <span className="font-mono text-purple-600 font-bold">Mã: {bulkPartnerCode}</span>}
@@ -526,10 +543,10 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                                 <input
                                                     type="text"
                                                     value={bulkPartnerSearch}
-                                                    onFocus={() => setIsBulkPartnerOpen(true)}
+                                                    onFocus={() => setActiveDropdown({ userId: 'bulk', type: 'partner', search: bulkPartnerSearch })}
                                                     onChange={(e) => {
                                                         setBulkPartnerSearch(e.target.value);
-                                                        setIsBulkPartnerOpen(true);
+                                                        setActiveDropdown({ userId: 'bulk', type: 'partner', search: e.target.value });
                                                     }}
                                                     placeholder="Gõ tìm đối tác..."
                                                     className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3.5 py-2 text-xs font-semibold text-slate-900 dark:text-white focus:border-purple-500 focus:outline-hidden pr-8"
@@ -537,7 +554,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                                 <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-3" />
                                             </div>
 
-                                            {isBulkPartnerOpen && (
+                                            {activeDropdown?.userId === 'bulk' && activeDropdown?.type === 'partner' && (
                                                 <div className="absolute z-40 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-48 overflow-y-auto p-1.5 space-y-1">
                                                     {uniquePartnersList
                                                         .filter(p => !bulkPartnerSearch || p.name.toLowerCase().includes(bulkPartnerSearch.toLowerCase()))
@@ -549,7 +566,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                                                     setBulkPartnerCode(p.code);
                                                                     setBulkPartnerName(p.name);
                                                                     setBulkPartnerSearch(p.name);
-                                                                    setIsBulkPartnerOpen(false);
+                                                                    setActiveDropdown(null);
                                                                 }}
                                                                 className="w-full text-left p-2 rounded-xl text-xs hover:bg-slate-50 dark:hover:bg-slate-800 flex justify-between items-center cursor-pointer"
                                                             >
@@ -562,7 +579,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                         </div>
 
                                         {/* 2. COMBOBOX CHỌN TRƯỜNG HỌC */}
-                                        <div className="relative" ref={bulkSchoolRef}>
+                                        <div className="relative">
                                             <label className="text-[10px] font-bold uppercase text-slate-500 flex justify-between">
                                                 <span>Trường Học Áp Dụng:</span>
                                                 {bulkSchoolCode && <span className="font-mono text-indigo-600 font-bold">Mã: {bulkSchoolCode}</span>}
@@ -571,10 +588,10 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                                 <input
                                                     type="text"
                                                     value={bulkSchoolSearch}
-                                                    onFocus={() => setIsBulkSchoolOpen(true)}
+                                                    onFocus={() => setActiveDropdown({ userId: 'bulk', type: 'school', search: bulkSchoolSearch })}
                                                     onChange={(e) => {
                                                         setBulkSchoolSearch(e.target.value);
-                                                        setIsBulkSchoolOpen(true);
+                                                        setActiveDropdown({ userId: 'bulk', type: 'school', search: e.target.value });
                                                     }}
                                                     placeholder="Gõ tìm tên trường..."
                                                     className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3.5 py-2 text-xs font-semibold text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden pr-8"
@@ -582,7 +599,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                                 <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-3" />
                                             </div>
 
-                                            {isBulkSchoolOpen && (
+                                            {activeDropdown?.userId === 'bulk' && activeDropdown?.type === 'school' && (
                                                 <div className="absolute z-40 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-56 overflow-y-auto p-1.5 space-y-1">
                                                     {schoolsList
                                                         .filter(s => !bulkSchoolSearch || s.school_name.toLowerCase().includes(bulkSchoolSearch.toLowerCase()))
@@ -595,7 +612,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                                                     setBulkSchoolCode(s.school_code);
                                                                     setBulkSchoolName(s.school_name);
                                                                     setBulkSchoolSearch(s.school_name);
-                                                                    setIsBulkSchoolOpen(false);
+                                                                    setActiveDropdown(null);
 
                                                                     const pCode = s.partner_code && s.partner_code !== 'N/A' ? s.partner_code : bulkPartnerCode;
                                                                     const pName = s.partner_name && s.partner_name !== 'N/A' ? s.partner_name : bulkPartnerName;
@@ -627,7 +644,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                     </div>
                 ) : (
                     // =========================================================
-                    // 🌟 CHẾ ĐỘ 2: DANH SÁCH THẺ RIÊNG LẺ (MỖI USER 1 BENTO CARD)
+                    // 🌟 CHẾ ĐỘ 2: DANH SÁCH THẺ RIÊNG LẺ (CHO EDIT CẢ TRƯỜNG & PARTNER)
                     // =========================================================
                     <div className="space-y-4">
                         {editableUsers.map((u, idx) => (
@@ -648,7 +665,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                         </span>
                                     </div>
 
-                                    {/* NÚT THÙNG RÁC / XÓA BẢN GHI THỪA */}
+                                    {/* NÚT THÙNG RÁC XÓA BẢN GHI THỪA */}
                                     <button
                                         type="button"
                                         onClick={() => handleDismissUser(u.user_id)}
@@ -659,7 +676,8 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                     </button>
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                                    {/* CỘT TRÁI: HỌ TÊN, EMAIL & NGÀY SINH */}
                                     <div className="space-y-3">
                                         <div className="grid grid-cols-2 gap-2">
                                             <div>
@@ -698,7 +716,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                                 <select
                                                     value={u.day}
                                                     onChange={(e) => updateSingleUserField(u.user_id, 'day', e.target.value)}
-                                                    className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-xs font-mono text-slate-900 dark:text-white"
+                                                    className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-xs font-mono text-slate-900 dark:text-white cursor-pointer"
                                                 >
                                                     {Array.from({ length: 31 }, (_, i) => String(i + 1)).map((d) => (
                                                         <option key={d} value={d}>Ngày {d}</option>
@@ -707,7 +725,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                                 <select
                                                     value={u.month}
                                                     onChange={(e) => updateSingleUserField(u.user_id, 'month', e.target.value)}
-                                                    className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-xs font-mono text-slate-900 dark:text-white"
+                                                    className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-xs font-mono text-slate-900 dark:text-white cursor-pointer"
                                                 >
                                                     {Array.from({ length: 12 }, (_, i) => String(i + 1)).map((m) => (
                                                         <option key={m} value={m}>Tháng {m}</option>
@@ -716,7 +734,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                                 <select
                                                     value={u.year}
                                                     onChange={(e) => updateSingleUserField(u.user_id, 'year', e.target.value)}
-                                                    className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-xs font-mono text-slate-900 dark:text-white"
+                                                    className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-xs font-mono text-slate-900 dark:text-white cursor-pointer"
                                                 >
                                                     {Array.from({ length: 45 }, (_, i) => String(2025 - i)).map((y) => (
                                                         <option key={y} value={y}>{y}</option>
@@ -726,20 +744,98 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
                                         </div>
                                     </div>
 
-                                    {/* CỘT PHẢI: TRƯỜNG & ĐỐI TÁC CỦA TỪNG NGƯỜI */}
-                                    <div className="space-y-2.5 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 text-xs">
-                                        <div>
-                                            <span className="text-[10px] font-bold uppercase text-slate-400 block">Trường Học:</span>
-                                            <span className="font-bold text-slate-800 dark:text-slate-200">{u.school_name}</span>
-                                            <span className="text-[10px] font-mono text-indigo-500 ml-2">(Mã: {u.school_id})</span>
+                                    {/* CỘT PHẢI: BỘ CHỌN ĐỐI TÁC & TRƯỜNG HỌC CHO TỪNG THẺ */}
+                                    <div className="space-y-3 p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
+                                        {/* 1. ĐỐI TÁC QUẢN LÝ */}
+                                        <div className="relative">
+                                            <div className="flex items-center justify-between text-[10px] font-bold uppercase text-slate-500 mb-1">
+                                                <span>Đối Tác (Partner):</span>
+                                                {u.partner_id && <span className="font-mono text-purple-600 font-bold">Mã: {u.partner_id}</span>}
+                                            </div>
+                                            <div className="relative">
+                                                <input
+                                                    type="text"
+                                                    value={activeDropdown?.userId === u.user_id && activeDropdown?.type === 'partner' ? activeDropdown.search : u.partner_name}
+                                                    onFocus={() => setActiveDropdown({ userId: u.user_id, type: 'partner', search: u.partner_name })}
+                                                    onChange={(e) => setActiveDropdown({ userId: u.user_id, type: 'partner', search: e.target.value })}
+                                                    placeholder="Gõ tìm đối tác..."
+                                                    className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-900 dark:text-white focus:border-purple-500 focus:outline-hidden pr-7"
+                                                />
+                                                <Search className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2" />
+                                            </div>
+
+                                            {activeDropdown?.userId === u.user_id && activeDropdown?.type === 'partner' && (
+                                                <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl max-h-40 overflow-y-auto p-1 space-y-0.5">
+                                                    {uniquePartnersList
+                                                        .filter(p => !activeDropdown.search || p.name.toLowerCase().includes(activeDropdown.search.toLowerCase()))
+                                                        .map(p => (
+                                                            <button
+                                                                key={p.code}
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    updateSingleUserField(u.user_id, 'partner_id', p.code);
+                                                                    updateSingleUserField(u.user_id, 'partner_name', p.name);
+                                                                    setActiveDropdown(null);
+                                                                }}
+                                                                className="w-full text-left px-2 py-1.5 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-slate-800 flex justify-between items-center cursor-pointer"
+                                                            >
+                                                                <span className="font-bold text-slate-900 dark:text-white">{p.name}</span>
+                                                                <span className="text-[10px] text-slate-400 font-mono">Mã: {p.code}</span>
+                                                            </button>
+                                                        ))}
+                                                </div>
+                                            )}
                                         </div>
-                                        <div>
-                                            <span className="text-[10px] font-bold uppercase text-slate-400 block">Đối Tác Quản Lý:</span>
-                                            <span className="font-bold text-slate-800 dark:text-slate-200">{u.partner_name}</span>
-                                            <span className="text-[10px] font-mono text-purple-500 ml-2">(Mã: {u.partner_id})</span>
+
+                                        {/* 2. TRƯỜNG HỌC THỤ HƯỞNG */}
+                                        <div className="relative">
+                                            <div className="flex items-center justify-between text-[10px] font-bold uppercase text-slate-500 mb-1">
+                                                <span>Trường Học (School):</span>
+                                                {u.school_id && <span className="font-mono text-indigo-600 font-bold">Mã: {u.school_id}</span>}
+                                            </div>
+                                            <div className="relative">
+                                                <input
+                                                    type="text"
+                                                    value={activeDropdown?.userId === u.user_id && activeDropdown?.type === 'school' ? activeDropdown.search : u.school_name}
+                                                    onFocus={() => setActiveDropdown({ userId: u.user_id, type: 'school', search: u.school_name })}
+                                                    onChange={(e) => setActiveDropdown({ userId: u.user_id, type: 'school', search: e.target.value })}
+                                                    placeholder="Gõ tìm tên trường..."
+                                                    className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-900 dark:text-white focus:border-indigo-500 focus:outline-hidden pr-7"
+                                                />
+                                                <Search className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2" />
+                                            </div>
+
+                                            {activeDropdown?.userId === u.user_id && activeDropdown?.type === 'school' && (
+                                                <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl max-h-48 overflow-y-auto p-1 space-y-0.5">
+                                                    {schoolsList
+                                                        .filter(s => !activeDropdown.search || s.school_name.toLowerCase().includes(activeDropdown.search.toLowerCase()) || String(s.school_code).includes(activeDropdown.search))
+                                                        .slice(0, 40)
+                                                        .map(s => (
+                                                            <button
+                                                                key={`${s.school_id}-${s.school_code}`}
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    updateSingleUserField(u.user_id, 'school_id', s.school_code);
+                                                                    updateSingleUserField(u.user_id, 'school_name', s.school_name);
+                                                                    if (s.partner_code && s.partner_code !== 'N/A') {
+                                                                        updateSingleUserField(u.user_id, 'partner_id', s.partner_code);
+                                                                        updateSingleUserField(u.user_id, 'partner_name', s.partner_name);
+                                                                    }
+                                                                    setActiveDropdown(null);
+                                                                }}
+                                                                className="w-full text-left px-2 py-1.5 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-slate-800 flex justify-between items-center cursor-pointer"
+                                                            >
+                                                                <span className="font-bold text-slate-900 dark:text-white truncate">{s.school_name}</span>
+                                                                <span className="text-[10px] text-slate-400 font-mono ml-2 shrink-0">Mã: {s.school_code}</span>
+                                                            </button>
+                                                        ))}
+                                                </div>
+                                            )}
                                         </div>
-                                        <div className="pt-1 text-[10px] text-slate-400 font-mono">
-                                            Moodle ID: {u.id_user_md || 'Chưa liên kết'}
+
+                                        <div className="pt-1 text-[10px] text-slate-400 font-mono flex items-center justify-between border-t border-slate-200/40 dark:border-slate-700/40">
+                                            <span>Moodle User ID: <b>{u.id_user_md || 'Chưa liên kết'}</b></span>
+                                            <span>Quốc gia: {u.country_id}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -750,7 +846,7 @@ export const UpdateUserSection: React.FC<UpdateUserSectionProps> = ({
             ) : (
                 <div className="flex h-48 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 p-6 text-center text-xs text-slate-400 animate-in fade-in duration-150">
                     <UserCheck className="h-8 w-8 text-slate-300 dark:text-slate-700 mb-2" />
-                    <span>Nhập tiền tố Email hoặc Username và bấm "Dò Tìm Hồ Sơ" để mở bảng chỉnh sửa.</span>
+                    <span>Nhập tiền tố hoặc dán danh sách tài khoản từ Excel vào ô trên và bấm "Dò Tìm Hồ Sơ".</span>
                 </div>
             )}
         </div>
