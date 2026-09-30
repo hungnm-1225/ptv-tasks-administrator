@@ -1,5 +1,6 @@
 # backend/app/services/workspace/user_service.py
 import logging
+import re
 import asyncio
 from typing import Dict, Any, Optional, List
 import httpx
