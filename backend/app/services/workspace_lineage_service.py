@@ -48,43 +48,92 @@ def decrypt_password(encrypted_pass: str) -> str:
 class WorkspaceLineageService:
     """Service tự động truy vết phả hệ Distributor -> Partner -> School."""
 
-    @staticmethod
-    def resolve_by_school(school_identifier: str, country_hint: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    @classmethod
+    def resolve_by_school(
+        cls, 
+        school_identifier: Optional[Union[str, Dict[str, Any]]] = None, 
+        country_hint: Optional[str] = None,
+        school_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """
-        Nhập tên trường, mã trường hoặc UUID trường (VD: '10266', 'SCH_10266', UUID hoặc 'Pythaverse School Demo') 
-        -> Trả về đầy đủ thông tin tài khoản của Trường, Partner, Distributor và Thư mục Quốc gia.
+        Chiến lược Waterfall Search giải quyết triệt để vấn đề tìm trường:
+        1. Ưu tiên tuyệt đối school_id (UUID / ID số).
+        2. Nếu truyền dictionary payload, tự bóc tách thông minh.
+        3. Nếu truyền chuỗi tên, xử lý sạch ký tự đặc biệt PostgREST và Heuristic Fallback (Demo/Test).
         """
-        if not school_identifier or school_identifier in ["Tự động truy vết", ""]:
+        target_id: Optional[str] = school_id
+        target_name: Optional[str] = None
+
+        # 0. Phòng thủ nếu caller vô tình truyền nguyên payload dict vào school_identifier
+        if isinstance(school_identifier, dict):
+            target_id = target_id or school_identifier.get("school_id") or school_identifier.get("id")
+            target_name = school_identifier.get("school_name") or school_identifier.get("school") or school_identifier.get("name")
+        elif isinstance(school_identifier, str):
+            clean_str = school_identifier.strip()
+            if clean_str not in ["Tự động truy vết", ""]:
+                # Nhận diện nếu bản thân chuỗi là UUID
+                if len(clean_str) == 36 and clean_str.count("-") == 4:
+                    target_id = target_id or clean_str
+                else:
+                    target_name = clean_str
+
+        # Nếu không có bất kỳ dữ kiện nào
+        if not target_id and not target_name:
             return None
 
         supabase = get_supabase_client()
-        clean_id = str(school_identifier).strip()
-        
-        # 🔒 KHÓA CỨNG: Bắt buộc chỉ tìm các tổ chức có role_type = 'school'
         query = supabase.table("workspace_organizations")\
             .select("*, workspace_credentials_vault(*)")\
             .eq("role_type", "school")
-            
-        # 1. Hỗ trợ tìm kiếm theo UUID định danh duy nhất nếu truyền school_id
-        if len(clean_id) == 36 and clean_id.count("-") == 4:
-            school_res = query.eq("id", clean_id).execute()
-        elif clean_id.isdigit():
-            school_res = query.or_(f"code.eq.{clean_id},code.eq.SCH_{clean_id},name.ilike.%{clean_id}%").execute()
-        elif clean_id.startswith("SCH_"):
-            num_part = clean_id.replace("SCH_", "")
-            school_res = query.or_(f"code.eq.{clean_id},code.eq.{num_part}").execute()
-        else:
-            school_res = query.or_(f"code.eq.{clean_id},name.ilike.%{clean_id}%").execute()
 
-        if not school_res.data:
-            logger.warning(f"Không tìm thấy trường học (role_type='school') phù hợp với: '{school_identifier}'")
+        school_res = None
+
+        # =========================================================================
+        # BƯỚC 1: ƯU TIÊN SỐ 1 - TÌM CHÍNH XÁC THEO UUID HOẶC MÃ SỐ (INDEX SCAN O(1))
+        # =========================================================================
+        if target_id:
+            clean_target_id = str(target_id).strip()
+            if len(clean_target_id) == 36 and clean_target_id.count("-") == 4:
+                school_res = query.eq("id", clean_target_id).execute()
+            elif clean_target_id.isdigit():
+                school_res = query.or_(f'code.eq."{clean_target_id}",code.eq."SCH_{clean_target_id}"').execute()
+            elif clean_target_id.startswith("SCH_"):
+                num_part = clean_target_id.replace("SCH_", "")
+                school_res = query.or_(f'code.eq."{clean_target_id}",code.eq."{num_part}"').execute()
+
+        # =========================================================================
+        # BƯỚC 2: NẾU CHƯA RA HOẶC KHÔNG CÓ ID, TÌM THEO TÊN (AN TOÀN POSTGREST)
+        # =========================================================================
+        if (not school_res or not school_res.data) and target_name:
+            clean_name = target_name.strip()
+            
+            # 2.1 Kiểm tra nếu tên thực chất là mã SCH_ hoặc Số
+            if clean_name.isdigit():
+                school_res = query.or_(f'code.eq."{clean_name}",code.eq."SCH_{clean_name}"').execute()
+            elif clean_name.startswith("SCH_"):
+                num_part = clean_name.replace("SCH_", "")
+                school_res = query.or_(f'code.eq."{clean_name}",code.eq."{num_part}"').execute()
+            else:
+                # 2.2 Tìm chính xác theo tên (Chỉ dùng ilike trên name, không nhét vào code.eq)
+                school_res = query.ilike("name", f"%{clean_name}%").execute()
+
+                # 2.3 Heuristic Fallback: Nếu không thấy và tên dính (Demo)/(Test) -> gọt sạch tìm lại
+                if (not school_res or not school_res.data):
+                    base_name = cls._clean_demo_noise(clean_name)
+                    if base_name and base_name != clean_name:
+                        logger.info(f"🔍 Thử fallback tìm trường theo Base Name: '{base_name}' (loại bỏ hậu tố Demo/Test)")
+                        school_res = query.ilike("name", f"%{base_name}%").execute()
+
+        if not school_res or not school_res.data:
+            logger.warning(f"❌ Không tìm thấy trường học (role_type='school') phù hợp với ID='{target_id}', Name='{target_name}'")
             return None
 
-        # 2. Lấy bản ghi School có credentials hợp lệ trong Vault
+        # =========================================================================
+        # BƯỚC 3: TRÍCH XUẤT CREDENTIALS TỪ VAULT & TRUY VẾT PHẢ HỆ
+        # =========================================================================
         school = None
         school_creds = {}
         for s in school_res.data:
-            # Bảo đảm bản ghi đúng chuẩn role_type school
             if s.get("role_type") != "school":
                 continue
             raw_v = s.get("workspace_credentials_vault")
@@ -103,7 +152,7 @@ class WorkspaceLineageService:
         partner_data = None
         distributor_data = None
 
-        # 2. Tìm Partner cấp trên
+        # Tìm Partner cấp trên
         if partner_id:
             partner_res = supabase.table("workspace_organizations")\
                 .select("*, workspace_credentials_vault(*)")\
@@ -122,7 +171,7 @@ class WorkspaceLineageService:
                     "password": decrypt_password(p_creds.get("encrypted_password", ""))
                 }
 
-                # 3. Tìm Distributor cấp cao nhất
+                # Tìm Distributor cấp cao nhất
                 dist_id = partner.get("parent_id")
                 if dist_id:
                     dist_res = supabase.table("workspace_organizations")\
@@ -168,7 +217,8 @@ class WorkspaceLineageService:
                 "name": "PTV Distributor Demo", "username": "testdistributor", "password": ""
             }
         }
-    
+
+
     @staticmethod
     def resolve_by_partner(partner_identifier: str) -> Optional[Dict[str, Any]]:
         """
