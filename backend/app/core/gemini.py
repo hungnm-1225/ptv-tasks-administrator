@@ -275,17 +275,19 @@ class AIEngine:
         parsed_thread = thread_service.parse_thread(raw_content, sender_email)
         full_content = parsed_thread.compact_prompt_context if parsed_thread.is_thread else (raw_content[:20000] if raw_content else "(Trống)")
 
-        # 1. Định dạng danh mục khóa học LMS
+        # 1. Định dạng danh mục khóa học LMS & Bản lược kê tệp
         excel_data = excel_summary or {}
         provenance = excel_data.get("provenance_ledger") or {}
         active_files = provenance.get("active_new_files") or []
 
-        # Chỉ tóm tắt cực ngắn file đính kèm nếu có
-        excel_info_str = f"Tệp đính kèm: {', '.join(active_files)}" if active_files else "(Không có tệp mới)"
-        if excel_data.get("account_profiles"):
-            excel_info_str += f"\n- Bóc tách được {len(excel_data['account_profiles'])} tài khoản từ file."
+        # Lấy Bản Lược Kê Quản Trị từ Python đã nén sẵn
+        excel_info_str = excel_data.get("executive_digest") or (
+            f"Tệp đính kèm: {', '.join(active_files)}" if active_files else "(Không có tệp mới)"
+        )
 
-        # Nạp Prompt rút gọn
+        # Lấy Top 6 Khóa Học Mồi từ Candidate Injection
+        catalog_context_str = excel_data.get("catalog_context_str") or "(Không có môn mồi)"
+
         ai_summary_clean = str(ai_summary or "Chưa có bản tóm tắt").strip()
 
         if self.intent_prompt_tpl:
@@ -293,7 +295,7 @@ class AIEngine:
             replacements = {
                 "{subject}": str(subject or ""),
                 "{sender_email}": str(sender_email or "Không rõ"),
-                "{catalog_context_str}": "(Đã chuyển sang Local Resolution)",
+                "{catalog_context_str}": catalog_context_str,
                 "{excel_info_str}": str(excel_info_str),
                 "{ai_summary}": ai_summary_clean,
                 "{full_content}": str(full_content or "")
