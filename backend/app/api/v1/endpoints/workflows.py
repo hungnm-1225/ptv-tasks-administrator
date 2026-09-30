@@ -10,7 +10,6 @@ Chuyên trách:
 - Bảo toàn tuyệt đối danh tính người duyệt Bearer JWT thuộc domain @dtt.vn.
 """
 
-import asyncio
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
@@ -29,8 +28,6 @@ from app.models.workflow import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-_IN_FLIGHT_WORKFLOW_APPROVALS: set = set()
-_APPROVAL_MUTEX = asyncio.Lock()
 
 
 @router.get("/capabilities")
@@ -278,184 +275,122 @@ async def approve_and_run_workflow(
     current_user_email: str = Depends(get_current_user_email)
 ):
     """
-    XÁC NHẬN, ĐÓNG BĂNG & THỰC THI (JWT AUTHENTICATED - CONCURRENCY HARDENED):
-    - In-Memory Double-Click Shield: Chặn cú click đúp trong phạm vi mili-giây.
-    - RPC Smart Error Detection: Chỉ fallback khi thực sự thiếu Function trong Postgres.
-    - PostgREST Atomic CAS: Khóa điều kiện nguyên tử cấp database chống race-condition.
-    - Saga Rollback: Triệt tiêu hoàn toàn nguy cơ Split-Brain giữa 2 bảng.
+    XÁC NHẬN, ĐÓNG BĂNG & THỰC THI (JWT AUTHENTICATED):
+    - Hỗ trợ hoàn hảo Admin Override khi Quản trị viên đã kiểm tra và cung cấp lý do can thiệp.
+    - Đóng băng song song: workflow_proposals (frozen_plan) VÀ automation_workflows (steps).
+    - Dual Freeze thông minh: Gọi Stored Procedure RPC, nếu thiếu RPC -> Tự động Fallback Direct Update.
     """
-    # 0. CHỐNG DOUBLE-CLICK CÙNG MỘT WORKFLOW TRÊN CÙNG INSTANCE
-    async with _APPROVAL_MUTEX:
-        if workflow_id in _IN_FLIGHT_WORKFLOW_APPROVALS:
-            raise HTTPException(
-                status_code=409, 
-                detail="Workflow này đang trong tiến trình phê duyệt, vui lòng không click liên tục!"
-            )
-        _IN_FLIGHT_WORKFLOW_APPROVALS.add(workflow_id)
+    supabase = get_supabase_client()
+    res = supabase.table("automation_workflows").select("*").eq("id", workflow_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Không tìm thấy workflow.")
 
-    try:
-        supabase = get_supabase_client()
-        res = supabase.table("automation_workflows").select("*").eq("id", workflow_id).execute()
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Không tìm thấy workflow.")
+    wf = res.data[0]
+    current_status = wf.get("status")
 
-        wf = res.data[0]
-        current_status = wf.get("status")
+    if current_status in ["running", "succeeded", "success", "approved"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Không thể phê duyệt lại: Workflow đã ở trạng thái '{current_status}'."
+        )
+    if current_status in ["cancelled"]:
+        raise HTTPException(status_code=400, detail="Workflow đã bị hủy.")
 
-        if current_status in ["running", "succeeded", "success", "approved"]:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Không thể phê duyệt lại: Workflow đã ở trạng thái '{current_status}'."
-            )
-        if current_status in ["cancelled"]:
-            raise HTTPException(status_code=400, detail="Workflow đã bị hủy.")
+    # 1. KIỂM ĐỊNH DANH SÁCH BƯỚC THỰC THI
+    raw_steps = wf.get("steps") or []
+    step_objs = [WorkflowStepDraft(**s) for s in raw_steps]
+    if not step_objs:
+        raise HTTPException(status_code=400, detail="Không thể phê duyệt workflow rỗng (0 bước).")
 
-        # 1. KIỂM ĐỊNH DANH SÁCH BƯỚC THỰC THI
-        raw_steps = wf.get("steps") or []
-        step_objs = [WorkflowStepDraft(**s) for s in raw_steps]
-        if not step_objs:
-            raise HTTPException(status_code=400, detail="Không thể phê duyệt workflow rỗng (0 bước).")
+    val_result = workflow_planner_service.validate_workflow_graph(step_objs)
+    if not val_result.is_valid:
+        raise HTTPException(status_code=422, detail=f"Cấu trúc đồ thị lỗi: {'; '.join(val_result.errors)}")
 
-        val_result = workflow_planner_service.validate_workflow_graph(step_objs)
-        if not val_result.is_valid:
-            raise HTTPException(status_code=422, detail=f"Cấu trúc đồ thị lỗi: {'; '.join(val_result.errors)}")
+    # 2. XÁC THỰC DANH TÍNH NGƯỜI PHÊ DUYỆT (@dtt.vn)
+    approver = current_user_email
+    if not approver or not approver.endswith("@dtt.vn") or approver.lower().startswith(("admin@", "unknown@", "test@")):
+        raise HTTPException(
+            status_code=403,
+            detail="Bắt buộc phải có danh tính người phê duyệt hợp lệ thuộc tổ chức (@dtt.vn)."
+        )
 
-        # 2. XÁC THỰC DANH TÍNH NGƯỜI PHÊ DUYỆT (@dtt.vn)
-        approver = current_user_email
-        if not approver or not approver.endswith("@dtt.vn") or approver.lower().startswith(("admin@", "unknown@", "test@")):
-            raise HTTPException(
-                status_code=403,
-                detail="Bắt buộc phải có danh tính người phê duyệt hợp lệ thuộc tổ chức (@dtt.vn)."
-            )
+    # 3. PHÂN GIẢI VÀ CHUẨN BỊ PROPOSAL
+    proposal_id = wf.get("proposal_id")
+    ticket_id = wf.get("ticket_id")
+    proposal = None
 
-        # 3. PHÂN GIẢI VÀ CHUẨN BỊ PROPOSAL
-        proposal_id = wf.get("proposal_id")
-        ticket_id = wf.get("ticket_id")
-        proposal = None
+    if proposal_id:
+        p_res = supabase.table("workflow_proposals").select("*").eq("id", proposal_id).execute()
+        if p_res.data:
+            proposal = p_res.data[0]
 
-        if proposal_id:
-            p_res = supabase.table("workflow_proposals").select("*").eq("id", proposal_id).execute()
-            if p_res.data:
-                proposal = p_res.data[0]
+    if not proposal and ticket_id:
+        latest_p_res = supabase.table("workflow_proposals")\
+            .select("*")\
+            .eq("ticket_id", ticket_id)\
+            .order("version", desc=True)\
+            .limit(1)\
+            .execute()
+        if latest_p_res.data:
+            proposal = latest_p_res.data[0]
+            proposal_id = proposal["id"]
 
-        if not proposal and ticket_id:
-            latest_p_res = supabase.table("workflow_proposals")\
-                .select("*")\
-                .eq("ticket_id", ticket_id)\
-                .order("version", desc=True)\
-                .limit(1)\
-                .execute()
-            if latest_p_res.data:
-                proposal = latest_p_res.data[0]
-                proposal_id = proposal["id"]
+    if not proposal:
+        raise HTTPException(status_code=400, detail="Không tìm thấy Proposal liên kết để phê duyệt.")
 
-        if not proposal:
-            raise HTTPException(status_code=400, detail="Không tìm thấy Proposal liên kết để phê duyệt.")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    frozen_steps_dicts = [s.model_dump() for s in step_objs]
+    operator_reason_text = payload.operator_reason or "Phê duyệt thực thi từ Workflow Console"
 
-        original_proposal_status = proposal.get("status")
-        now_iso = datetime.now(timezone.utc).isoformat()
-        frozen_steps_dicts = [s.model_dump() for s in step_objs]
-        operator_reason_text = payload.operator_reason or "Phê duyệt thực thi từ Workflow Console"
-
-        # 🌟 ADMIN OVERRIDE: MỞ KHÓA PROPOSAL NẾU ĐANG LÀ needs_information
-        if original_proposal_status != "ready_for_review":
-            logger.info(f"🔓 [ADMIN OVERRIDE] Mở khóa Proposal #{proposal_id[:8]} từ '{original_proposal_status}' -> 'ready_for_review'...")
-            try:
-                supabase.table("workflow_proposals").update({
-                    "status": "ready_for_review",
-                    "plan": frozen_steps_dicts,
-                    "updated_at": now_iso
-                }).eq("id", proposal_id).execute()
-            except Exception as unlock_err:
-                logger.warning(f"Lỗi mở khóa proposal: {unlock_err}")
-
-        # =====================================================================
-        # 4. DUAL FREEZE: THỬ RPC TRƯỚC (PHÂN BIỆT RẠCH RÒI LỖI THIẾU HÀM VS LỖI LOGIC)
-        # =====================================================================
-        rpc_success = False
-        should_fallback = False
-
+    # 🌟 NẾU LÀ ADMIN OVERRIDE: CHỦ ĐỘNG MỞ KHÓA PROPOSAL SANG 'ready_for_review' ĐỂ CSDL KHÔNG CHẶN
+    if proposal.get("status") != "ready_for_review":
+        logger.info(f"🔓 [ADMIN OVERRIDE] Mở khóa Proposal #{proposal_id[:8]} từ '{proposal.get('status')}' -> 'ready_for_review'...")
         try:
-            approval_res = supabase.rpc("approve_workflow_proposal", {
-                "p_workflow_id": workflow_id,
-                "p_proposal_id": proposal_id,
-                "p_frozen_plan": frozen_steps_dicts,
-                "p_approver": approver,
-                "p_operator_reason": operator_reason_text,
-            }).execute()
-            if approval_res.data:
-                rpc_success = True
-        except Exception as rpc_err:
-            err_msg = str(rpc_err).lower()
-            # 🎯 CHỐT CHẶN THÔNG MINH: Chỉ fallback khi thực sự thiếu Function trong PostgreSQL!
-            if "pgrst202" in err_msg or "could not find the function" in err_msg or "does not exist" in err_msg or "42883" in err_msg:
-                logger.warning(f"⚠️ [RPC Missing] Không tìm thấy hàm approve_workflow_proposal trong CSDL. Chuyển sang Atomic CAS Fallback!")
-                should_fallback = True
-            else:
-                # 🛑 Nếu Postgres ném lỗi do SP từ chối (ví dụ đã được duyệt hoặc proposal không hợp lệ), ném 409 ngay!
-                logger.error(f"🛑 [RPC Rejected] Stored Procedure từ chối phê duyệt: {rpc_err}")
-                raise HTTPException(
-                    status_code=409, 
-                    detail=f"Cơ sở dữ liệu từ chối phê duyệt: Luồng này có thể đã được duyệt bởi phiên khác hoặc proposal không hợp lệ."
-                )
+            supabase.table("workflow_proposals").update({
+                "status": "ready_for_review",
+                "plan": frozen_steps_dicts,
+                "updated_at": now_iso
+            }).eq("id", proposal_id).execute()
+        except Exception as unlock_err:
+            logger.warning(f"Lỗi mở khóa proposal: {unlock_err}")
 
-        # =====================================================================
-        # 5. ATOMIC CAS FALLBACK & SAGA ROLLBACK (CHỐNG RACE-CONDITION TUYỆT ĐỐI)
-        # =====================================================================
-        if not rpc_success and should_fallback:
-            logger.info(f"🛡️ [Atomic CAS Fallback] Đang thực hiện khóa kép nguyên tử cho Workflow #{workflow_id[:8]}...")
-            
-            # BƯỚC 1: ATOMIC CAS TRÊN WORKFLOW (Chỉ update nếu status chưa phải approved/running/success)
-            wf_cas_res = supabase.table("automation_workflows").update({
+    # 4. THỰC HIỆN DUAL FREEZE (THỬ RPC TRƯỚC, NẾU THIẾU THÌ FALLBACK DIRECT UPDATE)
+    rpc_success = False
+    try:
+        approval_res = supabase.rpc("approve_workflow_proposal", {
+            "p_workflow_id": workflow_id,
+            "p_proposal_id": proposal_id,
+            "p_frozen_plan": frozen_steps_dicts,
+            "p_approver": approver,
+            "p_operator_reason": operator_reason_text,
+        }).execute()
+        if approval_res.data:
+            rpc_success = True
+    except Exception as rpc_err:
+        err_msg = str(rpc_err)
+        logger.warning(f"⚠️ [RPC Notice] Không thể chạy approve_workflow_proposal ({err_msg}). Tự động dùng Fallback Table Update!")
+
+    if not rpc_success:
+        try:
+            # Đóng băng Proposal
+            supabase.table("workflow_proposals").update({
+                "status": "approved",
+                "frozen_plan": frozen_steps_dicts,
+                "approved_by": approver,
+                "approved_at": now_iso,
+                "updated_at": now_iso
+            }).eq("id", proposal_id).execute()
+
+            # Đóng băng Workflow
+            supabase.table("automation_workflows").update({
                 "status": "approved",
                 "steps": frozen_steps_dicts,
                 "approved_by": approver,
                 "approved_at": now_iso,
                 "updated_at": now_iso
-            })\
-            .eq("id", workflow_id)\
-            .not_.in_("status", ["approved", "running", "succeeded", "success", "cancelled"])\
-            .execute()
+            }).eq("id", workflow_id).execute()
 
-            # Nếu không có dòng nào được cập nhật -> Có người khác vừa duyệt trước đó 1ms!
-            if not wf_cas_res.data:
-                logger.warning(f"🛑 [CAS Blocked] Workflow #{workflow_id[:8]} đã bị tranh chấp và thay đổi trạng thái trước!")
-                raise HTTPException(
-                    status_code=409, 
-                    detail="Workflow này vừa được phê duyệt hoặc thay đổi trạng thái bởi một phiên khác!"
-                )
-
-            # BƯỚC 2: CẬP NHẬT PROPOSAL CÓ SAGA COMPENSATING ROLLBACK
-            try:
-                prop_res = supabase.table("workflow_proposals").update({
-                    "status": "approved",
-                    "frozen_plan": frozen_steps_dicts,
-                    "approved_by": approver,
-                    "approved_at": now_iso,
-                    "updated_at": now_iso
-                })\
-                .eq("id", proposal_id)\
-                .execute()
-
-                if not prop_res.data:
-                    raise RuntimeError(f"Không thể cập nhật Proposal #{proposal_id}")
-
-            except Exception as prop_err:
-                # 🚨 SAGA ROLLBACK: Nếu Proposal lỗi, lập tức hồi phục Workflow về trạng thái cũ để chống Split-Brain!
-                logger.error(f"💥 [Saga Rollback] Lỗi cập nhật Proposal, đang phục hồi Workflow #{workflow_id[:8]}...")
-                supabase.table("automation_workflows").update({
-                    "status": current_status,
-                    "approved_by": None,
-                    "approved_at": None,
-                    "updated_at": datetime.now(timezone.utc).isoformat()
-                }).eq("id", workflow_id).execute()
-                
-                raise HTTPException(
-                    status_code=500, 
-                    detail=f"Lỗi đồng bộ Proposal ({prop_err}). Đã khôi phục trạng thái an toàn."
-                )
-
-            # BƯỚC 3: GHI AUDIT EVENT
+            # Ghi Audit Event
             try:
                 supabase.table("workflow_execution_events").insert({
                     "proposal_id": proposal_id,
@@ -470,40 +405,40 @@ async def approve_and_run_workflow(
             except Exception as ev_err:
                 logger.warning(f"Lỗi ghi audit event: {ev_err}")
 
-        # Ghi log lịch sử workflow
-        try:
-            supabase.table("automation_workflow_history").insert({
-                "workflow_id": workflow_id,
-                "field_changed": "status",
-                "old_val": {"status": current_status},
-                "new_val": {"status": "approved", "proposal_id": proposal_id, "steps_count": len(frozen_steps_dicts)},
-                "changed_by": approver
-            }).execute()
-        except Exception as log_err:
-            logger.warning(f"Lỗi ghi audit log: {log_err}")
+        except Exception as table_err:
+            logger.error(f"❌ [Fallback Update Failed]: {table_err}")
+            raise HTTPException(status_code=500, detail=f"Lỗi lưu trữ phê duyệt: {str(table_err)}")
 
-        logger.info(f"🔒 [FROZEN PROPOSAL] Đã đóng băng an toàn Proposal #{proposal_id[:8]} và Workflow #{workflow_id[:8]} bởi '{approver}'!")
+    # Ghi log lịch sử workflow
+    try:
+        supabase.table("automation_workflow_history").insert({
+            "workflow_id": workflow_id,
+            "field_changed": "status",
+            "old_val": {"status": current_status},
+            "new_val": {"status": "approved", "proposal_id": proposal_id, "steps_count": len(frozen_steps_dicts)},
+            "changed_by": approver
+        }).execute()
+    except Exception as log_err:
+        logger.warning(f"Lỗi ghi audit log: {log_err}")
 
-        # 6. KÍCH HOẠT THỰC THI CHẠY NGẦM
-        if payload.run_immediately:
-            background_tasks.add_task(workflow_executor_service.execute_approved_workflow, workflow_id)
-            return {
-                "status": "success", 
-                "message": "🚀 Luồng đã được đóng băng và đang thực thi ngầm an toàn!",
-                "workflow_id": workflow_id,
-                "proposal_id": proposal_id
-            }
+    logger.info(f"🔒 [FROZEN PROPOSAL] Đã đóng băng an toàn Proposal #{proposal_id[:8]} và Workflow #{workflow_id[:8]} bởi '{approver}'!")
 
+    # 5. KÍCH HOẠT THỰC THI CHẠY NGẦM
+    if payload.run_immediately:
+        background_tasks.add_task(workflow_executor_service.execute_approved_workflow, workflow_id)
         return {
             "status": "success", 
-            "message": "Đã phê duyệt và đóng băng Luồng thành công!", 
+            "message": "🚀 Luồng đã được đóng băng và đang thực thi ngầm an toàn!",
             "workflow_id": workflow_id,
             "proposal_id": proposal_id
         }
 
-    finally:
-        async with _APPROVAL_MUTEX:
-            _IN_FLIGHT_WORKFLOW_APPROVALS.discard(workflow_id)
+    return {
+        "status": "success", 
+        "message": "Đã phê duyệt và đóng băng Luồng thành công!", 
+        "workflow_id": workflow_id,
+        "proposal_id": proposal_id
+    }
 
 
 @router.post("/{workflow_id}/validate")

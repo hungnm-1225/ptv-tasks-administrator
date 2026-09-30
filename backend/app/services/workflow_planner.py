@@ -457,17 +457,6 @@ class WorkflowPlannerService:
                     if not student_courses and c_names:
                         student_courses = [c_names[0]]
 
-                    if not c_names:
-                        missing_requirements.append({"field": "courses", "message": "Yêu cầu ghi danh thiếu thông tin khóa học."})
-                        continue
-
-                    if not student_emails and not teacher_emails:
-                        missing_requirements.append({
-                            "field": "teacher_accounts",
-                            "message": "Chưa bóc tách được danh sách email giáo viên hoặc học sinh từ file đính kèm để ghi danh."
-                        })
-                        continue
-
                     # 🎯 ĐÓNG GÓI CHI TIẾT TỪNG MÔN KÈM GIT REPO ĐỂ FRONTEND KHÔNG BỊ BÁO LỖI VÀNG
                     courses_detailed = []
                     for c in canonical_courses:
@@ -503,6 +492,17 @@ class WorkflowPlannerService:
                         depends_on=[]
                     ))
                     continue
+
+                    if c_names:
+                        step_name = f"Ghi danh Moodle ({', '.join(c_names[:2])})"
+                    else:
+                        missing_requirements.append({"field": "courses", "message": "Yêu cầu ghi danh thiếu thông tin khóa học."})
+
+                    if not enrol_users:
+                        missing_requirements.append({
+                            "field": "teacher_accounts",
+                            "message": "Chưa bóc tách được danh sách email giáo viên từ file đính kèm để ghi danh."
+                        })
 
                 # --- 3. NHÓM HỦY GHI DANH (GỠ MÔN) LMS ---
                 elif cap_id == "lms.unenrol_users":

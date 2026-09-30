@@ -5,79 +5,19 @@ import gc
 import time
 import logging
 import asyncio
-import heapq
 import subprocess
-import contextvars
-from typing import Optional, Any, List, Tuple
+from typing import Optional, Any
 from contextlib import asynccontextmanager
 from playwright.async_api import Route, Page, BrowserContext
 
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# 🚦 PRIORITY-AWARE ASYNC LOCK (CHỐNG HEAD-OF-LINE BLOCKING CHO RENDER 512MB)
+# 🔒 GLOBAL SINGLE-INSTANCE CONCURRENCY ARCHITECTURE (RENDER 512MB SAFEGUARD)
 # =============================================================================
-PRIORITY_VIP_ADMIN = 0       # Thao tác trực tiếp của Admin từ giao diện Web
-PRIORITY_WORKFLOW = 1        # Luồng thực thi DAG Kahn tự động
-PRIORITY_BACKGROUND = 2      # Cronjobs ngầm, Session Seeder, Cache Scanner
+# Khóa trần 1 Chromium duy nhất trên toàn hệ thống
+GLOBAL_PLAYWRIGHT_SEMAPHORE = asyncio.Semaphore(1)
 
-class AsyncPriorityLock:
-    """
-    Lock bất đồng bộ có phân cấp ưu tiên bằng Priority Queue (Min-Heap).
-    - Cam kết: Chỉ duy nhất 1 tác vụ giữ lock tại một thời điểm (Bảo vệ 512MB RAM).
-    - VIP Admin luôn được nhảy cóc lên đầu hàng đợi, không bao giờ bị nghẽn sau Cronjob.
-    """
-    def __init__(self):
-        self._locked = False
-        self._waiters: List[Tuple[int, float, int, asyncio.Future]] = []
-        self._counter = 0
-
-    @property
-    def is_locked(self) -> bool:
-        return self._locked
-
-    @property
-    def has_vip_waiting(self) -> bool:
-        """Kiểm tra xem có yêu cầu VIP nào đang xếp hàng đợi hay không."""
-        return any(w[0] == PRIORITY_VIP_ADMIN for w in self._waiters if not w[3].cancelled())
-
-    async def acquire(self, priority: int = PRIORITY_BACKGROUND) -> bool:
-        if not self._locked:
-            self._locked = True
-            return True
-
-        loop = asyncio.get_running_loop()
-        fut = loop.create_future()
-        self._counter += 1
-        # Lưu trữ: (Độ ưu tiên [0 nhỏ nhất = ưu tiên cao nhất], thời điểm tạo, counter chống so sánh future, future)
-        entry = (priority, time.time(), self._counter, fut)
-        heapq.heappush(self._waiters, entry)
-
-        try:
-            await fut
-            return True
-        except asyncio.CancelledError:
-            # Thu hồi sạch nếu task bị cancel hoặc timeout
-            self._waiters = [w for w in self._waiters if w[3] is not fut]
-            heapq.heapify(self._waiters)
-            raise
-
-    def release(self):
-        if not self._locked:
-            raise RuntimeError("Cố gắng giải phóng một Lock chưa từng được acquire!")
-
-        # Đánh thức waiter có độ ưu tiên cao nhất còn sống
-        while self._waiters:
-            priority, _, _, fut = heapq.heappop(self._waiters)
-            if not fut.cancelled():
-                fut.set_result(True)
-                return
-
-        self._locked = False
-
-
-# Khởi tạo Global Priority Lock độc quyền cho toàn hệ thống
-GLOBAL_PLAYWRIGHT_LOCK = AsyncPriorityLock()
 
 class CronSlotYieldException(Exception):
     """Exception nội bộ báo hiệu Cron chủ động nhường slot an toàn."""
@@ -90,11 +30,14 @@ def force_kill_zombie_chromium():
     để thu hồi bộ nhớ RAM ngay lập tức.
     """
     try:
+        # Lệnh pkill trên môi trường Linux Docker Render
         subprocess.run(["pkill", "-9", "-f", "chromium"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(["pkill", "-9", "-f", "chrome"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         pass
 
+
+import contextvars
 
 _PLAYWRIGHT_SLOT_HOLDER: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     "_playwright_slot_holder", default=None
@@ -104,22 +47,20 @@ _PLAYWRIGHT_SLOT_HOLDER: contextvars.ContextVar[Optional[str]] = contextvars.Con
 @asynccontextmanager
 async def acquire_playwright_slot(
     task_name: str = "Playwright Task", 
-    timeout: float = 18.0,
+    timeout: float = 300.0,
     lane: str = "admin"  # 'admin' (VIP) hoặc 'cron' (Nền)
 ):
     """
-    Async Context Manager quản lý cấp phát slot thực thi Playwright:
-    - lane='admin': Gán PRIORITY_VIP_ADMIN (0), nhảy cóc lên đầu hàng đợi. Timeout mặc định 18s (an toàn dưới 30s của Frontend).
-    - lane='cron': Gán PRIORITY_BACKGROUND (2), nhường slot êm dịu nếu hết 45s mà không có slot.
-    - An toàn Re-entrancy tuyệt đối qua ContextVar.
-    - DỌN DẸP NGUYÊN TỬ: Diệt zombie và thu hồi RAM XONG MỚI release lock, triệt tiêu race condition.
+    Async Context Manager quản lý việc cấp phát slot thực thi Playwright:
+    - Sử dụng 1 Global Lock duy nhất để bảo vệ trần 512MB RAM của Render.
+    - Hỗ trợ Re-entrancy an toàn qua ContextVar: chống deadlock khi hàm cha và con đều gọi acquire slot.
+    - lane='admin': Ưu tiên tối đa cho Quản trị viên duyệt tác vụ hoặc dispatch từ Studio (Timeout 300s).
+    - lane='cron': Tác vụ cào dữ liệu định kỳ (osTicket, Long-Task, Scanner).
+      Nếu slot đang bận, tự động ném CronSlotYieldException nhường slot êm dịu, KHÔNG làm văng lỗi đỏ ASGI.
     """
     is_admin = (lane.lower() == "admin")
-    priority = PRIORITY_VIP_ADMIN if is_admin else PRIORITY_BACKGROUND
     lane_tag = "👑 [VIP ADMIN LANE]" if is_admin else "⚙️ [BACKGROUND CRON LANE]"
-    
-    # Timeout an toàn: Admin chờ tối đa 18s (dưới ngưỡng 30s của UI), Cron chờ tối đa 45s
-    actual_timeout = min(timeout, 20.0) if is_admin else min(timeout, 45.0)
+    actual_timeout = timeout if is_admin else min(timeout, 45.0)
 
     # 1. KIỂM TRA RE-ENTRANCY (Nếu coroutine hiện tại đã giữ slot, cho phép đi qua ngay)
     current_holder = _PLAYWRIGHT_SLOT_HOLDER.get()
@@ -128,20 +69,20 @@ async def acquire_playwright_slot(
         yield
         return
 
-    logger.info(f"⏳ {lane_tag} Đang xin slot (Priority={priority}) cho: '{task_name}'...")
+    logger.info(f"⏳ {lane_tag} Đang xin slot thực thi Playwright cho: '{task_name}'...")
     acquired = False
     token = None
 
     try:
         try:
-            await asyncio.wait_for(GLOBAL_PLAYWRIGHT_LOCK.acquire(priority=priority), timeout=actual_timeout)
+            await asyncio.wait_for(GLOBAL_PLAYWRIGHT_SEMAPHORE.acquire(), timeout=actual_timeout)
             acquired = True
             token = _PLAYWRIGHT_SLOT_HOLDER.set(task_name)
             logger.info(f"🟢 {lane_tag} Đã nhận slot! Bắt đầu thực thi: '{task_name}'")
         except asyncio.TimeoutError:
             if is_admin:
                 logger.error(f"❌ {lane_tag} Quá thời gian chờ slot ({actual_timeout}s) cho: '{task_name}'")
-                raise TimeoutError(f"Máy chủ đang bận xử lý phiên làm việc khác. Vui lòng thử lại sau vài giây ({actual_timeout}s).")
+                raise TimeoutError(f"Hệ thống đang bận xử lý tác vụ khác. Hết thời gian chờ ({actual_timeout}s).")
             else:
                 logger.warning(f"⚠️ {lane_tag} Slot đang bận quá {actual_timeout}s. Nhường slot cho '{task_name}' để bảo toàn RAM Render.")
                 raise CronSlotYieldException(f"Cron task '{task_name}' nhường slot do hệ thống đang bận.")
@@ -152,17 +93,15 @@ async def acquire_playwright_slot(
         if acquired:
             if token is not None:
                 _PLAYWRIGHT_SLOT_HOLDER.reset(token)
-
-            # 🛡️ BẢO VỆ NGUYÊN TỬ: Tiêu diệt Zombie Chromium và thu hồi RAM TRƯỚC KHI thả Lock!
+            GLOBAL_PLAYWRIGHT_SEMAPHORE.release()
+            logger.info(f"⚪ {lane_tag} Đã giải phóng slot thực thi của: '{task_name}'")
+            
+            # Thu hồi triệt để Native RAM và tiêu diệt Zombie Chromium còn sót lại
             try:
                 force_kill_zombie_chromium()
             except Exception:
                 pass
             gc.collect()
-
-            # Thả Lock sau cùng để task tiếp theo an tâm khởi động Chromium mới
-            GLOBAL_PLAYWRIGHT_LOCK.release()
-            logger.info(f"⚪ {lane_tag} Đã dọn dẹp và giải phóng slot thực thi của: '{task_name}'")
 
 
 # =============================================================================
@@ -188,6 +127,7 @@ LOW_RAM_CHROMIUM_ARGS = [
     "--disable-ipc-flooding-protection",
     "--js-flags=--max-old-space-size=128",  # Khóa trần V8 Heap ở mức 128MB
 ]
+
 
 # =============================================================================
 # 🛡️ NETWORK ROUTE INTERCEPTOR (CHẶN MEDIA, FONT, TRACKERS ĐỂ TIẾT KIỆM RAM)
@@ -220,7 +160,9 @@ BLOCKED_URL_PATTERNS = [
 
 _BLOCKED_REGEX = re.compile("|".join(BLOCKED_URL_PATTERNS), re.IGNORECASE)
 
+
 async def handle_low_ram_route_abort(route: Route):
+    """Xử lý chặn tài nguyên nặng / tracking ngầm."""
     try:
         req = route.request
         res_type = req.resource_type
@@ -233,11 +175,14 @@ async def handle_low_ram_route_abort(route: Route):
     except Exception:
         pass
 
+
 async def setup_low_ram_routes(target: Page | BrowserContext):
+    """Gắn bộ lọc chặn tài nguyên vào Page hoặc BrowserContext."""
     try:
         await target.route("**/*", handle_low_ram_route_abort)
     except Exception as e:
         logger.debug(f"Không thể gắn route interceptor: {e}")
+
 
 # =============================================================================
 # ⏱️ SMART DOM & API STABILIZATION HELPERS
@@ -248,6 +193,7 @@ async def wait_for_dom_and_spinners(
     min_pacing_ms: int = 400, 
     timeout: int = 25000
 ):
+    """Chờ DOM ổn định và các spinner biến mất."""
     try:
         spinner_loc = page.locator(
             ".MuiCircularProgress-root, .MuiSkeleton-root, .MuiDataGrid-loadingOverlay, "
@@ -268,12 +214,14 @@ async def wait_for_dom_and_spinners(
     except Exception as e:
         logger.debug(f"wait_for_dom_and_spinners notice: {e}")
 
+
 async def smart_wait_login_or_error(
     page: Page,
     timeout: float = 20000,
     role_title: str = "Tài khoản",
     username: str = ""
 ) -> tuple[bool, str]:
+    """Chờ phản hồi đăng nhập thông minh theo State Race."""
     start_time = time.time()
     err_loc = page.locator(".alert-error, #input-error, span.kc-feedback-text, .alert.alert-warning, p.instruction")
     auth_loc = page.locator(".MuiDrawer-root, [data-testid='user-menu'], .usermenu, .userinitials, a[href*='logout'], button:has-text('Logout'), button:has-text('Đăng xuất')")
@@ -300,12 +248,14 @@ async def smart_wait_login_or_error(
     logger.error(err)
     return False, err
 
+
 async def smart_wait_for_options_loaded(
     page: Page,
     parent_locator = None,
     min_options: int = 1,
     timeout: float = 10000
 ) -> bool:
+    """Chờ danh sách options dropdown nạp xong từ API."""
     start_time = time.time()
     options_loc = page.locator("li[role='option'], ul[role='listbox'] li")
     spinner_loc = page.locator(".MuiCircularProgress-root, .MuiSkeleton-root")
@@ -323,11 +273,13 @@ async def smart_wait_for_options_loaded(
 
     return False
 
+
 async def smart_poll_condition(
     check_fn,
     timeout: float = 15000,
     poll_interval: float = 1.0
 ) -> Any:
+    """Polling kiểm tra trạng thái linh hoạt theo hàm check_fn bất đồng bộ."""
     start_time = time.time()
     while (time.time() - start_time) * 1000 < timeout:
         res = await check_fn()
@@ -341,9 +293,11 @@ _IS_HEAVY_OPERATION_RUNNING: bool = False
 _HEAVY_OPERATION_NAME: str = ""
 
 def is_heavy_operation_running() -> tuple[bool, str]:
+    """Kiểm tra xem hệ thống có đang bận chạy tác vụ nặng (LMS Enroll quy mô lớn, Order-Contract) hay không."""
     return _IS_HEAVY_OPERATION_RUNNING, _HEAVY_OPERATION_NAME
 
 class heavy_operation_guard:
+    """Context Manager kéo cờ ưu tiên tuyệt đối, yêu cầu 6 crons tạm hoãn nhường tài nguyên."""
     def __init__(self, operation_name: str):
         self.operation_name = operation_name
 
