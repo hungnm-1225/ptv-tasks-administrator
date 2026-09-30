@@ -26,7 +26,6 @@ def init_cipher_suite() -> Fernet:
         except Exception as e:
             logger.warning(f"⚠️ VAULT_SECRET_KEY không hợp lệ Fernet, sinh key tạm: {e}")
     
-    # Tự động sinh key ngẫu nhiên nếu chưa có key trong .env để không bao giờ làm sập app
     return Fernet(Fernet.generate_key())
 
 cipher_suite = init_cipher_suite()
@@ -37,7 +36,6 @@ def decrypt_password(encrypted_pass: str) -> str:
     if not encrypted_pass:
         return ""
     try:
-        # Nếu là mật khẩu chưa mã hóa (plain text) thì trả về nguyên bản
         if not str(encrypted_pass).startswith("gAAAAA"):
             return encrypted_pass
         return cipher_suite.decrypt(encrypted_pass.encode("utf-8")).decode("utf-8")
