@@ -243,6 +243,79 @@ class KeycloakService:
             }
 
     # =========================================================================
+    # 🧹 BỘ THANH TẨY TÀI KHOẢN CHO JIT (CHỐNG REQUIRED ACTIONS & MẬT KHẨU TẠM)
+    # =========================================================================
+    async def sanitize_and_clean_user_for_jit(self, identifier: str, password: Optional[str] = None) -> bool:
+        """
+        Dọn dẹp sạch sẽ tài khoản qua REST API (< 60ms) để mở đường cho Headless OIDC:
+        - Xóa sạch 100% requiredActions (Update Password, Verify Email, Update Profile).
+        - Ép cờ enabled = True, emailVerified = True.
+        - Khóa cứng mật khẩu vĩnh viễn (temporary = False), triệt tiêu màn hình bắt đổi pass.
+        """
+        clean_id = clean_email_identifier(identifier)
+        if not clean_id:
+            return False
+
+        async with httpx.AsyncClient(verify=False, headers=BROWSER_HEADERS, timeout=10.0) as client:
+            token = await self._get_admin_token(client)
+            if not token:
+                logger.error(f"❌ [JIT Sanitizer] Không lấy được Token Keycloak cho '{clean_id}'")
+                return False
+
+            auth_headers = {
+                **BROWSER_HEADERS,
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            }
+            base_api = f"{self.raw_server_url}/auth/admin/realms/{self.target_realm}"
+
+            try:
+                # 1. Tìm user để lấy ID chính xác
+                users = []
+                if "@" in clean_id:
+                    resp = await client.get(f"{base_api}/users", params={"email": clean_id, "exact": "true"}, headers=auth_headers)
+                    if resp.status_code == 200 and isinstance(resp.json(), list) and resp.json():
+                        users = resp.json()
+
+                if not users:
+                    resp = await client.get(f"{base_api}/users", params={"username": clean_id, "exact": "true"}, headers=auth_headers)
+                    if resp.status_code == 200 and isinstance(resp.json(), list) and resp.json():
+                        users = resp.json()
+
+                if not users:
+                    logger.warning(f"⚠️ [JIT Sanitizer] Không tìm thấy user '{clean_id}' trên Keycloak để thanh tẩy.")
+                    return False
+
+                user_id = users[0]["id"]
+
+                # 2. Xóa sạch requiredActions và kích hoạt tài khoản
+                clean_payload = {
+                    "enabled": True,
+                    "emailVerified": True,
+                    "requiredActions": []  # 🎯 XÓA SẠCH MỌI RÀO CẢN BẮT ĐỔI PASS HOẶC CẬP NHẬT PROFILE
+                }
+                put_res = await client.put(f"{base_api}/users/{user_id}", json=clean_payload, headers=auth_headers)
+                if put_res.status_code in (401, 403):
+                    self.invalidate_token_cache()
+                    return False
+
+                # 3. Nếu có password, ép nó thành MẬT KHẨU CHÍNH THỨC (temporary = False)
+                if password:
+                    pass_payload = {
+                        "type": "password",
+                        "value": password,
+                        "temporary": False  # 🎯 TRIỆT TIÊU CỜ MẬT KHẨU TẠM
+                    }
+                    await client.put(f"{base_api}/users/{user_id}/reset-password", json=pass_payload, headers=auth_headers)
+
+                logger.info(f"✨ [JIT Sanitizer] Đã thanh tẩy sạch sẽ tài khoản '{clean_id}' (Zero Required Actions, Permanent Pass)!")
+                return True
+
+            except Exception as e:
+                logger.error(f"❌ [JIT Sanitizer] Lỗi khi thanh tẩy user '{clean_id}': {e}")
+                return False
+    
+    # =========================================================================
     # ⚡ THỰC THI CẬP NHẬT TÀI KHOẢN (SONG SONG HÓA TOÀN TRÌNH REST API)
     # =========================================================================
     async def execute_via_rest_api(

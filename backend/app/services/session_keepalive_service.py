@@ -137,7 +137,7 @@ class UnifiedSessionKeepAliveService:
             return False
 
         logger.info(f"🌱 [Seeder 1/6] Đang mở Playwright bốc Session Admin Workspace ({user})...")
-        async with acquire_playwright_slot("Seed Workspace Admin", timeout=45, lane="admin"):
+        async with acquire_playwright_slot("Seed Workspace Admin", timeout=45, lane="cron"):
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True, args=LOW_RAM_CHROMIUM_ARGS)
                 context = await browser.new_context(viewport={"width": 1280, "height": 800}, user_agent=BROWSER_HEADERS["User-Agent"])
@@ -177,7 +177,7 @@ class UnifiedSessionKeepAliveService:
             return False
 
         logger.info("🌱 [Seeder 2/6] Đang mở Playwright bốc Session osTicket...")
-        async with acquire_playwright_slot("Seed osTicket", timeout=45, lane="admin"):
+        async with acquire_playwright_slot("Seed osTicket", timeout=45, lane="cron"):
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True, args=LOW_RAM_CHROMIUM_ARGS)
                 context = await browser.new_context(viewport={"width": 1280, "height": 800}, user_agent=BROWSER_HEADERS["User-Agent"])
@@ -211,7 +211,7 @@ class UnifiedSessionKeepAliveService:
             return False
 
         logger.info(f"🌱 [Seeder 3/6] Đang mở Playwright bốc Session Pythaverse Git ({user})...")
-        async with acquire_playwright_slot("Seed Git", timeout=45, lane="admin"):
+        async with acquire_playwright_slot("Seed Git", timeout=45, lane="cron"):
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True, args=LOW_RAM_CHROMIUM_ARGS)
                 context = await browser.new_context(viewport={"width": 1280, "height": 800}, user_agent=BROWSER_HEADERS["User-Agent"])
@@ -290,7 +290,7 @@ class UnifiedSessionKeepAliveService:
             return False
 
         logger.info(f"🌱 [Seeder 5/6] Đang mở Playwright bốc Session Keycloak Admin Console ({user})...")
-        async with acquire_playwright_slot("Seed Keycloak Admin", timeout=45, lane="admin"):
+        async with acquire_playwright_slot("Seed Keycloak Admin", timeout=45, lane="cron"):
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True, args=LOW_RAM_CHROMIUM_ARGS)
                 context = await browser.new_context(viewport={"width": 1280, "height": 800}, user_agent=BROWSER_HEADERS["User-Agent"])
@@ -344,8 +344,10 @@ class UnifiedSessionKeepAliveService:
                 if not user or not pwd:
                     continue
 
+                await asyncio.sleep(0.2)
+
                 logger.info(f"🌱 [Seeder Distributor] Đang bốc Session cho [{d_name}] ({d_code})...")
-                async with acquire_playwright_slot(f"Seed Distributor ({d_code})", timeout=45, lane="admin"):
+                async with acquire_playwright_slot(f"Seed Distributor ({d_code})", timeout=45, lane="cron"):
                     async with async_playwright() as p:
                         browser = await p.chromium.launch(headless=True, args=LOW_RAM_CHROMIUM_ARGS)
                         context = await browser.new_context(viewport={"width": 1280, "height": 800}, user_agent=BROWSER_HEADERS["User-Agent"])

@@ -267,118 +267,6 @@ class GitPlaywrightService:
             return cookies
 
     # =========================================================================
-    # ⚡ ĐỘNG CƠ KÍCH HOẠT JIT QUA HEADLESS OIDC HANDSHAKE (~300ms / USER)
-    # =========================================================================
-    async def activate_jit_user(self, username: str, password: str) -> bool:
-        """
-        Kích hoạt JIT cho 1 tài khoản thông qua OIDC Handshake với Keycloak.
-        Hoàn toàn thuần HTTPX, Zero Playwright, RAM < 1MB, thời gian ~300ms.
-        """
-        if not username or not password:
-            return False
-
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
-        }
-
-        try:
-            async with httpx.AsyncClient(headers=headers, follow_redirects=False, verify=False, timeout=15.0) as client:
-                # 1. Bắn vào /signin/oidc để lấy Keycloak Auth URL
-                oidc_endpoint = f"{self.base_url}/signin/oidc"
-                oidc_res = await client.post(oidc_endpoint)
-                if oidc_res.status_code not in [302, 303]:
-                    oidc_res = await client.get(oidc_endpoint)
-
-                keycloak_auth_url = oidc_res.headers.get("Location")
-                if not keycloak_auth_url:
-                    logger.warning(f"⚠️ [JIT Activator] Không thể lấy Keycloak Auth URL cho {username}")
-                    return False
-
-                keycloak_auth_url = urljoin(self.base_url, keycloak_auth_url)
-
-                # 2. Tải trang Keycloak để bóc form action & hidden fields
-                kc_page_res = await client.get(keycloak_auth_url)
-                kc_html = kc_page_res.text
-                form_kc_match = re.search(r'<form[^>]+action=["\']([^"\']+)["\'][^>]*>', kc_html, re.IGNORECASE)
-                if not form_kc_match:
-                    logger.warning(f"⚠️ [JIT Activator] Không tìm thấy Form Keycloak cho {username}")
-                    return False
-
-                kc_submit_url = urljoin(str(kc_page_res.url), html.unescape(form_kc_match.group(1)))
-                hidden_inputs = dict(re.findall(r'<input[^>]+type=["\']hidden["\'][^>]+name=["\']([^"\']+)["\'][^>]+value=["\']([^"\']*)["\']', kc_html, re.IGNORECASE))
-
-                # 3. Submit credentials vào Keycloak
-                login_payload = {
-                    **hidden_inputs,
-                    "username": username,
-                    "password": password,
-                    "credentialId": ""
-                }
-                kc_submit_res = await client.post(
-                    kc_submit_url,
-                    data=login_payload,
-                    headers={"Content-Type": "application/x-www-form-urlencoded", "Referer": str(kc_page_res.url)}
-                )
-
-                callback_url = kc_submit_res.headers.get("Location")
-                if kc_submit_res.status_code not in [302, 303] or not callback_url:
-                    logger.warning(f"⚠️ [JIT Activator] Keycloak từ chối thông tin đăng nhập của {username}")
-                    return False
-
-                callback_url = urljoin(str(kc_submit_res.url), callback_url)
-
-                # 4. Gửi Code về GitBucket Callback để hoàn tất JIT
-                callback_res = await client.get(callback_url)
-                if callback_res.headers.get("Location"):
-                    await client.get(urljoin(self.base_url, callback_res.headers.get("Location")))
-
-                # 5. Kiểm tra lại existence
-                is_success = await self._check_user_existence(client, username)
-                if is_success:
-                    logger.info(f"✨ [JIT Activator] Kích hoạt JIT thành công cho: {username} (< 400ms)!")
-                return is_success
-
-        except Exception as e:
-            logger.error(f"❌ [JIT Activator] Lỗi ngoại lệ khi kích hoạt JIT cho {username}: {e}")
-            return False
-
-    async def batch_activate_jit(self, accounts: List[Dict[str, str]], concurrency: int = 3) -> Dict[str, Any]:
-        """
-        Kích hoạt JIT hàng loạt cho danh sách [{'username': ..., 'password': ...}].
-        Kiểm soát tải qua Semaphore(3) để bảo vệ Keycloak và GitBucket.
-        """
-        if not accounts:
-            return {"total": 0, "activated": [], "failed": [], "elapsed_seconds": 0}
-
-        logger.info(f"🚀 [JIT Batch] Bắt đầu kích hoạt JIT cho {len(accounts)} tài khoản (Concurrency: {concurrency})...")
-        t0 = time.time()
-        sem = asyncio.Semaphore(concurrency)
-
-        async def _worker(acc: Dict[str, str]):
-            u = str(acc.get("username") or acc.get("user") or acc.get("email") or "").strip()
-            p = str(acc.get("password") or acc.get("pass") or "").strip()
-            if not u or not p:
-                return u, False
-            async with sem:
-                ok = await self.activate_jit_user(u, p)
-                return u, ok
-
-        results = await asyncio.gather(*[_worker(a) for a in accounts])
-        activated = [u for u, ok in results if ok and u]
-        failed = [u for u, ok in results if not ok and u]
-        elapsed = round(time.time() - t0, 2)
-
-        logger.info(f"🎉 [JIT Batch] Hoàn tất {len(activated)}/{len(accounts)} tài khoản trong {elapsed}s!")
-        return {
-            "total": len(accounts),
-            "activated": activated,
-            "failed": failed,
-            "elapsed_seconds": elapsed
-        }
-
-    # =========================================================================
     # 🔍 3. KIỂM TRA TỒN TẠI JIT TRÊN GITBUCKET (20ms)
     # =========================================================================
     async def _check_user_existence(self, client: httpx.AsyncClient, username: str) -> bool:
@@ -395,15 +283,36 @@ class GitPlaywrightService:
             return False
 
     # =========================================================================
-    # ⚡ 3.5. ĐỘNG CƠ KÍCH HOẠT JIT QUA HEADLESS OIDC HANDSHAKE (~300ms / USER)
+    # ⚡ ĐỘNG CƠ KÍCH HOẠT JIT TỰ CHỮA LÀNH (SELF-HEALING OIDC HANDSHAKE < 400ms)
     # =========================================================================
-    async def activate_jit_user(self, username: str, password: str) -> bool:
+    def _extract_hidden_inputs_order_agnostic(self, html_text: str) -> Dict[str, str]:
+        """Bóc tách toàn bộ input hidden không phụ thuộc vào thứ tự thuộc tính HTML (name, type, value)."""
+        hidden_inputs: Dict[str, str] = {}
+        # Quét từng thẻ <input ...> độc lập
+        for input_tag in re.findall(r'<input\b[^>]*>', html_text, re.IGNORECASE):
+            type_match = re.search(r'\btype=["\']?hidden["\']?', input_tag, re.IGNORECASE)
+            if not type_match:
+                continue
+
+            name_match = re.search(r'\bname=["\']([^"\']+)["\']', input_tag, re.IGNORECASE)
+            val_match = re.search(r'\bvalue=["\']([^"\']*)["\']', input_tag, re.IGNORECASE)
+
+            if name_match:
+                name = name_match.group(1).strip()
+                val = html.unescape(val_match.group(1) if val_match else "")
+                hidden_inputs[name] = val
+
+        return hidden_inputs
+
+    async def activate_jit_user(self, username: str, password: str, retry_if_blocked: bool = True) -> Tuple[bool, str]:
         """
         Kích hoạt JIT cho 1 tài khoản thông qua OIDC Handshake với Keycloak.
-        Hoàn toàn thuần HTTPX, Zero Playwright, RAM < 1MB, thời gian ~300ms.
+        - Hoàn toàn thuần HTTPX, Zero Playwright, RAM < 1MB, thời gian ~300ms.
+        - Tự động phát hiện Required Actions / Mật khẩu tạm và kích hoạt Auto-Heal qua REST API.
+        - Trả về: (is_success, reason_or_status)
         """
         if not username or not password:
-            return False
+            return False, "EMPTY_CREDENTIALS"
 
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
@@ -421,21 +330,32 @@ class GitPlaywrightService:
 
                 keycloak_auth_url = oidc_res.headers.get("Location")
                 if not keycloak_auth_url:
-                    logger.warning(f"⚠️ [JIT Activator] Không thể lấy Keycloak Auth URL cho {username}")
-                    return False
+                    logger.warning(f"⚠️ [JIT Activator] Không thể lấy Keycloak Auth URL cho '{username}'")
+                    return False, "FAILED_TO_GET_AUTH_URL"
 
                 keycloak_auth_url = urljoin(self.base_url, keycloak_auth_url)
 
                 # 2. Tải trang Keycloak để bóc form action & hidden fields
                 kc_page_res = await client.get(keycloak_auth_url)
                 kc_html = kc_page_res.text
-                form_kc_match = re.search(r'<form[^>]+action=["\']([^"\']+)["\'][^>]*>', kc_html, re.IGNORECASE)
-                if not form_kc_match:
-                    logger.warning(f"⚠️ [JIT Activator] Không tìm thấy Form Keycloak cho {username}")
-                    return False
 
-                kc_submit_url = urljoin(str(kc_page_res.url), html.unescape(form_kc_match.group(1)))
-                hidden_inputs = dict(re.findall(r'<input[^>]+type=["\']hidden["\'][^>]+name=["\']([^"\']+)["\'][^>]+value=["\']([^"\']*)["\']', kc_html, re.IGNORECASE))
+                # 🎯 NHẮM CHÍNH XÁC VÀO FORM LOGIN CHÍNH (Chống nhầm lẫn với Language/Locale Selector)
+                form_action = None
+                login_form_match = re.search(r'<form\b[^>]*\bid=["\']kc-form-login["\'][^>]*action=["\']([^"\']+)["\'][^>]*>', kc_html, re.IGNORECASE)
+                if login_form_match:
+                    form_action = login_form_match.group(1)
+                else:
+                    # Fallback tìm form có chứa password
+                    any_form = re.search(r'<form\b[^>]*action=["\']([^"\']+)["\'][^>]*>', kc_html, re.IGNORECASE)
+                    if any_form:
+                        form_action = any_form.group(1)
+
+                if not form_action:
+                    logger.warning(f"⚠️ [JIT Activator] Không tìm thấy Form Action Keycloak cho '{username}'")
+                    return False, "FORM_ACTION_NOT_FOUND"
+
+                kc_submit_url = urljoin(str(kc_page_res.url), html.unescape(form_action))
+                hidden_inputs = self._extract_hidden_inputs_order_agnostic(kc_html)
 
                 # 3. Submit credentials vào Keycloak
                 login_payload = {
@@ -451,34 +371,62 @@ class GitPlaywrightService:
                 )
 
                 callback_url = kc_submit_res.headers.get("Location")
-                if kc_submit_res.status_code not in [302, 303] or not callback_url:
-                    logger.warning(f"⚠️ [JIT Activator] Keycloak từ chối thông tin đăng nhập của {username}")
-                    return False
 
-                callback_url = urljoin(str(kc_submit_res.url), callback_url)
+                # =============================================================
+                # 🚨 CHẨN ĐOÁN LỖI & PHẢN XẠ TỰ CHỮA LÀNH (AUTO-HEAL ENGINE)
+                # =============================================================
+                if kc_submit_res.status_code not in [302, 303] or not callback_url:
+                    resp_text = kc_submit_res.text.lower()
+
+                    # Trường hợp 1: Dính màn hình Bắt đổi pass hoặc Required Actions
+                    if ("login-update-password" in resp_text or "update_password" in resp_text or "required-action" in resp_text) and retry_if_blocked:
+                        logger.warning(f"🚨 [JIT Auto-Heal] Tài khoản '{username}' bị chặn bởi Required Action / Mật khẩu tạm! Đang kích hoạt thanh tẩy...")
+                        healed = await keycloak_service.sanitize_and_clean_user_for_jit(username, password)
+                        if healed:
+                            logger.info(f"🔄 [JIT Auto-Heal] Đã dọn dẹp Keycloak thành công. Bắt đầu handshake lại lần 2 cho '{username}'...")
+                            return await self.activate_jit_user(username, password, retry_if_blocked=False)
+                        else:
+                            return False, "REQUIRED_ACTION_BLOCKED"
+
+                    # Trường hợp 2: Sai mật khẩu hoặc tài khoản bị khóa
+                    if "invalid username or password" in resp_text or "kc-feedback-text" in resp_text:
+                        logger.error(f"❌ [JIT Activator] Sai thông tin đăng nhập Keycloak cho '{username}'!")
+                        return False, "INVALID_CREDENTIALS"
+
+                    if "account is disabled" in resp_text:
+                        logger.error(f"❌ [JIT Activator] Tài khoản '{username}' đang bị vô hiệu hóa (Disabled) trên Keycloak!")
+                        return False, "ACCOUNT_DISABLED"
+
+                    logger.warning(f"⚠️ [JIT Activator] Keycloak từ chối đăng nhập (Mã HTTP: {kc_submit_res.status_code})")
+                    return False, f"KEYCLOAK_REJECTED_{kc_submit_res.status_code}"
 
                 # 4. Gửi Code về GitBucket Callback để hoàn tất JIT
+                callback_url = urljoin(str(kc_submit_res.url), callback_url)
                 callback_res = await client.get(callback_url)
                 if callback_res.headers.get("Location"):
                     await client.get(urljoin(self.base_url, callback_res.headers.get("Location")))
 
-                # 5. Kiểm tra lại existence
+                # 5. Kiểm tra lại existence trên GitBucket
                 is_success = await self._check_user_existence(client, username)
                 if is_success:
                     logger.info(f"✨ [JIT Activator] Kích hoạt JIT thành công cho: {username} (< 400ms)!")
-                return is_success
+                    return True, "SUCCESS"
+                else:
+                    logger.warning(f"⚠️ [JIT Activator] Bắt tay thành công nhưng không thấy bản ghi JIT của '{username}'!")
+                    return False, "JIT_RECORD_NOT_FOUND"
 
         except Exception as e:
-            logger.error(f"❌ [JIT Activator] Lỗi ngoại lệ khi kích hoạt JIT cho {username}: {e}")
-            return False
+            logger.error(f"❌ [JIT Activator] Lỗi ngoại lệ khi kích hoạt JIT cho '{username}': {e}")
+            return False, f"EXCEPTION_{str(e)[:50]}"
 
     async def batch_activate_jit(self, accounts: List[Dict[str, str]], concurrency: int = 3) -> Dict[str, Any]:
         """
         Kích hoạt JIT hàng loạt cho danh sách [{'username': ..., 'password': ...}].
-        Kiểm soát tải qua Semaphore(3) để bảo vệ Keycloak và GitBucket.
+        Kiểm soát tải qua Semaphore(concurrency) để bảo vệ Keycloak và GitBucket.
+        Báo cáo chi tiết lý do thất bại.
         """
         if not accounts:
-            return {"total": 0, "activated": [], "failed": [], "elapsed_seconds": 0}
+            return {"total": 0, "activated": [], "failed": [], "failure_reasons": {}, "elapsed_seconds": 0}
 
         logger.info(f"🚀 [JIT Batch] Bắt đầu kích hoạt JIT cho {len(accounts)} tài khoản (Concurrency: {concurrency})...")
         t0 = time.time()
@@ -488,14 +436,15 @@ class GitPlaywrightService:
             u = str(acc.get("username") or acc.get("user") or acc.get("email") or "").strip()
             p = str(acc.get("password") or acc.get("pass") or "").strip()
             if not u or not p:
-                return u, False
+                return u, False, "EMPTY_CREDENTIALS"
             async with sem:
-                ok = await self.activate_jit_user(u, p)
-                return u, ok
+                ok, reason = await self.activate_jit_user(u, p)
+                return u, ok, reason
 
         results = await asyncio.gather(*[_worker(a) for a in accounts])
-        activated = [u for u, ok in results if ok and u]
-        failed = [u for u, ok in results if not ok and u]
+        activated = [u for u, ok, _ in results if ok and u]
+        failed = [u for u, ok, _ in results if not ok and u]
+        failure_reasons = {u: reason for u, ok, reason in results if not ok and u}
         elapsed = round(time.time() - t0, 2)
 
         logger.info(f"🎉 [JIT Batch] Hoàn tất {len(activated)}/{len(accounts)} tài khoản trong {elapsed}s!")
@@ -503,8 +452,10 @@ class GitPlaywrightService:
             "total": len(accounts),
             "activated": activated,
             "failed": failed,
+            "failure_reasons": failure_reasons,
             "elapsed_seconds": elapsed
         }
+
 
     # =========================================================================
     # ⚡ 4. THỰC THI TRÊN 1 REPO (THUẦN DIRECT HTTPX - KHÔNG CHECK LẠI JIT)
