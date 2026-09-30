@@ -148,6 +148,7 @@ export const AutomationStudioPage: React.FC = () => {
     idUserMD: string;
     userRole: string;
   } | null>(null);
+  const [editableUsers, setEditableUsers] = useState<any[]>([]);
 
   // Form chỉnh sửa
   const [editFirstName, setEditFirstName] = useState<string>('');
@@ -737,65 +738,114 @@ export const AutomationStudioPage: React.FC = () => {
     }
 
     setIsSearchingUser(true);
-    toast.info(`Đang dò tìm người dùng: ${cleanIdentifier} (có thể mất 15-30s)...`);
+    toast.info(`Đang dò tìm người dùng: ${cleanIdentifier} (tối đa 25 bản ghi)...`);
 
     try {
       const res = await fetchApi<any>('/workspace/users/search-and-detail', {
         method: 'POST',
         body: JSON.stringify({ identifier: cleanIdentifier }),
-        timeoutMs: 90000, // 90s chống timeout
+        timeoutMs: 90000,
       });
 
-      if (!res?.success || !res?.detail) {
-        toast.error(res?.message || 'Không tìm thấy người dùng này trên hệ thống Workspace!');
+      if (!res?.success) {
+        toast.error(res?.message || 'Không tìm thấy người dùng phù hợp!');
+        setEditableUsers([]);
+        setLoadedUserProfile(null);
         return;
       }
 
-      const d = res.detail;
-      const s = res.summary || {};
+      // 🎯 Xử lý danh sách tối đa 25 người dùng trả về từ Backend
+      const rawUsers = res.users && res.users.length > 0 ? res.users : (res.detail ? [res] : []);
 
-      setEditFirstName(d.firstName || '');
-      setEditLastName(d.lastname || '');
-      setEditEmail(d.inputEmailTeacherEdit || s.user_email || cleanIdentifier);
-      setEditDay(String(d.day || '1'));
-      setEditMonth(String(d.month || '1'));
-      setEditYear(String(d.year || '2012'));
+      const mappedList = rawUsers.map((item: any) => {
+        const d = item.detail || item.parsed_profile || {};
+        const s = item.summary || {};
+        const uid = item.user_id || d.userId;
+        const ulogin = item.user_login || s.user_login || d.userLogin || '';
+        const rawSchoolId = String(d.school_id || d.schoolId || '').trim();
+        const rawPartnerId = String(d.partner_id || d.partnerId || '').trim();
 
-      // 🎯 PHÂN GIẢI CHÍNH XÁC THEO MÃ SỐ THẬT (10652) - KHÔNG DÙNG UUID!
-      const rawSchoolId = String(d.school_id || '').trim();
-      const rawPartnerId = String(d.partner_id || '').trim();
+        // Khớp phả hệ trường
+        const matched = schoolsList.find(
+          (sch) =>
+            sch.school_code === rawSchoolId ||
+            sch.school_code.replace(/\D/g, '') === rawSchoolId.replace(/\D/g, '') ||
+            sch.school_name.toLowerCase().includes((d.school_name || '').toLowerCase())
+        );
 
-      // Tìm trường trong 480 trường khớp mã code hoặc tên
-      const matched = schoolsList.find(
-        (sch) =>
-          sch.school_code === rawSchoolId ||
-          sch.school_code.replace(/\D/g, '') === rawSchoolId.replace(/\D/g, '') ||
-          sch.school_name.toLowerCase().includes((d.school_name || '').toLowerCase())
-      );
+        const fSchoolCode = matched ? matched.school_code : rawSchoolId;
+        const fSchoolName = matched ? matched.school_name : (d.school_name || `Trường #${rawSchoolId}`);
+        const fPartnerCode = matched ? matched.partner_code : rawPartnerId;
+        const fPartnerName = matched ? matched.partner_name : `Partner #${rawPartnerId}`;
 
-      const finalSchoolCode = matched ? matched.school_code : rawSchoolId;
-      const finalSchoolName = matched ? matched.school_name : (d.school_name || `Trường #${rawSchoolId}`);
-      const finalPartnerCode = matched ? matched.partner_code : rawPartnerId;
-      const finalPartnerName = matched ? matched.partner_name : `Partner #${rawPartnerId}`;
+        const fName = d.firstName || '';
+        const lName = d.lastname || d.lastName || '';
+        const email = d.inputEmailTeacherEdit || d.email || s.user_email || '';
+        const day = String(d.day || '1');
+        const month = String(d.month || '1');
+        const year = String(d.year || '2012');
 
-      setEditSchoolCode(finalSchoolCode);
-      setEditSchoolName(finalSchoolName);
-      setSchoolSearchQuery(finalSchoolName);
-
-      setEditPartnerCode(finalPartnerCode);
-      setEditPartnerName(finalPartnerName);
-      setPartnerSearchQuery(finalPartnerName);
-
-      setLoadedUserProfile({
-        userId: res.user_id,
-        userLogin: res.user_login || s.user_login || '',
-        countryId: String(d.country_id || '3'),
-        cityId: String(d.cityTeacherCompare || '2852'),
-        idUserMD: String(d.idUserMD || ''),
-        userRole: d.user_role || s.user_role || 'student',
+        return {
+          user_id: uid,
+          user_login: ulogin,
+          first_name: fName,
+          last_name: lName,
+          email: email,
+          day: day,
+          month: month,
+          year: year,
+          country_id: String(d.country_id || d.countryId || '3'),
+          city_id: String(d.cityTeacherCompare || d.cityId || '2852'),
+          school_id: fSchoolCode,
+          school_name: fSchoolName,
+          partner_id: fPartnerCode,
+          partner_name: fPartnerName,
+          id_user_md: String(d.idUserMD || ''),
+          user_role: d.user_role || d.userRole || s.user_role || 'student',
+          // Bản lưu snapshot để hoàn tác khi khoá
+          original: {
+            first_name: fName,
+            last_name: lName,
+            email: email,
+            day: day,
+            month: month,
+            year: year,
+            school_id: fSchoolCode,
+            school_name: fSchoolName,
+            partner_id: fPartnerCode,
+            partner_name: fPartnerName,
+          }
+        };
       });
 
-      toast.success(`🎉 Đã nạp hồ sơ: ${d.firstName} ${d.lastname} (#${res.user_id})!`);
+      setEditableUsers(mappedList);
+
+      if (mappedList.length > 0) {
+        const u0 = mappedList[0];
+        setEditFirstName(u0.first_name);
+        setEditLastName(u0.last_name);
+        setEditEmail(u0.email);
+        setEditDay(u0.day);
+        setEditMonth(u0.month);
+        setEditYear(u0.year);
+        setEditSchoolCode(u0.school_id);
+        setEditSchoolName(u0.school_name);
+        setEditPartnerCode(u0.partner_id);
+        setEditPartnerName(u0.partner_name);
+        setSchoolSearchQuery(u0.school_name);
+        setPartnerSearchQuery(u0.partner_name);
+
+        setLoadedUserProfile({
+          userId: u0.user_id,
+          userLogin: u0.user_login,
+          countryId: u0.country_id,
+          cityId: u0.city_id,
+          idUserMD: u0.id_user_md,
+          userRole: u0.user_role,
+        });
+
+        toast.success(`🎉 Tìm thấy ${mappedList.length} hồ sơ người dùng phù hợp!`);
+      }
     } catch (err) {
       toast.error('Lỗi khi dò tìm thông tin: ' + (err as Error).message);
     } finally {
@@ -836,6 +886,7 @@ export const AutomationStudioPage: React.FC = () => {
       lmsTeacherEmails,
       lmsManagerEmails,
       lmsAutoSyncGit,
+      editableUsers,
       loadedUserProfile,
       editFirstName,
       editLastName,
@@ -1397,30 +1448,8 @@ export const AutomationStudioPage: React.FC = () => {
               isSearchingUser={isSearchingUser}
               onSearchUserProfile={handleSearchUserProfile}
               loadedUserProfile={loadedUserProfile}
-              editFirstName={editFirstName}
-              setEditFirstName={setEditFirstName}
-              editLastName={editLastName}
-              setEditLastName={setEditLastName}
-              editEmail={editEmail}
-              setEditEmail={setEditEmail}
-              editDay={editDay}
-              setEditDay={setEditDay}
-              editMonth={editMonth}
-              setEditMonth={setEditMonth}
-              editYear={editYear}
-              setEditYear={setEditYear}
-              editSchoolCode={editSchoolCode}
-              setEditSchoolCode={setEditSchoolCode}
-              editSchoolName={editSchoolName}
-              setEditSchoolName={setEditSchoolName}
-              schoolSearchQuery={schoolSearchQuery}
-              setSchoolSearchQuery={setSchoolSearchQuery}
-              editPartnerCode={editPartnerCode}
-              setEditPartnerCode={setEditPartnerCode}
-              editPartnerName={editPartnerName}
-              setEditPartnerName={setEditPartnerName}
-              partnerSearchQuery={partnerSearchQuery}
-              setPartnerSearchQuery={setPartnerSearchQuery}
+              editableUsers={editableUsers}
+              setEditableUsers={setEditableUsers}
               schoolsList={schoolsList}
               uniquePartnersList={uniquePartnersList}
             />

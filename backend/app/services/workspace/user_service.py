@@ -60,8 +60,8 @@ class WorkspaceUserService(WorkspaceBaseService):
         identifier: str
     ) -> Dict[str, Any]:
         """
-        1. Tìm user_id qua getDataUser.php
-        2. Lấy toàn bộ chi tiết qua detailUser.php chuẩn bị cho form edit
+        Dò tìm danh sách người dùng (tối đa 25 bản ghi) qua getDataUser.php
+        và cào chi tiết song song có kiểm soát tải (Semaphore 5) qua detailUser.php.
         """
         cookies = await cls._get_admin_session_cookies(admin_user, admin_pass)
         
@@ -71,40 +71,132 @@ class WorkspaceUserService(WorkspaceBaseService):
         }
 
         async with httpx.AsyncClient(timeout=45.0, verify=False) as client:
-            # Bước 1: Dò tìm user_id
+            # Bước 1: Dò tìm danh sách người dùng gần đúng (tối đa 25 bản ghi)
             search_url = f"{cls.BASE_URL}/getDataUser.php"
-            params = {"page": 1, "per_page": 10, "search": identifier}
-            logger.info(f"🔍 [WorkspaceUser] Đang tìm kiếm user: '{identifier}'...")
+            params = {"page": 1, "per_page": 25, "search": identifier}
+            logger.info(f"🔍 [WorkspaceUser] Đang tìm kiếm user gần đúng (max 25): '{identifier}'...")
             
             resp_search = await client.get(search_url, params=params, cookies=cookies, headers=headers)
             if resp_search.status_code != 200:
                 raise RuntimeError(f"Lỗi tìm kiếm user: HTTP {resp_search.status_code}")
 
             search_data = resp_search.json()
-            users_list = search_data.get("data", [])
+            users_list = (search_data.get("data") or [])[:25]
             if not users_list:
-                return {"success": False, "message": f"Không tìm thấy người dùng với email/username: {identifier}"}
+                return {"success": False, "message": f"Không tìm thấy người dùng phù hợp với từ khóa: '{identifier}'"}
 
-            user_summary = users_list[0]
-            user_id = str(user_summary.get("user_id"))
-
-            # Bước 2: Lấy chi tiết thông qua detailUser.php (Param user_email chính là user_id!)
+            # Bước 2: Cào song song chi tiết từng người dùng với Bounded Concurrency (Semaphore = 5)
+            sem = asyncio.Semaphore(5)
             detail_url = f"{cls.BASE_URL}/detailUser.php"
-            resp_detail = await client.get(detail_url, params={"user_email": user_id}, cookies=cookies, headers=headers)
-            if resp_detail.status_code != 200:
-                raise RuntimeError(f"Lỗi lấy chi tiết user {user_id}: HTTP {resp_detail.status_code}")
 
-            detail_data = resp_detail.json()
-            logger.info(f"✅ [WorkspaceUser] Đã bốc chi tiết thành công cho User #{user_id} ({user_summary.get('user_login')})")
-            
+            async def fetch_user_detail(user_summary: Dict[str, Any]) -> Dict[str, Any]:
+                u_id = str(user_summary.get("user_id"))
+                async with sem:
+                    try:
+                        resp_d = await client.get(detail_url, params={"user_email": u_id}, cookies=cookies, headers=headers)
+                        d_data = resp_d.json() if resp_d.status_code == 200 else {}
+                    except Exception as e:
+                        logger.warning(f"⚠️ Không thể lấy chi tiết User #{u_id}: {e}")
+                        d_data = {}
+
+                    return {
+                        "user_id": u_id,
+                        "user_login": user_summary.get("user_login") or "",
+                        "summary": user_summary,
+                        "detail": d_data,
+                        "parsed_profile": {
+                            "userId": u_id,
+                            "userLogin": user_summary.get("user_login") or "",
+                            "userRole": d_data.get("user_role") or user_summary.get("user_role", "student"),
+                            "firstName": d_data.get("firstName") or "",
+                            "lastName": d_data.get("lastname") or "",
+                            "email": d_data.get("inputEmailTeacherEdit") or user_summary.get("user_email") or "",
+                            "day": str(d_data.get("day") or "1"),
+                            "month": str(d_data.get("month") or "1"),
+                            "year": str(d_data.get("year") or "2012"),
+                            "countryId": str(d_data.get("country_id") or "1"),
+                            "cityId": str(d_data.get("cityTeacherCompare") or d_data.get("city_id") or "2852"),
+                            "schoolId": str(d_data.get("school_id") or ""),
+                            "schoolName": d_data.get("school_name") or "",
+                            "partnerId": str(d_data.get("partner_id") or ""),
+                            "partnerName": d_data.get("partner_name") or "",
+                            "idUserMD": str(d_data.get("idUserMD") or d_data.get("idUserMDTeacher") or "")
+                        }
+                    }
+
+            detailed_users = await asyncio.gather(*[fetch_user_detail(u) for u in users_list])
+            logger.info(f"✅ [WorkspaceUser] Đã bốc chi tiết thành công cho {len(detailed_users)} người dùng.")
+
+            first_user = detailed_users[0]
             return {
                 "success": True,
-                "user_id": user_id,
-                "user_login": user_summary.get("user_login"),
-                "summary": user_summary,
-                "detail": detail_data
+                "total": len(detailed_users),
+                "users": detailed_users,
+                # Giữ nguyên các trường single cũ để tương thích ngược 100%
+                "user_id": first_user["user_id"],
+                "user_login": first_user["user_login"],
+                "summary": first_user["summary"],
+                "detail": first_user["detail"],
+                "parsed_profile": first_user["parsed_profile"]
             }
 
+    @classmethod
+    async def batch_update_users_info(
+        cls,
+        admin_user: str,
+        admin_pass: str,
+        users_payload: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Cập nhật danh sách người dùng có kiểm soát tải (Concurrency = 3)
+        bảo vệ trần RAM 512MB của Render và tránh quá tải WordPress.
+        """
+        total = len(users_payload)
+        success_list: List[str] = []
+        failed_list: List[Dict[str, str]] = []
+        logs: List[str] = [f"🚀 BẮT ĐẦU CẬP NHẬT HÀNG LOẠT {total} TÀI KHOẢN:"]
+
+        sem = asyncio.Semaphore(3)
+
+        async def update_single(u_data: Dict[str, Any]):
+            uid = str(u_data.get("user_id", "")).strip()
+            ulogin = str(u_data.get("user_login", "")).strip()
+            async with sem:
+                try:
+                    res = await cls.update_user_info(
+                        admin_user=admin_user,
+                        admin_pass=admin_pass,
+                        user_id=uid,
+                        form_data=u_data
+                    )
+                    if res.get("success"):
+                        success_list.append(ulogin or uid)
+                        logs.append(f"  ✓ User #{uid} ({ulogin}): Thành công")
+                    else:
+                        err = res.get("message") or "Thất bại"
+                        failed_list.append({"user": ulogin or uid, "error": err})
+                        logs.append(f"  ✗ User #{uid} ({ulogin}): {err}")
+                except Exception as ex:
+                    failed_list.append({"user": ulogin or uid, "error": str(ex)})
+                    logs.append(f"  ✗ User #{uid} ({ulogin}): Lỗi ngoại lệ - {ex}")
+
+        await asyncio.gather(*[update_single(u) for u in users_payload])
+
+        succ_count = len(success_list)
+        fail_count = len(failed_list)
+        summary_msg = f"Cập nhật hoàn tất: {succ_count}/{total} thành công, {fail_count} thất bại."
+        logs.append(f"🏁 TỔNG KẾT: {summary_msg}")
+
+        return {
+            "status": "success" if succ_count > 0 and fail_count == 0 else "partial_success" if succ_count > 0 else "failed",
+            "message": summary_msg,
+            "total": total,
+            "success_count": succ_count,
+            "failed_count": fail_count,
+            "execution_logs": "\n".join(logs),
+            "failed_users": failed_list
+        }
+    
     @classmethod
     async def update_user_info(
         cls,

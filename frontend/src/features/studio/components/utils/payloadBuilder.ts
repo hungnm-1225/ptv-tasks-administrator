@@ -77,6 +77,7 @@ export interface BuildPayloadParams {
     feedbackCommentContent: string;
     uploadedCofFile?: File | null;
     cofExtractionResult?: CofExtractionResult | null;
+    editableUsers?: any[];
 }
 
 export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPayload | null => {
@@ -521,49 +522,82 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                 ];
             }
         } else if (params.workspaceMainCategory === 'update_user') {
-            if (!params.loadedUserProfile) {
+            const usersToUpdate = params.editableUsers && params.editableUsers.length > 0
+                ? params.editableUsers
+                : params.loadedUserProfile ? [{
+                    user_id: params.loadedUserProfile.userId,
+                    user_login: params.loadedUserProfile.userLogin,
+                    first_name: params.editFirstName.trim(),
+                    last_name: params.editLastName.trim(),
+                    email: params.editEmail.trim(),
+                    day: params.editDay,
+                    month: params.editMonth,
+                    year: params.editYear,
+                    country_id: params.loadedUserProfile.countryId,
+                    city_id: params.loadedUserProfile.cityId,
+                    school_id: params.editSchoolCode,
+                    school_name: params.editSchoolName,
+                    partner_id: params.editPartnerCode,
+                    partner_name: params.editPartnerName,
+                    id_user_md: params.loadedUserProfile.idUserMD,
+                    user_role: params.loadedUserProfile.userRole,
+                }] : [];
+
+            if (usersToUpdate.length === 0) {
                 toast.error('Vui lòng tìm kiếm và nạp thông tin người dùng trước!');
                 return null;
             }
-            if (!params.editFirstName.trim() || !params.editLastName.trim()) {
-                toast.error('First Name và Last Name không được để trống!');
-                return null;
+
+            // Kiểm tra trường bắt buộc
+            for (let i = 0; i < usersToUpdate.length; i++) {
+                const u = usersToUpdate[i];
+                if (!u.first_name || !u.last_name) {
+                    toast.error(`Người dùng '${u.user_login || u.email}' đang để trống First Name hoặc Last Name!`);
+                    return null;
+                }
+                if (!u.school_id) {
+                    toast.error(`Người dùng '${u.user_login || u.email}' chưa được chọn Trường học!`);
+                    return null;
+                }
             }
-            if (!params.editSchoolCode) {
-                toast.error('Vui lòng chọn Trường học cho người dùng!');
-                return null;
-            }
+
+            const isBatch = usersToUpdate.length > 1;
 
             payload = {
                 ...payload,
                 action: 'update_user_profile',
-                user_id: params.loadedUserProfile.userId,
-                user_login: params.loadedUserProfile.userLogin,
-                first_name: params.editFirstName.trim(),
-                last_name: params.editLastName.trim(),
-                email: params.editEmail.trim(),
-                day: params.editDay,
-                month: params.editMonth,
-                year: params.editYear,
-                country_id: params.loadedUserProfile.countryId,
-                city_id: params.loadedUserProfile.cityId,
-                school_id: params.editSchoolCode,
-                school_name: params.editSchoolName,
-                partner_id: params.editPartnerCode,
-                partner_name: params.editPartnerName,
-                id_user_md: params.loadedUserProfile.idUserMD,
-                user_role: params.loadedUserProfile.userRole,
+                users: usersToUpdate,
+                // Giữ nguyên các trường đơn lẻ của user đầu tiên cho fallback
+                user_id: usersToUpdate[0].user_id,
+                user_login: usersToUpdate[0].user_login,
+                first_name: usersToUpdate[0].first_name,
+                last_name: usersToUpdate[0].last_name,
+                email: usersToUpdate[0].email,
+                day: usersToUpdate[0].day,
+                month: usersToUpdate[0].month,
+                year: usersToUpdate[0].year,
+                school_id: usersToUpdate[0].school_id,
+                school_name: usersToUpdate[0].school_name,
+                partner_id: usersToUpdate[0].partner_id,
+                partner_name: usersToUpdate[0].partner_name,
             };
 
             summary.engineName = '🏢 Workspace User Profile Engine';
-            summary.actionTitle = `Cập Nhật Hồ Sơ: ${params.editLastName} ${params.editFirstName} (#${params.loadedUserProfile.userId})`;
-            summary.targetEntity = `${params.loadedUserProfile.userLogin} (${params.editEmail})`;
-            summary.detailsList = [
-                `Vai trò: ${params.loadedUserProfile.userRole === 'student' ? 'Học sinh (Student)' : 'Giáo viên (Teacher)'}`,
-                `Ngày sinh: ${params.editDay}/${params.editMonth}/${params.editYear}`,
-                `Trường học: ${params.editSchoolName} (Mã: ${params.editSchoolCode})`,
-                `Đối tác quản lý: ${params.editPartnerName} (Mã: ${params.editPartnerCode})`,
-                `Moodle User ID: ${params.loadedUserProfile.idUserMD || 'Chưa liên kết'}`,
+            summary.actionTitle = isBatch
+                ? `Cập Nhật Hồ Sơ Đồng Loạt Cho ${usersToUpdate.length} Tài Khoản`
+                : `Cập Nhật Hồ Sơ: ${usersToUpdate[0].last_name} ${usersToUpdate[0].first_name} (#${usersToUpdate[0].user_id})`;
+            summary.targetEntity = isBatch
+                ? `${usersToUpdate.length} Tài Khoản (${usersToUpdate.map(u => u.user_login || u.email).slice(0, 3).join(', ')}${usersToUpdate.length > 3 ? '...' : ''})`
+                : `${usersToUpdate[0].user_login} (${usersToUpdate[0].email})`;
+            summary.detailsList = isBatch ? [
+                `Tổng số người dùng cập nhật: ${usersToUpdate.length} tài khoản`,
+                `Chế độ: Cập nhật an toàn với Concurrency 3 (Bảo vệ Render 512MB)`,
+                `Trường học áp dụng: ${usersToUpdate[0].school_name || 'Theo từng tài khoản'}`,
+            ] : [
+                `Vai trò: ${usersToUpdate[0].user_role === 'student' ? 'Học sinh (Student)' : 'Giáo viên (Teacher)'}`,
+                `Ngày sinh: ${usersToUpdate[0].day}/${usersToUpdate[0].month}/${usersToUpdate[0].year}`,
+                `Trường học: ${usersToUpdate[0].school_name} (Mã: ${usersToUpdate[0].school_id})`,
+                `Đối tác quản lý: ${usersToUpdate[0].partner_name} (Mã: ${usersToUpdate[0].partner_id})`,
             ];
         }
 
