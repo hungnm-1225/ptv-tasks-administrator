@@ -522,41 +522,63 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                 ];
             }
         } else if (params.workspaceMainCategory === 'update_user') {
-            const usersToUpdate = params.editableUsers && params.editableUsers.length > 0
-                ? params.editableUsers
-                : params.loadedUserProfile ? [{
-                    user_id: params.loadedUserProfile.userId,
+            // 🎯 Ưu tiên số 1: Lấy toàn bộ danh sách từ editableUsers
+            let usersToUpdate: any[] = [];
+
+            if (params.editableUsers && params.editableUsers.length > 0) {
+                usersToUpdate = params.editableUsers.map(u => ({
+                    user_id: String(u.user_id),
+                    user_login: u.user_login,
+                    first_name: (u.first_name || '').trim(),
+                    last_name: (u.last_name || '').trim(),
+                    email: (u.email || '').trim(),
+                    day: String(u.day || '1'),
+                    month: String(u.month || '1'),
+                    year: String(u.year || '2012'),
+                    country_id: String(u.country_id || '3'),
+                    city_id: String(u.city_id || '2852'),
+                    school_id: String(u.school_id || ''),
+                    school_name: u.school_name || '',
+                    partner_id: String(u.partner_id || ''),
+                    partner_name: u.partner_name || '',
+                    id_user_md: String(u.id_user_md || ''),
+                    user_role: u.user_role || 'student',
+                }));
+            } else if (params.loadedUserProfile) {
+                usersToUpdate = [{
+                    user_id: String(params.loadedUserProfile.userId),
                     user_login: params.loadedUserProfile.userLogin,
                     first_name: params.editFirstName.trim(),
                     last_name: params.editLastName.trim(),
                     email: params.editEmail.trim(),
-                    day: params.editDay,
-                    month: params.editMonth,
-                    year: params.editYear,
-                    country_id: params.loadedUserProfile.countryId,
-                    city_id: params.loadedUserProfile.cityId,
-                    school_id: params.editSchoolCode,
+                    day: String(params.editDay),
+                    month: String(params.editMonth),
+                    year: String(params.editYear),
+                    country_id: String(params.loadedUserProfile.countryId),
+                    city_id: String(params.loadedUserProfile.cityId),
+                    school_id: String(params.editSchoolCode),
                     school_name: params.editSchoolName,
-                    partner_id: params.editPartnerCode,
+                    partner_id: String(params.editPartnerCode),
                     partner_name: params.editPartnerName,
-                    id_user_md: params.loadedUserProfile.idUserMD,
+                    id_user_md: String(params.loadedUserProfile.idUserMD),
                     user_role: params.loadedUserProfile.userRole,
-                }] : [];
+                }];
+            }
 
             if (usersToUpdate.length === 0) {
                 toast.error('Vui lòng tìm kiếm và nạp thông tin người dùng trước!');
                 return null;
             }
 
-            // Kiểm tra trường bắt buộc
+            // Kiểm tra tính hợp lệ
             for (let i = 0; i < usersToUpdate.length; i++) {
                 const u = usersToUpdate[i];
                 if (!u.first_name || !u.last_name) {
-                    toast.error(`Người dùng '${u.user_login || u.email}' đang để trống First Name hoặc Last Name!`);
+                    toast.error(`Tài khoản '${u.user_login || u.email}' đang để trống First Name hoặc Last Name!`);
                     return null;
                 }
                 if (!u.school_id) {
-                    toast.error(`Người dùng '${u.user_login || u.email}' chưa được chọn Trường học!`);
+                    toast.error(`Tài khoản '${u.user_login || u.email}' chưa chọn Trường học!`);
                     return null;
                 }
             }
@@ -566,8 +588,8 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
             payload = {
                 ...payload,
                 action: 'update_user_profile',
-                users: usersToUpdate,
-                // Giữ nguyên các trường đơn lẻ của user đầu tiên cho fallback
+                users: usersToUpdate, // 👈 Mảng toàn bộ 24 users
+                // Các trường fallback cho single user
                 user_id: usersToUpdate[0].user_id,
                 user_login: usersToUpdate[0].user_login,
                 first_name: usersToUpdate[0].first_name,
@@ -587,17 +609,15 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                 ? `Cập Nhật Hồ Sơ Đồng Loạt Cho ${usersToUpdate.length} Tài Khoản`
                 : `Cập Nhật Hồ Sơ: ${usersToUpdate[0].last_name} ${usersToUpdate[0].first_name} (#${usersToUpdate[0].user_id})`;
             summary.targetEntity = isBatch
-                ? `${usersToUpdate.length} Tài Khoản (${usersToUpdate.map(u => u.user_login || u.email).slice(0, 3).join(', ')}${usersToUpdate.length > 3 ? '...' : ''})`
+                ? `${usersToUpdate.length} Tài Khoản (${usersToUpdate.slice(0, 3).map(u => u.user_login || u.email).join(', ')}${usersToUpdate.length > 3 ? '...' : ''})`
                 : `${usersToUpdate[0].user_login} (${usersToUpdate[0].email})`;
             summary.detailsList = isBatch ? [
-                `Tổng số người dùng cập nhật: ${usersToUpdate.length} tài khoản`,
-                `Chế độ: Cập nhật an toàn với Concurrency 3 (Bảo vệ Render 512MB)`,
-                `Trường học áp dụng: ${usersToUpdate[0].school_name || 'Theo từng tài khoản'}`,
+                `Tổng số người dùng cần cập nhật: ${usersToUpdate.length} tài khoản`,
+                `Danh sách ID: ${usersToUpdate.slice(0, 8).map(u => '#' + u.user_id).join(', ')}${usersToUpdate.length > 8 ? '...' : ''}`,
+                `Cơ chế: Chạy vòng lặp song song Concurrency 3 (Bảo vệ 512MB RAM)`,
             ] : [
                 `Vai trò: ${usersToUpdate[0].user_role === 'student' ? 'Học sinh (Student)' : 'Giáo viên (Teacher)'}`,
-                `Ngày sinh: ${usersToUpdate[0].day}/${usersToUpdate[0].month}/${usersToUpdate[0].year}`,
                 `Trường học: ${usersToUpdate[0].school_name} (Mã: ${usersToUpdate[0].school_id})`,
-                `Đối tác quản lý: ${usersToUpdate[0].partner_name} (Mã: ${usersToUpdate[0].partner_id})`,
             ];
         }
 
