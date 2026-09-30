@@ -1,4 +1,5 @@
 # backend/app/services/workspace_lineage_service.py
+import re
 import logging
 from typing import Dict, Any, Optional, Union
 from cryptography.fernet import Fernet
