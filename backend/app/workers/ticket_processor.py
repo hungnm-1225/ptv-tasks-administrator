@@ -17,6 +17,7 @@ import json
 import hashlib
 import logging
 import tempfile
+import time
 import httpx
 import urllib.request
 from typing import Dict, Any, Optional, List, Tuple, Set
@@ -304,8 +305,13 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
         archived_filenames: List[str] = []
 
         # =========================================================================
-        # 2. BÓC TÁCH TỆP ĐÍNH KÈM CÓ GẮN NHÃN PROVENANCE
+        # 2. BÓC TÁCH TỆP ĐÍNH KÈM CÓ GẮN NHÃN PROVENANCE & SMART IMAGE GATING
         # =========================================================================
+        seen_image_hashes: Set[str] = set()
+        # Kiểm tra xem yêu cầu có dấu hiệu cần dùng Gemini Vision để soi ảnh lỗi không
+        error_keywords = ["lỗi", "error", "failed", "bug", "screenshot", "chụp màn hình", "như hình", "đính kèm", "không vào được"]
+        needs_vision = any(kw in (subject + " " + raw_content).lower() for kw in error_keywords)
+
         for att in attachments:
             fname = str(att.get("filename") or "").strip()
             fname_lower = fname.lower()
@@ -324,7 +330,7 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
             else:
                 new_active_filenames.append(fname)
 
-            # A. BÓC TÁCH FILE EXCEL VỚI BỘ PHÂN LOẠI TEMPLATE TỰ ĐỘNG (COF, TOF, BULK_ACCOUNTS, GENERIC)
+            # A. BÓC TÁCH FILE EXCEL VỚI BỘ PHÂN LOẠI TEMPLATE TỰ ĐỘNG
             if fname_lower.endswith(".xlsx") or fname_lower.endswith(".xls"):
                 temp_path = None
                 try:
@@ -347,14 +353,12 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                                 tmp_file.write(file_bytes)
                                 temp_path = tmp_file.name
 
-                        # 🌟 1. GỌI BỘ NHẬN DIỆN PHÔI THÔNG MINH (QUÉT 1-5 HÀNG, CỘT A-Z)
                         from app.services.excel.excel_classifier import detect_excel_file_type
                         from app.services.excel.bulk_template_service import bulk_template_service
                         from app.services.excel.tof_service import tof_service
 
                         excel_type, type_meta = detect_excel_file_type(temp_path)
 
-                        # 🌟 2. ĐIỀU PHỐI ĐÚNG THEO TỪNG LOẠI PHÔI
                         if excel_type == "COF":
                             parsed_cof = COFExcelService.parse_cof_file(temp_path)
                             parsed_excel_files.append({
@@ -382,14 +386,12 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                                 "courses_detected": parsed_tof.get("courses_detected", [])
                             })
                         elif excel_type == "BULK_ACCOUNTS":
-                            # 🎯 VÁ LỖI: normalize_input_accounts_excel trả về Tuple (path, count, users_list) hoặc List
                             norm_res = bulk_template_service.normalize_input_accounts_excel(temp_path)
                             if isinstance(norm_res, tuple) and len(norm_res) >= 3:
-                                normalized_users = norm_res[2] # Lấy danh sách users từ phần tử thứ 3
+                                normalized_users = norm_res[2]
                             elif isinstance(norm_res, list):
                                 normalized_users = norm_res
                             else:
-                                # Fallback sang GenericExcelService bóc tách trực tiếp cực kỳ an toàn
                                 gen_data = GenericExcelService.extract_universal_data(file_bytes)
                                 normalized_users = gen_data.get("account_profiles", [])
 
@@ -401,13 +403,12 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                                 "lifecycle_status": lifecycle_status,
                                 "turn_index": turn_idx,
                                 "is_initial": is_initial,
-                                "account_profiles": normalized_users[:50],
+                                "account_profiles": normalized_users[:10], # Chỉ giữ lại 10 mẫu, không phình RAM
                                 "identifiers": clean_emails,
                                 "total_users": len(normalized_users)
                             })
                             logger.info(f"📄 [BULK_ACCOUNTS] Bóc tách thành công {len(normalized_users)} tài khoản từ [{fname}]!")
                         else:
-                            # Phôi tự do (GENERIC)
                             parsed_universal = GenericExcelService.extract_universal_data(file_bytes)
                             parsed_excel_files.append({
                                 "is_cof": False,
@@ -419,8 +420,7 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                                 "identifiers": parsed_universal.get("identifiers", []),
                                 "courses_detected": parsed_universal.get("courses_detected", []),
                                 "repo_urls": parsed_universal.get("repo_urls", []),
-                                "school_detected": parsed_universal.get("school_detected"),
-                                "account_profiles": parsed_universal.get("account_profiles", [])[:50]
+                                "school_detected": parsed_universal.get("school_detected")
                             })
                 except Exception as ex_err:
                     logger.warning(f"⚠️ Lỗi bóc tách Excel [{fname}]: {ex_err}")
@@ -431,33 +431,47 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                         except Exception:
                             pass
 
-            # B. 🎯 TẢI ẢNH CHỤP BÁO LỖI (.png, .jpg, .jpeg, .webp) CHO GEMINI VISION (ƯU TIÊN ẢNH MỚI)
-            elif any(fname_lower.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".webp"]) and not is_already_done and len(image_parts) < 3:
+            # B. 🎯 SMART IMAGE GATING: CHỈ TẢI ĐÚNG 1 ẢNH LỖI HỢP LỆ (LOẠI BỎ ICON, CHỮ KÝ < 15KB)
+            elif (
+                any(fname_lower.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".webp"])
+                and not is_already_done
+                and len(image_parts) < 1  # 👈 CHỐT CHẶN: Tối đa duy nhất 1 ảnh chụp màn hình để AI phản hồi siêu tốc!
+                and needs_vision          # 👈 CHỐT CHẶN: Chỉ nạp khi ngữ cảnh thực sự cần đọc ảnh lỗi
+            ):
                 try:
-                    async with httpx.AsyncClient(timeout=20.0) as client:
+                    async with httpx.AsyncClient(timeout=15.0) as client:
                         resp = await client.get(furl)
-                        if resp.status_code == 200 and len(resp.content) < 5 * 1024 * 1024:
-                            mime = "image/png" if fname_lower.endswith(".png") else "image/webp" if fname_lower.endswith(".webp") else "image/jpeg"
-                            image_parts.append({
-                                "mime_type": mime,
-                                "data": resp.content,
-                                "filename": fname
-                            })
-                            logger.info(f"📸 [Multimodal Vision] Đã nạp ảnh lỗi MỚI [{fname}] vào Gemini Vision!")
+                        # Bỏ qua ảnh rác: Icon, avatar, logo thường < 15KB (15360 bytes)
+                        if resp.status_code == 200 and 15 * 1024 <= len(resp.content) <= 4 * 1024 * 1024:
+                            img_hash = hashlib.sha256(resp.content).hexdigest()
+                            if img_hash not in seen_image_hashes:
+                                seen_image_hashes.add(img_hash)
+                                mime = "image/png" if fname_lower.endswith(".png") else "image/webp" if fname_lower.endswith(".webp") else "image/jpeg"
+                                image_parts.append({
+                                    "mime_type": mime,
+                                    "data": resp.content,
+                                    "filename": fname
+                                })
+                                logger.info(f"📸 [Smart Vision Gating] Đã chọn ảnh chụp màn hình đạt chuẩn: [{fname}] ({len(resp.content) // 1024} KB)")
+                        else:
+                            logger.info(f"🛡️ [Smart Vision Gating] Bỏ qua ảnh nhỏ/icon chữ ký: [{fname}] ({len(resp.content) // 1024} KB)")
                 except Exception as img_err:
                     logger.warning(f"⚠️ Lỗi tải ảnh đính kèm [{fname}]: {img_err}")
 
-        # 3. XÂY DỰNG CẤU TRÚC TÓM TẮT TỆP ĐÍNH KÈM CÓ SỔ CÁI PROVENANCE
+        # 3. XÂY DỰNG BẢN LƯỢC KÊ QUẢN TRỊ (EXECUTIVE DIGEST) TỪ TỆP ĐÍNH KÈM
         excel_summary: Optional[Dict[str, Any]] = None
+        executive_digest_str = ""
+
         if parsed_excel_files:
-            # Ưu tiên lấy file mới nhất thuộc nhóm 'new_pending' làm file active
             new_pending_files = [f for f in parsed_excel_files if f.get("lifecycle_status") == "new_pending"]
             new_pending_files.sort(key=lambda x: x.get("turn_index", 0), reverse=True)
-
             active_file = new_pending_files[0] if new_pending_files else parsed_excel_files[0]
+
+            executive_digest_str = build_executive_excel_digest(active_file)
             
             excel_summary = {
                 **active_file,
+                "executive_digest": executive_digest_str,
                 "provenance_ledger": {
                     "active_new_files": new_active_filenames,
                     "archived_completed_files": archived_filenames
@@ -481,18 +495,24 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                     "courses_detected": text_parsed.get("courses_detected", [])
                 }
 
-        # 4. Nạp LMS Catalog
+        # 4. MỒI KHÓA HỌC THÔNG MINH (CANDIDATE INJECTION - CHỌN TOP 6 MÔN)
         smart_catalog = get_smart_catalog_context(
             supabase=supabase,
             raw_text=raw_content,
             subject=subject,
             excel_summary=excel_summary,
-            max_candidates=15
+            max_candidates=6  # 👈 Chỉ lấy tối đa 6 môn liên quan nhất, tiết kiệm 95% token!
         )
+        catalog_context_str = "\n".join([f"- [{c['id']}] {c['name']}" for c in smart_catalog]) if smart_catalog else "(Không có môn phù hợp)"
+        
         if excel_summary is not None:
             excel_summary["catalog_reference"] = smart_catalog
+            excel_summary["catalog_context_str"] = catalog_context_str
         else:
-            excel_summary = {"catalog_reference": smart_catalog}
+            excel_summary = {
+                "catalog_reference": smart_catalog,
+                "catalog_context_str": catalog_context_str
+            }
 
         # 🌟 5. KÉO LỊCH SỬ WORKFLOW ĐÃ THỰC THI ĐỂ NHẮC NHỞ AI BẰNG VĂN BẢN
         historical_context_note = ""
@@ -529,10 +549,6 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
             source=source,
             sender_email=sender_email
         )
-
-        if summary_res.model_name != "fast_path_system_filter":
-            import asyncio
-            await asyncio.sleep(1.2)
 
         # 7. Bóc tách Sự Thật Vận Hành (Key 2) - ZERO-MOCKUP INVARIANT
         facts_res = gemini_engine.extract_operational_facts(
