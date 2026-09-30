@@ -1,5 +1,5 @@
 // frontend/src/features/studio/components/modals/TeacherAllocationModal.tsx
-import React from 'react';
+import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, BookOpen } from 'lucide-react';
 import { toast } from 'sonner';
@@ -14,6 +14,7 @@ interface TeacherAllocationModalProps {
     trays: LicenseTrayItem[];
 }
 
+
 export const TeacherAllocationModal: React.FC<TeacherAllocationModalProps> = ({
     isOpen,
     editingTeacherIndex,
@@ -27,6 +28,29 @@ export const TeacherAllocationModal: React.FC<TeacherAllocationModalProps> = ({
     }
 
     const currentTeacher = teachersAllocation[editingTeacherIndex];
+
+    useEffect(() => {
+        if (!isOpen || editingTeacherIndex === null || !teachersAllocation[editingTeacherIndex]) return;
+
+        const teacher = teachersAllocation[editingTeacherIndex];
+        if (teacher.assignedCourses.length === 0 && teacher.assignedLmsGroups.length > 0) {
+            const matchedCourseIds: string[] = [];
+            const teacherGroups = new Set(teacher.assignedLmsGroups.map((g) => g.trim().toLowerCase()));
+
+            trays.forEach((tray) => {
+                const hasGroup = tray.assignedClasses.some((c) => teacherGroups.has(c.lmsGroupName.trim().toLowerCase()));
+                if (hasGroup) {
+                    matchedCourseIds.push(String(tray.courseId));
+                }
+            });
+
+            if (matchedCourseIds.length > 0) {
+                const updated = [...teachersAllocation];
+                updated[editingTeacherIndex].assignedCourses = matchedCourseIds;
+                setTeachersAllocation(updated);
+            }
+        }
+    }, [isOpen, editingTeacherIndex, trays]);
 
     return createPortal(
         <div

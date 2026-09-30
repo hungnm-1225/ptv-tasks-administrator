@@ -201,6 +201,35 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                 const sourceFilename = params.uploadedCofFile?.name || (params.uploadedAccountsFile ? params.uploadedAccountsFile.name : undefined);
                 const totalAccCount = (params.cofExtractionResult?.studentsCount || 0) + (params.cofExtractionResult?.teachersCount || 0);
 
+                // ⚡ AUTO-HEALING & AUTO-BINDING: Tự động phục hồi assignedCourses nếu bị rỗng!
+                const healedTeachersAllocation = (params.cofTeachersAllocation || []).map((teacher) => {
+                    const existingCids = new Set((teacher.assignedCourses || []).map(String));
+                    const teacherGroups = (teacher.assignedLmsGroups || []).map((g) => String(g).trim().toLowerCase());
+
+                    // Duyệt qua class_assignments để truy vết: Group này thuộc Course ID nào?
+                    Object.entries(params.cofClassAssignments || {}).forEach(([cid, classes]) => {
+                        const courseClassGroups = (classes || []).map((cls) =>
+                            String(cls.lmsGroupName || cls.rawClassName || '').trim().toLowerCase()
+                        );
+
+                        // Nếu giáo viên có group nằm trong khóa học này -> Tự động nạp Course ID vào!
+                        const hasMatchingGroup = teacherGroups.some((tg) => courseClassGroups.includes(tg));
+                        if (hasMatchingGroup) {
+                            existingCids.add(String(cid));
+                        }
+                    });
+
+                    // Fallback an toàn: Nếu chỉ có đúng 1 môn được chọn trong đơn hàng mà assignedCourses vẫn rỗng
+                    if (existingCids.size === 0 && params.selectedCourses.length === 1) {
+                        existingCids.add(String(params.selectedCourses[0].course_id));
+                    }
+
+                    return {
+                        ...teacher,
+                        assignedCourses: Array.from(existingCids),
+                    };
+                });
+
                 payload = {
                     ...payload,
                     action: 'pipeline_end_to_end',
@@ -238,7 +267,7 @@ export const buildPreparedTaskPayload = (params: BuildPayloadParams): PreparedPa
                         }),
                     },
                     class_assignments: params.cofClassAssignments,
-                    teachers_allocation: params.cofTeachersAllocation,
+                    teachers_allocation: healedTeachersAllocation,
                     auto_sync_git: true,
                 };
 

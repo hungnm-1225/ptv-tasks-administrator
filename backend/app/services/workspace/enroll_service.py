@@ -142,7 +142,7 @@ class WorkspaceEnrollService(WorkspaceBaseService):
         return {k: (None, str(v) if v is not None else "") for k, v in data_dict.items()}
 
     # =========================================================================
-    # 🐙 HELPER: TRA CỨU GIT_REPOS TỪ CSDL SUPABASE THEO COURSE ID
+    # 🐙 HELPER: TRA CỨU GIT_REPOS CÓ HỖ TRỢ SELF-HEALING (SỬA LẠI)
     # =========================================================================
     def _resolve_git_repos_for_courses(
         self,
@@ -179,14 +179,25 @@ class WorkspaceEnrollService(WorkspaceBaseService):
                     continue
 
                 course_students: List[str] = []
+                course_class_groups: Set[str] = set()
                 for cls in class_assignments.get(cid_str, []):
                     course_students.extend([str(s).strip().lower() for s in cls.get("students", []) if str(s).strip()])
+                    grp_name = cls.get("lmsGroupName") or cls.get("rawClassName")
+                    if grp_name:
+                        course_class_groups.add(grp_name.strip().lower())
 
+                # ⚡ CẢI TIẾN SELF-HEALING: Nếu assignedCourses rỗng, tự suy luận qua assignedLmsGroups!
                 course_teachers: List[str] = []
                 for t in teachers_alloc:
                     t_email = str(t.get("email") or "").strip().lower()
+                    if not t_email:
+                        continue
                     assigned_cids = [str(c) for c in t.get("assignedCourses", [])]
-                    if cid_str in assigned_cids and t_email:
+                    teacher_groups = [str(g).strip().lower() for g in t.get("assignedLmsGroups", [])]
+
+                    # Khớp nếu có Course ID HOẶC có Group trùng với Group của môn học này
+                    is_assigned = (cid_str in assigned_cids) or any(g in course_class_groups for g in teacher_groups)
+                    if is_assigned:
                         course_teachers.append(t_email)
 
                 for r_item in raw_repos:
@@ -385,19 +396,29 @@ class WorkspaceEnrollService(WorkspaceBaseService):
                             )
                             total_students_enrolled += len(matched_st_records)
 
-                    # B. Gán các Giáo viên phụ trách khóa học này
+                    # B. Gán các Giáo viên phụ trách khóa học này (ĐÃ FIX TỰ PHỤC HỒI)
                     for t_item in teachers_alloc:
                         t_email = str(t_item.get("email") or "").lower()
-                        assigned_cids = [str(c) for c in t_item.get("assignedCourses", [])]
+                        if not t_email or t_email not in teacher_dir:
+                            continue
 
-                        if str(c_id) not in assigned_cids or t_email not in teacher_dir:
+                        assigned_cids = [str(c) for c in t_item.get("assignedCourses", [])]
+                        t_groups = t_item.get("assignedLmsGroups", [])
+                        
+                        # Tập hợp tên group hiện có của môn học này
+                        course_group_names = {str(g.get("group_name") or "").strip().lower() for g in existing_groups}
+                        has_matching_group = any(str(g).strip().lower() in course_group_names for g in t_groups)
+
+                        # ⚡ ĐIỀU KIỆN MỞ RỘNG: Thuộc assignedCourses HOẶC có group khớp với môn học!
+                        is_course_teacher = (str(c_id) in assigned_cids) or (len(assigned_cids) == 0 and has_matching_group)
+                        
+                        if not is_course_teacher:
                             continue
 
                         tc_record = teacher_dir[t_email]
                         moodle_uid = tc_record.get("moodle_user_id") or tc_record.get("ID")
                         wp_uid = tc_record.get("ID")
 
-                        t_groups = t_item.get("assignedLmsGroups", [])
                         for g_name in t_groups:
                             matched_grp = next((g for g in existing_groups if g.get("group_name") == g_name), None)
                             if not matched_grp:
@@ -427,6 +448,7 @@ class WorkspaceEnrollService(WorkspaceBaseService):
                                 files=self._to_multipart(tc_payload)
                             )
                             total_teachers_enrolled += 1
+                            logger.info(f"👨‍🏫 Đã gán thành công Giáo viên {t_email} vào Khóa #{c_id}, Group '{g_name}'")
 
                     processed_courses_count += 1
                     course_summaries.append({
