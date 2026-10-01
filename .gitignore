@@ -3,7 +3,7 @@ node_modules/
 backend/venv/
 backend/scripts/
 backend/tests/
-backend/__pycache__/
+backend/.pytest_cache/
 backend/scripts/*.xlsx
 *.pyc
 
@@ -16,6 +16,7 @@ frontend/dist-ssr/
 .env
 .env.local
 .env.*.local
+.venv/
 
 # IDE & OS
 .vscode/
@@ -29,9 +30,11 @@ Thumbs.db
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+.jeikcode/
 
 # agent
 .agents/
 .agent/
 *.md
 skills-lock.json
+*.bat

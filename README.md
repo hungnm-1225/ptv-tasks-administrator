@@ -600,7 +600,12 @@ ptv-tasks-administrator/
 5. **[`board.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/board.py):**
    - Quản trị bảng Kanban đa năng: Thêm/Sửa/Xóa Boards, Columns, Cards, cập nhật vị trí kéo thả Drag-and-Drop (DND), quản lý danh sách subtasks có checkbox tiến độ.
 6. **[`courses.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/courses.py):**
-   - Quản trị song song 2 bảng danh mục `workspace_courses` và `lms_courses`, cấu hình mảng Git Repositories liên kết cho từng môn học, nhập danh mục hàng loạt từ file Excel.
+   - **Quản lý danh mục kép:** Quản trị song song 2 bảng danh mục `workspace_courses` và `lms_courses` với cơ chế RAM Cache LRU (`course_cache` TIER_A_CATALOG, 50 entries, TTL 600s).
+   - **Xóa bỏ hoàn toàn cột SKU:** Loại bỏ trường `sku` khỏi toàn bộ CSDL và Pydantic Schemas (`CourseSchema`, `CourseUpdateSchema`) để chống lỗi schema PostgreSQL; bổ sung bộ lọc tự động `data.pop("sku", None)` an toàn tuyệt đối.
+   - **Cơ chế Tự Động Trích Xuất Course ID từ URL (`extract_course_id_from_url`):** Tự động bóc tách Course ID số nguyên từ bất kỳ định dạng link LMS nào (VD: `https://learn.pythaverse.space/course/view.php?id=1445` ➔ Course ID `1445`, `view.php?id=812` ➔ `812`, `/course/695` ➔ `695`).
+   - **Auto-Resolve 2 Chiều:** Nếu có Course ID mà chưa có link, Pydantic validator tự sinh link chuẩn `https://learn.pythaverse.space/course/view.php?id={id}`.
+   - **Bulk Upsert Thông Minh (`bulk_upsert_courses`):** Đồng bộ lô 50 khóa học mỗi batch, tự động nhận diện ID từ URL khi cột ID trống, ghi đè `on_conflict="course_id"` và tự động xóa RAM cache.
+   - **Quản trị Danh mục:** Đổi tên danh mục (`rename_category`) hoặc xóa/gộp khóa học sang danh mục khác (`delete_category`).
 7. **[`workspace.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/api/v1/endpoints/workspace.py):**
    - `/hierarchy-schools`: Lấy danh sách 480 trường học phân cấp.
    - `/cached-pending-orders` & `/cached-pending-contracts`: Lấy dữ liệu đệm đơn hàng và hợp đồng License (1ms).
@@ -652,8 +657,8 @@ ptv-tasks-administrator/
 #### 5.6.3. Bộ Lập Kế Hoạch & Thực Thi DAG v7.3 (`workflow_planner.py` & `workflow_executor.py`)
 - **[`workflow_planner.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_planner.py) (`WorkflowPlannerService` v7.3):**
   - `expand_course_range_text(raw_text: str) -> List[str]`: Mở rộng dải môn học tự nhiên tổng quát (VD: "SWRP 5 to 10", "SWRP từ 5 đến 10", "SWRP 5-10" ➔ `["SWRP 5", "SWRP 6", "SWRP 7", "SWRP 8", "SWRP 9", "SWRP 10"]`).
-  - `resolve_course_and_repos_from_db(course_query, is_teacher=False) -> Tuple[name, sku, repo_url, course_id]`:
-    - Tra cứu bảng `lms_courses` trên Supabase. Đào sâu vào cột JSONB `git_repos`. Nếu `is_teacher=True`, ưu tiên nhặt link repo của Giáo viên (`gv`); nếu là học sinh, lấy link chung hoặc học sinh (`hs`).
+  - `resolve_course_and_repos_from_db(course_query, is_teacher=False) -> Tuple[name, repo_url, course_id]`:
+    - Tra cứu bảng `lms_courses` trên Supabase. Đào sâu vào cột JSONB `git_repos`. Nếu `is_teacher=True`, ưu tiên nhặt link repo của Giáo viên (`teacher_only`); nếu là học sinh, lấy link chung hoặc học sinh (`all`). Tự động mở rộng dải môn và trả về ID khóa học.
   - `resolve_school_entities(school_name) -> Tuple[best_match, candidates]`: Tra cứu phả hệ trường học với điểm tin cậy fuzzy confidence.
   - `build_workflow_proposal(...) -> Tuple[str, List[WorkflowStepDraft], List[Dict[str, str]], List[str], bool]`:
     - Trả về 5 giá trị: `(status, steps, missing_requirements, plan_warnings, is_school_required)`.
@@ -845,7 +850,7 @@ ptv-tasks-administrator/
   - Bento Layout: Border hairline 1px, bo góc `radius-card: 1rem` (16px), khoảng cách `gap-4` (16px), hiệu ứng đổ bóng mờ tinh tế `shadow-sm`.
 
 ### 6.3. Lớp Giao Tiếp Mạng, Kiểu Dữ Liệu & Cấu Hình Tác Giả
-- [`lib/api.ts`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/lib/api.ts): Hàm `fetchApi<T>` tự động gắn Bearer JWT token từ Supabase Auth, thiết lập `AbortController` với timeout cứng **30 giây**.
+- [`lib/api.ts`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/lib/api.ts): Hàm `fetchApi<T>` tự động gắn Bearer JWT token từ Supabase Auth, thiết lập `AbortController` với timeout cứng **90 giây** (phòng chống treo mạng khi cào dữ liệu lớn trên Render). Tự động phân tích lỗi chi tiết (`ApiError`).
 - [`lib/supabase.ts`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/lib/supabase.ts): Client khởi tạo Supabase cho Browser SPA.
 - [`config/authorConfig.ts`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/config/authorConfig.ts): Module cấu hình định danh Tác giả sáng lập (Nguyễn Mạnh Hùng), chức danh, tiểu sử, avatar, mạng xã hội (GitHub, LinkedIn, Facebook, Email, Website) và thông số kỹ thuật hiển thị trên Landing Page.
 - [`types/index.ts`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/types/index.ts): Định nghĩa 30+ interfaces TypeScript nghiêm ngặt (`InboxTicket`, `AutomationWorkflow`, `WorkflowStepDraft`, `BotTask`, `SiteMonitorItem`...).
@@ -936,7 +941,18 @@ ptv-tasks-administrator/
 
 - **[`TaskManagementPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/tasks/TaskManagementPage.tsx):** Quản trị hàng đợi tác vụ bot trong `bot_automation_tasks`, xem/sửa payload JSON trước khi duyệt, drawer xem timeline và nhật ký lỗi.
 - **[`WorkBoardPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/board/WorkBoardPage.tsx):** Bảng Kanban đa năng, kéo thả thẻ mượt mà, tùy biến màu sắc cột, quản lý subtasks có thanh tiến độ phần trăm.
-- **[`CoursesManagerPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/courses/CoursesManagerPage.tsx):** Quản trị song song 2 bảng danh mục `workspace_courses` và `lms_courses`, liên kết Git Repositories, nhập Excel hàng loạt, đổi tên danh mục đồng loạt.
+- **[`CoursesManagerPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/courses/CoursesManagerPage.tsx):**
+  - **Quản trị song song 2 nguồn dữ liệu:** Tab chuyển đổi linh hoạt giữa Workspace Courses (`workspace_courses`) và LMS Learn Portal (`lms_courses`).
+  - **Bento Card hiển thị trực quan:** Thẻ khóa học hiển thị Course ID, Category, Tên môn học, Huy hiệu danh sách Git Repositories (phân biệt màu sắc giữa Repo GV và Repo Cả lớp), và liên kết LMS URL mở thẳng tab mới (`ExternalLink`). Toàn bộ giao diện đã loại bỏ trường SKU.
+  - **Tương tác 2 Chiều Tự Động Trong Form Thêm/Sửa (Auto-Detect Course ID):**
+    - Khi dán hoặc nhập link vào ô **LMS URL** (ví dụ: `https://learn.pythaverse.space/course/view.php?id=1445`), hệ thống tự động bóc tách và điền ngay `Course ID = 1445` kèm thông báo toast xác nhận `✨ Đã tự động nhận diện Course ID: #1445`.
+    - Ngược lại, khi nhập Course ID, nếu ô LMS URL đang trống, hệ thống tự động sinh đường dẫn chuẩn Moodle.
+    - Cấu hình Multi-Repo Builder: Thêm/xóa nhiều Git Repositories cho từng khóa học và thiết lập đối tượng áp dụng (`teacher_only` hoặc `all`).
+  - **Nhập Hàng Loạt Thông Minh (Excel & Dán Text):**
+    - File Excel mẫu chuẩn (`Mau_Nhap_Khoa_Hoc_Pythaverse.xlsx`): Đã bỏ cột SKU, thêm cột `Course ID (Tùy chọn nếu có Link)`.
+    - Nhận diện linh hoạt: Người dùng có thể để trống cột Course ID; hệ thống tự động quét cột LMS URL và trích xuất Course ID trực tiếp!
+    - Bảng xem trước Live Preview: Hiển thị trạng thái kiểm định, hiển thị tag xanh `từ link` cho các dòng tự nhận diện Course ID, kiểm tra trùng lặp và tính toàn vẹn trước khi gửi lên API `bulk-upsert`.
+  - **Quản lý Danh mục (Category Manager):** Đổi tên danh mục hàng loạt hoặc gộp các môn học từ danh mục cũ sang danh mục mới với xác nhận an toàn.
 - **[`BotCommanderPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/bots/BotCommanderPage.tsx):** Bảng đồng hồ theo dõi trạng thái worker, Live Terminal GMT+7 với lọc taxonomy sự kiện, nút kích hoạt nhanh (Trigger On-Demand) từng cronjob.
 - **[`SiteMonitorPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/monitor/SiteMonitorPage.tsx):** 3-Tab Health Monitor (Tab 1: Public Sites Uptime/Latency, Tab 2: Authentication Matrix, Tab 3: Incident Downtime Log).
 - **[`GithubReporterPage.tsx`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/frontend/src/features/github/GithubReporterPage.tsx):** Trợ lý báo lỗi AI đối soát `knowledge_base.json`, soạn thảo Markdown chuẩn và tạo GitHub Issue qua PAT.
@@ -970,7 +986,7 @@ $$\text{Execution Event} \xrightarrow{\text{proposal\_id}} \text{Workflow} \xrig
 | **11** | `workspace_credentials_vault` | `id (UUID)` | `org_id ➔ workspace_organizations` | Két sắt lưu mật khẩu mã hóa đối xứng Fernet (`VAULT_SECRET_KEY`) của từng đơn vị trường/đối tác. |
 | **12** | `workspace_contracts_cache` | `id (UUID)` | - | Bộ nhớ đệm danh sách hợp đồng License Distributor/Partner quét từ School Workspace. Unique `contract_code`. |
 | **13** | `workspace_orders_cache` | `id (UUID)` | - | Bộ nhớ đệm danh sách đơn hàng School/Partner quét từ School Workspace. Unique `order_code`. |
-| **14** | `workspace_courses` | `id (UUID)` | - | Danh mục các khóa học trên School Workspace, mã SKU. |
+| **14** | `workspace_courses` | `id (UUID)` | - | Danh mục các khóa học trên School Workspace, tên môn, danh mục, liên kết LMS URL và mảng Git Repos. (Đã xóa cột SKU). |
 | **15** | `lms_courses` | `id (UUID)` | - | Danh mục các khóa học trên PLearn Moodle LMS, đường dẫn LMS URL và mảng cấu hình `git_repos`. |
 | **16** | `site_monitor_credentials` | `id (UUID)` | - | Tài khoản kiểm thử đăng nhập định kỳ phục vụ Synthetic Auth Matrix. |
 | **17** | `site_downtime_events` | `id (UUID)` | - | Nhật ký ghi nhận sự cố gián đoạn dịch vụ của 10 trang web (thời gian sập, mã HTTP, thời gian phục hồi). |
@@ -1280,7 +1296,7 @@ Bảng tra cứu trực tiếp giúp AI Coder tìm kiếm tức thì vị trí �
 | `expand_course_range_text` | [`backend/app/services/workflow_planner.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_planner.py) | Module Planner | `raw_text: str` ➔ `List[str]` | Mở rộng dải môn học tự nhiên (VD: SWRP 5 to 10 ➔ SWRP 5, 6, 7, 8, 9, 10). |
 | `build_workflow_proposal` | [`backend/app/services/workflow_planner.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_planner.py) | `WorkflowPlannerService` | `assessment, resolved_school, candidates...` ➔ `Tuple[str, List, List, List, bool]` | Triết lý Non-Destructive DAG v7.3: Strict School Scoping, Course-Repo Auto-Binding. |
 | `resolve_school_entities` | [`backend/app/services/workflow_planner.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_planner.py) | `WorkflowPlannerService` | `school_name: str` ➔ `Tuple[best, candidates]` | Tra cứu trường học trong CSDL Supabase theo tên với fuzzy confidence. |
-| `resolve_course_and_repos_from_db`| [`backend/app/services/workflow_planner.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_planner.py) | `WorkflowPlannerService` | `course_query: str, is_teacher: bool` ➔ `Tuple[name, sku, repo, id]` | Tra cứu khóa học và trích xuất danh sách Git Repositories liên kết cho GV/HS. |
+| `resolve_course_and_repos_from_db`| [`backend/app/services/workflow_planner.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_planner.py) | `WorkflowPlannerService` | `course_query: str, is_teacher: bool` ➔ `Tuple[name, repo, id]` | Tra cứu khóa học và trích xuất danh sách Git Repositories liên kết cho GV/HS. |
 | `validate_workflow_graph` | [`backend/app/services/workflow_planner.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_planner.py) | `WorkflowPlannerService` | `steps: List[Any]` ➔ `WorkflowValidationResult` | Kiểm tra chu trình lặp (DFS), kiểm tra bước phụ thuộc và tính khả dụng của capability. |
 | `execute_approved_workflow` | [`backend/app/services/workflow_executor.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_executor.py) | `WorkflowExecutorService` | `workflow_id: str` ➔ `None` | Sắp xếp Tô-pô Kahn DAG, giải mã `{{ step.property }}`, ghi nhật ký audit. |
 | `retry_workflow_step` | [`backend/app/services/workflow_executor.py`](file:///c:/Users/dtt/Desktop/Project/ptv-tasks-administrator/backend/app/services/workflow_executor.py) | `WorkflowExecutorService` | `workflow_id: str, step_id: str` ➔ `None` | Duyệt BFS reset chính xác các bước hạ nguồn, giữ nguyên bước thành công. |

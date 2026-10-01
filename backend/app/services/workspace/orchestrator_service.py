@@ -258,6 +258,11 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
                 "execution_logs": f"✓ Đã cập nhật hồ sơ User #{user_id} ({form_data['user_login']})",
                 "data": result
             }
+        return await self.execute_full_license_hierarchy_chain(
+            school_identifier=payload.get("school_name", ""),
+            order_details=payload.get("order_details", payload)
+        )
+
 
     # =========================================================================
     # 🏆 QUY TRÌNH TRỌN GÓI 5-IN-1 E2E CHAIN (LOG THỰC TẾ & TỐI ƯU HIỆU NĂNG)
