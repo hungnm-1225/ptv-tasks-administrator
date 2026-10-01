@@ -462,35 +462,54 @@ class WorkspaceOrderService(WorkspaceBaseService):
                 "Partner"
             )
 
-            # 🎯 1. BẢO VỆ PARTNER_ID (TUYỆT ĐỐI KHÔNG FALLBACK GÁN BỪA ID)
-            raw_pid = identity.get("partner_id")
-            partner_user = credentials.get("username", "").strip()
+            # 🎯 1. TRUY VẾT GIA PHẢ THẬT TỪ MÃ TRƯỜNG CỦA ORDER (CHUẨN LINEAGE ZERO-MOCK)
+            partner_id = None
+            wp_username = None
 
-            # Nếu identity chưa có, tra cứu Supabase theo vai trò Partner thật
-            if not raw_pid or not str(raw_pid).strip().isdigit():
+            # Bóc tách mã trường từ order_code (VD: SCH-10514-20261001-1475 ➔ SCH-10514)
+            school_match = re.search(r"(SCH-\d+)", str(order_identifier or ""))
+            school_code_query = school_match.group(1) if school_match else None
+
+            if school_code_query:
                 try:
-                    from app.core.supabase import get_supabase_client
-                    supabase = get_supabase_client()
-                    # 1. Tìm trong vault để lấy org_id của Partner
-                    v_res = supabase.table("workspace_credentials_vault") \
-                        .select("org_id") \
-                        .ilike("username", partner_user) \
-                        .execute()
-                    
-                    if v_res.data:
-                        org_id = v_res.data[0].get("org_id")
-                        org_res = supabase.table("workspace_organizations") \
-                            .select("code, partner_id") \
-                            .eq("id", org_id) \
-                            .execute()
-                        if org_res.data:
-                            raw_pid = org_res.data[0].get("partner_id")
-                            if not raw_pid:
-                                num_m = re.search(r"\d+", str(org_res.data[0].get("code", "")))
-                                if num_m:
-                                    raw_pid = num_m.group(0)
-                except Exception as lookup_err:
-                    logger.warning(f"⚠️ Tra cứu Partner ID từ Supabase thất bại: {lookup_err}")
+                    from app.services.workspace_lineage_service import workspace_lineage_service
+                    lineage = workspace_lineage_service.resolve_by_school(school_code_query)
+                    if lineage and lineage.get("partner"):
+                        p_info = lineage["partner"]
+                        partner_id = str(p_info.get("partner_id") or p_info.get("id") or "").strip()
+                        wp_username = str(p_info.get("username") or "").strip()
+                        logger.info(f"🌳 [Lineage SOT] Tìm thấy từ gia phả trường [{school_code_query}]: Partner ID={partner_id}, User={wp_username}")
+                except Exception as l_err:
+                    logger.warning(f"⚠️ Lỗi tra cứu Lineage cho trường {school_code_query}: {l_err}")
+
+            # Nếu Lineage chưa có wp_username sạch (không chứa @), lấy từ identity hoặc vault
+            if not partner_id or not partner_id.isdigit():
+                raw_pid = identity.get("partner_id")
+                if raw_pid and str(raw_pid).isdigit():
+                    partner_id = str(raw_pid).strip()
+
+            if not wp_username or "@" in wp_username:
+                # Ưu tiên lấy user_login chuẩn từ session identity nếu có
+                clean_id_user = str(identity.get("username") or "").strip()
+                if clean_id_user and "@" not in clean_id_user:
+                    wp_username = clean_id_user
+                elif credentials.get("username"):
+                    # Nếu username truyền vào là email (ptv-4@dtt.vn), cắt lấy phần prefix login (ptv-4)
+                    raw_u = credentials.get("username").strip()
+                    wp_username = raw_u.split("@")[0] if "@" in raw_u else raw_u
+
+            # FAIL-CLOSED NẾU THIẾU DỮ LIỆU THẬT
+            if not partner_id or not partner_id.isdigit():
+                err_msg = f"KHÔNG THỂ XÁC ĐỊNH ĐƯỢC PARTNER ID CHO ORDER '{order_identifier}'. DỪNG THỰC THI!"
+                logger.error(f"❌ [Partner Order Fatal] {err_msg}")
+                return {"status": "failed", "error": err_msg}
+
+            if not wp_username:
+                err_msg = f"KHÔNG THỂ XÁC ĐỊNH ĐƯỢC WP USERNAME CHO PARTNER ID {partner_id}. DỪNG THỰC THI!"
+                logger.error(f"❌ [Partner Order Fatal] {err_msg}")
+                return {"status": "failed", "error": err_msg}
+
+            logger.info(f"🤝 [Partner Order] Định danh phê duyệt: Partner ID=[{partner_id}], Username='{wp_username}'")
 
             if not raw_pid or not str(raw_pid).strip().isdigit():
                 err_msg = f"KHÔNG THỂ XÁC ĐỊNH ĐƯỢC PARTNER ID CHO TÀI KHOẢN '{partner_user}'. DỪNG THỰC THI ĐỂ BẢO VỆ TÀI NGUYÊN!"
@@ -499,7 +518,30 @@ class WorkspaceOrderService(WorkspaceBaseService):
 
             partner_id = str(raw_pid).strip()
             logger.info(f"🤝 [Partner Order] Đã xác định Partner ID chính xác: [{partner_id}] cho user '{partner_user}'")
-            wp_username = str(identity.get("username") or partner_user).strip()
+
+            # 🎯 2. CHUẨN HÓA DANH TÍNH QUA KEYCLOAK IDP (SOT: EMAIL ➔ CANONICAL USERNAME 'ptv4')
+            wp_username = None
+            try:
+                from app.services.keycloak_service import keycloak_service
+                clean_lookup_id = partner_user.strip()
+                kc_res = await keycloak_service.resolve_identifiers_to_usernames([clean_lookup_id])
+                
+                # Bốc mapping chuẩn xác từ Keycloak
+                wp_username = kc_res.get("mapping", {}).get(clean_lookup_id.lower())
+                if not wp_username and kc_res.get("valid_usernames"):
+                    wp_username = kc_res["valid_usernames"][0]
+
+                if wp_username:
+                    logger.info(f"🔑 [Keycloak eID] Đã giải mã Partner '{partner_user}' ➔ Canonical Username: [{wp_username}]")
+            except Exception as kc_err:
+                logger.warning(f"⚠️ Tra cứu Keycloak eID cho Partner thất bại: {kc_err}")
+
+            # Fallback an toàn vào Identity/Credentials nếu Keycloak offline
+            if not wp_username:
+                clean_identity_u = str(identity.get("username") or "").strip()
+                wp_username = clean_identity_u if (clean_identity_u and "@" not in clean_identity_u) else partner_user
+
+            logger.info(f"🤝 [Partner Order] Username gửi duyệt đơn: '{wp_username}' (Partner ID: {partner_id})")
 
             clean_num_match = re.search(r"\d+$", str(order_identifier))
             num_order_id = clean_num_match.group(0) if clean_num_match else str(order_identifier)
