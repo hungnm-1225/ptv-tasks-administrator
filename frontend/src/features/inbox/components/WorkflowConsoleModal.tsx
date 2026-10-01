@@ -27,7 +27,15 @@ import {
     ChevronDown,
     Eye,
     XCircle,
-    PlusCircle
+    PlusCircle,
+    FileSpreadsheet,
+    ImageIcon,
+    GraduationCap,
+    KeyRound,
+    GitBranch,
+    CheckCircle2,
+    Tag,
+    Users
 } from 'lucide-react';
 import {
     InboxTicket,
@@ -139,6 +147,7 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
     const [operatorReason, setOperatorReason] = useState<string>('');
     const [isSchoolPickerOpen, setIsSchoolPickerOpen] = useState<boolean>(false);
     const [schoolSearchQuery, setSchoolSearchQuery] = useState<string>('');
+    const [showAttachmentDigest, setShowAttachmentDigest] = useState<boolean>(false);
 
     // 🌟 STATE OPTIMISTIC CHO TRƯỜNG HỌC (CHỐNG GIẬT LAG & REVERT)
     const [optimisticSchool, setOptimisticSchool] = useState<HierarchySchoolItem | null>(null);
@@ -182,6 +191,58 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
         if (optimisticSchool) return optimisticSchool.school_name;
         return activeWorkflow?.ai_analysis?.detected_school?.name || null;
     }, [optimisticSchool, activeWorkflow]);
+
+    // 🌟 DANH SÁCH KHÓA HỌC ĐÃ SOI CHIẾU CSDL (CANONICAL COURSES RESOLVED)
+    const canonicalCoursesList = useMemo(() => {
+        if (!activeWorkflow) return [];
+        // 1. Tìm trong các step lms.direct_enroll
+        for (const s of activeWorkflow.steps || []) {
+            if (s.inputs?.courses_detailed && Array.isArray(s.inputs.courses_detailed) && s.inputs.courses_detailed.length > 0) {
+                return s.inputs.courses_detailed;
+            }
+        }
+        // 2. Tìm trong excel_summary.courses
+        const excelCourses = (activeWorkflow.ai_analysis?.excel_summary as any)?.courses;
+        if (excelCourses && Array.isArray(excelCourses) && excelCourses.length > 0) {
+            return excelCourses.map((c: any) => ({
+                course_name: c.course_name || c.name || String(c),
+                course_id: c.course_id,
+                licenses: c.licenses || c.licenses_quota || 0,
+                has_git_repo: false
+            }));
+        }
+        // 3. Fallback detected_courses
+        const detected = activeWorkflow.ai_analysis?.detected_courses || [];
+        return detected.map((c: any) => ({
+            course_name: typeof c === 'string' ? c : c.course_name,
+            course_id: typeof c === 'object' ? c.course_id : null,
+            licenses: 0,
+            has_git_repo: false
+        }));
+    }, [activeWorkflow]);
+
+    // 🌟 THỐNG KÊ ĐỐI TƯỢNG THỤ HƯỞNG (BENEFICIARY STATS)
+    const beneficiaryStats = useMemo(() => {
+        if (!activeWorkflow) return { students: 0, teachers: 0, total: 0, identifiers: 0 };
+        const ex = activeWorkflow.ai_analysis?.excel_summary as any;
+        const totalStudents = ex?.total_students || 0;
+        const totalTeachers = ex?.total_teachers || 0;
+
+        const users = activeWorkflow.ai_analysis?.entities?.users || [];
+        const studentFromUsers = users.filter((u: any) => (u.role || '').toLowerCase() === 'student').length;
+        const teacherFromUsers = users.filter((u: any) => (u.role || '').toLowerCase() === 'teacher').length;
+
+        const finalStudents = totalStudents > 0 ? totalStudents : studentFromUsers;
+        const finalTeachers = totalTeachers > 0 ? totalTeachers : teacherFromUsers;
+        const idents = activeWorkflow.ai_analysis?.entities?.identifiers?.length || 0;
+
+        return {
+            students: finalStudents,
+            teachers: finalTeachers,
+            total: (finalStudents + finalTeachers) > 0 ? (finalStudents + finalTeachers) : (users.length || idents),
+            identifiers: idents
+        };
+    }, [activeWorkflow]);
 
     // 🎯 KIỂM ĐỊNH TÍNH KHẢ THI KHỞI CHẠY (BẬT CHẾ ĐỘ OVERRIDE KHI ADMIN SỬA LUỒNG)
     const isWorkflowRunnable = useMemo(() => {
@@ -254,12 +315,25 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
                             <Sparkles className="w-5 h-5 text-amber-300" />
                         </div>
                         <div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                                 <h3 className="text-base font-extrabold text-slate-900 dark:text-white tracking-tight">
                                     AI Workflow Pre-processing & Execution Console
                                 </h3>
                                 <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300 font-extrabold uppercase">
                                     Proposal v{activeWorkflow?.version || 1}
+                                </span>
+                                {activeWorkflow?.status === 'ready' && (
+                                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-bold flex items-center gap-1">
+                                        <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Sẵn Sàng Duyệt
+                                    </span>
+                                )}
+                                {activeWorkflow?.status === 'needs_information' && (
+                                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-bold flex items-center gap-1">
+                                        <AlertTriangle className="w-3 h-3 text-amber-600" /> Cần Thêm Thông Tin
+                                    </span>
+                                )}
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 font-mono font-bold flex items-center gap-1">
+                                    <Layers className="w-3 h-3 text-indigo-500" /> {activeWorkflow?.steps?.length || 0} Bước DAG
                                 </span>
                             </div>
                             <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
@@ -353,29 +427,73 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
 
                                         {selectedTicket.attachments && selectedTicket.attachments.length > 0 && (
                                             <div className="pt-1">
-                                                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-                                                    Tài liệu đính kèm ({selectedTicket.attachments.length}):
-                                                </span>
-                                                <div className="space-y-1.5">
-                                                    {selectedTicket.attachments.map((att: any, i: number) => (
-                                                        <div
-                                                            key={i}
-                                                            className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs shadow-2xs"
-                                                        >
-                                                            <span className="truncate max-w-[190px] font-medium text-slate-700 dark:text-slate-300">
-                                                                {att.filename}
-                                                            </span>
+                                                <div className="flex items-center justify-between mb-1.5">
+                                                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                                                        Tài liệu đính kèm ({selectedTicket.attachments.length}):
+                                                    </span>
+                                                    {((activeWorkflow?.ai_analysis?.excel_summary as any)?.executive_digest ||
+                                                        (selectedTicket.metadata as any)?.excel_summary?.executive_digest) && (
                                                             <button
                                                                 type="button"
-                                                                onClick={() => onPreviewFile(att)}
-                                                                className="p-1 text-indigo-600 hover:underline flex items-center gap-1 font-semibold cursor-pointer"
+                                                                onClick={() => setShowAttachmentDigest(!showAttachmentDigest)}
+                                                                className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
                                                             >
-                                                                <Eye className="w-3.5 h-3.5" />
-                                                                <span>Xem</span>
+                                                                <FileSpreadsheet className="w-3 h-3 text-emerald-600" />
+                                                                <span>{showAttachmentDigest ? 'Ẩn lược kê tệp' : 'Xem lược kê tệp'}</span>
                                                             </button>
-                                                        </div>
-                                                    ))}
+                                                        )}
                                                 </div>
+
+                                                <div className="space-y-1.5">
+                                                    {selectedTicket.attachments.map((att: any, i: number) => {
+                                                        const fnameLower = (att.filename || '').toLowerCase();
+                                                        const isExcel = fnameLower.endsWith('.xlsx') || fnameLower.endsWith('.xls');
+                                                        const isImg = fnameLower.endsWith('.png') || fnameLower.endsWith('.jpg') || fnameLower.endsWith('.jpeg') || fnameLower.endsWith('.webp');
+
+                                                        return (
+                                                            <div
+                                                                key={i}
+                                                                className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs shadow-2xs"
+                                                            >
+                                                                <div className="flex items-center gap-2 min-w-0 pr-2">
+                                                                    {isExcel ? (
+                                                                        <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+                                                                    ) : isImg ? (
+                                                                        <ImageIcon className="w-4 h-4 text-sky-600 shrink-0" />
+                                                                    ) : (
+                                                                        <FileText className="w-4 h-4 text-slate-400 shrink-0" />
+                                                                    )}
+                                                                    <span className="truncate max-w-[190px] font-medium text-slate-700 dark:text-slate-300">
+                                                                        {att.filename}
+                                                                    </span>
+                                                                </div>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => onPreviewFile(att)}
+                                                                    className="p-1 text-indigo-600 hover:underline flex items-center gap-1 font-semibold cursor-pointer shrink-0"
+                                                                >
+                                                                    <Eye className="w-3.5 h-3.5" />
+                                                                    <span>Xem</span>
+                                                                </button>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+
+                                                {/* KHỐI HIỂN THỊ BẢN LƯỢC KÊ QUẢN TRỊ TỆP ĐÍNH KÈM (EXECUTIVE DIGEST) */}
+                                                {showAttachmentDigest && (
+                                                    <div className="mt-2.5 p-3 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/80 dark:border-emerald-800/60 text-[11px] font-mono text-emerald-950 dark:text-emerald-100 space-y-1 max-h-48 overflow-y-auto scrollbar-thin">
+                                                        <div className="font-sans font-bold text-emerald-800 dark:text-emerald-300 text-xs mb-1 flex items-center gap-1.5">
+                                                            <FileSpreadsheet className="w-3.5 h-3.5" />
+                                                            <span>Bản Lược Kê Chi Tiết Tệp Đính Kèm (AI bóc tách):</span>
+                                                        </div>
+                                                        <pre className="whitespace-pre-wrap font-mono leading-relaxed text-[11px]">
+                                                            {(activeWorkflow?.ai_analysis?.excel_summary as any)?.executive_digest ||
+                                                                (selectedTicket.metadata as any)?.excel_summary?.executive_digest ||
+                                                                '(Chưa có bản lược kê chi tiết tệp đính kèm)'}
+                                                        </pre>
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                     </div>
@@ -633,32 +751,102 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
                                         </div>
                                     )}
 
-                                    {/* Khóa học & Git Role */}
-                                    <div className="flex items-center gap-2 flex-wrap text-xs">
-                                        {activeWorkflow.ai_analysis?.detected_courses &&
-                                            activeWorkflow.ai_analysis.detected_courses.length > 0 && (
-                                                <div className="flex items-center gap-1.5 flex-wrap">
-                                                    <span className="text-[10px] font-extrabold uppercase text-slate-400 flex items-center gap-1">
-                                                        <BookOpen className="w-3 h-3 text-indigo-500" /> Khóa học:
-                                                    </span>
-                                                    {activeWorkflow.ai_analysis.detected_courses.map((c, i) => (
-                                                        <span
-                                                            key={i}
-                                                            className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300"
-                                                        >
-                                                            {typeof c === 'string' ? c : (c as any).course_name}
-                                                        </span>
-                                                    ))}
-                                                </div>
-                                            )}
+                                    {/* 🌟 THỐNG KÊ ĐỐI TƯỢNG THỤ HƯỞNG & VAI TRÒ GIT */}
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                                        <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 space-y-0.5">
+                                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                                                <GraduationCap className="w-3 h-3 text-indigo-500" /> Học Sinh:
+                                            </span>
+                                            <p className="text-xs font-extrabold text-slate-900 dark:text-white">
+                                                {beneficiaryStats.students > 0 ? `${beneficiaryStats.students} HS` : (beneficiaryStats.total > 0 ? `${beneficiaryStats.total} tài khoản` : 'Theo yêu cầu')}
+                                            </p>
+                                        </div>
 
-                                        {activeWorkflow.ai_analysis?.entities?.git_role && (
-                                            <div className="flex items-center gap-1.5">
-                                                <span className="text-[10px] font-extrabold uppercase text-slate-400">Git Role:</span>
-                                                <span className="px-2 py-0.5 rounded-md bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 font-mono text-xs font-extrabold">
-                                                    {activeWorkflow.ai_analysis.entities.git_role}
+                                        <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 space-y-0.5">
+                                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                                                <Users className="w-3 h-3 text-emerald-500" /> Giáo Viên:
+                                            </span>
+                                            <p className="text-xs font-extrabold text-slate-900 dark:text-white">
+                                                {beneficiaryStats.teachers > 0 ? `${beneficiaryStats.teachers} GV` : 'Tùy chọn'}
+                                            </p>
+                                        </div>
+
+                                        <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 space-y-0.5">
+                                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                                                <GitBranch className="w-3 h-3 text-purple-500" /> Vai Trò Git:
+                                            </span>
+                                            <p className="text-xs font-mono font-extrabold text-purple-700 dark:text-purple-300">
+                                                {activeWorkflow.ai_analysis?.entities?.git_role || 'GUEST'}
+                                            </p>
+                                        </div>
+
+                                        <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 space-y-0.5">
+                                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                                                <Layers className="w-3 h-3 text-amber-500" /> Bước Lập:
+                                            </span>
+                                            <p className="text-xs font-mono font-extrabold text-indigo-600 dark:text-indigo-400">
+                                                {activeWorkflow.steps?.length || 0} Bước
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    {/* 🌟 KHÓA HỌC ĐÃ SOI CHIẾU CSDL (CANONICAL COURSES RESOLVED) */}
+                                    <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/30 space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-[10px] font-extrabold uppercase text-slate-400 flex items-center gap-1.5">
+                                                <BookOpen className="w-3.5 h-3.5 text-indigo-500" />
+                                                <span>Khóa Học Đã Soi Chiếu CSDL ({canonicalCoursesList.length} môn):</span>
+                                            </span>
+                                            {canonicalCoursesList.some((c: any) => c.has_git_repo) && (
+                                                <span className="text-[10px] font-bold text-purple-600 dark:text-purple-400 flex items-center gap-1">
+                                                    <GitBranch className="w-3 h-3" />
+                                                    <span>Có kho Git bám dính</span>
                                                 </span>
+                                            )}
+                                        </div>
+
+                                        {canonicalCoursesList.length > 0 ? (
+                                            <div className="space-y-1.5">
+                                                {canonicalCoursesList.map((cItem: any, cIdx: number) => (
+                                                    <div
+                                                        key={cIdx}
+                                                        className="flex items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200/70 dark:border-slate-700/60 text-xs gap-2 flex-wrap"
+                                                    >
+                                                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                                                            <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0" />
+                                                            <span className="font-bold text-slate-900 dark:text-white truncate">
+                                                                {cItem.course_name}
+                                                            </span>
+                                                        </div>
+
+                                                        <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                                                            {cItem.course_id && (
+                                                                <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 dark:bg-indigo-950/80 dark:text-indigo-300 text-[10px] font-mono font-bold">
+                                                                    #{cItem.course_id}
+                                                                </span>
+                                                            )}
+                                                            {cItem.has_git_repo && (
+                                                                <span
+                                                                    className="px-2 py-0.5 rounded bg-purple-100 text-purple-800 dark:bg-purple-950/80 dark:text-purple-300 text-[10px] font-mono font-bold flex items-center gap-1"
+                                                                    title={cItem.git_repo || 'Git Repository'}
+                                                                >
+                                                                    <GitBranch className="w-3 h-3" />
+                                                                    <span>Git Linked</span>
+                                                                </span>
+                                                            )}
+                                                            {cItem.licenses > 0 && (
+                                                                <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 text-[10px] font-mono font-bold">
+                                                                    🔑 {cItem.licenses} lic
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                ))}
                                             </div>
+                                        ) : (
+                                            <p className="text-[11px] text-slate-400 italic">
+                                                Không có khóa học cụ thể trong yêu cầu này.
+                                            </p>
                                         )}
                                     </div>
 
@@ -766,6 +954,63 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
                                             <span>{isEditingWorkflow ? 'Hoàn Tất Chỉnh Sửa' : 'Chỉnh Sửa Luồng Này'}</span>
                                         </button>
                                     </div>
+
+                                    {/* 🌟 THANH CHUỖI TIẾN TRÌNH THỰC THI DAG (EXECUTION SEQUENCE FLOW) */}
+                                    {activeWorkflow.steps && activeWorkflow.steps.length > 0 && (
+                                        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-slate-50 via-indigo-50/40 to-slate-50 dark:from-slate-850 dark:via-indigo-950/20 dark:to-slate-850 border border-indigo-100 dark:border-indigo-900/40 space-y-2">
+                                            <div className="flex items-center justify-between text-[11px] font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider flex-wrap gap-1">
+                                                <span className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300">
+                                                    <GitBranch className="w-3.5 h-3.5" />
+                                                    <span>Chuỗi Tiến Trình Thực Thi Liên Hoàn (DAG Sequence):</span>
+                                                </span>
+                                                <span className="text-[10px] lowercase font-normal italic text-slate-400">
+                                                    tự động chắp nối phụ thuộc & liên kết dữ liệu
+                                                </span>
+                                            </div>
+
+                                            <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-0.5 scrollbar-thin">
+                                                {activeWorkflow.steps.map((st, sIdx) => {
+                                                    const capId = (st.capability_id || '').toLowerCase();
+                                                    const isAccount = capId.includes('account');
+                                                    const isLms = capId.includes('lms');
+                                                    const isGit = capId.includes('git');
+                                                    const isOrder = capId.includes('order') || capId.includes('contract');
+                                                    const isKeycloak = capId.includes('keycloak') || capId.includes('password') || capId.includes('status');
+
+                                                    const badgeColor = isAccount
+                                                        ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800'
+                                                        : isLms
+                                                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800'
+                                                        : isGit
+                                                        ? 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800'
+                                                        : isOrder
+                                                        ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800'
+                                                        : isKeycloak
+                                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800'
+                                                        : 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700';
+
+                                                    return (
+                                                        <React.Fragment key={st.step_id}>
+                                                            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold shrink-0 shadow-2xs ${badgeColor}`}>
+                                                                <span className="w-5 h-5 rounded-lg bg-black/10 dark:bg-white/15 flex items-center justify-center text-[10px] font-mono font-black">
+                                                                    {sIdx + 1}
+                                                                </span>
+                                                                <span className="truncate max-w-[220px]">{st.name}</span>
+                                                                {st.depends_on && st.depends_on.length > 0 && (
+                                                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-black/10 dark:bg-white/10 font-mono font-semibold" title={`Phụ thuộc: ${st.depends_on.join(', ')}`}>
+                                                                        ⛓️ sau: {st.depends_on.join(', ')}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            {sIdx < activeWorkflow.steps.length - 1 && (
+                                                                <ArrowRight className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 shrink-0" />
+                                                            )}
+                                                        </React.Fragment>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
 
                                     {/* Khung nhập lý do khi Admin chỉnh sửa thủ công */}
                                     {isEditingWorkflow && (

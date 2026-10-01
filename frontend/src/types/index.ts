@@ -376,6 +376,7 @@ export interface WorkflowAIAnalysis {
   warnings?: string[];
   operator_reason?: string; // << BỔ SUNG: Lý do can thiệp của Admin
   model_used?: string | null;
+  excel_summary?: any;
   requested_operations?: Array<{ intent: string; confidence?: number } | string>;
   entities?: {
     school_name?: string;
