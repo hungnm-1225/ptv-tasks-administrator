@@ -465,7 +465,18 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                 except Exception as img_err:
                     logger.warning(f"⚠️ Lỗi tải ảnh đính kèm [{fname}]: {img_err}")
 
-        # 3. XÂY DỰNG BẢN LƯỢC KÊ QUẢN TRỊ (EXECUTIVE DIGEST) TỪ TOÀN BỘ CÁC TỆP ĐÍNH KÈM
+        # 3. TÁCH SẠCH TIN NHẮN MỚI NHẤT & BẢN LƯỢC KÊ TỆP ĐÍNH KÈM
+        from app.services.email_thread_service import thread_service
+        parsed_thread = thread_service.parse_thread(raw_content, sender_email)
+        clean_content = parsed_thread.latest_user_message or parsed_thread.current_message
+        clean_latest_check = thread_service.clean_trimmed_quotes(clean_content)
+        if not clean_latest_check:
+            clean_content = thread_service.clean_trimmed_quotes(raw_content)
+        else:
+            clean_content = clean_latest_check
+        if not clean_content:
+            clean_content = (raw_content or "").strip()
+
         excel_summary: Optional[Dict[str, Any]] = None
         executive_digest_str = ""
 
@@ -489,26 +500,12 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                 "all_parsed_files": parsed_excel_files,
                 "total_excel_files": len(parsed_excel_files)
             }
-        elif raw_content:
-            text_parsed = GenericExcelService.parse_universal_text(raw_content)
-            if text_parsed.get("identifiers") or text_parsed.get("repo_urls"):
-                excel_summary = {
-                    "is_cof": False,
-                    "filename": "email_raw_text",
-                    "lifecycle_status": "new_pending",
-                    "provenance_ledger": {
-                        "active_new_files": ["email_raw_text"],
-                        "archived_completed_files": archived_filenames
-                    },
-                    "identifiers": text_parsed.get("identifiers", []),
-                    "repo_urls": text_parsed.get("repo_urls", []),
-                    "courses_detected": text_parsed.get("courses_detected", [])
-                }
+        # Nếu KHÔNG CÓ file Excel thật, tuyệt đối KHÔNG giả tạo file ảo "email_raw_text"
 
-        # 4. MỒI KHÓA HỌC THÔNG MINH (CANDIDATE INJECTION TỪ CẢ 2 BẢNG LMS & WORKSPACE)
+        # 4. MỒI KHÓA HỌC THÔNG MINH (CHỈ QUÉT TIN NHẮN MỚI NHẤT)
         smart_catalog = course_knowledge_service.get_smart_catalog_context(
             supabase=supabase,
-            raw_text=raw_content,
+            raw_text=clean_content,
             subject=subject,
             excel_summary=excel_summary,
             max_candidates=10  # Lấy 10 môn liên quan nhất từ CSDL hợp nhất
@@ -552,19 +549,19 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
             except Exception as h_err:
                 logger.warning(f"Lỗi nạp lịch sử workflow: {h_err}")
 
-        # 6. Tóm tắt mềm (Key 1) - Tích hợp đầy đủ thông tin tệp đính kèm Excel
+        # 6. Tóm tắt mềm (Key 1) - CHỈ DÙNG TIN NHẮN MỚI NHẤT
         summary_res = gemini_engine.summarize_ticket(
             subject=subject, 
-            raw_content=raw_content + historical_context_note, 
+            raw_content=clean_content + historical_context_note, 
             source=source,
             sender_email=sender_email,
             excel_summary=excel_summary
         )
 
-        # 7. Bóc tách Sự Thật Vận Hành (Key 2) - ZERO-MOCKUP INVARIANT
+        # 7. Bóc tách Sự Thật Vận Hành (Key 2) - CHỈ DÙNG TIN NHẮN MỚI NHẤT
         facts_res = gemini_engine.extract_operational_facts(
             subject=subject,
-            raw_content=raw_content + historical_context_note,
+            raw_content=clean_content + historical_context_note,
             source=source,
             excel_summary=excel_summary,
             source_revision_id=revision_id,

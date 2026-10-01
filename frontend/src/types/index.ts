@@ -148,7 +148,6 @@ export interface CourseItem {
   course_id: number;
   category: string;
   course_name: string;
-  sku?: string | null;
   lms_url: string;
   git_repos?: GitRepoConfig[] | null;
   created_at?: string;

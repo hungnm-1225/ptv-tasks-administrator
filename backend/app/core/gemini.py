@@ -201,7 +201,10 @@ class AIEngine:
             )
 
         parsed_thread = thread_service.parse_thread(raw_content, sender_email)
-        prompt_content = parsed_thread.compact_prompt_context if parsed_thread.is_thread else (raw_content[:20000] if raw_content else "(Trống)")
+        clean_latest = parsed_thread.latest_user_message or parsed_thread.current_message
+        if not clean_latest:
+            clean_latest = thread_service.clean_trimmed_quotes(raw_content)
+        prompt_content = clean_latest[:10000] if clean_latest else "(Trống)"
 
         # Trích xuất bản tóm tắt file đính kèm (nếu có)
         excel_digest_section = ""
@@ -295,7 +298,10 @@ class AIEngine:
             )
 
         parsed_thread = thread_service.parse_thread(raw_content, sender_email)
-        full_content = parsed_thread.compact_prompt_context if parsed_thread.is_thread else (raw_content[:20000] if raw_content else "(Trống)")
+        clean_latest = parsed_thread.latest_user_message or parsed_thread.current_message
+        if not clean_latest:
+            clean_latest = thread_service.clean_trimmed_quotes(raw_content)
+        full_content = clean_latest[:10000] if clean_latest else "(Trống)"
 
         # 1. Định dạng danh mục khóa học LMS & Bản lược kê tệp
         excel_data = excel_summary or {}

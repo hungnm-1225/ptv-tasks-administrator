@@ -41,15 +41,29 @@ type CoursePaneType = 'workspace' | 'lms';
 type BulkInputMode = 'file' | 'text';
 type GitRepoTargetType = 'teacher_only' | 'all';
 
+export const extractCourseIdFromUrl = (url: string): number | null => {
+    if (!url) return null;
+    const clean = url.trim();
+    // 1. view.php?id=1445 hoặc ?id=1445 hoặc &id=1445
+    const m = clean.match(/[?&]id=(\d+)/i);
+    if (m) return parseInt(m[1], 10);
+    // 2. /course/1445 hoặc /courses/view.php?id=1445
+    const m2 = clean.match(/\/courses?\/(?:view\.php\?id=)?(\d+)/i);
+    if (m2) return parseInt(m2[1], 10);
+    // 3. Chuỗi số nguyên thuần túy
+    if (/^\d+$/.test(clean)) return parseInt(clean, 10);
+    return null;
+};
+
 interface ParsedImportItem {
     course_id: number;
     category: string;
     course_name: string;
-    sku?: string | null;
     lms_url: string;
     git_repos?: GitRepoConfig[];
     isValid: boolean;
     error?: string;
+    auto_extracted_id?: boolean;
 }
 
 export const CoursesManagerPage: React.FC = () => {
@@ -60,7 +74,6 @@ export const CoursesManagerPage: React.FC = () => {
     const [selectedCategory, setSelectedCategory] = useState<string>('all');
     const [searchQuery, setSearchQuery] = useState<string>('');
     const [isLoading, setIsLoading] = useState<boolean>(true);
-    const [copiedSku, setCopiedSku] = useState<string | null>(null);
 
     // Modal Thêm / Sửa
     const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -72,7 +85,6 @@ export const CoursesManagerPage: React.FC = () => {
     const [formCourseId, setFormCourseId] = useState<string>('');
     const [formCategory, setFormCategory] = useState<string>('');
     const [formCourseName, setFormCourseName] = useState<string>('');
-    const [formSku, setFormSku] = useState<string>('');
     const [formLmsUrl, setFormLmsUrl] = useState<string>('');
     // 🐙 Danh sách nhiều Repos trong Form
     const [formGitRepos, setFormGitRepos] = useState<GitRepoConfig[]>([]);
@@ -129,15 +141,6 @@ export const CoursesManagerPage: React.FC = () => {
         setActivePane(pane);
     };
 
-    const handleCopySku = (sku: string, e?: React.MouseEvent) => {
-        if (e) e.stopPropagation();
-        if (!sku || sku === '---') return;
-        navigator.clipboard.writeText(sku);
-        setCopiedSku(sku);
-        toast.success(`Đã sao chép SKU: ${sku}`);
-        setTimeout(() => setCopiedSku(null), 2000);
-    };
-
     const filteredCourses = useMemo(() => {
         return courses.filter((item) => {
             const matchCat = selectedCategory === 'all' || item.category === selectedCategory;
@@ -148,7 +151,6 @@ export const CoursesManagerPage: React.FC = () => {
                 !q ||
                 item.course_name.toLowerCase().includes(q) ||
                 item.course_id.toString().includes(q) ||
-                (item.sku && item.sku.toLowerCase().includes(q)) ||
                 reposText.includes(q) ||
                 item.category.toLowerCase().includes(q);
 
@@ -158,8 +160,18 @@ export const CoursesManagerPage: React.FC = () => {
 
     const handleCourseIdChange = (val: string) => {
         setFormCourseId(val);
-        if (val.trim() && !isNaN(Number(val.trim()))) {
+        if (val.trim() && !isNaN(Number(val.trim())) && !formLmsUrl.trim()) {
             setFormLmsUrl(`https://learn.pythaverse.space/course/view.php?id=${val.trim()}`);
+        }
+    };
+
+    const handleLmsUrlChange = (urlVal: string) => {
+        setFormLmsUrl(urlVal);
+        // 🎯 Tự động nhận diện Course ID từ LMS URL (view.php?id=1445 -> 1445)
+        const extracted = extractCourseIdFromUrl(urlVal);
+        if (extracted && (!formCourseId.trim() || formCourseId === '0')) {
+            setFormCourseId(extracted.toString());
+            toast.info(`✨ Đã tự động nhận diện Course ID: #${extracted}`);
         }
     };
 
@@ -170,7 +182,6 @@ export const CoursesManagerPage: React.FC = () => {
             setFormCourseId(course.course_id.toString());
             setFormCategory(course.category);
             setFormCourseName(course.course_name);
-            setFormSku(course.sku || '');
             setFormLmsUrl(course.lms_url || `https://learn.pythaverse.space/course/view.php?id=${course.course_id}`);
             setFormGitRepos(Array.isArray(course.git_repos) ? [...course.git_repos] : []);
         } else {
@@ -178,7 +189,6 @@ export const CoursesManagerPage: React.FC = () => {
             setFormCourseId('');
             setFormCategory(selectedCategory !== 'all' ? selectedCategory : categories[0] || 'SWRP');
             setFormCourseName('');
-            setFormSku('');
             setFormLmsUrl('');
             setFormGitRepos([]);
         }
@@ -223,7 +233,6 @@ export const CoursesManagerPage: React.FC = () => {
             course_id: cId,
             category: formCategory.trim().toUpperCase(),
             course_name: formCourseName.trim(),
-            sku: formSku.trim() || null,
             lms_url: finalUrl,
             git_repos: cleanRepos,
         };
@@ -311,27 +320,24 @@ export const CoursesManagerPage: React.FC = () => {
         try {
             const sampleData = [
                 {
-                    'Course ID (*)': 654,
+                    'Course ID (Tùy chọn nếu có Link)': 654,
                     'Category (*)': 'SWRP',
                     'Tên Khóa Học (*)': 'SWRP 9: LEANBOT Programming Applications with IoT [V2] (EN)',
-                    'Mã SKU': 'PTV-SWRP-09',
-                    'LMS URL (Có thể để trống)': 'https://learn.pythaverse.space/course/view.php?id=654',
+                    'LMS URL (Chứa ID)': 'https://learn.pythaverse.space/course/view.php?id=654',
                     'Git Repos (Cách nhau bởi dấu ;)': 'https://git.pythaverse.space/ptvswrp/SWRP11_Teacher; https://git.pythaverse.space/ptvswrp/SWRP11_Starter',
                 },
                 {
-                    'Course ID (*)': 780,
+                    'Course ID (Tùy chọn nếu có Link)': '',
                     'Category (*)': 'ASP',
                     'Tên Khóa Học (*)': 'ASP Elementary Intermediate (EN)',
-                    'Mã SKU': 'PTV-ASP-EL-01',
-                    'LMS URL (Có thể để trống)': '',
+                    'LMS URL (Chứa ID)': 'https://learn.pythaverse.space/course/view.php?id=780',
                     'Git Repos (Cách nhau bởi dấu ;)': 'https://git.pythaverse.space/ptvasp/ASP_Solution [teacher]; https://git.pythaverse.space/ptvasp/ASP_Project [all]',
                 },
                 {
-                    'Course ID (*)': 812,
+                    'Course ID (Tùy chọn nếu có Link)': 812,
                     'Category (*)': 'IR',
                     'Tên Khóa Học (*)': 'International Robothon 2026 Strategy Guide (EN)',
-                    'Mã SKU': 'PTV-IR-2026',
-                    'LMS URL (Có thể để trống)': '',
+                    'LMS URL (Chứa ID)': 'https://learn.pythaverse.space/course/view.php?id=812',
                     'Git Repos (Cách nhau bởi dấu ;)': 'https://git.pythaverse.space/ptvir/IR2026_All',
                 },
             ];
@@ -339,11 +345,10 @@ export const CoursesManagerPage: React.FC = () => {
             const ws = XLSX.utils.json_to_sheet(sampleData);
             // Thiết lập độ rộng cột cho đẹp mắt
             ws['!cols'] = [
-                { wch: 14 }, // Course ID
-                { wch: 14 }, // Category
+                { wch: 18 }, // Course ID
+                { wch: 16 }, // Category
                 { wch: 55 }, // Tên Khóa Học
-                { wch: 18 }, // SKU
-                { wch: 40 }, // LMS URL
+                { wch: 50 }, // LMS URL
                 { wch: 65 }, // Git Repos
             ];
 
@@ -387,26 +392,49 @@ export const CoursesManagerPage: React.FC = () => {
                     const row = rawRows[i];
                     if (!row || row.length === 0) continue;
 
-                    const cIdRaw = String(row[0] || '').trim().replace('#', '');
-                    const cId = parseInt(cIdRaw, 10);
+                    let cIdRaw = String(row[0] || '').trim().replace('#', '');
+                    let cId = parseInt(cIdRaw, 10);
                     const cat = String(row[1] || 'SWRP').trim().toUpperCase();
                     const name = String(row[2] || '').trim();
-                    const sku = row[3] ? String(row[3]).trim() : null;
-                    let url = row[4] ? String(row[4]).trim() : '';
-                    const gitReposRaw = row[5] ? String(row[5]).trim() : '';
+                    let url = '';
+                    let gitReposRaw = '';
 
-                    if (!url && !isNaN(cId)) {
+                    // Quét các cột còn lại để tìm ô link LMS URL và ô git repos
+                    for (let cIdx = 3; cIdx < row.length; cIdx++) {
+                        const cellVal = String(row[cIdx] || '').trim();
+                        if (cellVal.includes('view.php') || cellVal.includes('learn.pythaverse.space') || cellVal.includes('id=')) {
+                            url = cellVal;
+                        } else if (cellVal.includes('git.') || cellVal.includes('github.com') || cellVal.includes(';')) {
+                            gitReposRaw = cellVal;
+                        }
+                    }
+
+                    if (!url) {
+                        url = String(row[3] || row[4] || '').trim();
+                        if (url.startsWith('PTV-') || (!url.includes('http') && !url.includes('php'))) {
+                            url = String(row[4] || '').trim();
+                        }
+                    }
+
+                    // 🎯 TỰ ĐỘNG TRÍCH XUẤT COURSE_ID TỪ LMS_URL NẾU CỘT ID BỊ BỎ TRỐNG
+                    let autoExtracted = false;
+                    if (isNaN(cId) || cId <= 0) {
+                        const extracted = extractCourseIdFromUrl(url);
+                        if (extracted) {
+                            cId = extracted;
+                            autoExtracted = true;
+                        }
+                    }
+
+                    if (!url && !isNaN(cId) && cId > 0) {
                         url = `https://learn.pythaverse.space/course/view.php?id=${cId}`;
                     }
 
-                    const reposList: GitRepoConfig[] = [];
-                    if (gitReposRaw) {
-                        const reposList = parseGitReposString(gitReposRaw);
-                    }
+                    const reposList: GitRepoConfig[] = gitReposRaw ? parseGitReposString(gitReposRaw) : [];
 
                     const isValid = !isNaN(cId) && cId > 0 && name.length > 0 && cat.length > 0;
                     let error = '';
-                    if (isNaN(cId) || cId <= 0) error = 'Course ID không hợp lệ';
+                    if (isNaN(cId) || cId <= 0) error = 'Không xác định được Course ID (thiếu link LMS hoặc ID)';
                     else if (!cat) error = 'Thiếu danh mục';
                     else if (!name) error = 'Thiếu tên môn học';
 
@@ -414,11 +442,11 @@ export const CoursesManagerPage: React.FC = () => {
                         course_id: cId || 0,
                         category: cat,
                         course_name: name,
-                        sku: sku,
                         lms_url: url,
                         git_repos: reposList,
                         isValid,
                         error: error || undefined,
+                        auto_extracted_id: autoExtracted,
                     });
                 }
 
@@ -465,35 +493,55 @@ export const CoursesManagerPage: React.FC = () => {
 
             parts = parts.map((p) => p.trim());
 
-            if (parts.length >= 3) {
-                const cIdRaw = parts[0]?.replace(/\D/g, '');
-                const cId = parseInt(cIdRaw, 10);
-                const cat = parts[1]?.toUpperCase() || 'SWRP';
-                const name = parts[2] || '';
-                const sku = parts[3] || null;
-                let url = parts[4] || '';
-                const gitReposRaw = parts[5] || '';
+            if (parts.length >= 2) {
+                let cId = NaN;
+                let cat = 'SWRP';
+                let name = '';
+                let url = '';
+                let gitReposRaw = '';
+                let autoExtracted = false;
 
-                if (!url && !isNaN(cId)) {
+                // Nếu phần tử đầu tiên là số nguyên -> Course ID
+                if (/^\d+$/.test(parts[0]?.replace('#', ''))) {
+                    cId = parseInt(parts[0].replace('#', ''), 10);
+                    cat = parts[1]?.toUpperCase() || 'SWRP';
+                    name = parts[2] || '';
+                    url = parts[3] || parts[4] || '';
+                    gitReposRaw = parts[4] || parts[5] || '';
+                } else {
+                    // Nếu phần tử đầu tiên là Category (dòng không có Course ID)
+                    cat = parts[0]?.toUpperCase() || 'SWRP';
+                    name = parts[1] || '';
+                    url = parts[2] || '';
+                    gitReposRaw = parts[3] || '';
+                }
+
+                // Quét tìm link LMS URL nếu bị lệch cột
+                for (const p of parts) {
+                    if (p.includes('view.php') || p.includes('learn.pythaverse.space') || p.includes('id=')) {
+                        url = p;
+                        break;
+                    }
+                }
+
+                // 🎯 TỰ ĐỘNG TRÍCH XUẤT COURSE_ID TỪ LINK LMS URL NẾU THIẾU
+                if (isNaN(cId) || cId <= 0) {
+                    const extracted = extractCourseIdFromUrl(url);
+                    if (extracted) {
+                        cId = extracted;
+                        autoExtracted = true;
+                    }
+                }
+
+                if (!url && !isNaN(cId) && cId > 0) {
                     url = `https://learn.pythaverse.space/course/view.php?id=${cId}`;
                 }
 
-                const reposList: GitRepoConfig[] = [];
-                if (gitReposRaw) {
-                    gitReposRaw.split(';').forEach((rPart) => {
-                        const trimmed = rPart.trim();
-                        if (trimmed) {
-                            reposList.push({
-                                repo_url: trimmed,
-                                target: trimmed.toLowerCase().includes('teacher') ? 'teacher_only' : 'all',
-                            });
-                        }
-                    });
-                }
+                const reposList: GitRepoConfig[] = gitReposRaw ? parseGitReposString(gitReposRaw) : [];
 
                 const isValid = !isNaN(cId) && cId > 0 && name.length > 0 && cat.length > 0;
                 let error = '';
-                if (isNaN(cId) || cId <= 0) error = 'Course ID không hợp lệ';
+                if (isNaN(cId) || cId <= 0) error = 'Không xác định được Course ID (cần có ID hoặc Link LMS)';
                 else if (!cat) error = 'Thiếu danh mục';
                 else if (!name) error = 'Thiếu tên môn học';
 
@@ -501,11 +549,11 @@ export const CoursesManagerPage: React.FC = () => {
                     course_id: cId || 0,
                     category: cat,
                     course_name: name,
-                    sku: sku,
                     lms_url: url,
                     git_repos: reposList,
                     isValid,
                     error: error || undefined,
+                    auto_extracted_id: autoExtracted,
                 });
             }
         });
@@ -514,13 +562,13 @@ export const CoursesManagerPage: React.FC = () => {
     };
 
     const loadSampleBulkData = () => {
-        const sample = `654\tSWRP\tSWRP 9: LEANBOT Programming Applications with IoT [V2] (EN)\tPTV-SWRP-09\thttps://learn.pythaverse.space/course/view.php?id=654\thttps://git.pythaverse.space/ptvswrp/SWRP11_Teacher;https://git.pythaverse.space/ptvswrp/SWRP11_Student
-780\tASP\tASP Elementary Intermediate (EN)\tPTV-ASP-EL-01\thttps://learn.pythaverse.space/course/view.php?id=780\t
-812\tIR\tInternational Robothon 2026 Strategy Guide (EN)\tPTV-IR-2026\thttps://learn.pythaverse.space/course/view.php?id=812\thttps://git.pythaverse.space/ptvir/IR2026_All
-940\tOther\tAdvanced Digital Twin Simulation with Pythaverse Virtual Engine (EN)\tPTV-OTH-DT\thttps://learn.pythaverse.space/course/view.php?id=940\t`;
+        const sample = `654\tSWRP\tSWRP 9: LEANBOT Programming Applications with IoT [V2] (EN)\thttps://learn.pythaverse.space/course/view.php?id=654\thttps://git.pythaverse.space/ptvswrp/SWRP11_Teacher;https://git.pythaverse.space/ptvswrp/SWRP11_Student
+ASP\tASP Elementary Intermediate (EN)\thttps://learn.pythaverse.space/course/view.php?id=780\t
+812\tIR\tInternational Robothon 2026 Strategy Guide (EN)\thttps://learn.pythaverse.space/course/view.php?id=812\thttps://git.pythaverse.space/ptvir/IR2026_All
+Other\tAdvanced Digital Twin Simulation with Pythaverse Virtual Engine (EN)\thttps://learn.pythaverse.space/course/view.php?id=940\t`;
         setBulkRawText(sample);
         handleParseBulkText(sample);
-        toast.info('Đã nạp 4 khóa học mẫu (hỗ trợ nhiều Git Repos cách nhau bằng dấu chấm phẩy) để xem trước!');
+        toast.info('Đã nạp 4 khóa học mẫu (có dòng chỉ cần dán link URL là tự động nhận diện Course ID)!');
     };
 
     const handleExecuteBulkUpsert = async () => {
@@ -656,7 +704,7 @@ export const CoursesManagerPage: React.FC = () => {
                             type="text"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            placeholder="Tìm theo tên môn học, Course ID, SKU, Git Repo URL, danh mục..."
+                            placeholder="Tìm theo tên môn học, Course ID, Git Repo URL, danh mục..."
                             className="w-full pl-10 pr-9 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 rounded-xl text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-2xs"
                         />
                         {searchQuery && (
@@ -823,25 +871,19 @@ export const CoursesManagerPage: React.FC = () => {
                                             {course.course_name}
                                         </h3>
 
-                                        {/* SKU Row */}
+                                        {/* LMS URL Link */}
                                         <div className="mt-2 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                                            <span className="text-slate-400">SKU:</span>
-                                            {course.sku ? (
-                                                <button
-                                                    onClick={(e) => handleCopySku(course.sku || '', e)}
-                                                    title="Click để sao chép SKU"
-                                                    className="font-mono font-semibold text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors inline-flex items-center gap-1 cursor-pointer"
-                                                >
-                                                    <span>{course.sku}</span>
-                                                    {copiedSku === course.sku ? (
-                                                        <Check className="w-3 h-3 text-emerald-500" />
-                                                    ) : (
-                                                        <Copy className="w-3 h-3 opacity-40 group-hover:opacity-100 transition-opacity" />
-                                                    )}
-                                                </button>
-                                            ) : (
-                                                <span className="text-slate-400 font-mono">---</span>
-                                            )}
+                                            <span className="text-slate-400">LMS:</span>
+                                            <a
+                                                href={lmsUrl}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="font-mono text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline truncate max-w-[240px] inline-flex items-center gap-1"
+                                                title={lmsUrl}
+                                            >
+                                                <span>{lmsUrl}</span>
+                                                <ExternalLink className="w-3 h-3 shrink-0 opacity-60" />
+                                            </a>
                                         </div>
 
                                         {/* 🐙 Multi Git Repos Badge Rail */}
@@ -1258,7 +1300,7 @@ export const CoursesManagerPage: React.FC = () => {
                                     <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
                                         Cột trong file:{' '}
                                         <span className="font-mono text-slate-600 dark:text-slate-300">
-                                            Course ID | Category | Course Name | SKU | LMS URL | Danh sách Git Repos (cách nhau dấu ;)
+                                            Course ID (Tùy chọn) | Category | Course Name | LMS URL (Chứa ID) | Git Repos (cách nhau dấu ;)
                                         </span>
                                     </p>
                                 </div>
@@ -1339,7 +1381,7 @@ export const CoursesManagerPage: React.FC = () => {
                                                 <th className="p-2">ID</th>
                                                 <th className="p-2">Category</th>
                                                 <th className="p-2">Tên Môn Học</th>
-                                                <th className="p-2">SKU</th>
+                                                <th className="p-2">LMS URL</th>
                                                 <th className="p-2">Số Lượng Git Repos</th>
                                                 <th className="p-2 text-center">Trạng Thái</th>
                                             </tr>
@@ -1356,6 +1398,11 @@ export const CoursesManagerPage: React.FC = () => {
                                                 >
                                                     <td className="p-2 font-mono font-bold text-indigo-600 dark:text-indigo-400">
                                                         #{item.course_id}
+                                                        {item.auto_extracted_id && (
+                                                            <span className="ml-1 text-[9px] px-1 py-0.2 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-normal">
+                                                                từ link
+                                                            </span>
+                                                        )}
                                                     </td>
                                                     <td className="p-2">
                                                         <span className="px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold">
@@ -1365,7 +1412,9 @@ export const CoursesManagerPage: React.FC = () => {
                                                     <td className="p-2 text-slate-800 dark:text-slate-200 truncate max-w-[160px] font-medium">
                                                         {item.course_name}
                                                     </td>
-                                                    <td className="p-2 font-mono text-slate-500">{item.sku || '---'}</td>
+                                                    <td className="p-2 font-mono text-[11px] text-slate-500 truncate max-w-[180px]">
+                                                        {item.lms_url || '---'}
+                                                    </td>
                                                     <td className="p-2 font-mono">
                                                         {item.git_repos && item.git_repos.length > 0 ? (
                                                             <div className="flex flex-wrap gap-1 max-w-[260px]">
@@ -1522,28 +1571,18 @@ export const CoursesManagerPage: React.FC = () => {
 
                             <div>
                                 <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                                    Mã SKU (Tùy chọn)
-                                </label>
-                                <input
-                                    type="text"
-                                    value={formSku}
-                                    onChange={(e) => setFormSku(e.target.value)}
-                                    placeholder="VD: PTV-SWRP-09"
-                                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                                    Đường dẫn LMS URL (Tự động tạo)
+                                    Đường dẫn LMS URL (Tự động nhận diện ID)
                                 </label>
                                 <input
                                     type="url"
                                     value={formLmsUrl}
-                                    onChange={(e) => setFormLmsUrl(e.target.value)}
+                                    onChange={(e) => handleLmsUrlChange(e.target.value)}
                                     placeholder="https://learn.pythaverse.space/course/view.php?id=..."
-                                    className="w-full px-3.5 py-2.5 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono text-slate-600 dark:text-slate-400 outline-none"
+                                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                                 />
+                                <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1 font-medium">
+                                    <span>✨ Mẹo: Dán link LMS (ví dụ: view.php?id=1445) sẽ tự động nhận diện Course ID.</span>
+                                </p>
                             </div>
 
                             {/* 🐙 KHU VỰC CẤU HÌNH NHIỀU GIT REPOS (MULTI-REPO BUILDER) */}

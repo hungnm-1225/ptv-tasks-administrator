@@ -1,5 +1,6 @@
 """Deterministic, evidence-backed facts for common Unified Inbox requests."""
 import re
+import unicodedata
 from typing import List, Optional, Tuple, Dict, Any
 
 from app.models.intent import EvidenceSpan, ExtractedEntity, ExtractedIntent, IntentAssessment, TypedEntities
@@ -50,27 +51,27 @@ def _append_entity(assessment: IntentAssessment, entity: ExtractedEntity) -> Non
 def split_email_thread(content: str) -> Tuple[str, str]:
     """
     Tách tin nhắn mới nhất khỏi chuỗi hội thoại dài (Quoted Replies).
-    Cắt tại các dấu hiệu: 'Vào ngày... đã viết:', 'On ... wrote:', '-----Original Message-----'
+    Cắt sạch 100% tại các điểm ngắt header: 'Vào... đã viết:', 'On... wrote:', '-----Original Message-----'
     """
     if not content:
         return "", ""
 
-    patterns = [
-        r"\n\s*(?:Vào\s+[\w\s,]+vào\s+lúc\s+[\d:]+|Vào\s+[\w\s,]+đã\s+viết\s*:)",
-        r"\n\s*On\s+[\w\s,]+wrote\s*:",
-        r"\n\s*-{3,}\s*(?:Original Message|Tin nhắn gốc)\s*-{3,}",
-        r"\n\s*_{10,}",
-    ]
-
-    split_pos = len(content)
-    for p in patterns:
-        m = re.search(p, content, re.IGNORECASE)
-        if m and m.start() < split_pos:
-            split_pos = m.start()
-
-    current_msg = content[:split_pos].strip()
-    history = content[split_pos:].strip()
-    return current_msg, history
+    norm = unicodedata.normalize("NFC", content.replace("\r\n", "\n")).strip()
+    pattern = re.compile(
+        r"\n\s*(?:"
+        r"Vào\s+[\s\S]*?đã\s+viết\s*:|"
+        r"On\s+[\s\S]*?wrote\s*:|"
+        r"-{3,}\s*(?:Original Message|Tin nhắn gốc)\s*-{3,}|"
+        r"_{8,}|"
+        r"From:\s+[\s\S]*?Sent:\s+|"
+        r"-{5,}\s*Forwarded message\s*-{5,}"
+        r")",
+        re.IGNORECASE
+    )
+    m = pattern.search(norm)
+    if m:
+        return norm[:m.start()].strip(), norm[m.start():].strip()
+    return norm, ""
 
 
 def parse_users_from_table_or_text(text: str, source_revision_id: Optional[str]) -> Tuple[List[Dict[str, Any]], List[EvidenceSpan]]:
@@ -118,7 +119,13 @@ def parse_users_from_table_or_text(text: str, source_revision_id: Optional[str])
 
             if candidate_id and candidate_id.lower() not in seen_ids:
                 seen_ids.add(candidate_id.lower())
-                u_item = {"email": candidate_id, "role": detected_role}
+                is_email = "@" in candidate_id
+                u_item = {
+                    "identifier": candidate_id,
+                    "email": candidate_id if is_email else None,
+                    "username": None if is_email else candidate_id,
+                    "role": detected_role
+                }
                 if candidate_name:
                     u_item["full_name"] = candidate_name
                 users.append(u_item)

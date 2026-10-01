@@ -1,4 +1,5 @@
 # backend/app/api/v1/endpoints/courses.py
+import re
 import time
 import logging
 from fastapi import APIRouter, HTTPException, Query
@@ -19,30 +20,94 @@ course_cache = BoundedMemoryCache(tier=CacheTier.TIER_A_CATALOG, max_entries=50,
 
 
 
+def extract_course_id_from_url(url: Optional[str]) -> Optional[int]:
+    """
+    Trích xuất Course ID số nguyên từ URL Moodle / PLearn:
+    - https://learn.pythaverse.space/course/view.php?id=1445 -> 1445
+    - view.php?id=1445 -> 1445
+    - course/1445 -> 1445
+    """
+    if not url:
+        return None
+    url_str = str(url).strip()
+    m = re.search(r"[?&]id=(\d+)", url_str)
+    if m:
+        return int(m.group(1))
+    m2 = re.search(r"/course(?:s)?/(?:view\.php\?id=)?(\d+)", url_str)
+    if m2:
+        return int(m2.group(1))
+    # Nếu bản thân chuỗi là số nguyên (ví dụ người dùng nhập thẳng ID)
+    if url_str.isdigit():
+        return int(url_str)
+    return None
+
+
 class CourseSchema(BaseModel):
-    course_id: int
+    course_id: Optional[int] = None
     category: str
     course_name: str
-    sku: Optional[str] = None
     lms_url: Optional[str] = None
     # 🐙 Hỗ trợ mảng danh sách Git Repositories
     git_repos: Optional[List[Dict[str, Any]]] = None
 
-    @model_validator(mode="after")
-    def auto_fill_lms_url(self):
-        if not self.lms_url or not self.lms_url.strip():
-            self.lms_url = f"https://learn.pythaverse.space/course/view.php?id={self.course_id}"
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def auto_resolve_course_id_and_url(cls, data: Any):
+        if isinstance(data, dict):
+            # 🧹 Đã xóa cột SKU - loại bỏ triệt để trường sku để tránh lỗi schema Supabase
+            data.pop("sku", None)
+
+            c_id = data.get("course_id")
+            lms_url = data.get("lms_url")
+
+            # 🎯 Tự động trích xuất course_id từ lms_url nếu chỉ có link khóa học
+            if not c_id or str(c_id).strip() in ["", "0", "None", "null"]:
+                extracted = extract_course_id_from_url(lms_url)
+                if extracted:
+                    data["course_id"] = extracted
+                    c_id = extracted
+            else:
+                try:
+                    data["course_id"] = int(c_id)
+                    c_id = int(c_id)
+                except (ValueError, TypeError):
+                    extracted = extract_course_id_from_url(lms_url)
+                    if extracted:
+                        data["course_id"] = extracted
+                        c_id = extracted
+
+            # 🎯 Nếu có course_id mà chưa có lms_url -> Tự động sinh link chuẩn
+            if c_id and (not lms_url or not str(lms_url).strip()):
+                data["lms_url"] = f"https://learn.pythaverse.space/course/view.php?id={c_id}"
+
+            if not data.get("course_id"):
+                raise ValueError("Không thể xác định Course ID! Vui lòng nhập Course ID hoặc cung cấp link LMS URL chứa ID (ví dụ: view.php?id=1445).")
+        return data
 
 
 class CourseUpdateSchema(BaseModel):
     course_id: Optional[int] = None
     category: Optional[str] = None
     course_name: Optional[str] = None
-    sku: Optional[str] = None
     lms_url: Optional[str] = None
     # 🐙 Hỗ trợ mảng danh sách Git Repositories khi cập nhật
     git_repos: Optional[List[Dict[str, Any]]] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def clean_update_data(cls, data: Any):
+        if isinstance(data, dict):
+            # 🧹 Loại bỏ hoàn toàn sku
+            data.pop("sku", None)
+
+            c_id = data.get("course_id")
+            lms_url = data.get("lms_url")
+            # Tự động trích xuất nếu người dùng sửa lms_url có id mới
+            if not c_id and lms_url:
+                extracted = extract_course_id_from_url(lms_url)
+                if extracted:
+                    data["course_id"] = extracted
+        return data
 
 
 class BulkCoursesPayload(BaseModel):
@@ -98,9 +163,9 @@ async def list_courses(
             c for c in data 
             if s_lower in str(c.get("course_id", "")).lower() 
             or s_lower in str(c.get("course_name", "") or "").lower()
-            or s_lower in str(c.get("sku", "") or "").lower()
             or s_lower in str(c.get("category", "") or "").lower()
             or s_lower in str(c.get("git_repos", "") or "").lower()
+            or s_lower in str(c.get("lms_url", "") or "").lower()
         ]
         
     return data

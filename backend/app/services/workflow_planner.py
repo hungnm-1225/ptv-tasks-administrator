@@ -202,25 +202,48 @@ class WorkflowPlannerService:
                 logger.warning(f"⚠️ Không thể auto-hydrate TypedEntities: {hyd_err}")
 
         # 🎯 2. KHAI BÁO NGAY USERS_LIST & USER_EMAILS ĐỂ TRÁNH LỖI UNBOUNDLOCALERROR!
+        def strip_synthetic_pythaverse_domain(val: str) -> str:
+            """Khử sạch đuôi @pythaverse.space tự bịa nếu người dùng chỉ cung cấp username."""
+            s = str(val or "").strip()
+            if s.lower().endswith("@pythaverse.space"):
+                prefix = s[:-len("@pythaverse.space")].strip()
+                if re.match(r"^[a-zA-Z]{2,6}\d{2,8}[a-zA-Z0-9]*$", prefix) or len(prefix) <= 16:
+                    return prefix
+            return s
+
         users_list = entities.get("users") or []
         user_emails: List[str] = []
         is_teacher = False
 
         for u in users_list:
             if isinstance(u, dict):
-                em = u.get("email")
-                if em:
-                    user_emails.append(em.strip())
+                ident = u.get("email") or u.get("username") or u.get("identifier")
+                if ident:
+                    clean_id = strip_synthetic_pythaverse_domain(ident)
+                    u["identifier"] = clean_id
+                    if "@" not in clean_id:
+                        u["email"] = None
+                        u["username"] = clean_id
+                    else:
+                        u["email"] = clean_id
+                    user_emails.append(clean_id)
                 if u.get("role") == "teacher":
                     is_teacher = True
-            elif isinstance(u, str) and "@" in u:
-                user_emails.append(u.strip())
+            elif isinstance(u, str):
+                clean_id = strip_synthetic_pythaverse_domain(u)
+                if clean_id:
+                    user_emails.append(clean_id)
 
-        if not user_emails and entities.get("identifiers"):
-            user_emails = [str(i).strip() for i in entities.get("identifiers", []) if "@" in str(i) or len(str(i)) > 3]
+        if entities.get("identifiers"):
+            for i in entities.get("identifiers", []):
+                clean_id = strip_synthetic_pythaverse_domain(str(i).strip())
+                if len(clean_id) >= 3 and clean_id not in user_emails:
+                    user_emails.append(clean_id)
 
         if not user_emails and entities.get("target_email"):
-            user_emails = [entities["target_email"].strip()]
+            clean_target = strip_synthetic_pythaverse_domain(entities["target_email"])
+            if clean_target:
+                user_emails = [clean_target]
 
         # 🛑 THANH LỌC NGƯỜI GỬI (PURGE SENDER)
         clean_sender = str(sender_email or "").strip().lower()
@@ -232,7 +255,9 @@ class WorkflowPlannerService:
                 logger.info(f"🛡️ [Sender Guard] Đã lọc người gửi [{clean_sender}], còn lại: {purged_users}")
                 user_emails = purged_users
 
-        if not is_teacher and any(k in str(ai_summary or "").lower() for k in ["giáo viên", "teacher"]):
+        # Chỉ bật is_teacher khi trong users_list có giáo viên, hoặc văn bản yêu cầu rõ giáo viên mà không có học sinh
+        has_explicit_students = any(isinstance(u, dict) and str(u.get("role") or "").lower() in ["student", "học sinh", "hs"] for u in users_list)
+        if not is_teacher and not has_explicit_students and any(k in str(ai_summary or "").lower() for k in ["giáo viên", "teacher", "gv"]):
             is_teacher = True
 
         # 🎯 3. KIỂM TRA BẰNG CHỨNG (LÚC NÀY USERS_LIST ĐÃ CÓ NÊN AN TOÀN TUYỆT ĐỐI!)
@@ -357,9 +382,17 @@ class WorkflowPlannerService:
                     c_names = [c["course_name"] for c in canonical_courses]
                     c_ids = [c["course_id"] for c in canonical_courses if c.get("course_id")]
 
-                    # Phân tách rạch ròi danh sách học sinh vs giáo viên
-                    student_emails = [u["email"] for u in users_list if isinstance(u, dict) and u.get("role") == "student" and u.get("email")]
-                    teacher_emails = [u["email"] for u in users_list if isinstance(u, dict) and u.get("role") == "teacher" and u.get("email")]
+                    # Phân tách rạch ròi danh sách học sinh vs giáo viên (nhận cả username lẫn email)
+                    student_emails = [
+                        (u.get("identifier") or u.get("username") or u.get("email"))
+                        for u in users_list
+                        if isinstance(u, dict) and str(u.get("role") or "").lower() in ["student", "học sinh", "hs"] and (u.get("identifier") or u.get("username") or u.get("email"))
+                    ]
+                    teacher_emails = [
+                        (u.get("identifier") or u.get("username") or u.get("email"))
+                        for u in users_list
+                        if isinstance(u, dict) and str(u.get("role") or "").lower() in ["teacher", "giáo viên", "gv"] and (u.get("identifier") or u.get("username") or u.get("email"))
+                    ]
 
                     if not student_emails and not teacher_emails:
                         if is_teacher:
@@ -404,15 +437,32 @@ class WorkflowPlannerService:
 
                 # --- 3. NHÓM HỦY GHI DANH (GỠ MÔN) LMS ---
                 elif cap_id == "lms.unenrol_users":
-                    c_names = [c["course_name"] for c in canonical_courses]
+                    # 🛑 BẢO VỆ NGHIỆP VỤ BẤT BIẾN:
+                    # Tuyệt đối KHÔNG lấy môn người dùng xin ghi danh để hủy ghi danh!
+                    # Chỉ hủy ghi danh khi người dùng chỉ định ĐÍCH DANH môn cần gỡ bỏ.
+                    raw_unenrol_courses = entities.get("unenrol_courses") or []
+                    unenrol_c_names = []
+                    if raw_unenrol_courses:
+                        for uc in raw_unenrol_courses:
+                            uc_name, _, _, _ = self.resolve_course_and_repos_from_db(str(uc), is_teacher=is_teacher)
+                            enroll_names = [c["course_name"] for c in canonical_courses]
+                            if uc_name and uc_name not in enroll_names:
+                                unenrol_c_names.append(uc_name)
+
                     step_inputs = {
-                        "courses": c_names,
+                        "courses": unenrol_c_names,
                         "target_emails": user_emails,
                         "action": "unenrol_users"
                     }
-                    step_name = f"Hủy ghi danh Moodle ({', '.join(c_names[:3]) if c_names else 'Khóa học'})"
-                    if not c_names:
-                        missing_requirements.append({"field": "courses", "message": "Yêu cầu gỡ môn cần nêu rõ tên môn học."})
+                    if unenrol_c_names:
+                        step_name = f"Hủy ghi danh Moodle ({', '.join(unenrol_c_names[:3])})"
+                    else:
+                        step_name = "Hủy ghi danh Moodle (Chưa chỉ định môn cần gỡ)"
+                        missing_requirements.append({
+                            "field": "unenrol_courses",
+                            "message": "Yêu cầu hủy ghi danh (unenroll) chưa chỉ định rõ tên môn học cần hủy. Vui lòng nêu rõ môn cần hủy để tránh hủy nhầm."
+                        })
+                        has_critical_missing = True
 
                 # --- 4. NHÓM WORKSPACE: ĐỔI TRƯỜNG & HỒ SƠ ---
                 elif cap_id == "workspace.update_user_profile":

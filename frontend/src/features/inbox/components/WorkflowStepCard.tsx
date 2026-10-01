@@ -596,7 +596,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
 
       const filteredDbCourses = dbCourses.filter((c) =>
         (c.course_name || '').toLowerCase().includes(courseSearch.toLowerCase()) ||
-        (c.sku || '').toLowerCase().includes(courseSearch.toLowerCase()) ||
+        (c.category || '').toLowerCase().includes(courseSearch.toLowerCase()) ||
         String(c.course_id || '').includes(courseSearch)
       );
 
@@ -708,7 +708,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
                 <input
                   type="text"
                   autoFocus
-                  placeholder="Tìm theo tên môn, mã SKU, ID (VD: SWRP 11, SWRP 8...)"
+                  placeholder="Tìm theo tên môn, Course ID, danh mục (VD: SWRP 11, 1445...)"
                   value={courseSearch}
                   onChange={(e) => setCourseSearch(e.target.value)}
                   className="w-full h-9 pl-8 pr-3 text-xs font-bold text-slate-950 dark:text-white bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg outline-none"
@@ -732,7 +732,7 @@ export const WorkflowStepCard: React.FC<WorkflowStepCardProps> = ({
                           {c.course_name}
                         </div>
                         <div className="text-[10px] text-slate-500 font-mono">
-                          ID: #{c.course_id} | SKU: {c.sku || 'N/A'}
+                          ID: #{c.course_id} {c.category ? `| ${c.category}` : ''}
                         </div>
                       </div>
 

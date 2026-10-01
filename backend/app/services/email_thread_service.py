@@ -8,6 +8,7 @@ Chuyên trách:
 - Nhận diện lượt gửi của nhân viên DTT (@dtt.vn) vs khách hàng để trích xuất đúng Actionable Request.
 """
 import re
+import unicodedata
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 
@@ -51,12 +52,13 @@ class EmailThreadService:
 
     # Các điểm ngắt dòng khi người dùng Reply/Reply All (Show trimmed content)
     GMAIL_SPLIT_REGEX = re.compile(
-        r"(?:\n\s*On\s+[A-Za-z]{3},\s+[A-Za-z]{3}\s+\d+.*?(?:wrote|đã viết)\s*:|"
-        r"\n\s*Vào\s+[\w\s,]+(?:vào lúc|đã viết)\s*[\d:]*.*?:|"
+        r"(?:\n\s*Vào\s+[\s\S]*?đã\s+viết\s*:|"
+        r"\n\s*On\s+[\s\S]*?wrote\s*:|"
         r"\n\s*-{3,}\s*(?:Original Message|Tin nhắn gốc)\s*-{3,}|"
-        r"\n\s*_{10,}|"
-        r"\n\s*From:\s+.*?\nSent:\s+.*?\nTo:\s+)",
-        re.IGNORECASE | re.DOTALL
+        r"\n\s*_{8,}|"
+        r"\n\s*From:\s+[\s\S]*?Sent:\s+|"
+        r"\n\s*-{5,}\s*Forwarded message\s*-{5,})",
+        re.IGNORECASE
     )
 
     FULFILLMENT_PATTERNS = [
@@ -81,9 +83,10 @@ class EmailThreadService:
         """Cắt bỏ toàn bộ các khối quoted reply lặp lại của Gmail."""
         if not text:
             return ""
-        # 1. Cắt từ điểm xuất hiện header On ... wrote:
-        parts = cls.GMAIL_SPLIT_REGEX.split(text)
-        clean_first_part = parts[0] if parts else text
+        norm = unicodedata.normalize("NFC", text.replace("\r\n", "\n")).strip()
+        # 1. Cắt từ điểm xuất hiện header On ... wrote / Vào ... đã viết
+        m = cls.GMAIL_SPLIT_REGEX.search(norm)
+        clean_first_part = norm[:m.start()].strip() if m else norm
 
         # 2. Xóa các dòng bắt đầu bằng dấu trích dẫn '>'
         lines = []
@@ -96,7 +99,7 @@ class EmailThreadService:
 
     @classmethod
     def parse_thread(cls, raw_content: str, sender_email: Optional[str] = None) -> ParsedThreadResult:
-        content = (raw_content or "").replace("\r\n", "\n").strip()
+        content = unicodedata.normalize("NFC", (raw_content or "").replace("\r\n", "\n")).strip()
         sender_clean = (sender_email or "").strip().lower()
 
         if not content:
@@ -167,15 +170,16 @@ class EmailThreadService:
         # =====================================================================
         # TRƯỜNG HỢP B: ĐỊNH DẠNG GMAIL TOP-POSTING (CÓ NÚT "SHOW TRIMMED CONTENT")
         # =====================================================================
-        # Phân tách email thành các phần tử dựa trên điểm ngắt On ... wrote:
-        raw_splits = cls.GMAIL_SPLIT_REGEX.split(content)
-        parsed_turns: List[str] = [p.strip() for p in raw_splits if p and len(p.strip()) > 10]
-
-        if not parsed_turns:
-            parsed_turns = [content]
-
-        is_thread = len(parsed_turns) > 1
-        latest_msg = cls.clean_trimmed_quotes(parsed_turns[0])
+        # Cắt chính xác tại điểm ngắt Gmail quote đầu tiên
+        m_split = cls.GMAIL_SPLIT_REGEX.search(content)
+        if m_split:
+            latest_msg = cls.clean_trimmed_quotes(content[:m_split.start()])
+            history_text = content[m_split.start():].strip()
+            is_thread = True
+        else:
+            latest_msg = cls.clean_trimmed_quotes(content)
+            history_text = ""
+            is_thread = False
 
         # Kiểm tra xem tin nhắn gần nhất có phải do kỹ sư DTT gửi hoàn tất không
         is_latest_internal = cls.is_internal_email(sender_clean) or any(
@@ -185,26 +189,18 @@ class EmailThreadService:
         is_completed_by_staff = any(re.search(p, latest_msg, re.IGNORECASE) for p in cls.FULFILLMENT_PATTERNS)
 
         # 🎯 BỐC TÁCH YÊU CẦU THỰC SỰ CỦA KHÁCH HÀNG:
-        # Nếu lượt trên cùng là của anh Hùng ("I have completed..."), thì yêu cầu thực sự của khách nằm ở tin nhắn thứ 2!
-        if is_latest_internal and len(parsed_turns) > 1:
-            latest_customer_request = cls.clean_trimmed_quotes(parsed_turns[1])
-        else:
-            latest_customer_request = latest_msg
+        latest_customer_request = latest_msg
 
         lifecycle_state = "RESOLVED_CONFIRMATION" if (is_latest_internal and is_completed_by_staff) else ("ACTIONABLE" if is_thread else "SINGLE_MESSAGE")
 
-        compact_context = f"""[YÊU CẦU VẬN HÀNH CỦA KHÁCH HÀNG (CẦN XỬ LÝ)]:
-{latest_customer_request}
-
-[PHẢN HỒI GẦN NHẤT CỦA KỸ SƯ HỆ THỐNG]:
-{latest_msg if is_latest_internal else '(Chưa có phản hồi từ kỹ sư)'}
-"""
+        # 🌟 COMPACT CONTEXT: CHỈ CHỨA TIN NHẮN MỚI NHẤT, TUYỆT ĐỐI KHÔNG NHỒI EMAIL CŨ!
+        compact_context = latest_customer_request.strip()
 
         return ParsedThreadResult(
             is_thread=is_thread,
-            total_turns=len(parsed_turns),
+            total_turns=2 if is_thread else 1,
             current_message=latest_msg,
-            original_message=parsed_turns[-1] if parsed_turns else latest_msg,
+            original_message=history_text if is_thread else latest_msg,
             latest_user_message=latest_customer_request,
             history_turns=[],
             participants=[sender_clean] if sender_clean else [],
