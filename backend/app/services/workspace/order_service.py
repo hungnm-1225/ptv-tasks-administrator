@@ -157,9 +157,13 @@ async def get_or_steal_role_session(
                         const u = window.user || {};
                         let localUser = {};
                         try { localUser = JSON.parse(localStorage.getItem('user') || '{}'); } catch(e) {}
+                        
+                        const urlParams = new URLSearchParams(window.location.search);
+                        const pidFromUrl = urlParams.get('partner_id');
+
                         return {
                             school_id: u.school_id || localUser.school_id || null,
-                            partner_id: u.partner_id || localUser.partner_id || null,
+                            partner_id: u.partner_id || localUser.partner_id || pidFromUrl || null,
                             distributor_id: u.distributor_id || localUser.distributor_id || null,
                             user_id: u.id || localUser.id || null,
                             username: u.username || localUser.username || ''
@@ -458,18 +462,44 @@ class WorkspaceOrderService(WorkspaceBaseService):
                 "Partner"
             )
 
-            # 🎯 1. BẢO VỆ PARTNER_ID VÀ WP USERNAME CHUẨN DEVTOOLS
-            raw_pid = identity.get("partner_id") or identity.get("user_id") or identity.get("id")
-            if not raw_pid or str(raw_pid).strip().lower() in ("none", "null", ""):
+            # 🎯 1. BẢO VỆ PARTNER_ID (TUYỆT ĐỐI KHÔNG FALLBACK GÁN BỪA ID)
+            raw_pid = identity.get("partner_id")
+            partner_user = credentials.get("username", "").strip()
+
+            # Nếu identity chưa có, tra cứu Supabase theo vai trò Partner thật
+            if not raw_pid or not str(raw_pid).strip().isdigit():
                 try:
-                    from app.services.workspace_lineage_service import workspace_lineage_service
-                    lineage = workspace_lineage_service.resolve_by_school(credentials.get("username", ""))
-                    raw_pid = (lineage.get("partner") or {}).get("partner_id") if lineage else None
-                except Exception:
-                    pass
-            
-            partner_id = str(raw_pid).strip() if (raw_pid and str(raw_pid).strip().isdigit()) else "60"
-            wp_username = str(identity.get("username") or credentials.get("username") or "partnerdtte").strip()
+                    from app.core.supabase import get_supabase_client
+                    supabase = get_supabase_client()
+                    # 1. Tìm trong vault để lấy org_id của Partner
+                    v_res = supabase.table("workspace_credentials_vault") \
+                        .select("org_id") \
+                        .ilike("username", partner_user) \
+                        .execute()
+                    
+                    if v_res.data:
+                        org_id = v_res.data[0].get("org_id")
+                        org_res = supabase.table("workspace_organizations") \
+                            .select("code, partner_id") \
+                            .eq("id", org_id) \
+                            .execute()
+                        if org_res.data:
+                            raw_pid = org_res.data[0].get("partner_id")
+                            if not raw_pid:
+                                num_m = re.search(r"\d+", str(org_res.data[0].get("code", "")))
+                                if num_m:
+                                    raw_pid = num_m.group(0)
+                except Exception as lookup_err:
+                    logger.warning(f"⚠️ Tra cứu Partner ID từ Supabase thất bại: {lookup_err}")
+
+            if not raw_pid or not str(raw_pid).strip().isdigit():
+                err_msg = f"KHÔNG THỂ XÁC ĐỊNH ĐƯỢC PARTNER ID CHO TÀI KHOẢN '{partner_user}'. DỪNG THỰC THI ĐỂ BẢO VỆ TÀI NGUYÊN!"
+                logger.error(f"❌ [Partner Order Fatal] {err_msg}")
+                return {"status": "failed", "error": err_msg}
+
+            partner_id = str(raw_pid).strip()
+            logger.info(f"🤝 [Partner Order] Đã xác định Partner ID chính xác: [{partner_id}] cho user '{partner_user}'")
+            wp_username = str(identity.get("username") or partner_user).strip()
 
             clean_num_match = re.search(r"\d+$", str(order_identifier))
             num_order_id = clean_num_match.group(0) if clean_num_match else str(order_identifier)

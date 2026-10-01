@@ -130,7 +130,9 @@ class WorkspaceContractService(WorkspaceBaseService):
 
             summary_parts = []
             for idx, c in enumerate(courses):
-                c_id = str(c.get("course_id", 1344))
+                c_id = str(c.get("course_id", "")).strip()
+                if not c_id:
+                    raise RuntimeError("Thiếu course_id trong danh sách môn học!")
                 c_name = c.get("course_name", f"Course #{c_id}")
                 c_lic = str(c.get("licenses", 1))
                 c_cat = c.get("category", "SWRP")
@@ -175,7 +177,7 @@ class WorkspaceContractService(WorkspaceBaseService):
             return {"status": "failed", "error": str(e)}
 
     # =========================================================================
-    # 🏢 2. DISTRIBUTOR DUYỆT PRT CONTRACT (AUTO CREATE DST BÙ QUOTA TIẾNG ANH)
+    # 🏢 2. DISTRIBUTOR DUYỆT PRT CONTRACT (ZERO-MOCK, STRICT VALIDATION)
     # =========================================================================
     async def distributor_approve_partner_contract(
         self,
@@ -190,36 +192,72 @@ class WorkspaceContractService(WorkspaceBaseService):
         school_name: Optional[str] = None,
         total_amount: Optional[str] = "0"
     ) -> Dict[str, Any]:
-        """Distributor duyệt PRT Contract qua Direct API (Tạo DST bù cho tất cả các môn thiếu kèm Lineage)."""
+        """Distributor duyệt PRT Contract: Tuyệt đối không mock ID, chỉ bù DST khi thật sự thiếu kho."""
         try:
-            if not contract_identifier or str(contract_identifier).strip().lower() in ("none", "null", ""):
-                return {
-                    "status": "failed", 
-                    "error": "Invalid PRT Contract identifier (Empty or None)"
-                }
+            clean_contract_code = str(contract_identifier or "").strip()
+            if not clean_contract_code or clean_contract_code.lower() in ("none", "null", ""):
+                return {"status": "failed", "error": "Thiếu mã hợp đồng PRT (contract_identifier)"}
 
-            cookies, identity = await self._steal_role_session(credentials.get("username", ""), credentials.get("password", ""), "Distributor")
-            raw_did = identity.get("distributor_id") or identity.get("id") or "36"
-            dist_id = str(raw_did).strip() if str(raw_did).strip().isdigit() else "36"
+            dist_user = credentials.get("username", "").strip()
+            cookies, identity = await self._steal_role_session(dist_user, credentials.get("password", ""), "Distributor")
 
-            clean_num_match = re.search(r"\d+$", str(contract_identifier))
+            # 🎯 1. BẢO VỆ DISTRIBUTOR_ID: TRUY TÌM DANH TÍNH THẬT, CẤM FALLBACK GÁN BỪA SỐ 36!
+            raw_did = identity.get("distributor_id") or identity.get("id") or identity.get("user_id")
+
+            # Nếu identity chưa có ID số nguyên, tra cứu chính xác từ Supabase Vault & Organizations
+            if not raw_did or not str(raw_did).strip().isdigit():
+                try:
+                    from app.core.supabase import get_supabase_client
+                    supabase = get_supabase_client()
+                    v_res = supabase.table("workspace_credentials_vault") \
+                        .select("org_id") \
+                        .ilike("username", dist_user) \
+                        .execute()
+                    
+                    if v_res.data:
+                        org_id = v_res.data[0].get("org_id")
+                        org_res = supabase.table("workspace_organizations") \
+                            .select("code, partner_id") \
+                            .eq("id", org_id) \
+                            .execute()
+                        if org_res.data:
+                            org_code = org_res.data[0].get("code", "")
+                            num_m = re.search(r"\d+", str(org_code))
+                            if num_m:
+                                raw_did = num_m.group(0)
+                except Exception as db_err:
+                    logger.warning(f"⚠️ Tra cứu Distributor ID từ Supabase thất bại: {db_err}")
+
+            # Nếu vẫn không xác định được: FAIL-CLOSED NGAY LẬP TỨC!
+            if not raw_did or not str(raw_did).strip().isdigit():
+                err_msg = f"KHÔNG THỂ XÁC ĐỊNH DISTRIBUTOR ID CHO TÀI KHOẢN '{dist_user}'. DỪNG THỰC THI ĐỂ BẢO VỆ TÀI CHÍNH!"
+                logger.error(f"❌ [Distributor Fatal] {err_msg}")
+                return {"status": "failed", "error": err_msg}
+
+            dist_id = str(raw_did).strip()
+            wp_username = str(identity.get("username") or dist_user).strip()
+            logger.info(f"🏢 [Distributor Contract] Đã xác định Distributor ID thực tế: [{dist_id}] cho user '{wp_username}'")
+
+            # Trích xuất số nguyên ID từ PRT-YYYYMMDD-ID
+            clean_num_match = re.search(r"\d+$", clean_contract_code)
             if not clean_num_match:
                 return {
                     "status": "failed", 
-                    "error": f"Cannot extract integer ID from PRT code '{contract_identifier}'"
+                    "error": f"Không thể trích xuất ID số nguyên từ mã PRT '{clean_contract_code}'"
                 }
             prt_num_id = clean_num_match.group(0)
 
-            # Contact info & Note chuẩn hóa
             contact_val = str(contact_info or "Admin Automation Hub (hungnm@dtt.vn)").strip()
             approve_note = note or additional_notes or "Approved by PTV Automation Hub Fast Engine"
 
             async with httpx.AsyncClient(base_url=BASE_WORKSPACE_URL, cookies=cookies, timeout=25.0) as client:
+                # Gửi đầy đủ cả order_id (số nguyên) và order_code (chuỗi đầy đủ)
                 payload = {
                     "order_id": str(prt_num_id),
+                    "order_code": clean_contract_code,
                     "status": "approved",
                     "distributor_id": str(dist_id),
-                    "username": credentials.get("username", "testdistributor"),
+                    "username": wp_username,
                     "license_type": "license",
                     "note": approve_note,
                     "contactInfoId": contact_val,
@@ -229,27 +267,40 @@ class WorkspaceContractService(WorkspaceBaseService):
                 res = await client.post(url, files=self._to_multipart(payload))
 
                 if res.status_code == 200:
-                    res_json = res.json()
+                    try:
+                        res_json = res.json()
+                    except Exception:
+                        res_json = {}
+
+                    res_code = res_json.get("code")
                     msg = str(res_json.get("message", "")).lower()
 
-                    if "success" in msg or (res_json.get("code") == 200 and "insufficient" not in msg):
-                        await self._sync_contract_status_db(contract_identifier, "PRT", "Approved")
-                        clean_msg = f"Approved PRT: {contract_identifier}"
+                    # 🟢 TRƯỜNG HỢP 1: DUYỆT THÀNH CÔNG THẬT SỰ
+                    if res_code in (200, 201) or "success" in msg:
+                        await self._sync_contract_status_db(clean_contract_code, "PRT", "Approved")
+                        clean_msg = f"Approved PRT: {clean_contract_code}"
                         logger.info(f"✅ [Distributor Contract] {clean_msg}")
                         return {
                             "status": "success",
-                            "contract_identifier": contract_identifier,
+                            "contract_identifier": clean_contract_code,
                             "message": clean_msg
                         }
 
-                    # THIẾU LICENSE ➔ TẠO DST CONTRACT VỪA ĐỦ VỚI LINEAGE TIẾNG ANH
-                    if auto_create_dst_if_short:
+                    # 🔴 TRƯỜNG HỢP 2: LỖI THIẾU KHO THỰC SỰ ➔ MỚI ĐƯỢC TẠO ĐƠN BÙ DST
+                    is_really_insufficient = any(keyword in msg for keyword in ("insufficient", "not enough", "lacks license", "thiếu"))
+                    if is_really_insufficient and auto_create_dst_if_short:
                         courses_to_topup = courses_needed or []
+                        if not courses_to_topup:
+                            return {
+                                "status": "failed",
+                                "error": f"Distributor thiếu License cho PRT {clean_contract_code} nhưng không có danh sách môn để tạo đơn bù DST!"
+                            }
+
                         origin_part = f" | Origin Order: {origin_order_code}" if origin_order_code else ""
                         school_part = f" | School: {school_name}" if school_name else ""
                         
                         user_custom_note = (additional_notes or note or "").strip()
-                        lineage_tag = f"[Auto Top-up for Partner Contract: {contract_identifier}{origin_part}{school_part}]"
+                        lineage_tag = f"[Auto Top-up for Partner Contract: {clean_contract_code}{origin_part}{school_part}]"
                         sys_dst_notes = f"{lineage_tag} {user_custom_note}".strip() if user_custom_note else f"{lineage_tag} Quota top-up requested"
 
                         safe_amount = str(total_amount or "0").strip()
@@ -266,14 +317,17 @@ class WorkspaceContractService(WorkspaceBaseService):
 
                         topup_summary = []
                         for idx, c in enumerate(courses_to_topup):
-                            cid = str(c.get("course_id", 1344))
-                            cname = c.get("course_name", f"Course #{cid}")
+                            cid = str(c.get("course_id", "")).strip()
+                            if not cid:
+                                raise RuntimeError("Khóa học thiếu course_id thực tế, CẤM MOCK!")
+                            cname = str(c.get("course_name") or f"Course #{cid}").strip()
                             qty_topup = int(c.get("licenses") or c.get("quantity") or 1)
+                            ccat = str(c.get("category") or "SWRP").strip()
 
                             dst_payload[f"courses[{idx}][course_id]"] = cid
                             dst_payload[f"courses[{idx}][course_name]"] = cname
                             dst_payload[f"courses[{idx}][student_count]"] = str(qty_topup)
-                            dst_payload[f"courses[{idx}][category]"] = "SWRP"
+                            dst_payload[f"courses[{idx}][category]"] = ccat
                             dst_payload[f"courses[{idx}][unit_price]"] = "0"
                             dst_payload[f"courses[{idx}][total_amount]"] = "0"
                             topup_summary.append(f"#{cid} ({qty_topup} Qty)")
@@ -287,7 +341,7 @@ class WorkspaceContractService(WorkspaceBaseService):
                                 dst_code = f"DST-{dst_data.get('id')}"
 
                             if not dst_code:
-                                return {"status": "failed", "error": "API createOrder succeeded but returned no DST code"}
+                                return {"status": "failed", "error": "API createOrder thành công nhưng không trả về mã DST"}
 
                             await self._record_created_contract_db(
                                 dst_code, "DST", "Awaiting Sales Admin", 
@@ -295,11 +349,11 @@ class WorkspaceContractService(WorkspaceBaseService):
                                 contact_info=contact_val,
                                 additional_notes=sys_dst_notes
                             )
-                            clean_msg = f"Insufficient PRT {contract_identifier} ➔ Created DST: {dst_code} [{', '.join(topup_summary)}]"
+                            clean_msg = f"Kho Distributor thiếu License cho PRT {clean_contract_code} ➔ Đã tạo DST bù: {dst_code} [{', '.join(topup_summary)}]"
                             logger.warning(f"⚠️ [Distributor Contract] {clean_msg}")
                             return {
                                 "status": "insufficient_pool_created_dst",
-                                "contract_identifier": contract_identifier,
+                                "contract_identifier": clean_contract_code,
                                 "dst_contract_code": dst_code,
                                 "origin_order_code": origin_order_code,
                                 "school_name": school_name,
@@ -308,10 +362,17 @@ class WorkspaceContractService(WorkspaceBaseService):
                                 "message": clean_msg
                             }
 
-                return {"status": "failed", "error": f"Distributor approve PRT failed: {res.text}"}
+                    err_msg = res_json.get("message") or res.text
+                    logger.error(f"❌ [Distributor Approve PRT Reject] PHP từ chối với code {res_code}: {err_msg}")
+                    return {
+                        "status": "failed",
+                        "error": f"Distributor approve PRT thất bại (code {res_code}): {err_msg}"
+                    }
+
+                return {"status": "failed", "error": f"Distributor approve PRT lỗi HTTP {res.status_code}: {res.text}"}
 
         except Exception as e:
-            logger.error(f"❌ Error in Distributor Approve Partner Contract: {e}")
+            logger.error(f"❌ Lỗi trong Distributor Approve Partner Contract: {e}")
             return {"status": "failed", "error": str(e)}
 
     # =========================================================================
@@ -320,7 +381,9 @@ class WorkspaceContractService(WorkspaceBaseService):
     async def distributor_create_contract(self, credentials: Dict[str, str], contract_data: Dict[str, Any]) -> Dict[str, Any]:
         try:
             cookies, identity = await self._steal_role_session(credentials.get("username", ""), credentials.get("password", ""), "Distributor")
-            dist_id = identity.get("distributor_id") or "36"
+            dist_id = str(identity.get("distributor_id") or identity.get("id") or "").strip()
+            if not dist_id or not dist_id.isdigit():
+                raise RuntimeError(f"Không thể xác định distributor_id thực tế cho user '{credentials.get('username')}'")
 
             courses = contract_data.get("courses", [])
             safe_amount = str(contract_data.get("total_amount", 0)).strip()
