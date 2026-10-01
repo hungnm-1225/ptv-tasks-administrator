@@ -438,7 +438,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
             return {"status": "failed", "error": str(e)}
 
     # =========================================================================
-    # 🤝 2. PARTNER DUYỆT SCHOOL ORDER (LINEAGE & CONTACT INFO TIẾNG ANH)
+    # 🤝 2. PARTNER DUYỆT SCHOOL ORDER (CHUẨN HÓA DEVTOOLS & CHỐNG BÁO CÁO LÁO)
     # =========================================================================
     async def partner_approve_school_order(
         self, 
@@ -458,7 +458,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                 "Partner"
             )
 
-            # 🎯 1. BẢO VỆ PARTNER_ID: KHÔNG BAO GIỜ ĐỂ BỊ 'None'
+            # 🎯 1. BẢO VỆ PARTNER_ID VÀ WP USERNAME CHUẨN DEVTOOLS
             raw_pid = identity.get("partner_id") or identity.get("user_id") or identity.get("id")
             if not raw_pid or str(raw_pid).strip().lower() in ("none", "null", ""):
                 try:
@@ -469,16 +469,16 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     pass
             
             partner_id = str(raw_pid).strip() if (raw_pid and str(raw_pid).strip().isdigit()) else "60"
+            wp_username = str(identity.get("username") or credentials.get("username") or "partnerdtte").strip()
 
             clean_num_match = re.search(r"\d+$", str(order_identifier))
             num_order_id = clean_num_match.group(0) if clean_num_match else str(order_identifier)
 
-            # Bảo toàn contact info được truyền vào
             contact_val = str(contact_info or credentials.get("contact_info") or "Admin Automation Hub (hungnm@dtt.vn)").strip()
             approve_note = note or additional_notes or "Approved by PTV Automation Hub Fast Engine"
 
             async with httpx.AsyncClient(base_url=BASE_WORKSPACE_URL, cookies=cookies, timeout=25.0) as client:
-                # 1. Lấy chi tiết toàn bộ các môn trong đơn
+                # 🎯 2. LẤY CHI TIẾT CÁC MÔN CẦN DUYỆT TỪ ORDER DETAIL
                 detail_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/partner_workspace_v3/api/orders_management/getOrderDetail.php?order_id={num_order_id}"
                 d_res = await client.get(detail_url)
                 detail_data = d_res.json() if d_res.status_code == 200 else {}
@@ -496,22 +496,24 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     ]
 
                 if not courses_req:
-                    return {"status": "failed", "error": f"Cannot find course details for Order #{num_order_id}"}
+                    err_msg = f"Không tìm thấy danh sách khóa học của Order #{num_order_id}"
+                    logger.error(f"❌ [Partner Order] {err_msg}")
+                    return {"status": "failed", "error": err_msg}
 
-                # 2. Quét kho License Pool của Partner
+                # 🎯 3. QUÉT KHO LICENSE POOL CỦA PARTNER
                 pool_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/partner_workspace_v3/api/order_sale/getPartnerPoolLicense.php?partner_id={partner_id}"
                 p_res = await client.get(pool_url)
                 pool_courses = p_res.json().get("data", {}).get("pool_courses", []) if p_res.status_code == 200 else []
 
-                # Bản sao số dư kho để trừ dần (Virtual Pool Balance)
+                # Số dư ảo để trừ dần khi tính toán
                 pool_balance = {str(p.get("id")): int(p.get("item_quantity", 0)) for p in pool_courses}
 
                 allocated_courses = []
                 short_courses = []
 
-                # 🎯 3. DUYỆT TỪNG MÔN TRONG ĐƠN ĐỂ TÌM POOL KHỚP
+                # 🎯 4. KHỚP CHÍNH XÁC THEO item_id (TUYỆT ĐỐI KHÔNG GÁN BỪA POOL RÁC!)
                 for req in courses_req:
-                    cid = str(req.get("course_id", ""))
+                    cid = str(req.get("course_id", "")).strip()
                     c_name = req.get("course_name", f"Course #{cid}")
                     c_cat = req.get("category") or req.get("licenseCategory") or "SWRP"
                     qty = int(req.get("course_count", 0))
@@ -519,17 +521,10 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     matched_pool = None
                     for p in pool_courses:
                         pid = str(p.get("id"))
-                        p_cid = str(p.get("course_id", ""))
-                        if p_cid == cid and pool_balance.get(pid, 0) >= qty:
+                        p_item_id = str(p.get("item_id", "")).strip()  # 💡 CHUẨN XÁC: item_id từ DevTools!
+                        if p_item_id == cid and pool_balance.get(pid, 0) >= qty:
                             matched_pool = p
                             break
-
-                    if not matched_pool:
-                        for p in pool_courses:
-                            pid = str(p.get("id"))
-                            if pool_balance.get(pid, 0) >= qty:
-                                matched_pool = p
-                                break
 
                     if matched_pool:
                         pid = str(matched_pool.get("id"))
@@ -549,18 +544,15 @@ class WorkspaceOrderService(WorkspaceBaseService):
                             "quantity": qty
                         })
 
-                # 🟢 NẾU TẤT CẢ CÁC MÔN ĐỀU ĐỦ LICENSE ➔ DUYỆT ĐƠN 100%
+                # 🟢 5. NẾU 100% MÔN ĐỀU ĐỦ LICENSE TƯƠNG ỨNG ➔ BẮN API DUYỆT ĐƠN
                 if not short_courses and len(allocated_courses) == len(courses_req):
                     approve_payload = {
                         "order_id": str(num_order_id),
                         "status": "1",
                         "partner_id": str(partner_id),
-                        "username": credentials.get("username", "partnerdtte"),
+                        "username": wp_username,
                         "order_code": order_identifier or f"SCH-{num_order_id}",
-                        "license_type": "course",
-                        "note": approve_note,
-                        "contactInfoId": contact_val,
-                        "contact_info": contact_val
+                        "license_type": "course"
                     }
 
                     details_str_list = []
@@ -573,24 +565,51 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     ap_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/partner_workspace_v3/api/orders_management/updateStatusOrder.php"
                     res = await client.post(ap_url, files=self._to_multipart(approve_payload))
                     
+                    # 🎯 6. CHỐT CHẶN THÉP CHỐNG BÁO CÁO LÁO: KIỂM ĐỊNH JSON BODY & CODE 201
                     if res.status_code in (200, 201):
-                        await self._sync_order_status_db(order_identifier, "Approved", credentials.get("username"))
-                        clean_msg = f"Approved Order: {order_identifier} ({len(allocated_courses)} courses) | {' + '.join(details_str_list)}"
-                        logger.info(f"✅ [Partner Order] {clean_msg}")
-                        return {
-                            "status": "success",
-                            "order_identifier": order_identifier,
-                            "message": clean_msg
-                        }
+                        try:
+                            res_json = res.json()
+                        except Exception:
+                            res_json = {}
 
-                # 🔴 NẾU THIẾU LICENSE ➔ TẠO PRT CONTRACT BÙ ĐÚNG CHUẨN TIẾNG ANH & BẢO TOÀN CONTACT INFO
+                        res_code = res_json.get("code")
+                        # DevTools xác thực thành công trả về: {"code": 201, "message": "Order has been updated successfully"}
+                        if res_code in (200, 201):
+                            # Re-fetch verification: Đối soát trạng thái thực tế sau khi duyệt
+                            try:
+                                v_res = await client.get(detail_url)
+                                if v_res.status_code == 200:
+                                    v_data = v_res.json()
+                                    logger.info(f"🔍 [Re-fetch Verify] Order #{num_order_id} ➔ Status: '{v_data.get('status')}', is_can_approve: {v_data.get('is_can_approve')}")
+                            except Exception:
+                                pass
+
+                            await self._sync_order_status_db(order_identifier, "Approved", credentials.get("username"))
+                            clean_msg = f"Approved Order: {order_identifier} ({len(allocated_courses)} courses) | {' + '.join(details_str_list)}"
+                            logger.info(f"✅ [Partner Order] {clean_msg}")
+                            return {
+                                "status": "success",
+                                "order_identifier": order_identifier,
+                                "message": clean_msg
+                            }
+                        else:
+                            err_msg = res_json.get("message") or res.text or f"PHP Rejected with code {res_code}"
+                            logger.error(f"❌ [Partner Order Reject] PHP từ chối duyệt đơn: {err_msg} | Response: {res.text}")
+                            return {
+                                "status": "failed",
+                                "error": f"API updateStatusOrder.php từ chối: {err_msg}"
+                            }
+                    else:
+                        err_msg = f"HTTP Error {res.status_code}: {res.text}"
+                        logger.error(f"❌ [Partner Order HTTP Error] {err_msg}")
+                        return {"status": "failed", "error": err_msg}
+
+                # 🔴 6. NẾU THIẾU LICENSE ➔ TẠO PRT CONTRACT BÙ ĐÚNG LICENSE CÒN THIẾU
                 short_desc = ", ".join([f"#{c['course_id']} (needs {c['quantity']})" for c in short_courses])
-                logger.warning(f"⚠️ Partner Pool lacks licenses for Order [{order_identifier}]: {short_desc}")
+                logger.warning(f"⚠️ Kho License Partner thiếu môn cho Order [{order_identifier}]: {short_desc}")
 
                 if auto_create_prt_if_short:
                     resolved_school = credentials.get("school_name") or order_identifier
-                    
-                    # 🎯 LINEAGE TIẾNG ANH KẾT HỢP GHI CHÚ BỔ SUNG CỦA ANH
                     user_custom_note = (additional_notes or note or "").strip()
                     lineage_tag = f"[Auto Top-up for School Order: {order_identifier} | School: {resolved_school} | Shortage: {short_desc}]"
                     sys_topup_notes = f"{lineage_tag} {user_custom_note}".strip() if user_custom_note else f"{lineage_tag} Quota top-up requested"
@@ -626,7 +645,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                         prt_id = prt_data.get("id")
 
                         if not prt_code or not prt_id:
-                            err_msg = f"API createOrderSale failed (Did not return PRT code): {prt_res.text}"
+                            err_msg = f"API createOrderSale thất bại (Không trả về mã PRT): {prt_res.text}"
                             logger.error(f"❌ {err_msg}")
                             return {"status": "failed", "error": err_msg}
 
@@ -637,7 +656,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                             contact_info=contact_val,
                             additional_notes=sys_topup_notes
                         )
-                        clean_msg = f"Insufficient License for Order {order_identifier} ({short_desc}) ➔ Created PRT: {prt_code}"
+                        clean_msg = f"Kho không đủ License cho Order {order_identifier} ({short_desc}) ➔ Đã tự động tạo PRT bù Quota: {prt_code}"
                         logger.warning(f"⚠️ [Partner Order] {clean_msg}")
                         return {
                             "status": "insufficient_pool_created_prt",
@@ -650,18 +669,18 @@ class WorkspaceOrderService(WorkspaceBaseService):
                             "message": clean_msg
                         }
                     else:
-                        err_msg = f"API createOrderSale HTTP error {prt_res.status_code}: {prt_res.text}"
+                        err_msg = f"API createOrderSale lỗi HTTP {prt_res.status_code}: {prt_res.text}"
                         logger.error(f"❌ {err_msg}")
                         return {"status": "failed", "error": err_msg}
 
                 return {
                     "status": "insufficient_pool",
                     "order_identifier": order_identifier,
-                    "message": f"Insufficient License for Order {order_identifier}: {short_desc}"
+                    "message": f"Không đủ License cho Order {order_identifier}: {short_desc}"
                 }
 
         except Exception as e:
-            logger.error(f"❌ Error in Partner Approve Order: {e}")
+            logger.error(f"❌ Lỗi trong Partner Approve Order: {e}")
             return {"status": "failed", "error": str(e)}
             
     # =========================================================================

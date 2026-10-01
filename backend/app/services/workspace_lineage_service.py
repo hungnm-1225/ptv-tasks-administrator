@@ -115,13 +115,6 @@ class WorkspaceLineageService:
                 # 2.2 Tìm chính xác theo tên (Chỉ dùng ilike trên name, không nhét vào code.eq)
                 school_res = query.ilike("name", f"%{clean_name}%").execute()
 
-                # 2.3 Heuristic Fallback: Nếu không thấy và tên dính (Demo)/(Test) -> gọt sạch tìm lại
-                if (not school_res or not school_res.data):
-                    base_name = cls._clean_demo_noise(clean_name)
-                    if base_name and base_name != clean_name:
-                        logger.info(f"🔍 Thử fallback tìm trường theo Base Name: '{base_name}' (loại bỏ hậu tố Demo/Test)")
-                        school_res = query.ilike("name", f"%{base_name}%").execute()
-
         if not school_res or not school_res.data:
             logger.warning(f"❌ Không tìm thấy trường học (role_type='school') phù hợp với ID='{target_id}', Name='{target_name}'")
             return None
