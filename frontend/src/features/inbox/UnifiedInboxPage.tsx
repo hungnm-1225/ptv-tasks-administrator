@@ -647,9 +647,12 @@ export const UnifiedInboxPage: React.FC = () => {
       {loading ? (
         <TicketListSkeleton />
       ) : filteredTickets.length === 0 ? (
-        <div className="p-16 text-center rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-3">
-          <Inbox className="w-12 h-12 text-slate-300 mx-auto" />
+        <div className="w-full p-16 text-center rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-3">
+          <Inbox className="w-12 h-12 text-slate-300 dark:text-slate-600 mx-auto" />
           <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300">Không tìm thấy ticket nào</h3>
+          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
+            Không có ticket hoặc yêu cầu nào khớp với bộ lọc hoặc từ khóa tìm kiếm hiện tại.
+          </p>
         </div>
       ) : (
         <div className="space-y-4">

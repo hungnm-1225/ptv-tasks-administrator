@@ -358,9 +358,17 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                     )}
                 </div>
 
-                <p className="text-xs text-slate-800 dark:text-slate-200 leading-relaxed whitespace-pre-line font-medium">
-                    {ticket.ai_summary || 'Hệ thống đã nhận thông tin và đang chờ Gemini AI phân tích...'}
-                </p>
+                <div className="text-xs text-slate-800 dark:text-slate-200 leading-relaxed font-medium space-y-1.5">
+                    {ticket.ai_summary ? (
+                        ticket.ai_summary.split('\n').filter((l: string) => l.trim()).map((line: string, idx: number) => (
+                            <div key={idx} className="flex items-start gap-1.5">
+                                <span className="leading-relaxed">{line.trim()}</span>
+                            </div>
+                        ))
+                    ) : (
+                        <p className="italic text-slate-400">Hệ thống đã nhận thông tin và đang chờ Gemini AI phân tích...</p>
+                    )}
+                </div>
             </div>
 
             {/* Collapsible raw content */}

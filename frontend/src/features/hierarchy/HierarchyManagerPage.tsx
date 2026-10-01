@@ -597,8 +597,13 @@ export const HierarchyManagerPage: React.FC = () => {
                                 ))
                             ) : paginatedOrgs.length === 0 ? (
                                 <tr>
-                                    <td colSpan={5} className="py-12 text-center text-slate-400">
-                                        Không tìm thấy đơn vị nào khớp với tiêu chí lọc.
+                                    <td colSpan={5} className="py-12 text-center">
+                                        <div className="flex flex-col items-center justify-center space-y-2">
+                                            <Search className="w-8 h-8 text-slate-300 dark:text-slate-600 stroke-1" />
+                                            <p className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
+                                                Không tìm thấy đơn vị nào khớp với tiêu chí lọc hoặc từ khóa tìm kiếm.
+                                            </p>
+                                        </div>
                                     </td>
                                 </tr>
                             ) : (

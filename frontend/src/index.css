@@ -54,14 +54,11 @@
   --font-body:    "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono:    "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* ── Spacing (4pt scale — density 8/10) ────────────── */
-  --spacing-2xs: 0.25rem;  /*  4px */
-  --spacing-xs:  0.5rem;   /*  8px */
-  --spacing-sm:  0.75rem;  /* 12px */
-  --spacing-md:  1rem;     /* 16px */
-  --spacing-lg:  1.5rem;   /* 24px */
-  --spacing-xl:  2rem;     /* 32px */
-  --spacing-2xl: 3rem;     /* 48px */
+  /* ── Spacing Note ──────────────────────────────────
+   * Default Tailwind v4 spacing is preserved so max-w-sm, max-w-md,
+   * max-w-lg, max-w-xl, max-w-2xl correctly map to container widths
+   * (e.g. max-w-sm = 24rem, not 0.75rem / 12px)
+   ────────────────────────────────────────────────────── */
 
   /* ── Text scale ────────────────────────────────────── */
   --text-xs:    0.75rem;

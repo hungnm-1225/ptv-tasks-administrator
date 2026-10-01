@@ -28,6 +28,8 @@ from app.core.gemini import gemini_engine
 from app.services.workflow_planner import workflow_planner_service
 from app.services.cof_excel_service import COFExcelService
 from app.services.excel.generic_excel_service import GenericExcelService
+from app.services.excel.excel_digest_service import build_executive_excel_digest, merge_all_excel_data
+from app.services.course_knowledge_service import course_knowledge_service
 
 _LOCAL_COURSES_CACHE: Dict[str, Any] = {
     "courses": [],
@@ -431,46 +433,54 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                         except Exception:
                             pass
 
-            # B. 🎯 SMART IMAGE GATING: CHỈ TẢI ĐÚNG 1 ẢNH LỖI HỢP LỆ (LOẠI BỎ ICON, CHỮ KÝ < 15KB)
+            # B. 🎯 MULTIMODAL MEDIA VISION: TẢI TẤT CẢ ẢNH ĐÍNH KÈM HỢP LỆ (TỪ 10KB TRỞ LÊN)
             elif (
-                any(fname_lower.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".webp"])
+                any(fname_lower.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"])
                 and not is_already_done
-                and len(image_parts) < 1  # 👈 CHỐT CHẶN: Tối đa duy nhất 1 ảnh chụp màn hình để AI phản hồi siêu tốc!
-                and needs_vision          # 👈 CHỐT CHẶN: Chỉ nạp khi ngữ cảnh thực sự cần đọc ảnh lỗi
+                and len(image_parts) < 10  # 👈 Cho phép tối đa 10 ảnh đính kèm để quét sạch toàn bộ bằng chứng
             ):
                 try:
-                    async with httpx.AsyncClient(timeout=15.0) as client:
+                    async with httpx.AsyncClient(timeout=20.0) as client:
                         resp = await client.get(furl)
-                        # Bỏ qua ảnh rác: Icon, avatar, logo thường < 15KB (15360 bytes)
-                        if resp.status_code == 200 and 15 * 1024 <= len(resp.content) <= 4 * 1024 * 1024:
+                        # Lấy tất cả file media từ 10KB trở lên (loại bỏ icon, avatar siêu nhỏ < 10KB)
+                        if resp.status_code == 200 and 10 * 1024 <= len(resp.content) <= 10 * 1024 * 1024:
                             img_hash = hashlib.sha256(resp.content).hexdigest()
                             if img_hash not in seen_image_hashes:
                                 seen_image_hashes.add(img_hash)
-                                mime = "image/png" if fname_lower.endswith(".png") else "image/webp" if fname_lower.endswith(".webp") else "image/jpeg"
+                                mime = (
+                                    "image/png" if fname_lower.endswith(".png")
+                                    else "image/webp" if fname_lower.endswith(".webp")
+                                    else "image/gif" if fname_lower.endswith(".gif")
+                                    else "image/bmp" if fname_lower.endswith(".bmp")
+                                    else "image/jpeg"
+                                )
                                 image_parts.append({
                                     "mime_type": mime,
                                     "data": resp.content,
                                     "filename": fname
                                 })
-                                logger.info(f"📸 [Smart Vision Gating] Đã chọn ảnh chụp màn hình đạt chuẩn: [{fname}] ({len(resp.content) // 1024} KB)")
+                                logger.info(f"📸 [Multimodal Vision] Đã nạp ảnh đính kèm đạt chuẩn: [{fname}] ({len(resp.content) // 1024} KB)")
                         else:
-                            logger.info(f"🛡️ [Smart Vision Gating] Bỏ qua ảnh nhỏ/icon chữ ký: [{fname}] ({len(resp.content) // 1024} KB)")
+                            logger.info(f"🛡️ [Media Filter] Bỏ qua file media nhỏ hơn 10KB hoặc quá lớn: [{fname}] ({len(resp.content) // 1024} KB)")
                 except Exception as img_err:
                     logger.warning(f"⚠️ Lỗi tải ảnh đính kèm [{fname}]: {img_err}")
 
-        # 3. XÂY DỰNG BẢN LƯỢC KÊ QUẢN TRỊ (EXECUTIVE DIGEST) TỪ TỆP ĐÍNH KÈM
+        # 3. XÂY DỰNG BẢN LƯỢC KÊ QUẢN TRỊ (EXECUTIVE DIGEST) TỪ TOÀN BỘ CÁC TỆP ĐÍNH KÈM
         excel_summary: Optional[Dict[str, Any]] = None
         executive_digest_str = ""
 
         if parsed_excel_files:
             new_pending_files = [f for f in parsed_excel_files if f.get("lifecycle_status") == "new_pending"]
-            new_pending_files.sort(key=lambda x: x.get("turn_index", 0), reverse=True)
-            active_file = new_pending_files[0] if new_pending_files else parsed_excel_files[0]
+            target_files = new_pending_files if new_pending_files else parsed_excel_files
 
-            executive_digest_str = build_executive_excel_digest(active_file)
+            # Tóm tắt toàn bộ tất cả các file Excel, không bỏ sót bất kỳ file nào
+            executive_digest_str = build_executive_excel_digest(target_files)
+
+            # Hợp nhất toàn bộ thông tin từ các file Excel (học sinh, giáo viên, khóa học, licenses)
+            merged_excel_data = merge_all_excel_data(target_files)
             
             excel_summary = {
-                **active_file,
+                **merged_excel_data,
                 "executive_digest": executive_digest_str,
                 "provenance_ledger": {
                     "active_new_files": new_active_filenames,
@@ -495,15 +505,15 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
                     "courses_detected": text_parsed.get("courses_detected", [])
                 }
 
-        # 4. MỒI KHÓA HỌC THÔNG MINH (CANDIDATE INJECTION - CHỌN TOP 6 MÔN)
-        smart_catalog = get_smart_catalog_context(
+        # 4. MỒI KHÓA HỌC THÔNG MINH (CANDIDATE INJECTION TỪ CẢ 2 BẢNG LMS & WORKSPACE)
+        smart_catalog = course_knowledge_service.get_smart_catalog_context(
             supabase=supabase,
             raw_text=raw_content,
             subject=subject,
             excel_summary=excel_summary,
-            max_candidates=6  # 👈 Chỉ lấy tối đa 6 môn liên quan nhất, tiết kiệm 95% token!
+            max_candidates=10  # Lấy 10 môn liên quan nhất từ CSDL hợp nhất
         )
-        catalog_context_str = "\n".join([f"- [{c['id']}] {c['name']}" for c in smart_catalog]) if smart_catalog else "(Không có môn phù hợp)"
+        catalog_context_str = "\n".join([f"- [{c['id']}] {c['name']}" for c in smart_catalog]) if smart_catalog else "(Không có môn phù hợp trong CSDL)"
         
         if excel_summary is not None:
             excel_summary["catalog_reference"] = smart_catalog
@@ -542,12 +552,13 @@ async def process_ticket_revision(revision_id: str) -> Dict[str, Any]:
             except Exception as h_err:
                 logger.warning(f"Lỗi nạp lịch sử workflow: {h_err}")
 
-        # 6. Tóm tắt mềm (Key 1)
+        # 6. Tóm tắt mềm (Key 1) - Tích hợp đầy đủ thông tin tệp đính kèm Excel
         summary_res = gemini_engine.summarize_ticket(
             subject=subject, 
             raw_content=raw_content + historical_context_note, 
             source=source,
-            sender_email=sender_email
+            sender_email=sender_email,
+            excel_summary=excel_summary
         )
 
         # 7. Bóc tách Sự Thật Vận Hành (Key 2) - ZERO-MOCKUP INVARIANT

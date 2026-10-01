@@ -177,12 +177,14 @@ class AIEngine:
         subject: str,
         raw_content: str,
         source: str,
-        sender_email: Optional[str] = None
+        sender_email: Optional[str] = None,
+        excel_summary: Optional[Dict[str, Any]] = None
     ) -> TicketSummary:
         """
         Nâng cấp Tóm Tắt thành Hồ Sơ Giám Định Chi Tiết (Detailed Operational Dossier).
-        Phân định rạch ròi Người Gửi (Requester) vs Người Thụ Hưởng (Target Subjects)
-        để chống tuyệt đối lỗi kẹp người gửi vào danh sách thực thi.
+        Tích hợp thông tin bóc tách từ file đính kèm (COF, TOF, Bulk Accounts, Generic)
+        để tóm tắt chính xác từng môn học, số lượng bản quyền, giáo viên và học sinh.
+        Làm ngọn hải đăng chỉ dẫn cho AI Planner xây dựng luồng workflow tự động.
         """
         sender_clean = (sender_email or "").lower().strip()
         is_automated = any(sender_clean.startswith(prefix) or prefix in sender_clean for prefix in AUTOMATED_SENDER_PREFIXES)
@@ -201,22 +203,42 @@ class AIEngine:
         parsed_thread = thread_service.parse_thread(raw_content, sender_email)
         prompt_content = parsed_thread.compact_prompt_context if parsed_thread.is_thread else (raw_content[:20000] if raw_content else "(Trống)")
 
+        # Trích xuất bản tóm tắt file đính kèm (nếu có)
+        excel_digest_section = ""
+        if excel_summary and isinstance(excel_summary, dict):
+            digest_str = excel_summary.get("executive_digest")
+            if not digest_str:
+                from app.services.excel.excel_digest_service import build_executive_excel_digest
+                digest_str = build_executive_excel_digest(excel_summary)
+            if digest_str and "(Không có" not in digest_str:
+                excel_digest_section = f"\n[THÔNG TIN TỆP ĐÍNH KÈM / BẢNG TÍNH ĐÃ BÓC TÁCH]:\n{digest_str}\n"
+
         # XÂY DỰNG PROMPT GIÁM ĐỊNH CHI TIẾT
         detailed_dossier_instruction = (
-            f"Bạn là Chuyên gia Giám định Vận hành Hệ thống.\n"
-            f"Hãy lập HỒ SƠ GIÁM ĐỊNH CHI TIẾT cho yêu cầu sau:\n"
+            f"Bạn là Chuyên gia Giám định Vận hành Hệ thống Pythaverse Central Admin Hub (DTT Corporation).\n"
+            f"Nhiệm vụ: Đọc kỹ yêu cầu và thông tin tệp đính kèm để lập HỒ SƠ GIÁM ĐỊNH CHI TIẾT mạch lạc, chuẩn xác, "
+            f"làm CHỈ DẪN NGHIỆP VỤ ĐỊNH HƯỚNG cho AI Planner xây dựng luồng tự động hóa (Workflow DAG).\n\n"
+            f"[THÔNG TIN YÊU CẦU]:\n"
             f"- Tiêu đề: {subject}\n"
             f"- Người gửi (Requester): {sender_clean}\n"
             f"- Kênh tiếp nhận: {source}\n"
-            f"- Nội dung:\n{prompt_content}\n\n"
+            f"- Nội dung thư:\n{prompt_content}\n"
+            f"{excel_digest_section}\n"
             f"YÊU CẦU PHÂN TÍCH:\n"
-            f"1. Xác định rõ: Người gửi là ai? Họ đang yêu cầu cho chính họ hay yêu cầu cho người khác (học sinh/giáo viên khác)?\n"
-            f"2. Liệt kê các đối tượng thụ hưởng thực sự (target subjects) nếu có trong văn bản.\n"
-            f"3. Xác định rõ phân hệ cần can thiệp: Git, LMS Moodle, Keycloak, hay School Workspace?\n"
-            f"4. Trả về JSON gồm: category ('license'|'lms_enroll'|'account_keycloak'|'bug'|'other'), "
-            f"priority ('urgent'|'high'|'normal'|'low'), goal, và summary_vi.\n"
-            f"Trong đó summary_vi PHẢI LÀ BẢN GIÁM ĐỊNH ĐẦY ĐỦ theo cấu trúc:\n"
-            f"'[Người yêu cầu: {sender_clean}]\n [Hành động: ...]\n [Đối tượng đích: ...]\n [Phân hệ: ...]\n [Chi tiết: ...]'"
+            f"1. Phân định rõ ràng: Người gửi ({sender_clean}) là ai? Họ đang tự yêu cầu cho họ hay gửi danh sách yêu cầu cho giáo viên/học sinh khác?\n"
+            f"2. Nếu có tệp đính kèm (COF, TOF, Bulk Accounts): Nêu rõ số lượng bản quyền (licenses) của từng môn học (VD: 300 licenses SWRP 1, 100 licenses ASP Leanbot...), số lượng học sinh/giáo viên cần tạo tài khoản.\n"
+            f"3. Xác định rõ các phân hệ cần can thiệp: Moodle LMS (ghi danh/hủy môn), Keycloak IDP (mở khóa/reset pass/kích hoạt), Pythaverse Git (cấp quyền/gỡ quyền repo), hoặc School Workspace (tạo tài khoản lô/duyệt đơn/hợp đồng).\n"
+            f"4. Trả về DUY NHẤT một JSON hợp lệ gồm: category ('license'|'lms_enroll'|'account_keycloak'|'bug'|'other'), "
+            f"priority ('urgent'|'high'|'normal'|'low'), goal (mục đích ngắn gọn 1 câu), và summary_vi.\n"
+            f"Trong đó summary_vi PHẢI LÀ BẢN GIÁM ĐỊNH MẠCH LẠC, TRỰC QUAN với hệ thống ICON/EMOJI sinh động theo cấu trúc sau (xuống dòng rõ ràng giữa các mục):\n"
+            f"'🎯 Mục đích: [Tuyên bố mục đích ngắn gọn 1-2 câu]\n"
+            f"👤 Người gửi: {sender_clean}\n"
+            f"👥 Đối tượng thụ hưởng: [Số lượng học sinh 🎓, giáo viên 👨‍🏫 hoặc email đích (đã loại trừ người gửi nếu gửi dùm)]\n"
+            f"📁 Tệp đính kèm: [Tên tệp, loại phôi 📊 COF / 👥 Bulk Accounts / 📋 TOF / 📸 Ảnh sự cố (nêu nếu có)]\n"
+            f"🏫 Đơn vị / Trường học: [Tên trường học và quốc gia nếu có]\n"
+            f"📚 Khóa học & Bản quyền: [Tên môn học chuẩn mực, 🔑 số lượng licenses yêu cầu, thời hạn]\n"
+            f"⚙️ Phân hệ tác động: [🎓 Moodle LMS / 🐙 Pythaverse Git / 🔐 Keycloak IDP / 🏢 School Workspace]\n"
+            f"⚡ Đề xuất luồng tự động hóa: [Chắp nối các bước liên hoàn: Bước 1 ➔ Bước 2 ➔ Bước 3...]'"
         )
 
         parsed_data, used_model = self._call_gemini_with_fallback(detailed_dossier_instruction, primary_key=self.api_key_summary)

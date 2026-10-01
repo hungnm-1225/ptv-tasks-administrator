@@ -412,10 +412,17 @@ export const WorkflowConsoleModal: React.FC<WorkflowConsoleModalProps> = ({
 
                                         <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs overflow-y-auto max-h-48 flex-1 leading-relaxed shadow-inner">
                                             {vungAViewMode === 'summary' ? (
-                                                <p className="whitespace-pre-line text-slate-800 dark:text-slate-200 font-medium">
-                                                    {selectedTicket.ai_summary ||
-                                                        'Chưa có bản tóm tắt. Bạn có thể nhấn nút "Tóm tắt lại" ở trên góc phải để AI sinh tóm tắt.'}
-                                                </p>
+                                                <div className="text-slate-800 dark:text-slate-200 font-medium space-y-1.5">
+                                                    {selectedTicket.ai_summary ? (
+                                                        selectedTicket.ai_summary.split('\n').filter((l: string) => l.trim()).map((line: string, idx: number) => (
+                                                            <div key={idx} className="flex items-start gap-1.5">
+                                                                <span className="leading-relaxed">{line.trim()}</span>
+                                                            </div>
+                                                        ))
+                                                    ) : (
+                                                        <p className="italic text-slate-400">Chưa có bản tóm tắt. Bạn có thể nhấn nút "Tóm tắt lại" ở trên góc phải để AI sinh tóm tắt.</p>
+                                                    )}
+                                                </div>
                                             ) : (
                                                 <pre className="whitespace-pre-wrap font-mono text-[11px] text-slate-700 dark:text-slate-300">
                                                     {stripHtmlTags(selectedTicket.raw_content) || '(Không có nội dung văn bản gốc)'}

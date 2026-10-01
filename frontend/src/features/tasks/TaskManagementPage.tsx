@@ -764,12 +764,12 @@ export const TaskManagementPage: React.FC = () => {
       {loading && tasks.length === 0 ? (
         viewMode === 'table' ? <TaskTableSkeleton /> : <TaskBentoSkeleton />
       ) : filteredTasks.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-12 text-center shadow-xs">
+        <div className="w-full flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-12 text-center shadow-xs">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-50 dark:bg-slate-800 text-indigo-500 mb-3">
             <Search className="h-6 w-6" />
           </div>
           <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200">Không tìm thấy tác vụ phù hợp</h3>
-          <p className="mt-1 text-xs text-slate-500 max-w-sm">
+          <p className="mt-1.5 text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
             Không có tác vụ nào khớp với bộ lọc hoặc từ khóa tìm kiếm.
           </p>
           <button
@@ -778,7 +778,7 @@ export const TaskManagementPage: React.FC = () => {
               setSelectedBotFilter('all');
               setSearchQuery('');
             }}
-            className="mt-4 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-4 py-2 text-xs font-semibold shadow-sm cursor-pointer"
+            className="mt-4 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-4 py-2 text-xs font-semibold shadow-sm cursor-pointer hover:opacity-90 transition-opacity"
           >
             Đặt lại tất cả bộ lọc
           </button>
@@ -829,7 +829,7 @@ export const TaskManagementPage: React.FC = () => {
                       </td>
 
                       {/* Nội Dung Nghiệp Vụ */}
-                      <td className="py-4 px-4 align-top max-w-sm">
+                      <td className="py-4 px-4 align-top min-w-[220px] max-w-md">
                         <div className="flex flex-col gap-1">
                           <span className="font-bold text-slate-900 dark:text-white leading-snug">
                             {info.title}

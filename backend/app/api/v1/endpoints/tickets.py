@@ -207,11 +207,15 @@ async def re_summarize_ticket(ticket_id: str):
     if not revision_id:
         raise HTTPException(status_code=500, detail="Không thể xác định revision để cập nhật tóm tắt.")
 
+    meta = ticket.get("metadata") or {}
+    excel_summary = meta.get("excel_summary")
+
     summary_res = gemini_engine.summarize_ticket(
         subject=ticket.get("subject", ""),
         raw_content=raw_content,
         source=ticket.get("source", "gmail"),
-        sender_email=ticket.get("sender_email")
+        sender_email=ticket.get("sender_email"),
+        excel_summary=excel_summary
     )
 
     now_iso = datetime.now(timezone.utc).isoformat()

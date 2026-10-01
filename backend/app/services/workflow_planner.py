@@ -1,5 +1,5 @@
 # backend/app/services/workflow_planner.py
-"""
+r"""
 Deterministic Workflow Planner Service (Master Enterprise v7.3 - Course-Repo Auto-Binding & Strict School Scoping)
 Tác giả: Nguyễn Mạnh Hùng & Co-pilot AI
 Cải tiến đột phá:
@@ -22,6 +22,7 @@ from app.services.evidence_verifier import load_verified_assessment
 from app.core.supabase import get_supabase_client
 from app.models.intent import IntentAssessment
 from app.models.workflow import WorkflowStepDraft, WorkflowValidationResult, WorkflowEntityCandidate
+from app.services.course_knowledge_service import course_knowledge_service
 
 logger = logging.getLogger(__name__)
 BRAIN_DIR = os.path.join(os.path.dirname(__file__), "../brain")
@@ -142,129 +143,23 @@ class WorkflowPlannerService:
     @staticmethod
     def resolve_course_and_repos_from_db(course_query: str, is_teacher: bool = False) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[int]]:
         """
-        Cỗ máy tra cứu khóa học 3 tầng siêu bền vững:
-        1. Bắt Course ID số nguyên từ URL Moodle (id=1437) hoặc chuỗi (ID 1437) -> 100% trúng đích!
-        2. Tự động lột sạch rác: (Primary), (Secondary), [VN], &amp; -> So khớp mượt mà như Ảnh 2 & 3.
-        3. Tự động bắt mã viết tắt: SWRP 1, SWRP 3, SWRP 5.
-        4. Tự bốc đúng Git Repo từ cột git_repos JSONB cho Giáo viên / Học sinh.
+        Ủy thác cho CourseKnowledgeService để soi chiếu chuẩn hóa cả 2 bảng lms_courses và workspace_courses:
+        1. Bắt Course ID số nguyên (?id=695, ID 695, 695).
+        2. Bắt mã viết tắt: 'SWRP 11' -> 'SWRP 11: Exploring IoT and AI with LEANBOT Intermediate [V2] (EN)' (ID 695).
+        3. Khử rác ngữ nghĩa (Primary, Secondary, &amp;, [Trial], [DEMO]).
+        4. Bốc đúng Git Repo từ cột git_repos JSONB cho Giáo viên / Học sinh.
         """
         if not course_query:
             return None, None, None, None
 
         clean_q = str(course_query).strip()
         supabase = get_supabase_client()
-
-        # =========================================================================
-        # 🎯 TẦNG 1: BẮT THẲNG COURSE ID SỐ (VUA CHÍNH XÁC - TỐC ĐỘ 1MS)
-        # =========================================================================
-        course_id_target = None
-        # Bắt id trong link: view.php?id=1437 hoặc id=1441
-        id_url_match = re.search(r"[?&]id=(\d+)", clean_q)
-        if id_url_match:
-            course_id_target = int(id_url_match.group(1))
-        elif clean_q.isdigit():
-            course_id_target = int(clean_q)
-        else:
-            # Bắt ID đứng cạnh chữ ID: ID 1437, ID: 1437, #1437
-            id_inline_match = re.search(r"\b(?:id|course)[\s:#]*(\d+)\b", clean_q, re.IGNORECASE)
-            if id_inline_match:
-                course_id_target = int(id_inline_match.group(1))
-
-        if course_id_target:
-            try:
-                res_id = supabase.table("lms_courses")\
-                    .select("id, course_id, course_name, git_repos")\
-                    .eq("course_id", course_id_target)\
-                    .limit(1)\
-                    .execute()
-                if res_id.data:
-                    c_match = res_id.data[0]
-                    c_name_clean = str(c_match.get("course_name") or "").replace("&amp;", "&").strip()
-                    
-                    resolved_repo = None
-                    git_repos = c_match.get("git_repos") or []
-                    if isinstance(git_repos, list) and git_repos:
-                        for r in git_repos:
-                            if isinstance(r, dict):
-                                r_url = r.get("repo_url") or r.get("url")
-                                r_target = str(r.get("target") or "").lower()
-                                if is_teacher and any(k in r_target for k in ["gv", "teacher", "teacher_only"]):
-                                    resolved_repo = r_url
-                                    break
-                                elif not resolved_repo:
-                                    resolved_repo = r_url
-                            elif isinstance(r, str) and r.startswith("http"):
-                                resolved_repo = r
-                                break
-
-                    logger.info(f"🎯 [Course Resolver - Tầng 1] Trúng Course ID #{course_id_target} -> [{c_name_clean}]")
-                    return c_name_clean, "", resolved_repo, c_match.get("course_id")
-            except Exception as id_err:
-                logger.warning(f"Lỗi tra cứu course theo ID {course_id_target}: {id_err}")
-
-        # =========================================================================
-        # 🎯 TẦNG 2: LỘT SẠCH RÁC NGỮ NGHĨA (PRIMARY, SECONDARY, &AMP;) - GIẢI QUYẾT ẢNH 1
-        # =========================================================================
-        # Cắt sạch các hậu tố râu ria làm hỏng tìm kiếm
-        clean_name = re.sub(r"\s*[\(\[](?:Primary|Secondary|HighSchool|VN|Cả GV & HS|GV|HS)[\)\]]", "", clean_q, flags=re.IGNORECASE).strip()
-        clean_name = clean_name.replace("&amp;", "&").strip()
-        # Loại bỏ các từ thừa như 'course', 'courses', 'khóa học'
-        clean_name = re.sub(r"(?i)\b(?:courses?|khóa\s*học)\b", "", clean_name).strip(" :-,")
-
-        # =========================================================================
-        # 🎯 TẦNG 3: BẮT MÃ MÔN VIẾT TẮT (SWRP 1, SWRP 3, SWRP 5, IR 4...)
-        # =========================================================================
-        code_match = re.search(r"\b([A-Za-z]+)\s*[-_]?\s*(\d+)\b", clean_name)
-        try:
-            matched_rows = []
-            if code_match:
-                prefix, num = code_match.group(1).upper(), code_match.group(2)
-                # Tìm theo mẫu SWRP 1: hoặc SWRP 1
-                res_code = supabase.table("lms_courses")\
-                    .select("id, course_id, course_name, git_repos")\
-                    .ilike("course_name", f"%{prefix} {num}%")\
-                    .limit(5)\
-                    .execute()
-                matched_rows = res_code.data or []
-
-            # Nếu không tìm thấy theo mã, tìm kiếm theo tên đã làm sạch
-            if not matched_rows and len(clean_name) >= 4:
-                # Lấy 3 từ khóa chính để so khớp (VD: Synapse City Robotics)
-                search_keywords = clean_name.split()[:3]
-                search_pattern = "%".join(search_keywords)
-                res_text = supabase.table("lms_courses")\
-                    .select("id, course_id, course_name, git_repos")\
-                    .ilike("course_name", f"%{search_pattern}%")\
-                    .limit(5)\
-                    .execute()
-                matched_rows = res_text.data or []
-
-            if matched_rows:
-                best = matched_rows[0]
-                best_name = str(best.get("course_name") or "").replace("&amp;", "&").strip()
-                resolved_repo = None
-                git_repos = best.get("git_repos") or []
-                if isinstance(git_repos, list) and git_repos:
-                    for r in git_repos:
-                        if isinstance(r, dict):
-                            r_url = r.get("repo_url") or r.get("url")
-                            r_target = str(r.get("target") or "").lower()
-                            if is_teacher and any(k in r_target for k in ["teacher", "teacher_only", "gv"]):
-                                resolved_repo = r_url
-                                break
-                            elif not resolved_repo:
-                                resolved_repo = r_url
-                        elif isinstance(r, str) and r.startswith("http"):
-                            resolved_repo = r
-                            break
-
-                logger.info(f"🎯 [Course Resolver - Tầng 2/3] Khớp '{clean_q}' -> [{best_name}] (ID: {best.get('course_id')})")
-                return best_name, "", resolved_repo, best.get("course_id")
-
-        except Exception as e:
-            logger.warning(f"Lỗi tra cứu course theo text '{clean_q}': {e}")
-
-        return clean_q, "", None, None
+        canonical_name, course_id, resolved_repo, _ = course_knowledge_service.resolve_canonical_course(
+            supabase=supabase,
+            course_query=clean_q,
+            is_teacher=is_teacher
+        )
+        return canonical_name, "", resolved_repo, course_id
 
 
     def build_workflow_proposal(
@@ -392,7 +287,7 @@ class WorkflowPlannerService:
                 })
                 if c_repo and c_repo not in collected_repos and "learn.pythaverse.space" not in c_repo:
                     collected_repos.append(c_repo)
-        # 🎯 4. XÁC ĐỊNH CHÍNH XÁC INTENTS ĐƯỢC PHÉP CHẠY
+        # 🎯 4. XÁC ĐỊNH CHÍNH XÁC INTENTS ĐƯỢC PHÉP CHẠY & SẮP XẾP THỨ TỰ NGHIỆP VỤ (TOPOLOGICAL ORDER)
         active_intent_types = [i.type for i in assessment.intents if i.type in self.policy_registry]
 
         # Bảo vệ ngữ nghĩa: Nếu người dùng chỉ yêu cầu kho lưu trữ Git mà không xin vào lớp LMS
@@ -403,6 +298,26 @@ class WorkflowPlannerService:
 
         if not active_intent_types:
             return "no_action", [], [], ["AI không phát hiện ý định tự động hóa cụ thể nào cần thực thi."], False
+
+        # SẮP XẾP THEO THỨ TỰ CHUYÊN BIỆT: Tạo tài khoản -> Đổi trường/Hồ sơ -> Ghi danh LMS -> Cấp quyền Git
+        INTENT_EXECUTION_ORDER = {
+            "create_accounts": 10,
+            "update_user_profile": 20,
+            "update_user_status": 25,
+            "reset_password": 30,
+            "verify_email": 35,
+            "school_create_order": 40,
+            "approve_order": 50,
+            "partner_create_contract": 60,
+            "approve_contract": 70,
+            "admin_approve_contract": 80,
+            "course_access": 90,
+            "school_enroll_users": 95,
+            "repository_access": 100,
+            "unenrol_course": 110,
+            "remove_repository_access": 120
+        }
+        active_intent_types.sort(key=lambda t: INTENT_EXECUTION_ORDER.get(t, 99))
 
         # 🎯 5. DỰNG CÁC BƯỚC THỰC THI (NON-DESTRUCTIVE DAG)
         for itype in active_intent_types:
@@ -481,28 +396,11 @@ class WorkflowPlannerService:
                         "auto_sync_git": True
                     }
                     
-                    step_name = f"Ghi danh Moodle ({len(c_names)} khóa cho {len(student_emails)} HS & {len(teacher_emails)} GV)"
-
-                    steps.append(WorkflowStepDraft(
-                        step_id=curr_step_id,
-                        capability_id=cap_id,
-                        name=step_name,
-                        status="ready",
-                        inputs=step_inputs,
-                        depends_on=[]
-                    ))
-                    continue
-
                     if c_names:
-                        step_name = f"Ghi danh Moodle ({', '.join(c_names[:2])})"
+                        step_name = f"Ghi danh Moodle ({len(c_names)} khóa cho {len(student_emails)} HS & {len(teacher_emails)} GV)"
                     else:
+                        step_name = "Ghi danh khóa học Moodle PLearn"
                         missing_requirements.append({"field": "courses", "message": "Yêu cầu ghi danh thiếu thông tin khóa học."})
-
-                    if not enrol_users:
-                        missing_requirements.append({
-                            "field": "teacher_accounts",
-                            "message": "Chưa bóc tách được danh sách email giáo viên từ file đính kèm để ghi danh."
-                        })
 
                 # --- 3. NHÓM HỦY GHI DANH (GỠ MÔN) LMS ---
                 elif cap_id == "lms.unenrol_users":
@@ -591,15 +489,12 @@ class WorkflowPlannerService:
                 elif cap_id in ["workspace.partner_approve_order", "workspace.distributor_approve_contract"] and not target_code:
                     has_critical_missing = True
 
-                # Nếu bản thân intent không có bằng chứng, không sinh bước thực thi
+                # Nếu bản thân intent không có bằng chứng, không sinh bước thực thi (Fail-Closed)
                 parent_intent = next((it for it in assessment.intents if it.type == itype), None)
                 if parent_intent and not parent_intent.evidence:
-                    # 🎯 NGOẠI LỆ AN TOÀN:
-                    # 1. create_accounts: Cho chạy nếu đã bóc tách được user từ file
-                    # 2. course_access: Cho chạy nếu đã tìm thấy khóa học hợp lệ từ CSDL
+                    # 🎯 NGOẠI LỆ AN TOÀN DUY NHẤT:
+                    # create_accounts: Cho chạy nếu đã bóc tách được user từ file đính kèm
                     if itype == "create_accounts" and len(users_list) > 0:
-                        has_critical_missing = False
-                    elif itype == "course_access" and len(canonical_courses) > 0:
                         has_critical_missing = False
                     else:
                         has_critical_missing = True
@@ -613,6 +508,55 @@ class WorkflowPlannerService:
                         inputs=step_inputs,
                         depends_on=[]
                     ))
+
+        # 🎯 5.1. CHẮP NỐI CHUỖI PHỤ THUỘC THÔNG MINH (INTELLIGENT STEP CHAINING & INPUT BINDING)
+        # Tự động liên kết các bước theo đồ thị có hướng không chu trình (DAG)
+        account_step = next((s for s in steps if s.capability_id == "workspace.bulk_account_creation"), None)
+        lms_step = next((s for s in steps if s.capability_id == "lms.direct_enroll"), None)
+        git_step = next((s for s in steps if s.capability_id == "git.add_collaborators"), None)
+        order_step = next((s for s in steps if s.capability_id == "workspace.school_create_order"), None)
+        prt_approve_step = next((s for s in steps if s.capability_id == "workspace.partner_approve_order"), None)
+        dst_approve_step = next((s for s in steps if s.capability_id == "workspace.distributor_approve_contract"), None)
+        reset_pass_step = next((s for s in steps if s.capability_id == "keycloak.reset_password"), None)
+        verify_email_step = next((s for s in steps if s.capability_id == "keycloak.verify_email"), None)
+
+        # A. Chuỗi Tài khoản: Tạo tài khoản -> Lấy kết quả -> Ghi danh LMS -> Cấp quyền Git
+        poll_step = next((s for s in steps if s.capability_id == "workspace.poll_account_batch"), None)
+        if account_step:
+            if poll_step and poll_step.step_id != account_step.step_id:
+                if account_step.step_id not in poll_step.depends_on:
+                    poll_step.depends_on.append(account_step.step_id)
+                poll_step.inputs["upstream_account_step"] = account_step.step_id
+
+            upstream_acc = poll_step.step_id if poll_step else account_step.step_id
+
+            if lms_step and lms_step.step_id != account_step.step_id:
+                if upstream_acc not in lms_step.depends_on:
+                    lms_step.depends_on.append(upstream_acc)
+                lms_step.inputs["upstream_step"] = upstream_acc
+                lms_step.inputs["source_binding"] = f"{{{{ {upstream_acc}.created_accounts }}}}"
+
+            if git_step and git_step.step_id != account_step.step_id:
+                upstream_for_git = lms_step.step_id if lms_step else upstream_acc
+                if upstream_for_git not in git_step.depends_on:
+                    git_step.depends_on.append(upstream_for_git)
+                git_step.inputs["upstream_step"] = upstream_for_git
+
+        # B. Chuỗi Đơn hàng -> Duyệt đơn Partner -> Duyệt hợp đồng Distributor
+        if order_step and prt_approve_step and prt_approve_step.step_id != order_step.step_id:
+            if order_step.step_id not in prt_approve_step.depends_on:
+                prt_approve_step.depends_on.append(order_step.step_id)
+            prt_approve_step.inputs["upstream_order_step"] = order_step.step_id
+
+        if prt_approve_step and dst_approve_step and dst_approve_step.step_id != prt_approve_step.step_id:
+            if prt_approve_step.step_id not in dst_approve_step.depends_on:
+                dst_approve_step.depends_on.append(prt_approve_step.step_id)
+            dst_approve_step.inputs["upstream_contract_step"] = prt_approve_step.step_id
+
+        # C. Chuỗi Reset Password -> Verify Email
+        if reset_pass_step and verify_email_step and verify_email_step.step_id != reset_pass_step.step_id:
+            if reset_pass_step.step_id not in verify_email_step.depends_on:
+                verify_email_step.depends_on.append(reset_pass_step.step_id)
 
         # 🎯 6. ĐÁNH GIÁ XEM CÓ BẮT BUỘC PHẢI CHỌN TRƯỜNG HAY KHÔNG (STRICT SCOPE)
         # Chỉ các tác vụ đụng vào Workspace Organization mới cần trường!
