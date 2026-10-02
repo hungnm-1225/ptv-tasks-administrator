@@ -442,7 +442,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
             return {"status": "failed", "error": str(e)}
 
     # =========================================================================
-    # 🤝 2. PARTNER DUYỆT SCHOOL ORDER (CHUẨN HÓA DEVTOOLS & CHỐNG BÁO CÁO LÁO)
+    # 🤝 2. PARTNER DUYỆT SCHOOL ORDER (CHUẨN HÓA KEYCLOAK & ZERO-MOCK SOT)
     # =========================================================================
     async def partner_approve_school_order(
         self, 
@@ -454,103 +454,88 @@ class WorkspaceOrderService(WorkspaceBaseService):
         contact_info: Optional[str] = None,
         additional_notes: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Partner duyệt School Order cấp đủ 100% tất cả các môn trong đơn hàng."""
+        """Partner duyệt School Order: Tích hợp Keycloak IDP chuẩn hóa username, Zero-Mock."""
         try:
-            cookies, identity = await self._steal_role_session(
-                credentials.get("username", ""), 
-                credentials.get("password", ""), 
-                "Partner"
-            )
+            # 🎯 1. KHAI BÁO BIẾN CỐT LÕI TỪ ĐẦU (CHỐNG LỖI NAME_ERROR)
+            partner_user = str(credentials.get("username") or "").strip()
+            partner_pass = str(credentials.get("password") or "").strip()
 
-            # 🎯 1. TRUY VẾT GIA PHẢ THẬT TỪ MÃ TRƯỜNG CỦA ORDER (CHUẨN LINEAGE ZERO-MOCK)
+            if not partner_user:
+                return {"status": "failed", "error": "Thiếu thông tin đăng nhập của Partner (username rỗng)"}
+
+            # Đăng nhập / Tái sử dụng session Partner
+            cookies, identity = await self._steal_role_session(partner_user, partner_pass, "Partner")
+
+            # 🎯 2. XÁC ĐỊNH PARTNER_ID CHUẨN XÁC
             partner_id = None
-            wp_username = None
+            raw_pid = identity.get("partner_id") or identity.get("id") or identity.get("user_id")
+            if raw_pid and str(raw_pid).strip().isdigit():
+                partner_id = str(raw_pid).strip()
 
-            # Bóc tách mã trường từ order_code (VD: SCH-10514-20261001-1475 ➔ SCH-10514)
-            school_match = re.search(r"(SCH-\d+)", str(order_identifier or ""))
-            school_code_query = school_match.group(1) if school_match else None
-
-            if school_code_query:
+            # Nếu identity chưa có, tra cứu Supabase Vault & Organizations theo Partner username
+            if not partner_id:
                 try:
-                    from app.services.workspace_lineage_service import workspace_lineage_service
-                    lineage = workspace_lineage_service.resolve_by_school(school_code_query)
-                    if lineage and lineage.get("partner"):
-                        p_info = lineage["partner"]
-                        partner_id = str(p_info.get("partner_id") or p_info.get("id") or "").strip()
-                        wp_username = str(p_info.get("username") or "").strip()
-                        logger.info(f"🌳 [Lineage SOT] Tìm thấy từ gia phả trường [{school_code_query}]: Partner ID={partner_id}, User={wp_username}")
-                except Exception as l_err:
-                    logger.warning(f"⚠️ Lỗi tra cứu Lineage cho trường {school_code_query}: {l_err}")
+                    from app.core.supabase import get_supabase_client
+                    supabase = get_supabase_client()
+                    v_res = supabase.table("workspace_credentials_vault") \
+                        .select("org_id") \
+                        .ilike("username", partner_user) \
+                        .execute()
+                    
+                    if v_res.data:
+                        org_id = v_res.data[0].get("org_id")
+                        org_res = supabase.table("workspace_organizations") \
+                            .select("code, partner_id") \
+                            .eq("id", org_id) \
+                            .execute()
+                        if org_res.data:
+                            partner_id = str(org_res.data[0].get("partner_id") or "").strip()
+                            if not partner_id:
+                                num_m = re.search(r"\d+", str(org_res.data[0].get("code", "")))
+                                if num_m:
+                                    partner_id = num_m.group(0)
+                except Exception as lookup_err:
+                    logger.warning(f"⚠️ Tra cứu Partner ID từ Supabase thất bại: {lookup_err}")
 
-            # Nếu Lineage chưa có wp_username sạch (không chứa @), lấy từ identity hoặc vault
             if not partner_id or not partner_id.isdigit():
-                raw_pid = identity.get("partner_id")
-                if raw_pid and str(raw_pid).isdigit():
-                    partner_id = str(raw_pid).strip()
-
-            if not wp_username or "@" in wp_username:
-                # Ưu tiên lấy user_login chuẩn từ session identity nếu có
-                clean_id_user = str(identity.get("username") or "").strip()
-                if clean_id_user and "@" not in clean_id_user:
-                    wp_username = clean_id_user
-                elif credentials.get("username"):
-                    # Nếu username truyền vào là email (ptv-4@dtt.vn), cắt lấy phần prefix login (ptv-4)
-                    raw_u = credentials.get("username").strip()
-                    wp_username = raw_u.split("@")[0] if "@" in raw_u else raw_u
-
-            # FAIL-CLOSED NẾU THIẾU DỮ LIỆU THẬT
-            if not partner_id or not partner_id.isdigit():
-                err_msg = f"KHÔNG THỂ XÁC ĐỊNH ĐƯỢC PARTNER ID CHO ORDER '{order_identifier}'. DỪNG THỰC THI!"
+                err_msg = f"KHÔNG THỂ XÁC ĐỊNH PARTNER ID CHO TÀI KHOẢN '{partner_user}'. DỪNG THỰC THI!"
                 logger.error(f"❌ [Partner Order Fatal] {err_msg}")
                 return {"status": "failed", "error": err_msg}
 
-            if not wp_username:
-                err_msg = f"KHÔNG THỂ XÁC ĐỊNH ĐƯỢC WP USERNAME CHO PARTNER ID {partner_id}. DỪNG THỰC THI!"
-                logger.error(f"❌ [Partner Order Fatal] {err_msg}")
-                return {"status": "failed", "error": err_msg}
-
-            logger.info(f"🤝 [Partner Order] Định danh phê duyệt: Partner ID=[{partner_id}], Username='{wp_username}'")
-
-            if not raw_pid or not str(raw_pid).strip().isdigit():
-                err_msg = f"KHÔNG THỂ XÁC ĐỊNH ĐƯỢC PARTNER ID CHO TÀI KHOẢN '{partner_user}'. DỪNG THỰC THI ĐỂ BẢO VỆ TÀI NGUYÊN!"
-                logger.error(f"❌ [Partner Order Fatal] {err_msg}")
-                return {"status": "failed", "error": err_msg}
-
-            partner_id = str(raw_pid).strip()
             logger.info(f"🤝 [Partner Order] Đã xác định Partner ID chính xác: [{partner_id}] cho user '{partner_user}'")
 
-            # 🎯 2. CHUẨN HÓA DANH TÍNH QUA KEYCLOAK IDP (SOT: EMAIL ➔ CANONICAL USERNAME 'ptv4')
+            # 🎯 3. CHUẨN HÓA USERNAME QUA KEYCLOAK IDP (SOT: EMAIL ➔ USERNAME EID)
             wp_username = None
             try:
                 from app.services.keycloak_service import keycloak_service
-                clean_lookup_id = partner_user.strip()
-                kc_res = await keycloak_service.resolve_identifiers_to_usernames([clean_lookup_id])
-                
-                # Bốc mapping chuẩn xác từ Keycloak
-                wp_username = kc_res.get("mapping", {}).get(clean_lookup_id.lower())
+                kc_res = await keycloak_service.resolve_identifiers_to_usernames([partner_user])
+                wp_username = kc_res.get("mapping", {}).get(partner_user.lower())
                 if not wp_username and kc_res.get("valid_usernames"):
                     wp_username = kc_res["valid_usernames"][0]
 
                 if wp_username:
-                    logger.info(f"🔑 [Keycloak eID] Đã giải mã Partner '{partner_user}' ➔ Canonical Username: [{wp_username}]")
+                    logger.info(f"🔑 [Keycloak eID] Đã giải mã danh tính Partner '{partner_user}' ➔ Canonical Username: [{wp_username}]")
             except Exception as kc_err:
-                logger.warning(f"⚠️ Tra cứu Keycloak eID cho Partner thất bại: {kc_err}")
+                logger.warning(f"⚠️ Tra cứu Keycloak eID thất bại: {kc_err}")
 
-            # Fallback an toàn vào Identity/Credentials nếu Keycloak offline
             if not wp_username:
                 clean_identity_u = str(identity.get("username") or "").strip()
-                wp_username = clean_identity_u if (clean_identity_u and "@" not in clean_identity_u) else partner_user
+                if clean_identity_u and "@" not in clean_identity_u:
+                    wp_username = clean_identity_u
+                else:
+                    wp_username = partner_user.split("@")[0] if "@" in partner_user else partner_user
 
-            logger.info(f"🤝 [Partner Order] Username gửi duyệt đơn: '{wp_username}' (Partner ID: {partner_id})")
+            logger.info(f"🤝 [Partner Order] Định danh phê duyệt: Partner ID=[{partner_id}], Username='{wp_username}'")
 
-            clean_num_match = re.search(r"\d+$", str(order_identifier))
+            # 🎯 4. LẤY SỐ NGUYÊN ORDER_ID
+            clean_num_match = re.search(r"\d+$", str(order_identifier or ""))
             num_order_id = clean_num_match.group(0) if clean_num_match else str(order_identifier)
 
             contact_val = str(contact_info or credentials.get("contact_info") or "Admin Automation Hub (hungnm@dtt.vn)").strip()
             approve_note = note or additional_notes or "Approved by PTV Automation Hub Fast Engine"
 
             async with httpx.AsyncClient(base_url=BASE_WORKSPACE_URL, cookies=cookies, timeout=25.0) as client:
-                # 🎯 2. LẤY CHI TIẾT CÁC MÔN CẦN DUYỆT TỪ ORDER DETAIL
+                # 🎯 5. LẤY CHI TIẾT CÁC MÔN CẦN DUYỆT TỪ ORDER DETAIL
                 detail_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/partner_workspace_v3/api/orders_management/getOrderDetail.php?order_id={num_order_id}"
                 d_res = await client.get(detail_url)
                 detail_data = d_res.json() if d_res.status_code == 200 else {}
@@ -572,7 +557,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     logger.error(f"❌ [Partner Order] {err_msg}")
                     return {"status": "failed", "error": err_msg}
 
-                # 🎯 3. QUÉT KHO LICENSE POOL CỦA PARTNER
+                # 🎯 6. QUÉT KHO LICENSE POOL CỦA PARTNER
                 pool_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/partner_workspace_v3/api/order_sale/getPartnerPoolLicense.php?partner_id={partner_id}"
                 p_res = await client.get(pool_url)
                 pool_courses = p_res.json().get("data", {}).get("pool_courses", []) if p_res.status_code == 200 else []
@@ -583,7 +568,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                 allocated_courses = []
                 short_courses = []
 
-                # 🎯 4. KHỚP CHÍNH XÁC THEO item_id (TUYỆT ĐỐI KHÔNG GÁN BỪA POOL RÁC!)
+                # 🎯 7. KHỚP CHÍNH XÁC THEO item_id (TUYỆT ĐỐI KHÔNG GÁN BỪA POOL KHÁC)
                 for req in courses_req:
                     cid = str(req.get("course_id", "")).strip()
                     c_name = req.get("course_name", f"Course #{cid}")
@@ -593,7 +578,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     matched_pool = None
                     for p in pool_courses:
                         pid = str(p.get("id"))
-                        p_item_id = str(p.get("item_id", "")).strip()  # 💡 CHUẨN XÁC: item_id từ DevTools!
+                        p_item_id = str(p.get("item_id", "")).strip()
                         if p_item_id == cid and pool_balance.get(pid, 0) >= qty:
                             matched_pool = p
                             break
@@ -616,13 +601,13 @@ class WorkspaceOrderService(WorkspaceBaseService):
                             "quantity": qty
                         })
 
-                # 🟢 5. NẾU 100% MÔN ĐỀU ĐỦ LICENSE TƯƠNG ỨNG ➔ BẮN API DUYỆT ĐƠN
+                # 🟢 8. ĐỦ 100% LICENSE ➔ BẮN API DUYỆT ĐƠN
                 if not short_courses and len(allocated_courses) == len(courses_req):
                     approve_payload = {
                         "order_id": str(num_order_id),
                         "status": "1",
                         "partner_id": str(partner_id),
-                        "username": wp_username,
+                        "username": str(wp_username),
                         "order_code": order_identifier or f"SCH-{num_order_id}",
                         "license_type": "course"
                     }
@@ -637,7 +622,6 @@ class WorkspaceOrderService(WorkspaceBaseService):
                     ap_url = f"{BASE_WORKSPACE_URL}/wp-content/plugins/partner_workspace_v3/api/orders_management/updateStatusOrder.php"
                     res = await client.post(ap_url, files=self._to_multipart(approve_payload))
                     
-                    # 🎯 6. CHỐT CHẶN THÉP CHỐNG BÁO CÁO LÁO: KIỂM ĐỊNH JSON BODY & CODE 201
                     if res.status_code in (200, 201):
                         try:
                             res_json = res.json()
@@ -645,18 +629,8 @@ class WorkspaceOrderService(WorkspaceBaseService):
                             res_json = {}
 
                         res_code = res_json.get("code")
-                        # DevTools xác thực thành công trả về: {"code": 201, "message": "Order has been updated successfully"}
-                        if res_code in (200, 201):
-                            # Re-fetch verification: Đối soát trạng thái thực tế sau khi duyệt
-                            try:
-                                v_res = await client.get(detail_url)
-                                if v_res.status_code == 200:
-                                    v_data = v_res.json()
-                                    logger.info(f"🔍 [Re-fetch Verify] Order #{num_order_id} ➔ Status: '{v_data.get('status')}', is_can_approve: {v_data.get('is_can_approve')}")
-                            except Exception:
-                                pass
-
-                            await self._sync_order_status_db(order_identifier, "Approved", credentials.get("username"))
+                        if res_code in (200, 201) or "success" in str(res_json.get("message", "")).lower():
+                            await self._sync_order_status_db(order_identifier, "Approved", partner_user)
                             clean_msg = f"Approved Order: {order_identifier} ({len(allocated_courses)} courses) | {' + '.join(details_str_list)}"
                             logger.info(f"✅ [Partner Order] {clean_msg}")
                             return {
@@ -665,7 +639,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                                 "message": clean_msg
                             }
                         else:
-                            err_msg = res_json.get("message") or res.text or f"PHP Rejected with code {res_code}"
+                            err_msg = res_json.get("message") or res.text
                             logger.error(f"❌ [Partner Order Reject] PHP từ chối duyệt đơn: {err_msg} | Response: {res.text}")
                             return {
                                 "status": "failed",
@@ -676,7 +650,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
                         logger.error(f"❌ [Partner Order HTTP Error] {err_msg}")
                         return {"status": "failed", "error": err_msg}
 
-                # 🔴 6. NẾU THIẾU LICENSE ➔ TẠO PRT CONTRACT BÙ ĐÚNG LICENSE CÒN THIẾU
+                # 🔴 9. THIẾU LICENSE ➔ TẠO PRT BÙ QUOTA
                 short_desc = ", ".join([f"#{c['course_id']} (needs {c['quantity']})" for c in short_courses])
                 logger.warning(f"⚠️ Kho License Partner thiếu môn cho Order [{order_identifier}]: {short_desc}")
 
@@ -723,7 +697,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
 
                         await self._record_created_contract_db(
                             prt_code, "PRT", "Awaiting Distributor", 
-                            partner_name=credentials.get("username"),
+                            partner_name=partner_user,
                             courses=short_courses,
                             contact_info=contact_val,
                             additional_notes=sys_topup_notes
