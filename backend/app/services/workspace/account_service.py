@@ -225,19 +225,20 @@ class WorkspaceAccountService(WorkspaceBaseService):
             # 🎯 1. TỰ ĐỘNG DÒ TỌA ĐỘ CỘT TỪ DÒNG HEADER (DÒNG 1 ĐẾN 6)
             header_row_idx = 5
             col_map = {
-                "first_name": 3,  # Cột C: First Name
-                "last_name": 4,   # Cột D: Last Name
-                "mobile": 5,      # Cột E: Mobile number
-                "email": 6,       # Cột F: Email
-                "dob": 7,         # Cột G: Date of Birth
-                "role": 8,        # Cột H: Role
-                "note": 9
+                "first_name": 3,
+                "last_name": 4,
+                "mobile": None,
+                "email": 5,
+                "dob": 6,
+                "role": 7,
+                "note": 8
             }
 
             for r in range(1, 7):
                 row_vals = [str(ws.cell(row=r, column=c).value or "").strip().lower() for c in range(1, 15)]
                 if any("email" in v for v in row_vals) and any("first" in v for v in row_vals):
                     header_row_idx = r
+                    found_mobile = False
                     for col_idx in range(1, 15):
                         val = str(ws.cell(row=r, column=col_idx).value or "").strip().lower()
                         if "first name" in val:
@@ -246,6 +247,7 @@ class WorkspaceAccountService(WorkspaceBaseService):
                             col_map["last_name"] = col_idx
                         elif "mobile" in val or "phone" in val:
                             col_map["mobile"] = col_idx
+                            found_mobile = True
                         elif "email" in val:
                             col_map["email"] = col_idx
                         elif "birth" in val or "dob" in val:
@@ -254,6 +256,8 @@ class WorkspaceAccountService(WorkspaceBaseService):
                             col_map["role"] = col_idx
                         elif "note" in val:
                             col_map["note"] = col_idx
+                    if not found_mobile:
+                        col_map["mobile"] = None
                     break
 
             logger.info(f"📊 [Excel Dynamic Parser] Định vị Header tại dòng {header_row_idx}: {col_map}")
@@ -272,7 +276,8 @@ class WorkspaceAccountService(WorkspaceBaseService):
                     continue
 
                 clean_email = raw_email.lower().strip()
-                mobile = str(ws.cell(row=r, column=col_map["mobile"]).value or "").strip()
+                mob_col = col_map.get("mobile")
+                mobile = str(ws.cell(row=r, column=mob_col).value or "").strip() if mob_col else ""
                 if mobile.lower() in ("none", "null"):
                     mobile = ""
 
@@ -570,44 +575,41 @@ class WorkspaceAccountService(WorkspaceBaseService):
                 if isinstance(raw_records, list) and len(raw_records) > 0:
                     logger.info(f"✨ Lấy được {len(raw_records)} tài khoản từ exportData.php!")
 
-                    # 🎯 1. LỌC RA CÁC TÀI KHOẢN CÓ IS_CREATE = FALSE ĐỂ ĐỒNG BỘ KEYCLOAK
+                    # 🎯 1. LỌC RA TẤT CẢ EMAIL ĐỂ THẨM ĐỊNH USERNAME THỰC TẾ QUA KEYCLOAK IDP
                     from app.services.keycloak_service import keycloak_service
                     
-                    emails_to_sync = []
                     for item in raw_records:
-                        # Chuẩn hóa role bỏ 's'
                         r = str(item.get("role", "")).lower()
                         item["role"] = "Teacher" if any(k in r for k in ["teach", "gv"]) else "Student"
 
-                        em = str(item.get("email") or "").strip().lower()
-                        # Nếu tài khoản đã tồn tại (is_create=false) thì bắt buộc phải lấy lại username từ Keycloak
-                        if not item.get("is_create", False) and em and "@" in em:
-                            emails_to_sync.append(em)
+                    # Thu thập toàn bộ email hợp lệ trong batch kết quả
+                    all_batch_emails = [
+                        em for item in raw_records
+                        if (em := str(item.get("email") or "").strip().lower()) and "@" in em
+                    ]
+                    all_batch_emails = list(dict.fromkeys(all_batch_emails))
 
-                    emails_to_sync = list(dict.fromkeys(emails_to_sync))
-
-                    # 🎯 2. GỌI KEYCLOAK ĐỂ LẤY USERNAME CHUẨN & RESET PASS VỀ EMAIL CHỮ THƯỜNG
-                    if emails_to_sync:
-                        logger.info(f"🔍 Phát hiện {len(emails_to_sync)} tài khoản đã tồn tại! Kích hoạt Keycloak để lấy Username thật & Reset Pass về email...")
-                        for em in emails_to_sync:
-                            try:
-                                clean_em = em.lower().strip()
-                                # 2.1 Tra cứu username thật trên Keycloak
-                                resolved_map = await keycloak_service.resolve_identifiers_to_usernames([clean_em])
-                                real_username = resolved_map.get(clean_em)
-                                
-                                # 2.2 Reset mật khẩu Keycloak về chính email chữ thường
-                                await keycloak_service.reset_user_password(clean_em, clean_em)
-
-                                # 2.3 Cập nhật vào mảng bản ghi
+                    # 🎯 2. ĐỒNG BỘ CHUẨN XÁC VỚI KEYCLOAK (SINGLE SOURCE OF TRUTH CHO USERNAME THẬT)
+                    # Nếu tài khoản đã tồn tại trên Keycloak: BẮT BUỘC lấy username từ Keycloak (không dùng export từ Workspace)
+                    if all_batch_emails:
+                        logger.info(f"🔍 [Keycloak Master Truth] Kiểm tra {len(all_batch_emails)} tài khoản trên Keycloak IDP để lấy Username thật...")
+                        try:
+                            synced_map = await keycloak_service.sync_existing_users_passwords(all_batch_emails)
+                            if synced_map:
+                                logger.info(f"🎯 [Keycloak Master Truth] Tìm thấy {len(synced_map)} tài khoản đã tồn tại trên Keycloak. Ghi đè username thật...")
                                 for item in raw_records:
-                                    if str(item.get("email") or "").strip().lower() == clean_em:
+                                    clean_em = str(item.get("email") or "").strip().lower()
+                                    if clean_em in synced_map:
+                                        kc_info = synced_map[clean_em]
+                                        real_username = kc_info.get("username")
                                         if real_username:
                                             item["username"] = real_username
                                         item["password"] = clean_em
+                                        item["is_create"] = False
                                         item["is_keycloak_synced"] = True
-                            except Exception as kc_err:
-                                logger.warning(f"⚠️ Lỗi sync Keycloak cho {em}: {kc_err}")
+                                        logger.info(f"   👤 Email '{clean_em}' ➔ Canonical Username từ Keycloak: '{real_username}' (Ghi đè Workspace export)")
+                        except Exception as kc_err:
+                            logger.error(f"❌ [Keycloak Master Truth] Lỗi khi đồng bộ Keycloak: {kc_err}", exc_info=True)
 
                     # 🎯 2.5. KÍCH HOẠT JIT TRÊN GIT CHO TOÀN BỘ TÀI KHOẢN (CẢ TẠO MỚI & RESET)
                     try:

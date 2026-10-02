@@ -91,11 +91,20 @@ export const parseAccountsExcelFile = async (
             const lastName = String(row[lnIdx !== -1 ? lnIdx : 2] || '').trim();
             if (!firstName && !lastName) return;
 
-            const mobile = String(row[mobIdx !== -1 ? mobIdx : 3] || '').trim();
-            const email = String(row[emIdx !== -1 ? emIdx : 4] || '').trim();
-            const dob = formatExcelDateClient(row[dobIdx !== -1 ? dobIdx : 5]);
+            // 🎯 ĐẶC BIỆT: File COF gốc không có cột Mobile Number
+            // Mặc định mobile = '' nếu không có cột mobile trong headers, TUYỆT ĐỐI KHÔNG fallback lấy row[3]!
+            const mobile = mobIdx !== -1 ? String(row[mobIdx] || '').trim() : '';
 
-            let roleRaw = String(row[roleIdx !== -1 ? roleIdx : 6] || '').trim();
+            // Nếu không tìm thấy cột email qua header:
+            // Nếu có mobIdx thì email ở 4, nếu KHÔNG có mobile (như file COF) thì email ở 3!
+            const fallbackEmailIdx = mobIdx !== -1 ? 4 : 3;
+            const email = String(row[emIdx !== -1 ? emIdx : fallbackEmailIdx] || '').trim();
+
+            const fallbackDobIdx = mobIdx !== -1 ? 5 : 4;
+            const dob = formatExcelDateClient(row[dobIdx !== -1 ? dobIdx : fallbackDobIdx]);
+
+            const fallbackRoleIdx = mobIdx !== -1 ? 6 : 5;
+            let roleRaw = String(row[roleIdx !== -1 ? roleIdx : fallbackRoleIdx] || '').trim();
             if (!roleRaw && sheetName.toLowerCase().includes('teacher')) roleRaw = 'Teacher';
             if (!roleRaw && sheetName.toLowerCase().includes('student')) roleRaw = 'Student';
 
@@ -529,6 +538,25 @@ export const parseCofExcelFile = async (
         const ws3 = workbook.Sheets[teacherSheetName];
         const rawJson3: any[][] = XLSX.utils.sheet_to_json(ws3, { header: 1, defval: '' });
 
+        // Tự động tìm dòng header Tab 3 (tránh fix cứng index gây lệch cột khi file không có Mobile Number)
+        let headerRowIndex3 = -1;
+        for (let i = 0; i < Math.min(rawJson3.length, 10); i++) {
+            const rowStr = rawJson3[i].map((c) => String(c).toLowerCase()).join(' ');
+            if (rowStr.includes('email') || (rowStr.includes('first') && rowStr.includes('last')) || rowStr.includes('teacher')) {
+                headerRowIndex3 = i;
+                break;
+            }
+        }
+        if (headerRowIndex3 === -1) headerRowIndex3 = 5;
+
+        const h3 = rawJson3[headerRowIndex3].map((h) => String(h).trim().toLowerCase());
+        const tFnIdx = h3.findIndex((h) => h.includes('first name') || h.includes('tên'));
+        const tLnIdx = h3.findIndex((h) => h.includes('last name') || h.includes('họ'));
+        const tFullNameIdx = h3.findIndex((h) => h.includes('full name') || (h.includes('name') && !h.includes('first') && !h.includes('last') && !h.includes('school')));
+        const tEmIdx = h3.findIndex((h) => h.includes('email'));
+        const tCourseIdx = h3.findIndex((h) => h.includes('course') || h.includes('môn'));
+        const tClassIdx = h3.findIndex((h) => h.includes('class') || h.includes('target'));
+
         const teacherMap: Record<
             string,
             {
@@ -542,12 +570,35 @@ export const parseCofExcelFile = async (
         let lastTeacherName = '';
         let lastTeacherEmail = '';
 
-        for (let r = 6; r < rawJson3.length; r++) {
+        for (let r = headerRowIndex3 + 1; r < rawJson3.length; r++) {
             const row = rawJson3[r];
-            let tName = String(row[4] || row[5] || '').trim();
-            let email = String(row[7] || row[3] || '').trim().toLowerCase();
-            const courseAssign = String(row[10] || '').trim();
-            const rawTargetClass = String(row[2] || '').trim();
+            // Tên giáo viên
+            let tName = '';
+            if (tFullNameIdx !== -1 && row[tFullNameIdx]) {
+                tName = String(row[tFullNameIdx]).trim();
+            } else if (tFnIdx !== -1 || tLnIdx !== -1) {
+                const fn = tFnIdx !== -1 ? String(row[tFnIdx] || '').trim() : '';
+                const ln = tLnIdx !== -1 ? String(row[tLnIdx] || '').trim() : '';
+                tName = `${fn} ${ln}`.trim();
+            } else {
+                tName = String(row[4] || row[5] || '').trim();
+            }
+
+            // Email giáo viên (File COF không có cột Mobile Number, nên Email đứng ngay sau Name/Class)
+            let email = '';
+            if (tEmIdx !== -1 && row[tEmIdx]) {
+                email = String(row[tEmIdx]).trim().toLowerCase();
+            } else {
+                const emailCell = row.find((c) => String(c).includes('@'));
+                if (emailCell) {
+                    email = String(emailCell).trim().toLowerCase();
+                } else {
+                    email = String(row[7] || row[6] || row[3] || '').trim().toLowerCase();
+                }
+            }
+
+            const courseAssign = tCourseIdx !== -1 ? String(row[tCourseIdx] || '').trim() : String(row[10] || row[9] || '').trim();
+            const rawTargetClass = tClassIdx !== -1 ? String(row[tClassIdx] || '').trim() : String(row[2] || row[1] || '').trim();
 
             if (!courseAssign && !tName && !email) continue;
 

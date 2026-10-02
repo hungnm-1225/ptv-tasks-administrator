@@ -248,6 +248,7 @@ class COFService:
                         "first_name": fn or "Student",
                         "last_name": ln or "Auto",
                         "email": email,
+                        "mobile": "",  # Mặc định không có mobile number từ file COF
                         "dob": cls.format_date_dob(dob_raw),
                         "class_group": raw_class_name,
                         "lms_group_name": clean_group_lms,
@@ -306,15 +307,50 @@ class COFService:
                 last_dob = ""
                 last_acc_exist = ""
 
-                for r in range(7, ws3.max_row + 1):
-                    raw_target_class = cls.clean_str(ws3.cell(row=r, column=3).value)
-                    fn = cls.clean_str(ws3.cell(row=r, column=6).value) or cls.clean_str(ws3.cell(row=r, column=5).value)
-                    ln = cls.clean_str(ws3.cell(row=r, column=7).value)
-                    email = cls.clean_str(ws3.cell(row=r, column=8).value or ws3.cell(row=r, column=4).value).lower()
-                    dob_raw = ws3.cell(row=r, column=9).value
-                    account_exist = cls.clean_str(ws3.cell(row=r, column=10).value).lower()
-                    course_assign = cls.clean_str(ws3.cell(row=r, column=11).value)
-                    username = cls.clean_str(ws3.cell(row=r, column=12).value)
+                # 🎯 DÒ TÌM HÀNG HEADER VÀ TỌA ĐỘ CỘT ĐỘNG CHO TAB 3 (GIÁO VIÊN)
+                header_row_3 = 6
+                col_class = 3
+                col_fn = 5
+                col_ln = 6
+                col_email = 7
+                col_dob = 8
+                col_acc_exist = 9
+                col_course = 10
+                col_username = 11
+
+                for scan_r in range(1, 10):
+                    row_vals = [str(ws3.cell(row=scan_r, column=c).value or "").strip().lower() for c in range(1, 20)]
+                    if any("email" in v for v in row_vals) and (any("first" in v for v in row_vals) or any("name" in v for v in row_vals)):
+                        header_row_3 = scan_r
+                        for c_i in range(1, 20):
+                            val = str(ws3.cell(row=scan_r, column=c_i).value or "").strip().lower()
+                            if "target class" in val or "class" in val:
+                                col_class = c_i
+                            elif "first name" in val:
+                                col_fn = c_i
+                            elif "last name" in val:
+                                col_ln = c_i
+                            elif "email" in val:
+                                col_email = c_i
+                            elif "birth" in val or "dob" in val:
+                                col_dob = c_i
+                            elif "exist" in val:
+                                col_acc_exist = c_i
+                            elif "course" in val:
+                                col_course = c_i
+                            elif "username" in val or "user" in val:
+                                col_username = c_i
+                        break
+
+                for r in range(header_row_3 + 1, ws3.max_row + 1):
+                    raw_target_class = cls.clean_str(ws3.cell(row=r, column=col_class).value)
+                    fn = cls.clean_str(ws3.cell(row=r, column=col_fn).value) or cls.clean_str(ws3.cell(row=r, column=col_fn - 1).value if col_fn > 1 else None)
+                    ln = cls.clean_str(ws3.cell(row=r, column=col_ln).value)
+                    email = cls.clean_str(ws3.cell(row=r, column=col_email).value or ws3.cell(row=r, column=4).value).lower()
+                    dob_raw = ws3.cell(row=r, column=col_dob).value
+                    account_exist = cls.clean_str(ws3.cell(row=r, column=col_acc_exist).value).lower()
+                    course_assign = cls.clean_str(ws3.cell(row=r, column=col_course).value)
+                    username = cls.clean_str(ws3.cell(row=r, column=col_username).value)
 
                     if not course_assign and not fn and not email:
                         continue
@@ -345,6 +381,7 @@ class COFService:
                         "first_name": fn or "Teacher",
                         "last_name": ln or "Auto",
                         "email": email,
+                        "mobile": "",  # Mặc định thông tin Mobile Number của giáo viên là không có nếu phân tích từ file COF
                         "dob": cls.format_date_dob(dob_raw),
                         "class_group": raw_target_class or "Default Class",
                         "course_assign": course_assign,

@@ -113,25 +113,32 @@ class BulkTemplateService:
                 header_row_idx = 5
                 col_map = {"first_name": 1, "last_name": 2, "mobile": 3, "email": 4, "dob": 5, "role": 6}
 
+            has_mobile = "mobile" in col_map
             extracted_users = []
             for row in ws_in.iter_rows(min_row=header_row_idx + 1, values_only=True):
                 if not any(row):
                     continue
-                fn = str(row[col_map.get("first_name", 1)] or '').strip()
-                ln = str(row[col_map.get("last_name", 2)] or '').strip()
+                fn = str(row[col_map.get("first_name", 1)] or '').strip() if col_map.get("first_name", 1) < len(row) else ""
+                ln = str(row[col_map.get("last_name", 2)] or '').strip() if col_map.get("last_name", 2) < len(row) else ""
                 if not fn and not ln:
                     continue
 
-                mob = str(row[col_map.get("mobile", 3)] or '').strip() if "mobile" in col_map else ""
+                mob = str(row[col_map["mobile"]] or '').strip() if has_mobile and col_map.get("mobile") is not None and col_map["mobile"] < len(row) else ""
                 
-                # 🌟 UỐN NẮN EMAIL & ROLE TẠI ĐÂY (Cắt sạch dấu cách thừa, nắn students -> Student)
-                raw_em = str(row[col_map.get("email", 4)] or '').strip() if "email" in col_map else ""
+                # 🌟 UỐN NẮN EMAIL & ROLE TẠI ĐÂY (An toàn khi file không có cột Mobile Number)
+                fallback_em_idx = 4 if has_mobile else 3
+                em_idx = col_map.get("email", fallback_em_idx)
+                raw_em = str(row[em_idx] or '').strip() if em_idx < len(row) else ""
                 em = sanitize_email(raw_em)
 
-                raw_dob = row[col_map.get("dob", 5)] if "dob" in col_map else ""
+                fallback_dob_idx = 5 if has_mobile else 4
+                dob_idx = col_map.get("dob", fallback_dob_idx)
+                raw_dob = row[dob_idx] if dob_idx < len(row) else ""
                 dob = COFService.format_date_dob(raw_dob)
 
-                raw_role = str(row[col_map.get("role", 6)] or 'Student').strip() if "role" in col_map else "Student"
+                fallback_role_idx = 6 if has_mobile else 5
+                role_idx = col_map.get("role", fallback_role_idx)
+                raw_role = str(row[role_idx] or 'Student').strip() if role_idx < len(row) else "Student"
                 role = sanitize_role(raw_role)
 
                 extracted_users.append({
