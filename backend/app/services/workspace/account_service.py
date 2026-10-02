@@ -465,8 +465,8 @@ class WorkspaceAccountService(WorkspaceBaseService):
                 account_count = len(accounts)
 
                 # Tối thiểu 10s / tài khoản, tối đa 20s / tài khoản
-                min_wait = max(account_count * 10, 10)
-                max_wait = max(account_count * 20, 20)
+                min_wait = max(account_count * 15, 15)
+                max_wait = max(account_count * 30, 30)
 
                 # ⚡ FAST-PATH POLLING: ĐỢI ĐỦ THỜI GIAN RỒI CHECK TRỰC TIẾP TẠI CHỖ
                 # Với batch nhỏ (<= 20 tài khoản), bot tự động đợi đúng thời gian anh tính và check để ăn kết quả ngay!

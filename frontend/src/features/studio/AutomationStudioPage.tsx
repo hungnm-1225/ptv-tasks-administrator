@@ -138,6 +138,17 @@ export const AutomationStudioPage: React.FC = () => {
     request_id?: string;
   } | null>(null);
 
+  // 🎯 SỐ LIỆU THẬT TỪ HỆ THỐNG & VALIDATION STATE
+  const [realMetrics, setRealMetrics] = useState<{
+    total_tickets?: number;
+    pending_approval?: number;
+    resolved_this_month?: number;
+    automation_rate?: number;
+    system_health?: string;
+    system_health_subtext?: string;
+  } | null>(null);
+  const [hasTriggeredValidation, setHasTriggeredValidation] = useState<boolean>(false);
+
   const [userSearchQuery, setUserSearchQuery] = useState<string>('hsdttemd@pythaverse.net');
   const [isSearchingUser, setIsSearchingUser] = useState<boolean>(false);
   const [loadedUserProfile, setLoadedUserProfile] = useState<{
@@ -415,17 +426,19 @@ export const AutomationStudioPage: React.FC = () => {
   useEffect(() => {
     const loadAllMetadata = async () => {
       try {
-        const [schools, wsCats, wsCourses, lmsCats, lmsCourses] = await Promise.all([
+        const [schools, wsCats, wsCourses, lmsCats, lmsCourses, reportSummary] = await Promise.all([
           fetchApi<HierarchySchoolItem[]>('/workspace/hierarchy-schools').catch(() => []),
           fetchApi<string[]>('/workspace/categories').catch(() => ['SWRP', 'IR', 'ASP', 'Other']),
           fetchApi<CourseItem[]>('/courses/workspace').catch(() => []),
           fetchApi<string[]>('/courses/lms/categories').catch(() => []),
           fetchApi<CourseItem[]>('/courses/lms').catch(() => []),
+          fetchApi<any>('/reports/summary').catch(() => null),
         ]);
 
         if (schools) setSchoolsList(schools);
         if (wsCats && wsCats.length > 0) setWorkspaceCategoriesList(wsCats);
         if (wsCourses) setWorkspaceCoursesList(wsCourses);
+        if (reportSummary) setRealMetrics(reportSummary);
         if (lmsCats && lmsCats.length > 0) setLmsCategoriesList(lmsCats);
         if (lmsCourses && lmsCourses.length > 0) {
           setLmsCoursesList(lmsCourses);
@@ -854,6 +867,30 @@ export const AutomationStudioPage: React.FC = () => {
   };
 
   const handleOpenConfirmModal = () => {
+    // 🎯 Kích hoạt cờ kiểm tra để highlight viền đỏ các mục chưa phân bổ
+    setHasTriggeredValidation(true);
+
+    // Cảnh báo nếu có giáo viên hoặc lớp chưa được gán vào khóa học
+    if (selectedBotType === 'workspace_rpa' && workspaceMainCategory === 'create_and_approve') {
+      const warnings: string[] = [];
+      const unassignedClassCount = cofUnassignedClasses.length;
+      const unassignedTeachers = cofTeachersAllocation.filter((t) => t.assignedLmsGroups.length === 0);
+
+      if (unassignedClassCount > 0) {
+        warnings.push(`${unassignedClassCount} nhóm lớp chưa xếp vào khóa học`);
+      }
+      if (unassignedTeachers.length > 0) {
+        warnings.push(`${unassignedTeachers.length} giáo viên chưa được gán vào nhóm nào`);
+      }
+
+      if (warnings.length > 0) {
+        toast.warning(
+          `⚠️ Cảnh báo phân bổ: Còn ${warnings.join(' và ')}. Các thẻ chưa được xếp/gán đã được viền đỏ để bạn lưu ý!`,
+          { duration: 6000 }
+        );
+      }
+    }
+
     const result = buildPreparedTaskPayload({
       selectedBotType,
       workspaceMainCategory,
@@ -1023,39 +1060,12 @@ export const AutomationStudioPage: React.FC = () => {
               </p>
             </div>
           </div>
-
-          <div className="flex items-center gap-3">
-            <button
-              id="btn-goto-bot-center"
-              onClick={() => navigate('/bots')}
-              className="group flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/80 px-4 py-2.5 text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-xs hover:border-indigo-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all cursor-pointer"
-            >
-              <span>Xem Bot Center</span>
-              <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-            </button>
-          </div>
         </div>
       </div>
 
-      {/* 2. 4 Bento Pastel Stats Cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <motion.div
-          whileHover={{ y: -2 }}
-          transition={{ duration: 0.2 }}
-          className="rounded-3xl border border-blue-100 dark:border-blue-950/60 bg-blue-50/90 dark:bg-blue-950/30 p-5 flex flex-col justify-between shadow-xs"
-        >
-          <div>
-            <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-widest mb-1">
-              Tác Vụ Tự Động
-            </p>
-            <h3 className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono">24,850</h3>
-          </div>
-          <div className="flex items-center text-xs text-blue-500 font-medium mt-3">
-            <span className="mr-1 font-bold">↑ 12%</span>
-            <span className="opacity-60 text-slate-500 dark:text-slate-400">so với tháng trước</span>
-          </div>
-        </motion.div>
-
+      {/* 2. Bento Pastel Stats Cards (Dữ liệu thật, tinh gọn) */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {/* Card 1: Cơ sở trường học & Tuyến đối tác thật */}
         <motion.div
           whileHover={{ y: -2 }}
           transition={{ duration: 0.2 }}
@@ -1063,58 +1073,57 @@ export const AutomationStudioPage: React.FC = () => {
         >
           <div>
             <p className="text-xs font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-widest mb-1">
-              Đơn Hàng & License
+              Cơ Sở Giáo Dục & Tuyến Kết Nối
             </p>
             <h3 className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono">
-              {schoolsList.length > 0 ? `${schoolsList.length}+` : '490+'}
+              {schoolsList.length > 0 ? `${schoolsList.length} Trường` : 'Đang tải...'}
             </h3>
           </div>
           <div className="flex items-center text-xs text-purple-500 font-medium mt-3">
-            <span className="mr-1 font-bold">480 Trường</span>
-            <span className="opacity-60 text-slate-500 dark:text-slate-400">+ 158 PRT/DST</span>
+            <span className="mr-1 font-bold">{uniquePartnersList.length} Đối tác</span>
+            <span className="opacity-60 text-slate-500 dark:text-slate-400">& Nhà phân phối liên kết</span>
           </div>
         </motion.div>
 
+        {/* Card 2: Tác vụ chờ xử lý & hoàn tất */}
         <motion.div
           whileHover={{ y: -2 }}
           transition={{ duration: 0.2 }}
-          className="rounded-3xl border border-orange-100 dark:border-orange-950/60 bg-orange-50/90 dark:bg-orange-950/30 p-5 flex flex-col justify-between shadow-xs"
+          className="rounded-3xl border border-blue-100 dark:border-blue-950/60 bg-blue-50/90 dark:bg-blue-950/30 p-5 flex flex-col justify-between shadow-xs"
         >
           <div>
-            <p className="text-xs font-semibold text-orange-600 dark:text-orange-400 uppercase tracking-widest mb-1">
-              Duyệt Tự Động
+            <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-widest mb-1">
+              Tác Vụ Đang Xử Lý & Chờ Duyệt
             </p>
-            <h3 className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono">98.6%</h3>
+            <h3 className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono">
+              {realMetrics?.pending_approval !== undefined ? `${realMetrics.pending_approval} Tác vụ` : '0 Tác vụ'}
+            </h3>
           </div>
-          <div className="flex items-center text-xs text-orange-500 font-medium mt-3">
-            <span className="mr-1 font-bold">Zero-error</span>
-            <span className="opacity-60 text-slate-500 dark:text-slate-400">pipeline 4 cấp</span>
+          <div className="flex items-center text-xs text-blue-500 font-medium mt-3">
+            <span className="mr-1 font-bold">{realMetrics?.resolved_this_month ?? 0} tác vụ</span>
+            <span className="opacity-60 text-slate-500 dark:text-slate-400">đã hoàn tất trong tháng</span>
           </div>
         </motion.div>
 
+        {/* Card 3: Sức khỏe hệ thống & Tỷ lệ tự động hóa */}
         <motion.div
           whileHover={{ y: -2 }}
           transition={{ duration: 0.2 }}
           className="rounded-3xl border border-emerald-100 dark:border-emerald-950/60 bg-emerald-50/90 dark:bg-emerald-950/30 p-5 flex flex-col justify-between shadow-xs"
         >
-          <div className="flex justify-between items-start mb-2">
-            <div>
-              <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 uppercase tracking-widest mb-0.5">
-                Mục Tiêu Năm
-              </p>
-              <h4 className="text-base font-bold text-emerald-900 dark:text-emerald-200">Kỳ 2026 - 2027</h4>
-            </div>
-            <div className="w-8 h-8 rounded-full bg-white dark:bg-emerald-900/60 flex items-center justify-center text-emerald-500 shadow-xs text-sm">
-              🎯
-            </div>
-          </div>
-          <div className="space-y-1.5 mt-1">
-            <div className="h-2 w-full bg-emerald-200/60 dark:bg-emerald-900/60 rounded-full overflow-hidden">
-              <div className="h-full w-3/4 bg-emerald-500 rounded-full" />
-            </div>
-            <p className="text-[11px] text-emerald-700 dark:text-emerald-300 font-medium">
-              Đã hoàn thành 75% chỉ tiêu năm. Tiếp tục duy trì phong độ!
+          <div>
+            <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-1">
+              Sức Khỏe Hệ Thống & Tự Động Hóa
             </p>
+            <h3 className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono">
+              {realMetrics?.system_health || '100%'}
+            </h3>
+          </div>
+          <div className="flex items-center text-xs text-emerald-600 dark:text-emerald-400 font-medium mt-3">
+            <span className="mr-1 font-bold">{realMetrics?.automation_rate !== undefined ? `${realMetrics.automation_rate}%` : '100%'}</span>
+            <span className="opacity-60 text-slate-500 dark:text-slate-400">
+              {realMetrics?.system_health_subtext || 'Tỷ lệ tự động hóa chuẩn xác'}
+            </span>
           </div>
         </motion.div>
       </div>
@@ -1388,6 +1397,7 @@ export const AutomationStudioPage: React.FC = () => {
               setContactInfo={setContactInfo}
               additionalNotes={additionalNotes}
               setAdditionalNotes={setAdditionalNotes}
+              hasTriggeredValidation={hasTriggeredValidation}
             />
           )}
 

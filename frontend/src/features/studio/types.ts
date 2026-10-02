@@ -71,11 +71,14 @@ export interface PreparedTaskSummary {
 }
 
 export interface ClassGroupItem {
+    id?: string;
     rawClassName: string;
     lmsGroupName: string;
     studentsCount: number;
     gradeDetected: number | null;
     students?: string[];
+    groupFamilyId?: string;
+    isDuplicate?: boolean;
     [key: string]: any;
 }
 

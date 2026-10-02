@@ -31,6 +31,7 @@ import {
     CofExtractionResult,
 } from '../../../types';
 import { TeacherAllocationModal } from '../../modals/TeacherAllocationModal';
+import { ClassEditModal } from '../../modals/ClassEditModal';
 
 interface CreateAndApproveSectionProps {
     uploadedCofFile: File | null;
@@ -64,6 +65,7 @@ interface CreateAndApproveSectionProps {
     setContactInfo: (val: string) => void;
     additionalNotes: string;
     setAdditionalNotes: (val: string) => void;
+    hasTriggeredValidation?: boolean;
 }
 
 export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = ({
@@ -73,6 +75,7 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
     setCofExtractionResult,
     onProcessCofFile,
     cofTrays,
+    cofClassAssignments,
     setCofClassAssignments,
     cofUnassignedClasses,
     setCofUnassignedClasses,
@@ -97,6 +100,7 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
     setContactInfo,
     additionalNotes,
     setAdditionalNotes,
+    hasTriggeredValidation = false,
 }) => {
     // 1. Quản lý kéo thả lớp
     const [draggedClassInfo, setDraggedClassInfo] = useState<{
@@ -153,10 +157,132 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
     }, [schoolsList]);
 
     // -------------------------------------------------------------------------
-    // 🎯 STATE & EFFECT: CUSTOM EDIT TÊN GROUP & TỰ ĐỘNG ĐỒNG BỘ THEO TRƯỜNG
+    // 🎯 STATE & MODAL QUẢN LÝ / CHỈNH SỬA / DUPLICATE LỚP HỌC
     // -------------------------------------------------------------------------
-    const [editingGroupClassKey, setEditingGroupClassKey] = useState<string | null>(null);
-    const [editingGroupNameVal, setEditingGroupNameVal] = useState<string>('');
+    const [editingClassState, setEditingClassState] = useState<{
+        classItem: ClassGroupItem;
+        sourceTrayId: string | null;
+    } | null>(null);
+
+    const handleOpenClassEdit = (classItem: ClassGroupItem, sourceTrayId: string | null) => {
+        setEditingClassState({ classItem, sourceTrayId });
+    };
+
+    const handleSaveClassEdit = (
+        updatedClass: ClassGroupItem,
+        sourceTrayId: string | null,
+        _oldGroupName: string,
+        _newGroupName: string
+    ) => {
+        if (sourceTrayId) {
+            setCofClassAssignments((prev) => ({
+                ...prev,
+                [sourceTrayId]: (prev[sourceTrayId] || []).map((c) =>
+                    (c.id && updatedClass.id ? c.id === updatedClass.id : c.rawClassName === updatedClass.rawClassName)
+                        ? updatedClass
+                        : c
+                ),
+            }));
+        } else {
+            setCofUnassignedClasses((prev) =>
+                prev.map((c) =>
+                    (c.id && updatedClass.id ? c.id === updatedClass.id : c.rawClassName === updatedClass.rawClassName)
+                        ? updatedClass
+                        : c
+                )
+            );
+        }
+    };
+
+    const handleDuplicateClass = (baseClass: ClassGroupItem) => {
+        const familyId = baseClass.groupFamilyId || baseClass.id || `fam-${Date.now()}`;
+        const newId = `cls-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+        // Đảm bảo nhóm gốc cũng có familyId
+        if (!baseClass.groupFamilyId) {
+            baseClass.groupFamilyId = familyId;
+            setCofClassAssignments((prev) => {
+                const next: Record<string, ClassGroupItem[]> = {};
+                for (const [tId, list] of Object.entries(prev)) {
+                    next[tId] = list.map((c) =>
+                        (c.id && baseClass.id ? c.id === baseClass.id : c.rawClassName === baseClass.rawClassName)
+                            ? { ...c, groupFamilyId: familyId }
+                            : c
+                    );
+                }
+                return next;
+            });
+            setCofUnassignedClasses((prev) =>
+                prev.map((c) =>
+                    (c.id && baseClass.id ? c.id === baseClass.id : c.rawClassName === baseClass.rawClassName)
+                        ? { ...c, groupFamilyId: familyId }
+                        : c
+                )
+            );
+        }
+
+        const duplicatedClass: ClassGroupItem = {
+            ...baseClass,
+            id: newId,
+            groupFamilyId: familyId,
+            isDuplicate: true,
+            rawClassName: baseClass.rawClassName,
+            lmsGroupName: baseClass.lmsGroupName,
+            studentsCount: baseClass.studentsCount,
+            students: [...(baseClass.students || [])],
+        };
+
+        setCofUnassignedClasses((prev) => [...prev, duplicatedClass]);
+        toast.success(`Đã nhân bản nhóm '${baseClass.rawClassName}'. Nhóm mới đã được đưa vào hàng đợi Các Khối Lớp Chưa Xếp Vào Khay!`);
+    };
+
+    // Ràng buộc cốt tử: Không cho phép nhóm vừa duplicate và nhóm gốc được chung 1 khóa học
+    const isTrayConflictedWithGroup = (trayCourseId: string, classItem: ClassGroupItem) => {
+        const assignedInTray = cofClassAssignments[trayCourseId] || [];
+        const targetFamily = classItem.groupFamilyId || classItem.id || classItem.rawClassName;
+        return assignedInTray.some((c: ClassGroupItem) => {
+            if (c.id && classItem.id && c.id === classItem.id) return false;
+            const cFamily = c.groupFamilyId || c.id || c.rawClassName;
+            return cFamily === targetFamily;
+        });
+    };
+
+    // Xóa khóa học trực tiếp ngay tại khay
+    const handleRemoveCourseFromTray = (courseId: string) => {
+        const courseIdx = selectedCourses.findIndex((c) => String(c.course_id) === String(courseId));
+        if (courseIdx === -1) return;
+
+        const courseToRemove = selectedCourses[courseIdx];
+        const classesInTray = cofClassAssignments[courseId] || [];
+
+        if (classesInTray.length > 0) {
+            setCofUnassignedClasses((prev) => [...prev, ...classesInTray]);
+            setCofClassAssignments((prev) => {
+                const next = { ...prev };
+                delete next[courseId];
+                return next;
+            });
+        }
+
+        onRemoveCourseRow(courseIdx);
+        toast.info(`Đã xóa khóa học '${courseToRemove.course_name}' khỏi khay. ${classesInTray.length} lớp học đã được đưa về hàng đợi.`);
+    };
+
+    // Cập nhật ngày bắt đầu / kết thúc trực tiếp tại khay (đồng bộ 2 chiều với bảng bên dưới)
+    const handleUpdateTrayDates = (courseId: string, startDate?: string, endDate?: string) => {
+        setSelectedCourses((prev) =>
+            prev.map((c) => {
+                if (String(c.course_id) === String(courseId)) {
+                    return {
+                        ...c,
+                        start_date: startDate !== undefined ? startDate : c.start_date,
+                        end_date: endDate !== undefined ? endDate : c.end_date,
+                    };
+                }
+                return c;
+            })
+        );
+    };
 
     // Tự động cập nhật tên Group theo trường học nếu chưa bị sửa tay
     useEffect(() => {
@@ -497,17 +623,28 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                         const { sourceTrayId, classItem } = draggedClassInfo;
                                         if (sourceTrayId === tray.courseId) return;
 
+                                        // 🎯 RÀNG BUỘC CỐT TỬ: Không cho phép nhóm vừa duplicate và nhóm gốc cùng thuộc 1 khóa học
+                                        if (isTrayConflictedWithGroup(tray.courseId, classItem)) {
+                                            toast.error(`⚠️ Không thể xếp lớp '${classItem.rawClassName}' vào Khay #${tray.courseId} vì khay này đã có nhóm gốc hoặc nhóm nhân bản!`);
+                                            setDraggedClassInfo(null);
+                                            return;
+                                        }
+
                                         setCofClassAssignments((prev) => {
                                             const next = { ...prev };
                                             if (sourceTrayId && next[sourceTrayId]) {
-                                                next[sourceTrayId] = next[sourceTrayId].filter((c) => c.rawClassName !== classItem.rawClassName);
+                                                next[sourceTrayId] = next[sourceTrayId].filter((c) =>
+                                                    (c.id && classItem.id ? c.id !== classItem.id : c.rawClassName !== classItem.rawClassName)
+                                                );
                                             }
                                             next[tray.courseId] = [...(next[tray.courseId] || []), classItem];
                                             return next;
                                         });
 
                                         if (!sourceTrayId) {
-                                            setCofUnassignedClasses((prev) => prev.filter((c) => c.rawClassName !== classItem.rawClassName));
+                                            setCofUnassignedClasses((prev) => prev.filter((c) =>
+                                                (c.id && classItem.id ? c.id !== classItem.id : c.rawClassName !== classItem.rawClassName)
+                                            ));
                                         }
 
                                         setDraggedClassInfo(null);
@@ -538,16 +675,27 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                                 )}
                                             </div>
 
-                                            <span
-                                                className={`shrink-0 px-2.5 py-1 rounded-xl text-[10px] font-extrabold font-mono ${isOverflow
-                                                    ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-300'
-                                                    : isExact
-                                                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300'
-                                                        : 'bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300'
-                                                    }`}
-                                            >
-                                                {isOverflow ? `TRÀN +${Math.abs(diff)}` : isExact ? 'KHỚP 100%' : `DƯ ${diff} CHỖ`}
-                                            </span>
+                                            <div className="flex items-center gap-1.5 shrink-0">
+                                                <span
+                                                    className={`px-2.5 py-1 rounded-xl text-[10px] font-extrabold font-mono ${isOverflow
+                                                        ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-300'
+                                                        : isExact
+                                                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300'
+                                                            : 'bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300'
+                                                        }`}
+                                                >
+                                                    {isOverflow ? `TRÀN +${Math.abs(diff)}` : isExact ? 'KHỚP 100%' : `DƯ ${diff} CHỖ`}
+                                                </span>
+                                                {/* Nút xóa môn học trực tiếp ngay tại khay */}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleRemoveCourseFromTray(tray.courseId)}
+                                                    className="p-1 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                                                    title="Xóa khóa học này khỏi khay"
+                                                >
+                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                </button>
+                                            </div>
                                         </div>
 
                                         {/* Thanh tiến độ sức chứa */}
@@ -569,11 +717,37 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                             </div>
                                         </div>
 
+                                        {/* Chỉnh sửa ngày bắt đầu / kết thúc trực tiếp tại khay (đồng bộ 2 chiều) */}
+                                        {!isContractFlow && (
+                                            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-[10px]">
+                                                <div>
+                                                    <label className="text-slate-400 font-semibold block mb-0.5">Bắt đầu:</label>
+                                                    <input
+                                                        type="text"
+                                                        value={tray.startDate || '2026-09-16'}
+                                                        placeholder="YYYY-MM-DD"
+                                                        onChange={(e) => handleUpdateTrayDates(tray.courseId, e.target.value, undefined)}
+                                                        className="w-full px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/80 font-mono text-[10px] text-slate-800 dark:text-slate-200 focus:border-indigo-500 focus:outline-hidden"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="text-slate-400 font-semibold block mb-0.5">Kết thúc:</label>
+                                                    <input
+                                                        type="text"
+                                                        value={tray.endDate || '2027-09-16'}
+                                                        placeholder="YYYY-MM-DD"
+                                                        onChange={(e) => handleUpdateTrayDates(tray.courseId, undefined, e.target.value)}
+                                                        className="w-full px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/80 font-mono text-[10px] text-slate-800 dark:text-slate-200 focus:border-indigo-500 focus:outline-hidden"
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
+
                                         {/* Danh sách các lớp trong Khay */}
                                         <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800">
                                             <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                                                 <span>CÁC LỚP TRONG KHAY ({tray.assignedClasses.length} LỚP):</span>
-                                                <span className="text-[9px] lowercase font-normal italic text-slate-400">kéo để chuyển khay</span>
+                                                <span className="text-[9px] lowercase font-normal italic text-slate-400">kéo hoặc nhấp thẻ để sửa</span>
                                             </div>
 
                                             <div className="max-h-64 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
@@ -584,82 +758,34 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                                 ) : (
                                                     tray.assignedClasses.map((clsItem) => {
                                                         const classTeachers = getTeachersForGroup(clsItem.lmsGroupName);
-                                                        const isPopoverOpen = activeTeacherPopoverGroup === clsItem.lmsGroupName;
 
                                                         return (
                                                             <div
-                                                                key={clsItem.rawClassName}
+                                                                key={clsItem.id || clsItem.rawClassName}
                                                                 draggable
                                                                 onDragStart={(e) => {
                                                                     setDraggedClassInfo({ sourceTrayId: tray.courseId, classItem: clsItem });
                                                                     e.dataTransfer.setData('text/plain', clsItem.rawClassName);
                                                                 }}
-                                                                className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/60 dark:border-slate-700 text-xs cursor-grab active:cursor-grabbing hover:border-indigo-400 hover:shadow-2xs transition space-y-1.5"
+                                                                onClick={() => handleOpenClassEdit(clsItem, tray.courseId)}
+                                                                className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/60 dark:border-slate-700 text-xs cursor-pointer hover:border-indigo-400 hover:shadow-2xs transition space-y-1.5 group/card"
+                                                                title="Nhấp để chỉnh sửa lớp học, giáo viên & học sinh"
                                                             >
-                                                                {/* Tên Lớp & Custom Edit Group Name */}
+                                                                {/* Tên Lớp & Số học sinh */}
                                                                 <div className="flex items-center justify-between">
                                                                     <div className="min-w-0 pr-2 flex-1">
-                                                                        <p className="font-bold text-slate-800 dark:text-slate-200 truncate flex items-center gap-1.5">
-                                                                            <span className="text-slate-400">⠿</span>
-                                                                            <span>{clsItem.rawClassName}</span>
+                                                                        <p className="font-bold text-slate-800 dark:text-slate-200 truncate flex items-center gap-1.5 group-hover/card:text-indigo-600 transition">
+                                                                            <span className="text-slate-400 cursor-grab active:cursor-grabbing">⠿</span>
+                                                                            <span className="truncate">{clsItem.rawClassName}</span>
+                                                                            {clsItem.isDuplicate && (
+                                                                                <span className="px-1.5 py-0.2 rounded-md text-[9px] font-mono font-bold bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300 shrink-0">
+                                                                                    Copy
+                                                                                </span>
+                                                                            )}
                                                                         </p>
-
-                                                                        {/* Inline Edit Group Name */}
-                                                                        {editingGroupClassKey === clsItem.rawClassName ? (
-                                                                            <div className="flex items-center gap-1 mt-1 pl-3">
-                                                                                <input
-                                                                                    type="text"
-                                                                                    value={editingGroupNameVal}
-                                                                                    onChange={(e) => setEditingGroupNameVal(e.target.value)}
-                                                                                    onKeyDown={(e) => {
-                                                                                        if (e.key === 'Enter') {
-                                                                                            const finalName = editingGroupNameVal.trim() || clsItem.lmsGroupName;
-                                                                                            setCofClassAssignments(prev => ({
-                                                                                                ...prev,
-                                                                                                [tray.courseId]: prev[tray.courseId].map(c =>
-                                                                                                    c.rawClassName === clsItem.rawClassName ? { ...c, lmsGroupName: finalName, isCustomGroup: true } : c
-                                                                                                )
-                                                                                            }));
-                                                                                            setEditingGroupClassKey(null);
-                                                                                            toast.success(`Đã đổi tên group thành '${finalName}'`);
-                                                                                        } else if (e.key === 'Escape') {
-                                                                                            setEditingGroupClassKey(null);
-                                                                                        }
-                                                                                    }}
-                                                                                    className="px-2 py-0.5 rounded border border-indigo-400 bg-white dark:bg-slate-900 text-[10px] font-mono w-full focus:outline-hidden"
-                                                                                    autoFocus
-                                                                                />
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={() => {
-                                                                                        const finalName = editingGroupNameVal.trim() || clsItem.lmsGroupName;
-                                                                                        setCofClassAssignments(prev => ({
-                                                                                            ...prev,
-                                                                                            [tray.courseId]: prev[tray.courseId].map(c =>
-                                                                                                c.rawClassName === clsItem.rawClassName ? { ...c, lmsGroupName: finalName, isCustomGroup: true } : c
-                                                                                            )
-                                                                                        }));
-                                                                                        setEditingGroupClassKey(null);
-                                                                                        toast.success(`Đã đổi tên group thành '${finalName}'`);
-                                                                                    }}
-                                                                                    className="p-1 text-emerald-600 hover:text-emerald-700"
-                                                                                >
-                                                                                    <Check className="w-3 h-3" />
-                                                                                </button>
-                                                                            </div>
-                                                                        ) : (
-                                                                            <div
-                                                                                onClick={() => {
-                                                                                    setEditingGroupClassKey(clsItem.rawClassName);
-                                                                                    setEditingGroupNameVal(clsItem.lmsGroupName);
-                                                                                }}
-                                                                                className="text-[10px] text-slate-400 font-mono truncate pl-3 flex items-center gap-1 group/edit cursor-pointer hover:text-indigo-600 transition"
-                                                                                title="Nhấp để đổi tên Group"
-                                                                            >
-                                                                                <span className="truncate">Group: {clsItem.lmsGroupName}</span>
-                                                                                <span className="opacity-0 group-hover/edit:opacity-100 text-[9px] text-indigo-500 font-sans font-bold">✎ Sửa</span>
-                                                                            </div>
-                                                                        )}
+                                                                        <p className="text-[10px] text-slate-400 font-mono truncate pl-3">
+                                                                            Group: {clsItem.lmsGroupName}
+                                                                        </p>
                                                                     </div>
 
                                                                     <div className="flex items-center gap-1.5 shrink-0">
@@ -668,12 +794,13 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                                                         </span>
                                                                         <button
                                                                             type="button"
-                                                                            onClick={() => {
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
                                                                                 setCofClassAssignments((prev) => {
                                                                                     const next = { ...prev };
                                                                                     if (next[tray.courseId]) {
                                                                                         next[tray.courseId] = next[tray.courseId].filter(
-                                                                                            (c) => c.rawClassName !== clsItem.rawClassName
+                                                                                            (c) => (c.id && clsItem.id ? c.id !== clsItem.id : c.rawClassName !== clsItem.rawClassName)
                                                                                         );
                                                                                     }
                                                                                     return next;
@@ -689,8 +816,8 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                                                     </div>
                                                                 </div>
 
-                                                                {/* 🎯 HÀNG GIÁO VIÊN GẮN TRỰC TIẾP TRONG THẺ LỚP */}
-                                                                <div className="flex flex-wrap items-center gap-1 pl-3 pt-1 border-t border-slate-200/50 dark:border-slate-700/50 text-[10px] relative">
+                                                                {/* Hàng Giáo viên phụ trách */}
+                                                                <div className="flex flex-wrap items-center gap-1 pl-3 pt-1 border-t border-slate-200/50 dark:border-slate-700/50 text-[10px]">
                                                                     <span className="font-semibold text-slate-400 flex items-center gap-0.5">
                                                                         <GraduationCap className="w-3 h-3 text-indigo-500" />
                                                                         <span>GV:</span>
@@ -706,83 +833,12 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                                                                 key={t.email}
                                                                                 className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 font-medium border border-indigo-200/60 dark:border-indigo-800"
                                                                             >
-                                                                                <span className="truncate max-w-[85px]" title={t.teacherName}>
+                                                                                <span className="truncate max-w-[120px]" title={t.teacherName}>
                                                                                     {t.teacherName}
                                                                                 </span>
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={(e) => {
-                                                                                        e.stopPropagation();
-                                                                                        toggleTeacherInGroup(t.email, clsItem.lmsGroupName, t.teacherName);
-                                                                                    }}
-                                                                                    className="text-slate-400 hover:text-rose-500 font-bold ml-0.5 cursor-pointer"
-                                                                                    title="Gỡ GV khỏi group này"
-                                                                                >
-                                                                                    ×
-                                                                                </button>
                                                                             </span>
                                                                         ))
                                                                     )}
-
-                                                                    {/* Nút bấm mở menu Gán Giáo Viên nhanh */}
-                                                                    <div className="relative inline-block ml-auto">
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={(e) => {
-                                                                                e.stopPropagation();
-                                                                                setActiveTeacherPopoverGroup(isPopoverOpen ? null : clsItem.lmsGroupName);
-                                                                            }}
-                                                                            className="px-1.5 py-0.5 rounded-md bg-slate-200/70 hover:bg-indigo-100 text-slate-700 hover:text-indigo-700 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-indigo-950 dark:hover:text-indigo-300 font-bold text-[9px] transition cursor-pointer flex items-center gap-0.5"
-                                                                        >
-                                                                            <Plus className="w-2.5 h-2.5" />
-                                                                            <span>Gán GV</span>
-                                                                        </button>
-
-                                                                        {/* Popover danh sách GV để chọn nhanh */}
-                                                                        {isPopoverOpen && (
-                                                                            <div
-                                                                                onClick={(e) => e.stopPropagation()}
-                                                                                className="absolute z-40 right-0 top-full mt-1 w-48 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl p-1.5 space-y-1 animate-in fade-in zoom-in-95 duration-100"
-                                                                            >
-                                                                                <div className="px-2 py-1 text-[9px] font-bold uppercase text-slate-400 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                                                                                    <span>Chọn GV cho lớp</span>
-                                                                                    <button
-                                                                                        type="button"
-                                                                                        onClick={() => setActiveTeacherPopoverGroup(null)}
-                                                                                        className="text-slate-400 hover:text-slate-600"
-                                                                                    >
-                                                                                        ✕
-                                                                                    </button>
-                                                                                </div>
-
-                                                                                {cofTeachersAllocation.length === 0 ? (
-                                                                                    <div className="p-2 text-center text-[10px] text-slate-400 italic">
-                                                                                        Không có GV nào trong danh sách
-                                                                                    </div>
-                                                                                ) : (
-                                                                                    cofTeachersAllocation.map((t) => {
-                                                                                        const isAssigned = t.assignedLmsGroups.includes(clsItem.lmsGroupName);
-                                                                                        return (
-                                                                                            <button
-                                                                                                key={t.email}
-                                                                                                type="button"
-                                                                                                onClick={() => {
-                                                                                                    toggleTeacherInGroup(t.email, clsItem.lmsGroupName, t.teacherName);
-                                                                                                }}
-                                                                                                className={`w-full text-left p-1.5 rounded-lg text-[10px] flex items-center justify-between transition cursor-pointer ${isAssigned
-                                                                                                    ? 'bg-indigo-50 dark:bg-indigo-950/60 font-bold text-indigo-700 dark:text-indigo-300'
-                                                                                                    : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
-                                                                                                    }`}
-                                                                                            >
-                                                                                                <span className="truncate pr-1">{t.teacherName}</span>
-                                                                                                {isAssigned && <Check className="w-3 h-3 text-indigo-600 shrink-0" />}
-                                                                                            </button>
-                                                                                        );
-                                                                                    })
-                                                                                )}
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
                                                                 </div>
                                                             </div>
                                                         );
@@ -838,54 +894,80 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                             </div>
 
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                                {cofUnassignedClasses.map((uCls) => (
-                                    <div
-                                        key={uCls.rawClassName}
-                                        draggable
-                                        onDragStart={(e) => {
-                                            setDraggedClassInfo({ sourceTrayId: null, classItem: uCls });
-                                            e.dataTransfer.setData('text/plain', uCls.rawClassName);
-                                        }}
-                                        className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/40 flex items-center justify-between gap-2.5 text-xs shadow-2xs hover:border-amber-400 cursor-grab active:cursor-grabbing transition"
-                                    >
-                                        <div className="min-w-0 pr-2">
-                                            <p className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 truncate">
-                                                <span className="text-slate-400">⠿</span>
-                                                <span>{uCls.rawClassName || 'Chưa phân lớp'}</span>
-                                            </p>
-                                            <span className="text-[10px] text-slate-400 font-mono pl-3">
-                                                {uCls.studentsCount} học sinh {uCls.gradeDetected ? `(Khối ${uCls.gradeDetected})` : ''}
-                                            </span>
-                                        </div>
+                                {cofUnassignedClasses.map((uCls) => {
+                                    const classTeachers = getTeachersForGroup(uCls.lmsGroupName);
 
-                                        {/* NÚT SELECT DROPDOWN XẾP NHANH VÀO KHAY */}
-                                        <div className="relative shrink-0">
-                                            <select
-                                                defaultValue=""
-                                                onChange={(e) => {
-                                                    const targetTrayId = e.target.value;
-                                                    if (!targetTrayId) return;
+                                    return (
+                                        <div
+                                            key={uCls.id || uCls.rawClassName}
+                                            draggable
+                                            onDragStart={(e) => {
+                                                setDraggedClassInfo({ sourceTrayId: null, classItem: uCls });
+                                                e.dataTransfer.setData('text/plain', uCls.rawClassName);
+                                            }}
+                                            onClick={() => handleOpenClassEdit(uCls, null)}
+                                            className={`p-3.5 rounded-xl bg-white dark:bg-slate-900 flex items-center justify-between gap-2.5 text-xs shadow-2xs hover:border-indigo-400 cursor-pointer active:cursor-grabbing transition group/card ${
+                                                hasTriggeredValidation
+                                                    ? 'ring-2 ring-rose-500 border-rose-500 bg-rose-50/40 dark:bg-rose-950/20'
+                                                    : 'border border-amber-200 dark:border-amber-900/40'
+                                            }`}
+                                            title="Nhấp để chỉnh sửa thông tin lớp, học sinh & giáo viên"
+                                        >
+                                            <div className="min-w-0 pr-2">
+                                                <p className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 truncate group-hover/card:text-indigo-600 transition">
+                                                    <span className="text-slate-400">⠿</span>
+                                                    <span className="truncate">{uCls.rawClassName || 'Chưa phân lớp'}</span>
+                                                    {uCls.isDuplicate && (
+                                                        <span className="px-1.5 py-0.2 rounded-md text-[9px] font-mono font-bold bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300 shrink-0">
+                                                            Copy
+                                                        </span>
+                                                    )}
+                                                </p>
+                                                <span className="text-[10px] text-slate-400 font-mono pl-3 block truncate">
+                                                    {uCls.studentsCount} học sinh {uCls.gradeDetected ? `(Khối ${uCls.gradeDetected})` : ''} • {classTeachers.length > 0 ? `${classTeachers.length} GV` : 'Chưa có GV'}
+                                                </span>
+                                            </div>
 
-                                                    setCofClassAssignments((prev) => ({
-                                                        ...prev,
-                                                        [targetTrayId]: [...(prev[targetTrayId] || []), uCls],
-                                                    }));
-                                                    setCofUnassignedClasses((prev) => prev.filter((c) => c.rawClassName !== uCls.rawClassName));
-                                                    toast.success(`Đã xếp lớp '${uCls.rawClassName}' vào Khay #${targetTrayId}!`);
-                                                }}
-                                                className="appearance-none px-3 py-1.5 pr-7 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/80 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-mono text-[11px] font-bold hover:bg-indigo-100 transition cursor-pointer outline-hidden"
-                                            >
-                                                <option value="" disabled>+ Xếp vào Khay...</option>
-                                                {cofTrays.map((t) => (
-                                                    <option key={t.courseId} value={t.courseId}>
-                                                        Khay #{t.courseId} ({t.quota - t.assignedStudentsCount} slots)
-                                                    </option>
-                                                ))}
-                                            </select>
-                                            <ChevronDown className="w-3.5 h-3.5 text-indigo-500 absolute right-2 top-2.5 pointer-events-none" />
+                                            {/* NÚT SELECT DROPDOWN XẾP NHANH VÀO KHAY */}
+                                            <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
+                                                <select
+                                                    defaultValue=""
+                                                    onChange={(e) => {
+                                                        const targetTrayId = e.target.value;
+                                                        if (!targetTrayId) return;
+
+                                                        // Ràng buộc cốt tử: Chặn nhóm cùng gốc/nhân bản
+                                                        if (isTrayConflictedWithGroup(targetTrayId, uCls)) {
+                                                            toast.error(`⚠️ Không thể xếp lớp '${uCls.rawClassName}' vào Khay #${targetTrayId} vì khay này đã có nhóm cùng gốc hoặc nhóm nhân bản!`);
+                                                            return;
+                                                        }
+
+                                                        setCofClassAssignments((prev) => ({
+                                                            ...prev,
+                                                            [targetTrayId]: [...(prev[targetTrayId] || []), uCls],
+                                                        }));
+                                                        setCofUnassignedClasses((prev) =>
+                                                            prev.filter((c) => (c.id && uCls.id ? c.id !== uCls.id : c.rawClassName !== uCls.rawClassName))
+                                                        );
+                                                        toast.success(`Đã xếp lớp '${uCls.rawClassName}' vào Khay #${targetTrayId}!`);
+                                                    }}
+                                                    className="appearance-none px-3 py-1.5 pr-7 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/80 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-mono text-[11px] font-bold hover:bg-indigo-100 transition cursor-pointer outline-hidden"
+                                                >
+                                                    <option value="" disabled>+ Xếp vào Khay...</option>
+                                                    {cofTrays.map((t) => {
+                                                        const hasConflict = isTrayConflictedWithGroup(t.courseId, uCls);
+                                                        return (
+                                                            <option key={t.courseId} value={t.courseId} disabled={hasConflict}>
+                                                                Khay #{t.courseId} ({t.quota - t.assignedStudentsCount} slots){hasConflict ? ' - ⚠️ Đã có nhóm cùng gốc' : ''}
+                                                            </option>
+                                                        );
+                                                    })}
+                                                </select>
+                                                <ChevronDown className="w-3.5 h-3.5 text-indigo-500 absolute right-2 top-2.5 pointer-events-none" />
+                                            </div>
                                         </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         </div>
                     )}
@@ -913,7 +995,11 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                     return (
                                         <div
                                             key={tIdx}
-                                            className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 hover:border-indigo-400 text-xs shadow-2xs transition flex flex-col justify-between space-y-2 group"
+                                            className={`p-3 rounded-xl bg-white dark:bg-slate-900 border text-xs shadow-2xs transition flex flex-col justify-between space-y-2 group ${
+                                                hasTriggeredValidation && !hasGroups
+                                                    ? 'ring-2 ring-rose-500 border-rose-500 bg-rose-50/20'
+                                                    : 'border-slate-200 dark:border-slate-700/80 hover:border-indigo-400'
+                                            }`}
                                         >
                                             <div
                                                 onClick={() => setEditingTeacherIndex(tIdx)}
@@ -927,10 +1013,10 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                                                     <span
                                                         className={`px-2 py-0.5 rounded-full font-mono text-[9px] font-bold ${hasGroups
                                                             ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
-                                                            : 'bg-amber-50 text-amber-700 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                                                            : 'bg-rose-50 text-rose-700 dark:bg-rose-950/80 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
                                                             }`}
                                                     >
-                                                        {hasGroups ? `✓ ${t.assignedLmsGroups.length} groups` : 'Chưa gán'}
+                                                        {hasGroups ? `✓ ${t.assignedLmsGroups.length} groups` : '0 groups'}
                                                     </span>
                                                 </div>
                                                 <p className="text-[10px] text-slate-400 font-mono truncate" title={t.email}>
@@ -978,6 +1064,18 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                         setTeachersAllocation={setCofTeachersAllocation}
                         onClose={() => setEditingTeacherIndex(null)}
                         trays={cofTrays}
+                    />
+
+                    {/* MODAL CHỈNH SỬA CHI TIẾT NHÓM LỚP / DUPLICATE */}
+                    <ClassEditModal
+                        isOpen={editingClassState !== null}
+                        onClose={() => setEditingClassState(null)}
+                        classItem={editingClassState?.classItem || null}
+                        sourceTrayId={editingClassState?.sourceTrayId || null}
+                        onSave={handleSaveClassEdit}
+                        onDuplicate={handleDuplicateClass}
+                        teachersList={cofTeachersAllocation}
+                        setTeachersList={setCofTeachersAllocation}
                     />
                 </div>
             )}

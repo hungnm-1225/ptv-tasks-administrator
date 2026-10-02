@@ -285,8 +285,11 @@ export const parseCofExcelFile = async (
             const cleanClass = cleanLmsText(className);
             const lmsGroupName = `${cleanSchool} ${cleanClass} ${dateSuffix}`.replace(/\s+/g, ' ').trim();
 
+            const classId = `cls-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
             // 🎯 GẮN DANH SÁCH STUDENTS VÀO CLASS ITEM
             const classItem: ClassGroupItem = {
+                id: classId,
+                groupFamilyId: classId,
                 rawClassName: className,
                 lmsGroupName,
                 studentsCount: info.count,
@@ -339,19 +342,14 @@ export const parseCofExcelFile = async (
             }
         });
 
-        // Chuyển đổi danh sách Giáo viên
+        // Chuyển đổi danh sách Giáo viên (Khởi tạo chuẩn: 0 groups, không gán sẵn khi mới import)
         const teachersAlloc: TeacherAllocationItem[] = Object.values(teacherMap).map((t) => {
-            const assignedGroups: string[] = [];
-            t.classes.forEach((clsName) => {
-                assignedGroups.push(`${cleanSchool} ${cleanLmsText(clsName)} ${dateSuffix}`);
-            });
-
             return {
                 teacherName: t.name,
                 email: t.email,
-                assignedCourses: Object.keys(traysMap),
-                courseAssign: Object.values(traysMap).map((tray) => tray.courseName).join(' | '),
-                assignedLmsGroups: assignedGroups,
+                assignedCourses: [],
+                courseAssign: '',
+                assignedLmsGroups: [], // Khởi tạo rỗng để tránh bug vừa import đã hiển thị join 1 group
             };
         });
 
@@ -496,7 +494,10 @@ export const parseCofExcelFile = async (
         const cleanClass = cleanLmsText(className);
         const lmsGroupName = `${cleanSchool} ${cleanClass} ${dateSuffix}`.replace(/\s+/g, ' ').trim();
 
+        const classId = `cls-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         const classItem: ClassGroupItem = {
+            id: classId,
+            groupFamilyId: classId,
             rawClassName: className,
             lmsGroupName,
             studentsCount: info.count,
@@ -576,36 +577,12 @@ export const parseCofExcelFile = async (
 
         Object.values(teacherMap).forEach((t) => {
             totalTeachers++;
-            const assignedCourseIds = new Set<string>();
-            const assignedGroups = new Set<string>();
-
-            t.courses.forEach((cStr) => {
-                Object.values(traysMap).forEach((tray) => {
-                    if (
-                        tray.courseName.toLowerCase().includes(cStr.toLowerCase()) ||
-                        (tray.targetGrade && cStr.toLowerCase().includes(`swrp ${tray.targetGrade}`))
-                    ) {
-                        assignedCourseIds.add(tray.courseId);
-
-                        if (t.classes.size > 0) {
-                            t.classes.forEach((clsName) => {
-                                if (tray.assignedClasses.some((ac) => ac.rawClassName === clsName)) {
-                                    assignedGroups.add(`${cleanSchool} ${cleanLmsText(clsName)} ${dateSuffix}`);
-                                }
-                            });
-                        } else {
-                            tray.assignedClasses.forEach((ac) => assignedGroups.add(ac.lmsGroupName));
-                        }
-                    }
-                });
-            });
-
             teachersAlloc.push({
                 teacherName: t.name,
                 email: t.email,
-                assignedCourses: Array.from(assignedCourseIds),
+                assignedCourses: [],
                 courseAssign: Array.from(t.courses).join(' | '),
-                assignedLmsGroups: Array.from(assignedGroups),
+                assignedLmsGroups: [], // Khởi tạo rỗng để tránh bug vừa import đã hiển thị join 1 group
             });
         });
     }
