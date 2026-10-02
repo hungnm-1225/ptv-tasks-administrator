@@ -237,18 +237,59 @@ class WorkspaceOrderService(WorkspaceBaseService):
         except Exception as e:
             logger.warning(f"⚠️ [DB SYNC] Lỗi cập nhật Order: {e}")
 
-    async def _record_created_order_db(self, order_code: str, school_name: str, order_data: Dict[str, Any]):
+    async def _record_created_order_db(
+        self, 
+        order_code: str, 
+        school_identifier: str, 
+        order_data: Dict[str, Any],
+        school_id_num: Optional[str] = None
+    ):
+        """Ghi nhận School Order mới vào Supabase cache: Tự động tra cứu Lineage để điền đầy đủ tên thật của School, Partner và Distributor."""
         if not order_code:
             return
         try:
             from app.core.supabase import get_supabase_client
+            from app.services.workspace_lineage_service import workspace_lineage_service
+
+            # 🎯 1. TRUY VẾT PHẢ HỆ QUA LINEAGE ĐỂ LẤY TÊN THẬT
+            school_query = school_id_num or school_identifier
+            lineage = workspace_lineage_service.resolve_by_school(school_query)
+            if not lineage and school_identifier != school_query:
+                lineage = workspace_lineage_service.resolve_by_school(school_identifier)
+
+            # Giá trị mặc định ban đầu
+            final_school_name = school_identifier
+            final_school_code = f"SCH-{school_id_num}" if school_id_num else None
+            final_partner_name = order_data.get("partner_name")
+            final_distributor_name = order_data.get("distributor_name")
+            final_distributor_code = order_data.get("distributor_code")
+
+            # Nếu tìm thấy Gia phả thật ➔ Điền chuẩn 100% tên hiển thị Enterprise
+            if lineage:
+                sch_info = lineage.get("school", {})
+                prt_info = lineage.get("partner", {})
+                dst_info = lineage.get("distributor", {})
+
+                if sch_info.get("name"):
+                    final_school_name = sch_info["name"]
+                if sch_info.get("code"):
+                    final_school_code = sch_info["code"]
+                if prt_info.get("name"):
+                    final_partner_name = prt_info["name"]
+                if dst_info.get("name"):
+                    final_distributor_name = dst_info["name"]
+                if dst_info.get("code"):
+                    final_distributor_code = dst_info["code"]
+
             now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             supabase = get_supabase_client()
             record = {
                 "order_code": order_code,
-                "school_name": school_name,
-                "partner_name": order_data.get("partner_name", "Partner"),
-                "distributor_code": order_data.get("distributor_code", "N/A"),
+                "school_name": final_school_name,
+                "school_code": final_school_code,
+                "partner_name": final_partner_name,
+                "distributor_name": final_distributor_name,
+                "distributor_code": final_distributor_code,
                 "order_date": now_utc,
                 "status": "Awaiting Partner",
                 "courses_data": order_data.get("courses", []),
@@ -258,7 +299,7 @@ class WorkspaceOrderService(WorkspaceBaseService):
             }
             supabase.table("workspace_orders_cache").upsert(record, on_conflict="order_code").execute()
             self._invalidate_workspace_ram_cache("orders")
-            logger.info(f"💾 [DB SYNC] Lưu Order [{order_code}] ➔ Awaiting Partner")
+            logger.info(f"💾 [DB SYNC] Lưu Order [{order_code}] ({final_school_name} | {final_partner_name} ➔ {final_distributor_name}) ➔ Awaiting Partner")
         except Exception as e:
             logger.warning(f"⚠️ [DB SYNC] Lỗi ghi nhận Order mới: {e}")
 
@@ -423,8 +464,14 @@ class WorkspaceOrderService(WorkspaceBaseService):
                         o_info = res_json.get("data", {}).get("order", {})
                         o_id = str(o_info.get("id"))
                         o_code = o_info.get("school_order_id_format") or f"SCH-{clean_school_id}-{o_id}"
-                        
-                        await self._record_created_order_db(o_code, credentials.get("username", "School"), order_data)
+
+                        await self._record_created_order_db(
+                            order_code=o_code,
+                            school_identifier=credentials.get("username", "School"),
+                            order_data=order_data,
+                            school_id_num=clean_school_id
+                        )
+
                         clean_summary = f"Order: {o_code} | {len(courses)} Khóa [{', '.join(summary_parts)}]"
                         logger.info(f"✅ [School Order] {clean_summary}")
                         return {

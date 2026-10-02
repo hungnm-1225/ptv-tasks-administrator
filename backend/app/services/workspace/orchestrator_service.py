@@ -90,14 +90,29 @@ class WorkspaceOrchestratorService(WorkspaceOrderService, WorkspaceContractServi
 
         # 2. Phê duyệt School Order độc lập (kèm leo cấp Boomerang)
         elif action == "approve_school_order_standalone":
-            school_ident = payload.get("school_name") or payload.get("order_code") or ""
-            lineage = workspace_lineage_service.resolve_by_school(school_ident)
-            partner_creds = lineage["partner"] if lineage else {"username": payload.get("partner_name", "")}
-            distributor_creds = lineage["distributor"] if lineage else {"username": payload.get("distributor_name", "")}
+            order_code = str(payload.get("order_code") or payload.get("order_identifier") or "").strip()
+            school_ident = str(payload.get("school_name") or order_code).strip()
+
+            # 🎯 Bóc tách mã trường từ order_code (VD: SCH-15295-20261002-1483 ➔ SCH-15295)
+            sch_m = re.search(r"(SCH[-_]\d+)", order_code, re.IGNORECASE)
+            school_query = sch_m.group(1) if sch_m else school_ident
+
+            lineage = workspace_lineage_service.resolve_by_school(school_query)
+            if not lineage and school_ident != school_query:
+                lineage = workspace_lineage_service.resolve_by_school(school_ident)
+
+            # 🎯 CHỐT CHẶN THÉP: KHÔNG CÓ THÔNG TIN THẬT TRONG VAULT LẬP TỨC DỪNG LUỒNG, CẤM GỬI PASS RỖNG!
+            if not lineage or not lineage.get("partner") or not lineage["partner"].get("password"):
+                err_msg = f"Không tìm thấy phả hệ hoặc thông tin đăng nhập Partner trong Vault cho trường '{school_ident or order_code}'"
+                logger.error(f"❌ [Orchestrator] {err_msg}")
+                return {"status": "failed", "error": err_msg, "execution_logs": f"❌ {err_msg}"}
+
+            partner_creds = lineage["partner"]
+            distributor_creds = lineage.get("distributor") or {}
             sales_admin_creds = {"username": getattr(settings, "TEST_ADMIN_USER", ""), "password": getattr(settings, "TEST_ADMIN_PASS", "")}
 
             return await self.execute_approve_school_order_standalone(
-                order_identifier=payload.get("order_code", ""),
+                order_identifier=order_code,
                 partner_creds=partner_creds,
                 distributor_creds=distributor_creds,
                 sales_admin_creds=sales_admin_creds,

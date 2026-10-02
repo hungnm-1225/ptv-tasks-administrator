@@ -54,28 +54,26 @@ class WorkspaceLineageService:
         school_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
-        Chiến lược Waterfall Search giải quyết triệt để vấn đề tìm trường:
-        1. Ưu tiên tuyệt đối school_id (UUID / ID số).
-        2. Nếu truyền dictionary payload, tự bóc tách thông minh.
-        3. Nếu truyền chuỗi tên, xử lý sạch ký tự đặc biệt PostgREST và Heuristic Fallback (Demo/Test).
+        Chiến lược Waterfall Search giải quyết triệt để vấn đề tìm trường (Zero-Mock):
+        1. Ưu tiên UUID / ID số / Mã SCH- hoặc SCH_ (kể cả bóc từ order_code).
+        2. Nếu đầu vào là Email/Username Vault -> Tìm ngược qua workspace_credentials_vault.
+        3. Tìm theo Tên (ilike name).
+        4. Tuyệt đối không fallback vào credential ma có password rỗng.
         """
         target_id: Optional[str] = school_id
         target_name: Optional[str] = None
 
-        # 0. Phòng thủ nếu caller vô tình truyền nguyên payload dict vào school_identifier
         if isinstance(school_identifier, dict):
             target_id = target_id or school_identifier.get("school_id") or school_identifier.get("id")
-            target_name = school_identifier.get("school_name") or school_identifier.get("school") or school_identifier.get("name")
+            target_name = school_identifier.get("school_name") or school_identifier.get("school") or school_identifier.get("name") or school_identifier.get("order_code")
         elif isinstance(school_identifier, str):
             clean_str = school_identifier.strip()
             if clean_str not in ["Tự động truy vết", ""]:
-                # Nhận diện nếu bản thân chuỗi là UUID
                 if len(clean_str) == 36 and clean_str.count("-") == 4:
                     target_id = target_id or clean_str
                 else:
                     target_name = clean_str
 
-        # Nếu không có bất kỳ dữ kiện nào
         if not target_id and not target_name:
             return None
 
@@ -87,32 +85,46 @@ class WorkspaceLineageService:
         school_res = None
 
         # =========================================================================
-        # BƯỚC 1: ƯU TIÊN SỐ 1 - TÌM CHÍNH XÁC THEO UUID HOẶC MÃ SỐ (INDEX SCAN O(1))
+        # BƯỚC 1: TÌM THEO UUID HOẶC ID SỐ
         # =========================================================================
         if target_id:
             clean_target_id = str(target_id).strip()
             if len(clean_target_id) == 36 and clean_target_id.count("-") == 4:
                 school_res = query.eq("id", clean_target_id).execute()
             elif clean_target_id.isdigit():
-                school_res = query.or_(f'code.eq."{clean_target_id}",code.eq."SCH_{clean_target_id}"').execute()
-            elif clean_target_id.startswith("SCH_"):
-                num_part = clean_target_id.replace("SCH_", "")
-                school_res = query.or_(f'code.eq."{clean_target_id}",code.eq."{num_part}"').execute()
+                school_res = query.or_(f'code.eq."{clean_target_id}",code.eq."SCH-{clean_target_id}",code.eq."SCH_{clean_target_id}"').execute()
 
         # =========================================================================
-        # BƯỚC 2: NẾU CHƯA RA HOẶC KHÔNG CÓ ID, TÌM THEO TÊN (AN TOÀN POSTGREST)
+        # BƯỚC 2: TÌM THEO CODE / EMAIL VAULT / TÊN TRƯỜNG
         # =========================================================================
         if (not school_res or not school_res.data) and target_name:
             clean_name = target_name.strip()
-            
-            # 2.1 Kiểm tra nếu tên thực chất là mã SCH_ hoặc Số
-            if clean_name.isdigit():
-                school_res = query.or_(f'code.eq."{clean_name}",code.eq."SCH_{clean_name}"').execute()
-            elif clean_name.startswith("SCH_"):
-                num_part = clean_name.replace("SCH_", "")
-                school_res = query.or_(f'code.eq."{clean_name}",code.eq."{num_part}"').execute()
-            else:
-                # 2.2 Tìm chính xác theo tên (Chỉ dùng ilike trên name, không nhét vào code.eq)
+
+            # 2.1 Bóc tách mã trường từ SCH- hoặc SCH_ (Kể cả trong order code SCH-15295-20261002-1483)
+            sch_match = re.search(r"(SCH[-_]\d+)", clean_name, re.IGNORECASE)
+            if sch_match:
+                extracted_code = sch_match.group(1).upper().replace("_", "-")
+                num_only = re.search(r"\d+", extracted_code).group(0)
+                school_res = query.or_(f'code.eq."{extracted_code}",code.eq."SCH_{num_only}",code.eq."{num_only}"').execute()
+
+            # 2.2 Nếu đầu vào là số nguyên thuần
+            elif clean_name.isdigit():
+                school_res = query.or_(f'code.eq."{clean_name}",code.eq."SCH-{clean_name}",code.eq."SCH_{clean_name}"').execute()
+
+            # 2.3 Nếu đầu vào là Email hoặc Username trong Két Sắt Vault (VD: airoc2026.scvn@school.edu)
+            elif "@" in clean_name or "." in clean_name:
+                try:
+                    v_res = supabase.table("workspace_credentials_vault")\
+                        .select("org_id")\
+                        .ilike("username", clean_name)\
+                        .execute()
+                    if v_res.data and v_res.data[0].get("org_id"):
+                        school_res = query.eq("id", v_res.data[0]["org_id"]).execute()
+                except Exception as v_err:
+                    logger.warning(f"⚠️ Tra cứu Vault username thất bại: {v_err}")
+
+            # 2.4 Tìm kiếm theo tên trường học
+            if not school_res or not school_res.data:
                 school_res = query.ilike("name", f"%{clean_name}%").execute()
 
         if not school_res or not school_res.data:
@@ -120,30 +132,16 @@ class WorkspaceLineageService:
             return None
 
         # =========================================================================
-        # BƯỚC 3: TRÍCH XUẤT CREDENTIALS TỪ VAULT & TRUY VẾT PHẢ HỆ
+        # BƯỚC 3: TRÍCH XUẤT CREDENTIALS TỪ VAULT & PHẢ HỆ PARTNER / DISTRIBUTOR
         # =========================================================================
-        school = None
-        school_creds = {}
-        for s in school_res.data:
-            if s.get("role_type") != "school":
-                continue
-            raw_v = s.get("workspace_credentials_vault")
-            s_c = raw_v[0] if (isinstance(raw_v, list) and len(raw_v) > 0) else (raw_v or {})
-            if s_c.get("username"):
-                school = s
-                school_creds = s_c
-                break
-
-        if not school:
-            school = school_res.data[0]
-            raw_school_vault = school.get("workspace_credentials_vault")
-            school_creds = raw_school_vault[0] if (isinstance(raw_school_vault, list) and len(raw_school_vault) > 0) else (raw_school_vault or {})
+        school = school_res.data[0]
+        raw_school_vault = school.get("workspace_credentials_vault")
+        school_creds = raw_school_vault[0] if (isinstance(raw_school_vault, list) and len(raw_school_vault) > 0) else (raw_school_vault or {})
 
         partner_id = school.get("parent_id")
         partner_data = None
         distributor_data = None
 
-        # Tìm Partner cấp trên
         if partner_id:
             partner_res = supabase.table("workspace_organizations")\
                 .select("*, workspace_credentials_vault(*)")\
@@ -154,12 +152,14 @@ class WorkspaceLineageService:
                 raw_p_vault = partner.get("workspace_credentials_vault")
                 p_creds = raw_p_vault[0] if (isinstance(raw_p_vault, list) and len(raw_p_vault) > 0) else (raw_p_vault or {})
                 
+                p_pass = decrypt_password(p_creds.get("encrypted_password", ""))
                 partner_data = {
                     "id": partner.get("id"),
                     "code": partner.get("code"),
                     "name": partner.get("name"),
+                    "partner_id": str(partner.get("partner_id") or partner.get("code") or "").replace("PAR-", "").replace("PAR_", ""),
                     "username": p_creds.get("username", ""),
-                    "password": decrypt_password(p_creds.get("encrypted_password", ""))
+                    "password": p_pass
                 }
 
                 # Tìm Distributor cấp cao nhất
@@ -178,16 +178,22 @@ class WorkspaceLineageService:
                             "id": dist.get("id"),
                             "code": dist.get("code"),
                             "name": dist.get("name"),
+                            "distributor_id": str(dist.get("distributor_id") or dist.get("code") or "").replace("DST-", "").replace("DST_", ""),
                             "username": d_creds.get("username", ""),
                             "password": decrypt_password(d_creds.get("encrypted_password", ""))
                         }
+
+        # 🎯 CHỐT CHẶN AN TOÀN: NẾU KHÔNG CÓ PARTNER THẬT -> BÁO RỖNG, TUYỆT ĐỐI KHÔNG TRẢ DICTIONARY PASSWORD RỖNG!
+        if not partner_data or not partner_data.get("password"):
+            logger.error(f"❌ Trường '{school.get('name')}' không có Partner hợp lệ hoặc thiếu password trong Vault!")
+            return None
 
         country_info = {"name": "Vietnam", "folder": "4. Vietnam", "code": "2"}
         if country_hint and country_hint in COUNTRY_DISTRIBUTOR_MAP:
             country_info = {"name": country_hint, **COUNTRY_DISTRIBUTOR_MAP[country_hint]}
         elif distributor_data:
             for c_name, c_meta in COUNTRY_DISTRIBUTOR_MAP.items():
-                if (c_meta["name"].lower() in distributor_data["name"].lower() or 
+                if (c_meta["name"].lower() in str(distributor_data["name"]).lower() or 
                     str(c_meta["code"]) == str(distributor_data["code"])):
                     country_info = {"name": c_name, **c_meta}
                     break
@@ -198,15 +204,11 @@ class WorkspaceLineageService:
                 "id": school["id"],
                 "code": school["code"],
                 "name": school["name"],
-                "username": school_creds.get("username", "htdttemd"),
+                "username": school_creds.get("username", ""),
                 "password": decrypt_password(school_creds.get("encrypted_password", ""))
             },
-            "partner": partner_data or {
-                "name": "Partner DTTE test (Demo)", "username": "", "password": ""
-            },
-            "distributor": distributor_data or {
-                "name": "PTV Distributor Demo", "username": "testdistributor", "password": ""
-            }
+            "partner": partner_data,
+            "distributor": distributor_data
         }
 
 
