@@ -310,6 +310,7 @@ export const BulkAccountsSection: React.FC<BulkAccountsSectionProps> = ({
                                         <th className="p-2.5 text-center w-10">#</th>
                                         <th className="p-2.5">Họ & Tên</th>
                                         <th className="p-2.5">Email</th>
+                                        <th className="p-2.5">Mobile Number</th>
                                         <th className="p-2.5">Ngày Sinh</th>
                                         <th className="p-2.5">Vai Trò</th>
                                         <th className="p-2.5">Trạng Thái</th>
@@ -338,6 +339,15 @@ export const BulkAccountsSection: React.FC<BulkAccountsSectionProps> = ({
                                                 ) : (
                                                     <span className="text-slate-400 italic font-sans text-[10px]">
                                                         (Tự sinh email định danh)
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td className="p-2.5 text-slate-600 dark:text-slate-300 font-mono">
+                                                {row.mobile ? (
+                                                    <span>{row.mobile}</span>
+                                                ) : (
+                                                    <span className="text-slate-400 font-sans italic text-[10px]">
+                                                        —
                                                     </span>
                                                 )}
                                             </td>

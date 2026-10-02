@@ -19,6 +19,7 @@ import {
     ChevronDown,
     UserCheck,
     GraduationCap,
+    RotateCcw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -159,6 +160,32 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
     // -------------------------------------------------------------------------
     // 🎯 STATE & MODAL QUẢN LÝ / CHỈNH SỬA / DUPLICATE LỚP HỌC
     // -------------------------------------------------------------------------
+    const [initialTeachersBackup, setInitialTeachersBackup] = useState<TeacherAllocationItem[]>([]);
+
+    useEffect(() => {
+        if (cofTeachersAllocation.length > 0 && initialTeachersBackup.length === 0) {
+            setInitialTeachersBackup([...cofTeachersAllocation]);
+        }
+    }, [cofTeachersAllocation, initialTeachersBackup.length]);
+
+    useEffect(() => {
+        setInitialTeachersBackup([]);
+    }, [uploadedCofFile]);
+
+    const handleDeleteTeacher = (email: string, teacherName: string) => {
+        setCofTeachersAllocation((prev) => prev.filter((t) => t.email !== email));
+        toast.info(`Đã xóa giáo viên '${teacherName}' khỏi danh sách.`);
+    };
+
+    const handleRestoreTeachers = () => {
+        if (initialTeachersBackup.length > 0) {
+            setCofTeachersAllocation([...initialTeachersBackup]);
+            toast.success(`Đã khôi phục lại ${initialTeachersBackup.length} giáo viên từ file gốc!`);
+        } else {
+            toast.info('Không có dữ liệu giáo viên gốc để khôi phục.');
+        }
+    };
+
     const [editingClassState, setEditingClassState] = useState<{
         classItem: ClassGroupItem;
         sourceTrayId: string | null;
@@ -973,86 +1000,126 @@ export const CreateAndApproveSection: React.FC<CreateAndApproveSectionProps> = (
                     )}
 
                     {/* 2.3. TRẠM ĐIỀU PHỐI GIÁO VIÊN THÔNG MINH (INTERACTIVE TEACHER HUB) */}
-                    {cofTeachersAllocation.length > 0 && (
+                    {(cofTeachersAllocation.length > 0 || initialTeachersBackup.length > 0) && (
                         <div className="p-4.5 rounded-2xl bg-slate-50/80 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 space-y-3">
                             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs border-b border-slate-200/60 dark:border-slate-800 pb-2">
                                 <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                                     <Users className="w-4 h-4 text-indigo-600" />
                                     <span>Trạm Điều Phối Giáo Viên ({cofTeachersAllocation.length} GV - Không tốn License):</span>
                                 </span>
-                                <span className="text-[11px] text-slate-400 italic">
-                                    Bấm vào thẻ để cấu hình chi tiết, hoặc dùng nút thao tác nhanh bên cạnh.
-                                </span>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-[11px] text-slate-400 italic">
+                                        Bấm vào thẻ để cấu hình chi tiết, hoặc dùng nút thao tác nhanh bên cạnh.
+                                    </span>
+                                    {initialTeachersBackup.length > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={handleRestoreTeachers}
+                                            className="flex items-center gap-1 px-2.5 py-1 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 font-semibold text-[10px] transition cursor-pointer shrink-0 shadow-2xs"
+                                            title="Khôi phục lại danh sách giáo viên đầy đủ ban đầu được phân tích từ file"
+                                        >
+                                            <RotateCcw className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
+                                            <span>Khôi phục danh sách</span>
+                                        </button>
+                                    )}
+                                </div>
                             </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
-                                {cofTeachersAllocation.map((t, tIdx) => {
-                                    const hasGroups = t.assignedLmsGroups.length > 0;
-                                    const allSchoolGroupNames = cofTrays.flatMap((tray) =>
-                                        tray.assignedClasses.map((c) => c.lmsGroupName)
-                                    );
+                            {cofTeachersAllocation.length === 0 ? (
+                                <div className="p-4 text-center rounded-xl border border-dashed border-slate-200 dark:border-slate-800 text-xs text-slate-400 space-y-2">
+                                    <p className="italic">Danh sách giáo viên hiện đang trống (đã xóa hết).</p>
+                                    <button
+                                        type="button"
+                                        onClick={handleRestoreTeachers}
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition cursor-pointer"
+                                    >
+                                        <RotateCcw className="w-3.5 h-3.5" />
+                                        <span>Khôi phục lại {initialTeachersBackup.length} giáo viên từ file gốc</span>
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
+                                    {cofTeachersAllocation.map((t, tIdx) => {
+                                        const hasGroups = t.assignedLmsGroups.length > 0;
+                                        const allSchoolGroupNames = cofTrays.flatMap((tray) =>
+                                            tray.assignedClasses.map((c) => c.lmsGroupName)
+                                        );
 
-                                    return (
-                                        <div
-                                            key={tIdx}
-                                            className={`p-3 rounded-xl bg-white dark:bg-slate-900 border text-xs shadow-2xs transition flex flex-col justify-between space-y-2 group ${
-                                                hasTriggeredValidation && !hasGroups
-                                                    ? 'ring-2 ring-rose-500 border-rose-500 bg-rose-50/20'
-                                                    : 'border-slate-200 dark:border-slate-700/80 hover:border-indigo-400'
-                                            }`}
-                                        >
+                                        return (
                                             <div
-                                                onClick={() => setEditingTeacherIndex(tIdx)}
-                                                className="cursor-pointer space-y-1"
+                                                key={tIdx}
+                                                className={`p-3 rounded-xl bg-white dark:bg-slate-900 border text-xs shadow-2xs transition flex flex-col justify-between space-y-2 group ${
+                                                    hasTriggeredValidation && !hasGroups
+                                                        ? 'ring-2 ring-rose-500 border-rose-500 bg-rose-50/20'
+                                                        : 'border-slate-200 dark:border-slate-700/80 hover:border-indigo-400'
+                                                }`}
                                             >
-                                                <div className="flex items-center justify-between">
-                                                    <p className="font-bold text-slate-900 dark:text-white group-hover:text-indigo-600 truncate flex items-center gap-1">
-                                                        <span>🧑‍🏫</span>
-                                                        <span className="truncate">{t.teacherName}</span>
-                                                    </p>
-                                                    <span
-                                                        className={`px-2 py-0.5 rounded-full font-mono text-[9px] font-bold ${hasGroups
-                                                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
-                                                            : 'bg-rose-50 text-rose-700 dark:bg-rose-950/80 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
-                                                            }`}
-                                                    >
-                                                        {hasGroups ? `✓ ${t.assignedLmsGroups.length} groups` : '0 groups'}
-                                                    </span>
-                                                </div>
-                                                <p className="text-[10px] text-slate-400 font-mono truncate" title={t.email}>
-                                                    {t.email}
-                                                </p>
-                                            </div>
-
-                                            {/* Thao tác 1-Click gán nhanh */}
-                                            <div className="flex items-center justify-between pt-1.5 border-t border-slate-100 dark:border-slate-800 text-[10px]">
-                                                <button
-                                                    type="button"
-                                                    onClick={() =>
-                                                        assignTeacherToAllTrayGroups(t.email, allSchoolGroupNames, t.teacherName)
-                                                    }
-                                                    className="text-indigo-600 dark:text-indigo-400 font-bold hover:underline cursor-pointer flex items-center gap-0.5"
-                                                    title="Gán thầy/cô này vào tất cả các lớp của trường"
+                                                <div
+                                                    onClick={() => setEditingTeacherIndex(tIdx)}
+                                                    className="cursor-pointer space-y-1"
                                                 >
-                                                    <UserCheck className="w-3 h-3" />
-                                                    <span>Gán hết lớp</span>
-                                                </button>
+                                                    <div className="flex items-center justify-between">
+                                                        <p className="font-bold text-slate-900 dark:text-white group-hover:text-indigo-600 truncate flex items-center gap-1">
+                                                            <span>🧑‍🏫</span>
+                                                            <span className="truncate">{t.teacherName}</span>
+                                                        </p>
+                                                        <div className="flex items-center gap-1">
+                                                            <span
+                                                                className={`px-2 py-0.5 rounded-full font-mono text-[9px] font-bold ${hasGroups
+                                                                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                                                                    : 'bg-rose-50 text-rose-700 dark:bg-rose-950/80 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
+                                                                    }`}
+                                                            >
+                                                                {hasGroups ? `✓ ${t.assignedLmsGroups.length} groups` : '0 groups'}
+                                                            </span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleDeleteTeacher(t.email, t.teacherName);
+                                                                }}
+                                                                className="p-1 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                                                                title="Xóa giáo viên này"
+                                                            >
+                                                                <Trash2 className="w-3 h-3" />
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    <p className="text-[10px] text-slate-400 font-mono truncate" title={t.email}>
+                                                        {t.email}
+                                                    </p>
+                                                </div>
 
-                                                {hasGroups && (
+                                                {/* Thao tác 1-Click gán nhanh */}
+                                                <div className="flex items-center justify-between pt-1.5 border-t border-slate-100 dark:border-slate-800 text-[10px]">
                                                     <button
                                                         type="button"
-                                                        onClick={() => clearTeacherAllGroups(t.email, t.teacherName)}
-                                                        className="text-slate-400 hover:text-rose-500 cursor-pointer"
-                                                        title="Gỡ khỏi tất cả nhóm"
+                                                        onClick={() =>
+                                                            assignTeacherToAllTrayGroups(t.email, allSchoolGroupNames, t.teacherName)
+                                                        }
+                                                        className="text-indigo-600 dark:text-indigo-400 font-bold hover:underline cursor-pointer flex items-center gap-0.5"
+                                                        title="Gán thầy/cô này vào tất cả các lớp của trường"
                                                     >
-                                                        Bỏ gán
+                                                        <UserCheck className="w-3 h-3" />
+                                                        <span>Gán hết lớp</span>
                                                     </button>
-                                                )}
+
+                                                    {hasGroups && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => clearTeacherAllGroups(t.email, t.teacherName)}
+                                                            className="text-slate-400 hover:text-rose-500 cursor-pointer"
+                                                            title="Gỡ khỏi tất cả nhóm"
+                                                        >
+                                                            Bỏ gán
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
                         </div>
                     )}
 
