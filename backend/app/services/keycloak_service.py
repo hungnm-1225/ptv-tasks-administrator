@@ -157,7 +157,8 @@ class KeycloakService:
 
         logger.info(f"🔄 [Keycloak Gateway] Bắt đầu thẩm định {len(cleaned_inputs)} tài khoản...")
 
-        async with httpx.AsyncClient(verify=False, headers=BROWSER_HEADERS, timeout=15.0) as client:
+        timeout_config = httpx.Timeout(30.0, connect=10.0)
+        async with httpx.AsyncClient(verify=False, headers=BROWSER_HEADERS, timeout=timeout_config) as client:
             token = await self._get_admin_token(client)
             if not token:
                 logger.error("❌ Không lấy được Keycloak Token để thẩm định danh tính!")
@@ -604,8 +605,8 @@ class KeycloakService:
         cleaned_inputs = list(dict.fromkeys(cleaned_inputs))
         if not cleaned_inputs:
             return []
-
-        async with httpx.AsyncClient(verify=False, headers=BROWSER_HEADERS, timeout=15.0) as client:
+        timeout_config = httpx.Timeout(30.0, connect=10.0)
+        async with httpx.AsyncClient(verify=False, headers=BROWSER_HEADERS, timeout=timeout_config) as client:
             token = await self._get_admin_token(client)
             if not token:
                 return [{"identifier": i, "exists": False, "error": "Không lấy được Keycloak Token"} for i in cleaned_inputs]
@@ -679,7 +680,8 @@ class KeycloakService:
 
         logger.info(f"🔄 [Keycloak Sync] Bắt đầu đồng bộ & reset mật khẩu cho {len(cleaned_emails)} tài khoản đã tồn tại...")
 
-        async with httpx.AsyncClient(verify=False, headers=BROWSER_HEADERS, timeout=15.0) as client:
+        timeout_config = httpx.Timeout(30.0, connect=10.0)
+        async with httpx.AsyncClient(verify=False, headers=BROWSER_HEADERS, timeout=timeout_config) as client:
             token = await self._get_admin_token(client)
             if not token:
                 logger.error("❌ Không lấy được Keycloak Token để đồng bộ tài khoản cũ!")

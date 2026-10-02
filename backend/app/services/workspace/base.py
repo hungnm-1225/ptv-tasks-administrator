@@ -112,10 +112,25 @@ class WorkspaceBaseService:
             
             # Chờ phản hồi đăng nhập theo State Race
             is_ok, login_err = await smart_wait_login_or_error(
-                page, timeout=20000, role_title=role_title, username=username
+                page, timeout=35000, role_title=role_title, username=username
             )
             if not is_ok:
-                return False, login_err
+                # Chụp nhanh chẩn đoán: Đọc URL hiện tại và thông báo lỗi trên web (nếu có)
+                current_url = page.url
+                error_banner = ""
+                try:
+                    alert_el = page.locator(".alert, .error, .toast-error, [role='alert'], .login-error").first
+                    if await alert_el.count() > 0 and await alert_el.is_visible():
+                        error_banner = (await alert_el.inner_text()).strip()
+                except Exception:
+                    pass
+
+                detailed_err = f"Đăng nhập thất bại ({login_err}). URL hiện tại: {current_url}"
+                if error_banner:
+                    detailed_err += f" | Thông báo lỗi trên web: '{error_banner}'"
+                
+                logger.error(f"❌ [{role_title}] {detailed_err}")
+                return False, detailed_err
 
             logger.info(f"✅ [{role_title}] Đăng nhập thành công: {username}")
             return True, "Đăng nhập thành công"
